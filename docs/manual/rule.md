@@ -1,0 +1,6 @@
+1. All agents share the same memory server.
+2. The system architecture should follow a modular and plugin-oriented design to ensure scalability, maintainability, and easy extensibility for future integrations and support.
+3. All code execution by agents must occur within isolated, sandboxed worktrees (e.g., containerized environments). Critical actions, such as merging code or modifying deployment configurations, strictly require explicit Human-in-the-Loop (HITL) approval.
+4. Agents must employ 'Progressive Disclosure' for skills and context. They are prohibited from loading the entire codebase or all available skills into memory at once. Agents must actively prune dormant knowledge and only load the specific context required for the immediate sub-task.
+5. Agents must author comprehensive automated tests (unit/integration) for every feature or bug fix. Agents are strictly prohibited from opening a Pull Request or requesting Human-in-the-Loop review if the automated CI/CD checks are failing.
+6. For any task labeled 'Medium' or 'Hard' complexity, agents are prohibited from immediately writing code. The agent must first produce a brief implementation plan (or ask clarifying Socratic questions to the human) and receive approval before beginning execution.

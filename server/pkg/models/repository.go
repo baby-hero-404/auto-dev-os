@@ -1,0 +1,31 @@
+package models
+
+import "time"
+
+// Repository represents a Git repository linked to a project.
+type Repository struct {
+	ID        string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	ProjectID string    `json:"project_id" gorm:"type:uuid;not null"`
+	URL       string    `json:"url" gorm:"not null"`
+	Provider  string    `json:"provider" gorm:"default:'github'"`
+	Branch    string    `json:"branch" gorm:"default:'main'"`
+	Token     string    `json:"-" gorm:"default:''"` // never expose in JSON
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CreateRepositoryInput is the payload to create a repository.
+type CreateRepositoryInput struct {
+	URL      string `json:"url"`
+	Provider string `json:"provider"`
+	Branch   string `json:"branch"`
+	Token    string `json:"token"`
+}
+
+// UpdateRepositoryInput is the payload to partially update a repository.
+type UpdateRepositoryInput struct {
+	URL      *string `json:"url,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+	Branch   *string `json:"branch,omitempty"`
+	Token    *string `json:"token,omitempty"`
+}

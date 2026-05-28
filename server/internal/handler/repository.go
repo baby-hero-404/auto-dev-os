@@ -14,6 +14,43 @@ func NewRepositoryHandler(svc *service.RepositoryService) *RepositoryHandler {
 	return &RepositoryHandler{svc: svc}
 }
 
+func (h *RepositoryHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "repoID")
+	if err := h.svc.ValidateToken(r.Context(), id); err != nil {
+		if isValidationErr(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{"valid": true})
+}
+
+func (h *RepositoryHandler) ListRemoteRepos(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	repos, err := h.svc.ListRemoteRepos(r.Context(), token)
+	if err != nil {
+		if isValidationErr(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, repos)
+}
+
+func (h *RepositoryHandler) Clone(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "repoID")
+	repo, err := h.svc.Clone(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, repo)
+}
+
 func (h *RepositoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	var input models.CreateRepositoryInput

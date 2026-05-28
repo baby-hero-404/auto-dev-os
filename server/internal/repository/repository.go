@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gorm.io/gorm"
@@ -59,10 +60,24 @@ func (r *RepositoryRepo) Update(ctx context.Context, id string, input models.Upd
 	if input.Token != nil {
 		updates["token"] = *input.Token
 	}
+	if input.ClonePath != nil {
+		updates["clone_path"] = *input.ClonePath
+	}
+	if input.CloneStatus != nil {
+		updates["clone_status"] = *input.CloneStatus
+	}
 	if err := r.db.WithContext(ctx).Model(repo).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update repository: %w", err)
 	}
 	return repo, nil
+}
+
+func (r *RepositoryRepo) MarkValidated(ctx context.Context, id string) error {
+	now := time.Now()
+	if err := r.db.WithContext(ctx).Model(&models.Repository{}).Where("id = ?", id).Update("last_validated_at", now).Error; err != nil {
+		return fmt.Errorf("mark repository validated: %w", err)
+	}
+	return nil
 }
 
 func (r *RepositoryRepo) Delete(ctx context.Context, id string) error {

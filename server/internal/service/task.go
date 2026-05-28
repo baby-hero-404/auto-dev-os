@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -45,6 +47,146 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, error) {
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	analysis := buildTaskAnalysis(task)
+	raw, err := json.Marshal(analysis)
+	if err != nil {
+		return nil, fmt.Errorf("marshal analysis: %w", err)
+	}
+
+	status := models.TaskStatusAnalyzing
+	specStatus := models.TaskSpecStatusDraft
+	if len(analysis.ClarificationQuestions) > 0 {
+		specStatus = models.TaskSpecStatusChangesRequested
+		status = models.TaskStatusSpecReview
+	} else if analysis.Complexity == models.TaskComplexityEasy {
+		specStatus = models.TaskSpecStatusAutoApproved
+		status = models.TaskStatusPlanning
+	} else {
+		specStatus = models.TaskSpecStatusPendingReview
+		status = models.TaskStatusSpecReview
+	}
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{
+		Status:     &status,
+		Complexity: &analysis.Complexity,
+		Analysis:   json.RawMessage(raw),
+		SpecStatus: &specStatus,
+	})
+}
+
+func (s *TaskService) Clarify(ctx context.Context, id string, input models.ClarifyTaskInput) (*models.Task, error) {
+	if strings.TrimSpace(input.Context) == "" {
+		return nil, ErrValidation("context is required")
+	}
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	description := strings.TrimSpace(task.Description + "\n\nClarification:\n" + input.Context)
+	if _, err := s.repo.Update(ctx, id, models.UpdateTaskInput{Description: &description}); err != nil {
+		return nil, err
+	}
+	return s.Analyze(ctx, id)
+}
+
+func (s *TaskService) GetAnalysis(ctx context.Context, id string) (json.RawMessage, error) {
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return task.Analysis, nil
+}
+
+func (s *TaskService) ApproveAnalysis(ctx context.Context, id string) (*models.Task, error) {
+	specStatus := models.TaskSpecStatusApproved
+	status := models.TaskStatusPlanning
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{SpecStatus: &specStatus, Status: &status})
+}
+
+func (s *TaskService) RequestAnalysisChanges(ctx context.Context, id string, input models.ClarifyTaskInput) (*models.Task, error) {
+	specStatus := models.TaskSpecStatusChangesRequested
+	status := models.TaskStatusSpecReview
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	description := task.Description
+	if strings.TrimSpace(input.Context) != "" {
+		description = strings.TrimSpace(description + "\n\nRequested changes:\n" + input.Context)
+	}
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{
+		Description: &description,
+		SpecStatus:  &specStatus,
+		Status:      &status,
+	})
+}
+
+func (s *TaskService) UpdateAnalysis(ctx context.Context, id string, analysis json.RawMessage) (*models.Task, error) {
+	if !json.Valid(analysis) {
+		return nil, ErrValidation("analysis must be valid JSON")
+	}
+	specStatus := models.TaskSpecStatusDraft
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{Analysis: analysis, SpecStatus: &specStatus})
+}
+
+func (s *TaskService) ListSubTasks(ctx context.Context, parentID string) ([]models.Task, error) {
+	return s.repo.ListSubTasks(ctx, parentID)
+}
+
+func (s *TaskService) CreateSubTask(ctx context.Context, parentID string, input models.CreateTaskInput) (*models.Task, error) {
+	parent, err := s.repo.GetByID(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	input.ParentTaskID = &parentID
+	return s.Create(ctx, parent.ProjectID, input)
+}
+
+func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
+	text := strings.ToLower(task.Title + " " + task.Description)
+	complexity := task.Complexity
+	if complexity == "" {
+		complexity = models.TaskComplexityEasy
+	}
+	hardSignals := []string{"architecture", "security", "auth", "permission", "rbac", "payment", "migration", "distributed"}
+	mediumSignals := []string{"feature", "refactor", "api", "database", "ui", "workflow", "integration"}
+	for _, signal := range hardSignals {
+		if strings.Contains(text, signal) {
+			complexity = models.TaskComplexityHard
+			break
+		}
+	}
+	if complexity != models.TaskComplexityHard {
+		for _, signal := range mediumSignals {
+			if strings.Contains(text, signal) {
+				complexity = models.TaskComplexityMedium
+				break
+			}
+		}
+	}
+	questions := []string{}
+	if len(strings.TrimSpace(task.Description)) < 30 {
+		questions = append(questions, "Please provide more implementation context, affected module names, and expected behavior.")
+	}
+	return models.TaskAnalysis{
+		Complexity:    complexity,
+		Scope:         "Derived from task title and description. Human review should refine this for Medium/Hard work.",
+		AffectedFiles: []string{},
+		Risks:         []string{"Analysis is heuristic until the Phase 3 planner agent is available."},
+		ExecutionPlan: []string{
+			"Confirm definition of ready.",
+			"Identify affected files.",
+			"Implement changes in an isolated worktree.",
+			"Run automated tests before PR creation.",
+		},
+		ClarificationQuestions: questions,
+	}
 }
 
 func validateTransition(from, to string) error {

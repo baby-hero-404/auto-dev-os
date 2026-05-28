@@ -29,6 +29,18 @@ func NewGemini(apiKey, model string) *Gemini {
 
 func (g *Gemini) Name() string { return "gemini" }
 
+func (g *Gemini) Metadata() ProviderMetadata {
+	return ProviderMetadata{
+		Provider:          g.Name(),
+		Model:             g.model,
+		Tier:              tierForModel(g.model),
+		InputCostPer1K:    inputCostPer1K(g.model),
+		OutputCostPer1K:   outputCostPer1K(g.model),
+		MaxContextTokens:  1000000,
+		MaxResponseTokens: 4096,
+	}
+}
+
 // Chat sends messages to the Google Gemini API.
 func (g *Gemini) Chat(ctx context.Context, messages []Message) (*Response, error) {
 	// Convert our standard messages to Gemini's format.

@@ -29,6 +29,18 @@ func NewOpenAI(apiKey, model string) *OpenAI {
 
 func (o *OpenAI) Name() string { return "openai" }
 
+func (o *OpenAI) Metadata() ProviderMetadata {
+	return ProviderMetadata{
+		Provider:          o.Name(),
+		Model:             o.model,
+		Tier:              tierForModel(o.model),
+		InputCostPer1K:    inputCostPer1K(o.model),
+		OutputCostPer1K:   outputCostPer1K(o.model),
+		MaxContextTokens:  128000,
+		MaxResponseTokens: 4096,
+	}
+}
+
 // Chat sends messages to the OpenAI Chat Completions API.
 func (o *OpenAI) Chat(ctx context.Context, messages []Message) (*Response, error) {
 	payload := map[string]interface{}{

@@ -1,0 +1,46 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap");
+@import "tailwindcss";
+
+:root {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --primary: #1e293b;
+  --secondary: #334155;
+  --accent: #22c55e;
+  --muted: #94a3b8;
+  --border: rgba(148, 163, 184, 0.22);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Fira Sans";
+  --font-mono: "Fira Code";
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Fira Sans", Arial, Helvetica, sans-serif;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  outline-color: var(--accent);
+}
+
+button,
+a {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: rgba(34, 197, 94, 0.3);
+}

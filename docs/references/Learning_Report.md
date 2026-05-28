@@ -223,7 +223,36 @@ Tài liệu này tổng hợp phân tích các dự án tiêu biểu trong thư 
 
 ---
 
-## 11. Bài Học Kinh Nghiệm và Best Practices (Tổng hợp)
+## 11. Antigravity Awesome Skills (Thư viện Skill & Playbook cho Agent)
+
+**Mô tả:** Antigravity Awesome Skills là một thư viện mã nguồn mở khổng lồ chứa hơn 1,470+ Agentic Skills (playbook dạng `SKILL.md`) được đóng gói sẵn để cài đặt cho các AI coding assistant (Claude Code, Cursor, Codex CLI, Gemini CLI, Antigravity...). Thư viện giúp các Agent thực hiện các tác vụ kỹ thuật lặp đi lặp lại với context rõ ràng, ràng buộc chặt chẽ và output chuẩn hóa.
+
+**Tính năng nổi bật & Kiến trúc:**
+*   **Skill Plugins System:** Định nghĩa kỹ năng hoàn toàn bằng Markdown (prompt engineering) giúp dễ dàng di chuyển và chạy trên nhiều IDE/Agent khác nhau mà không phụ thuộc vào code logic.
+*   **Registry Manifest (`skills_index.json`):** Cung cấp một manifest cấu trúc dạng JSON ổn định (`id`, `path`, metadata) để các host agent tự động quét, định tuyến và load JIT (Just-In-Time) động khi cần.
+*   **Phân loại rủi ro (Risk Taxonomy):** Phân loại kỹ năng theo các mức độ rủi ro (`unknown`, `none`, `safe`, `critical`, `offensive`) và danh mục (`development`, `backend`, `security`, `marketing`...) giúp lọc và cài đặt giới hạn an toàn.
+*   **Cơ chế nén Context (Overload Recovery):** Hỗ trợ cài đặt chọn lọc (chỉ cài đặt một số bundle/category nhất định) hoặc thu gọn context để tránh Agent bị tràn token (token-budget limits).
+
+**Đường dẫn (Paths) để nghiên cứu:**
+*   `resources/antigravity-awesome-skills/skills/`: Thư mục chứa hàng ngàn skill đơn lẻ được tổ chức khoa học.
+*   `resources/antigravity-awesome-skills/schemas/`: Chứa JSON Schema để validate manifest và index.
+*   `resources/antigravity-awesome-skills/walkthrough.md`: Nhật ký bảo trì và cập nhật kỹ năng định kỳ.
+
+**Gợi ý các nhóm Skill phù hợp với Auto Code OS:**
+Dựa trên kiến trúc của Auto Code OS (Go backend, Next.js frontend, PostgreSQL + pgvector, Docker Sandbox), các nhóm skill sau cực kỳ phù hợp để đưa vào hệ thống:
+1.  **Golang Development (`golang-pro`):** Quy định các best practices về concurrency, channel pattern, context cancellation, slog, net/http, clean architecture và table-driven testing cho backend Go.
+2.  **Next.js & Frontend UI/UX (`nextjs-best-practices`, `frontend-design`, `ui-ux-pro-max`):** Hướng dẫn Agent code Next.js 16 App Router, React Server Components (RSC) và visual polish để tạo UI premium, mượt mà.
+3.  **Database & Vector Search (`postgres-best-practices`, `postgresql-optimization`):** Ràng buộc cách thiết kế database, query optimization và sử dụng pgvector cho memory/RAG.
+4.  **Sandbox & Devops (`docker-expert`, `bash-linux`):** Hướng dẫn Agent build Dockerfile tối ưu và chạy script an toàn trong sandbox.
+5.  **Agent SDLC Workflow (`brainstorming`, `tdd-workflow`, `code-review-checklist`, `systematic-debugging`):** Thiết lập quy trình 7 bước nghiêm ngặt (RED-GREEN-REFACTOR, Socratic Gate, Cross-Harness Review) cho Agent khi code.
+6.  **Security & Governance (`security-auditor`, `vulnerability-scanner`, `protect-mcp-governance`):** Ràng buộc kiểm tra mã nguồn, rò rỉ secret và phân quyền thực thi an toàn.
+
+**Ứng dụng để khởi tạo dữ liệu mặc định (Roadmap §4.5):**
+Chúng ta sẽ sử dụng danh sách các skill và rule này làm nguồn dữ liệu mẫu (seed data) ban đầu cho cơ sở dữ liệu Auto Code OS. Khi một Project mới được tạo ra, hệ thống sẽ tự động gieo (seed) các rule và skill mặc định này vào DB thông qua `SeederService` để Agent của project đó có thể truy vấn và sử dụng ngay lập tức.
+
+---
+
+## 12. Bài Học Kinh Nghiệm và Best Practices (Tổng hợp)
 
 Khi xây dựng nền tảng AI-Native SDLC, cần lưu ý:
 

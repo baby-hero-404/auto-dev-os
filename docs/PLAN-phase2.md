@@ -36,14 +36,14 @@
 > **Why here?** Without auth, the Web UI is an open dashboard and the API is unprotected. Auth must exist before building UI pages.
 
 **Scope:**
-- [ ] **Step 1: Migration** — `users` table (id, email, password_hash, org_id, role, created_at) + `api_keys` table
-- [ ] **Step 2: Auth service** — register, login (bcrypt), JWT issue/verify (access + refresh tokens)
-- [ ] **Step 3: Auth middleware** — extract JWT from `Authorization: Bearer` header, inject user context
-- [ ] **Step 4: Auth endpoints** — `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
-- [ ] **Step 5: Protect existing endpoints** — all CRUD routes require valid JWT
-- [ ] **Step 6: RBAC** — admin vs member permissions on org/project resources
-- [ ] **Step 7: Rate limiting** — per-user rate limit middleware (token bucket)
-- [ ] **Step 8: Tests** — unit tests for auth service + integration tests for auth flow
+- [x] **Step 1: Migration** — `users` table (id, email, password_hash, org_id, role, created_at) + `api_keys` table
+- [x] **Step 2: Auth service** — register, login (bcrypt), JWT issue/verify (access + refresh tokens)
+- [x] **Step 3: Auth middleware** — extract JWT from `Authorization: Bearer` header, inject user context
+- [x] **Step 4: Auth endpoints** — `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
+- [x] **Step 5: Protect existing endpoints** — all CRUD routes require valid JWT
+- [x] **Step 6: RBAC** — admin vs member permissions on org/project resources
+- [x] **Step 7: Rate limiting** — per-user rate limit middleware (token bucket)
+- [x] **Step 8: Tests** — unit tests for auth service + integration tests for auth flow
 
 ---
 
@@ -109,7 +109,7 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Reference code:** `resources/multica/server/` for Go Git integration patterns
 
 **Scope:**
-- [ ] **Step 1: Define GitProvider interface**
+- [x] **Step 1: Define GitProvider interface**
   ```go
   type GitProvider interface {
       CloneRepo(ctx, repoURL, token, branch) (localPath, error)
@@ -120,11 +120,11 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
   }
   ```
 
-- [ ] **Step 2: Implement GitHub provider** using go-git for local ops and `net/http` for GitHub REST API (PR creation, repo listing)
+- [x] **Step 2: Implement GitHub provider** using go-git for local ops and `net/http` for GitHub REST API (PR creation, repo listing)
 
-- [ ] **Step 3: Add Webhook listeners** — `POST /api/v1/webhooks/github` to listen for "Issue Opened" or "CI Failed" events to auto-create Tasks.
+- [x] **Step 3: Add Webhook listeners** — `POST /api/v1/webhooks/github` to listen for "Issue Opened" or "CI Failed" events to auto-create Tasks.
 
-- [ ] **Step 4: Add tests** — unit tests with mocks for GitHub API calls
+- [x] **Step 4: Add tests** — unit tests with mocks for GitHub API calls
 
 ---
 
@@ -135,9 +135,9 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 - Modify: `server/internal/handler/repository.go`
 
 **Scope:**
-- [ ] **Step 1: Add ValidateToken endpoint** — `POST /api/v1/repositories/:id/validate` — tests the stored GitHub token by calling the GitHub API
-- [ ] **Step 2: Add ListRemoteRepos endpoint** — `GET /api/v1/repositories/remote?token=xxx` — lists repos accessible via the provided token
-- [ ] **Step 3: Add CloneRepo endpoint** — `POST /api/v1/repositories/:id/clone` — triggers async clone to local storage
+- [x] **Step 1: Add ValidateToken endpoint** — `POST /api/v1/repositories/:id/validate` — tests the stored GitHub token by calling the GitHub API
+- [x] **Step 2: Add ListRemoteRepos endpoint** — `GET /api/v1/repositories/remote?token=xxx` — lists repos accessible via the provided token
+- [x] **Step 3: Add CloneRepo endpoint** — `POST /api/v1/repositories/:id/clone` — triggers async clone to local storage
 
 ---
 
@@ -148,9 +148,9 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 - Create: `server/internal/service/seeder.go`
 
 **Scope:**
-- [ ] **Step 1: Auto-seed Rules** — Upon project creation, automatically parse `resources/prompt_base/GEMINI.md` and `resources/prompt_base/core/rules.md` to insert default `Rule` records into the database for the new project.
-- [ ] **Step 2: Auto-seed Skills** — Parse `resources/superpowers/skills/` (for TDD workflows, planning, debugging) and `resources/prompt_base/antigravity/skills/` (for system workflows) to insert default `Skill` records for the new project.
-- [ ] **Step 3: Update CreateProject endpoint** — Ensure the handler calls the seeder service synchronously or asynchronously after successful project creation.
+- [x] **Step 1: Auto-seed Rules** — Upon project creation, automatically parse `resources/prompt_base/GEMINI.md` and `resources/prompt_base/core/rules.md` to insert default `Rule` records into the database for the new project.
+- [x] **Step 2: Auto-seed Skills** — Parse `resources/superpowers/skills/` (for TDD workflows, planning, debugging) and `resources/prompt_base/antigravity/skills/` (for system workflows) to insert default `Skill` records for the new project.
+- [x] **Step 3: Update CreateProject endpoint** — Ensure the handler calls the seeder service synchronously or asynchronously after successful project creation.
 
 ---
 
@@ -168,23 +168,23 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Aligns with:** `docs/manual/Roadmap.md` §2 — Complexity-based branching (Easy/Medium/Hard)
 
 **Scope:**
-- [ ] **Step 1: Migration** — add columns to `tasks` table:
+- [x] **Step 1: Migration** — add columns to `tasks` table:
   - `parent_task_id UUID REFERENCES tasks(id)` — sub-task support
   - `analysis JSONB` — AI-generated analysis (scope, affected files, risks, execution plan)
   - `spec_status VARCHAR(20) DEFAULT 'NONE'` — tracks spec review state (NONE, DRAFT, PENDING_REVIEW, CHANGES_REQUESTED, APPROVED, AUTO_APPROVED)
-- [ ] **Step 2: Update model** — add `ParentTaskID *uuid.UUID`, `SubTasks []Task`, `Analysis json.RawMessage`, `SpecStatus string`
-- [ ] **Step 3: Task classification service** — implement the two-track workflow:
+- [x] **Step 2: Update model** — add `ParentTaskID *uuid.UUID`, `SubTasks []Task`, `Analysis json.RawMessage`, `SpecStatus string`
+- [x] **Step 3: Task classification service** — implement the two-track workflow:
   - **Analyze endpoint** `POST /api/v1/tasks/:id/analyze` — AI agent analyzes task, classifies complexity (Easy/Medium/Hard), generates structured analysis (JSON), and sets `spec_status`:
     - Easy → `spec_status = AUTO_APPROVED`, task proceeds directly to execution.
     - Medium/Hard → `spec_status = PENDING_REVIEW`, task waits for human review.
   - **Clarification loop** — if AI detects missing information during analysis, it generates clarification questions returned in the response. Developer answers via `POST /api/v1/tasks/:id/clarify` with additional context. Agent re-analyzes after each clarification until satisfied.
-- [ ] **Step 4: Spec review endpoints** (for Medium/Hard tasks):
+- [x] **Step 4: Spec review endpoints** (for Medium/Hard tasks):
   - `GET /api/v1/tasks/:id/analysis` — view the AI-generated analysis
   - `POST /api/v1/tasks/:id/analysis/approve` — human approves spec → `spec_status = APPROVED`
   - `POST /api/v1/tasks/:id/analysis/request-changes` — human requests changes with feedback → `spec_status = CHANGES_REQUESTED`
   - `PATCH /api/v1/tasks/:id/analysis` — human updates the analysis directly
-- [ ] **Step 5: Sub-task support** — `ListSubTasks(ctx, parentID)`, `GET /api/v1/tasks/:id/subtasks`, `POST /api/v1/tasks/:id/subtasks`
-- [ ] **Step 6: Tests** — unit tests for classification logic, spec review state machine, sub-task CRUD
+- [x] **Step 5: Sub-task support** — `ListSubTasks(ctx, parentID)`, `GET /api/v1/tasks/:id/subtasks`, `POST /api/v1/tasks/:id/subtasks`
+- [x] **Step 6: Tests** — unit tests for classification logic, spec review state machine, sub-task CRUD
 
 ---
 
@@ -196,26 +196,26 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Primary reference:** Use `docs/design-system/autocodeos/MASTER.md` for styling (Colors, Typography) and `resources/ui-demo/` for structural React components.
 
 **Scope:**
-- [ ] **Step 1: Bootstrap project**
+- [x] **Step 1: Bootstrap project**
   ```bash
   npx -y create-next-app@latest ./web --typescript --tailwind --eslint --app --src-dir --use-npm
   ```
   - Use the latest stable Next.js 16.x release generated by `create-next-app@latest`.
   - Require Node.js `>=20.9` for local development and Docker images.
 
-- [ ] **Step 2: Initialize Design System**
+- [x] **Step 2: Initialize Design System**
   - Translate the hex colors from `docs/design-system/autocodeos/MASTER.md` into OKLCH CSS variables in `web/src/app/globals.css`.
   - Configure Google Fonts for **Fira Code** (headings) and **Fira Sans** (body).
   - Copy structural components from `resources/ui-demo/components/ui/` → `web/src/components/ui/` (but adapt them to use the new CSS variables).
   - Install dependencies: Radix UI, lucide-react, recharts, cmdk, sonner, next-themes, class-variance-authority, clsx, tailwind-merge, react-hook-form, zod.
 
-- [ ] **Step 3: Set up API client & Real-time Context** 
+- [x] **Step 3: Set up API client & Real-time Context** 
   - `web/src/lib/api.ts` with base fetch wrapper pointing to `http://localhost:8080/api/v1`
   - Create a React Context or Zustand store (`web/src/lib/store/realtime.ts`) to manage Server-Sent Events (SSE) connections for future live pipeline tracking.
 
-- [ ] **Step 4: Set up shared types** — `web/src/lib/types.ts` mirroring Go models (Organization, Project, Task, Agent, etc.)
+- [x] **Step 4: Set up shared types** — `web/src/lib/types.ts` mirroring Go models (Organization, Project, Task, Agent, etc.)
 
-- [ ] **Step 5: Configure CORS** — update `server/internal/middleware/cors.go` to allow `http://localhost:3000`
+- [x] **Step 5: Configure CORS** — update `server/internal/middleware/cors.go` to allow `http://localhost:3000`
 
 ---
 
@@ -231,11 +231,11 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Design reference:** `docs/design-system/autocodeos/MASTER.md` for visual tokens (Fira fonts, #0F172A background, #22C55E accent).
 
 **Scope:**
-- [ ] **Step 1: Apply Design System** — Enforce dark theme by default, Fira Sans font, and the specific CTA/Accent colors.
-- [ ] **Step 2: Home Sidebar** — navigation: Projects, Skills, Organization, Settings (matching ui-demo's `HomeSidebar`)
-- [ ] **Step 3: Home Header** — search bar, notifications, user avatar (matching ui-demo's `HomeHeader`)
-- [ ] **Step 4: Responsive layout** — collapsible sidebar on mobile
-- [ ] **Step 5: Wire to API** — replace ui-demo's hardcoded data with SWR hooks fetching from REST API
+- [x] **Step 1: Apply Design System** — Enforce dark theme by default, Fira Sans font, and the specific CTA/Accent colors.
+- [x] **Step 2: Home Sidebar** — navigation: Projects, Skills, Organization, Settings (matching ui-demo's `HomeSidebar`)
+- [x] **Step 3: Home Header** — search bar, notifications, user avatar (matching ui-demo's `HomeHeader`)
+- [x] **Step 4: Responsive layout** — collapsible sidebar on mobile
+- [x] **Step 5: Wire to API** — replace ui-demo's hardcoded data with SWR hooks fetching from REST API
 
 ---
 
@@ -252,11 +252,11 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Copy & adapt from:** `resources/ui-demo/components/dashboard/create-project-modal.tsx`, `project-setup-wizard.tsx`
 
 **Scope:**
-- [ ] **Step 1: Projects gallery** — grid of project cards (name, description, status badge, progress bar, task count, agent count, Open/Delete buttons) — adapt from ui-demo's `ProjectsGallery`
-- [ ] **Step 2: Create project modal** — multi-step form (name, description, language, framework) — adapt from ui-demo's `CreateProjectModal`
-- [ ] **Step 3: Project setup wizard** — post-create wizard for linking repo, adding agents — adapt from ui-demo's `ProjectSetupWizard`
-- [ ] **Step 4: Project detail page** — sidebar with tabs (Overview, Tasks, Agents, Rules, Skills, Knowledge) — adapt from ui-demo's `ProjectSidebar` + `ProjectContent`
-- [ ] **Step 5: Wire to API** — CRUD operations via `web/src/lib/api.ts`
+- [x] **Step 1: Projects gallery** — grid of project cards (name, description, status badge, progress bar, task count, agent count, Open/Delete buttons) — adapt from ui-demo's `ProjectsGallery`
+- [x] **Step 2: Create project modal** — multi-step form (name, description, language, framework) — adapt from ui-demo's `CreateProjectModal`
+- [x] **Step 3: Project setup wizard** — post-create wizard for linking repo, adding agents — adapt from ui-demo's `ProjectSetupWizard`
+- [x] **Step 4: Project detail page** — sidebar with tabs (Overview, Tasks, Agents, Rules, Skills, Knowledge) — adapt from ui-demo's `ProjectSidebar` + `ProjectContent`
+- [x] **Step 5: Wire to API** — CRUD operations via `web/src/lib/api.ts`
 
 ---
 
@@ -270,15 +270,15 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Study:** `resources/Reference_doc.md` §3.8 — HITL design: task approval/rejection UI points
 
 **Scope:**
-- [ ] **Step 1: Tasks list** — table/list view with status badges, complexity (Easy/Medium/Hard color-coded), priority, assigned agent, **spec_status badge** — adapt from ui-demo's `TasksList`
-- [ ] **Step 2: Task detail page** — full description, AI analysis panel, sub-tasks list, status transitions, agent assignment
-- [ ] **Step 3: Spec review UI** (for Medium/Hard tasks):
+- [x] **Step 1: Tasks list** — table/list view with status badges, complexity (Easy/Medium/Hard color-coded), priority, assigned agent, **spec_status badge** — adapt from ui-demo's `TasksList`
+- [x] **Step 2: Task detail page** — full description, AI analysis panel, sub-tasks list, status transitions, agent assignment
+- [x] **Step 3: Spec review UI** (for Medium/Hard tasks):
   - Display AI-generated analysis (scope, affected files, risks, execution plan)
   - **Approve / Request Changes** buttons — triggers `spec_status` transition
   - Inline editing — reviewer can update analysis directly
   - Clarification Q&A thread — show agent's questions and developer's answers
-- [ ] **Step 4: Kanban board** — columns for each task status (TODO → ANALYZING → PENDING_REVIEW → CODING → REVIEWING → FIXING → TESTING → HUMAN_REVIEW → MERGED)
-- [ ] **Step 5: Create/edit task form** — title, description, complexity (optional — AI can auto-classify), priority, labels, repository selection
+- [x] **Step 4: Kanban board** — columns for each task status (TODO → ANALYZING → PENDING_REVIEW → CODING → REVIEWING → FIXING → TESTING → HUMAN_REVIEW → MERGED)
+- [x] **Step 5: Create/edit task form** — title, description, complexity (optional — AI can auto-classify), priority, labels, repository selection
 
 ---
 
@@ -291,9 +291,9 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Study:** `resources/Learning_Report.md` §8 — Hermes Agent self-improving loop (influences agent status display)
 
 **Scope:**
-- [ ] **Step 1: Agents grid** — cards showing name, role, provider, model, status (idle/busy), level badge — adapt from ui-demo's `AgentsGrid`
-- [ ] **Step 2: Agent detail** — assigned tasks, performance stats placeholder, configuration
-- [ ] **Step 3: Create/edit agent form** — name, role (Planner/Backend/Frontend/Reviewer/QA), provider, model, level
+- [x] **Step 1: Agents grid** — cards showing name, role, provider, model, status (idle/busy), level badge — adapt from ui-demo's `AgentsGrid`
+- [x] **Step 2: Agent detail** — assigned tasks, performance stats placeholder, configuration
+- [x] **Step 3: Create/edit agent form** — name, role (Planner/Backend/Frontend/Reviewer/QA), provider, model, level
 
 ---
 
@@ -308,13 +308,13 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 > **Copy & adapt from:** `resources/ui-demo/components/dashboard/page-content.tsx` — `RulesPage`, `SkillsPage`, `KnowledgePage`, `EnvironmentsPage`, `SettingsPage`
 
 **Scope:**
-- [ ] **Step 1: Overview stats** — stat cards (total projects, active tasks, running agents, open PRs) — from ui-demo's `StatsCards`
-- [ ] **Step 2: Metrics chart** — Recharts visualization (task completion rate, agent activity) — from ui-demo's `MetricsChart`
-- [ ] **Step 3: Workflow timeline** — visual timeline of recent workflow executions — from ui-demo's `WorkflowTimeline`
-- [ ] **Step 4: Rules page** — toggle-based rule management — from ui-demo's `RulesPage`
-- [ ] **Step 5: Skills page** — skill proficiency cards — from ui-demo's `SkillsPage`
-- [ ] **Step 6: Knowledge page** — document browser — from ui-demo's `KnowledgePage`
-- [ ] **Step 7: Settings page** — settings categories — from ui-demo's `SettingsPage`
+- [x] **Step 1: Overview stats** — stat cards (total projects, active tasks, running agents, open PRs) — from ui-demo's `StatsCards`
+- [x] **Step 2: Metrics chart** — Recharts visualization (task completion rate, agent activity) — from ui-demo's `MetricsChart`
+- [x] **Step 3: Workflow timeline** — visual timeline of recent workflow executions — from ui-demo's `WorkflowTimeline`
+- [x] **Step 4: Rules page** — toggle-based rule management — from ui-demo's `RulesPage`
+- [x] **Step 5: Skills page** — skill proficiency cards — from ui-demo's `SkillsPage`
+- [x] **Step 6: Knowledge page** — document browser — from ui-demo's `KnowledgePage`
+- [x] **Step 7: Settings page** — settings categories — from ui-demo's `SettingsPage`
 
 ---
 
@@ -325,15 +325,15 @@ While `ui-demo` is our primary visual design, **Multica's Web UI (`resources/mul
 - Modify: `Makefile` — add `web`, `dev` targets
 
 **Scope:**
-- [ ] **Step 1: Docker compose** — add Next.js service with hot reload
-- [ ] **Step 2: Makefile targets**
+- [x] **Step 1: Docker compose** — add Next.js service with hot reload
+- [x] **Step 2: Makefile targets**
   ```makefile
   web:
   	cd web && npm run dev
   dev:
   	make db-up && make api & make web
   ```
-- [ ] **Step 3: Update .env.example** — add `NEXT_PUBLIC_API_URL`, `GITHUB_TOKEN`
+- [x] **Step 3: Update .env.example** — add `NEXT_PUBLIC_API_URL`, `GITHUB_TOKEN`
 
 ---
 

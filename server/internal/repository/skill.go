@@ -38,6 +38,28 @@ func (r *SkillRepo) List(ctx context.Context) ([]models.Skill, error) {
 	return skills, nil
 }
 
+func (r *SkillRepo) ListByAgentID(ctx context.Context, agentID string) ([]models.Skill, error) {
+	var skills []models.Skill
+	err := r.db.WithContext(ctx).
+		Table("skills").
+		Joins("JOIN agent_skills ON agent_skills.skill_id = skills.id").
+		Where("agent_skills.agent_id = ?", agentID).
+		Order("skills.name ASC").
+		Find(&skills).Error
+	if err != nil {
+		return nil, fmt.Errorf("list agent skills: %w", err)
+	}
+	return skills, nil
+}
+
+func (r *SkillRepo) AssignToAgent(ctx context.Context, agentID, skillID string) error {
+	assignment := models.AgentSkill{AgentID: agentID, SkillID: skillID}
+	if err := r.db.WithContext(ctx).FirstOrCreate(&assignment, "agent_id = ? AND skill_id = ?", agentID, skillID).Error; err != nil {
+		return fmt.Errorf("assign skill to agent: %w", err)
+	}
+	return nil
+}
+
 func (r *SkillRepo) Update(ctx context.Context, id string, input models.UpdateSkillInput) (*models.Skill, error) {
 	s, err := r.GetByID(ctx, id)
 	if err != nil {

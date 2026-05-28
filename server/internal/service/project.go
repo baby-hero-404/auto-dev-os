@@ -7,17 +7,26 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-type ProjectService struct{ repo *repository.ProjectRepo }
+type ProjectService struct {
+	repo   *repository.ProjectRepo
+	seeder *SeederService
+}
 
-func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
-	return &ProjectService{repo: repo}
+func NewProjectService(repo *repository.ProjectRepo, seeder *SeederService) *ProjectService {
+	return &ProjectService{repo: repo, seeder: seeder}
 }
 
 func (s *ProjectService) Create(ctx context.Context, orgID string, input models.CreateProjectInput) (*models.Project, error) {
 	if input.Name == "" {
 		return nil, ErrValidation("name is required")
 	}
-	return s.repo.Create(ctx, orgID, input)
+	project, err := s.repo.Create(ctx, orgID, input)
+	if err != nil {
+		return nil, err
+	}
+	// Seed default rules and skills asynchronously so project creation stays fast.
+	go s.seeder.SeedProject(context.Background(), project.ID)
+	return project, nil
 }
 
 func (s *ProjectService) GetByID(ctx context.Context, id string) (*models.Project, error) {

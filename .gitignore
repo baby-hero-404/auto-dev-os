@@ -41,3 +41,6 @@ Thumbs.db
 # Temporary directories
 tmp/
 temp/
+
+# External cloned resources
+resources/

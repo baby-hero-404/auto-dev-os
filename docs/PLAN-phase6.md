@@ -70,33 +70,46 @@
 
 ---
 
-## Task 2: Episodic Memory (pgvector)
+## Task 2: Episodic Memory & 4-Tier Knowledge Graph (pgvector + BM25)
 
 **Files:**
-- Create: `server/migration/000008_episodic_memory.up.sql` — enhance memories table
+- Create: `server/migration/000008_episodic_memory.up.sql` — enhance memories table (add BM25 indices, vector dimension, and knowledge graph mapping tables)
 - Create: `server/migration/000008_episodic_memory.down.sql`
-- Create: `server/internal/handler/memory.go`
+- Create: `server/internal/memory/4tier_store.go` — Working, Episodic, Semantic, Procedural layers
+- Create: `server/internal/memory/retrieval.go` — Triple-stream (BM25 + Vector + Relational/Graph) + RRF fusion
+- Create: `server/internal/memory/lifecycle_hooks.go` — SessionStart, PostToolUse, and SessionEnd execution hooks
 
 **Scope:**
-- [ ] Store agent experiences as embeddings (task context + outcome + learnings)
-- [ ] Semantic search — find relevant past experiences for new tasks
-- [ ] User modeling — track developer preferences and patterns
-- [ ] RAG pipeline — inject relevant memories into agent prompts
-- [ ] Memory decay — reduce weight of old/irrelevant memories over time
+- [ ] **4-Tier Memory Structure**:
+  - *Working Memory*: Raw, session-local tool usage logs (short-term).
+  - *Episodic Memory*: Compressed summaries of past execution sessions.
+  - *Semantic Memory*: Generalized facts, rules, and codebase patterns.
+  - *Procedural Memory*: Successful execution routes, tool sequences, and decisions.
+- [ ] **Triple-Stream Retrieval**: Implement search merging BM25 (keyword matching), pgvector (semantic meaning), and Graph/Relational queries, consolidated using **Reciprocal Rank Fusion (RRF)**.
+- [ ] **Lifecycle Hook System**:
+  - **`SessionStart`**: Load project profile, run Triple-stream RAG, check token budget, and inject context into the assembly.
+  - **`PostToolUse`**: Record observation, de-duplicate using SHA-256, and apply regex/entity privacy filters (mask keys/secrets).
+  - **Background Worker**: Periodically compress raw observations into narrative facts, generate embeddings, and update the BM25/Vector database.
+  - **`SessionEnd`**: Compute final outcome, compile session summary, and extract knowledge graph relationships.
+- [ ] **Memory Decay (Auto-forgetting)**: Implement Ebbinghaus curve-based memory decay over time, while reinforcing memories that are frequently accessed.
+- [ ] User modeling — track developer preferences, style, and historical task patterns.
 
 ---
 
-## Task 3: Self-improving Agent Loop
+## Task 3: Self-improving Agent Loop & Rule Suggestion Engine
 
 **Files:**
 - Modify: `server/internal/orchestrator/orchestrator.go`
 - Create: `server/internal/orchestrator/learning.go`
 
 **Scope:**
-- [ ] Post-task evaluation — agent reflects on outcome (success/failure/retries)
-- [ ] Skill generation — agent proposes new skills based on recurring patterns
-- [ ] Performance tracking — historical success rates feed into agent selection
-- [ ] Confidence scoring — agent rates its own confidence before execution
+- [ ] Post-task evaluation — agent reflects on outcome (success/failure/retries).
+- [ ] **Auto Prompt Optimization**: When tasks fail or require multiple retries, the agent analyzes the failure logs and suggests optimizations/patches to the Agent Role System Prompt template.
+- [ ] **Rule Suggestion Engine**: Detect recurring coding mistakes or codebase patterns, and automatically suggest suitable new Local/Project Rules to the human operator for approval.
+- [ ] **HITL Feedback Integration**: Capture human corrections (changes made during Spec review, clarification responses, and PR rejection feedback) and feed them directly into the Episodic Memory as high-priority negative reinforcement signals to refine future prompt assembly.
+- [ ] Skill generation — agent proposes new skills based on recurring patterns.
+- [ ] Performance tracking — historical success rates feed into agent selection.
+- [ ] Confidence scoring — agent rates its own confidence before execution.
 
 ---
 

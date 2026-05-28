@@ -1,6 +1,6 @@
 # Phase 4 Implementation Plan — AI Gateway (Tier Routing) + Skill System
 
-> **Status:** 📋 Planned
+> **Status:** ✅ COMPLETED
 > **Depends on:** Phase 3b (Workflow Engine + Prompt Assembly)
 
 **Goal:** Build the intelligent LLM routing layer and a dynamic skill system so agents can use the right model for each task and leverage reusable tool capabilities.
@@ -61,11 +61,11 @@
 - Create: `server/pkg/llm/fallback.go` — fallback chain
 
 **Scope:**
-- [ ] Route by task complexity: `easy` → fast/cheap model, `hard` → powerful model
-- [ ] Provider routing — switch between OpenAI, Anthropic, Gemini
-- [ ] Protocol normalization — unified request/response format
-- [ ] Fallback chain — if primary model fails, try next provider
-- [ ] **Cost Circuit Breaker**: Hard limits to automatically kill an LLM loop if the task exceeds a defined budget cap ($X or Y tokens), preventing runaway costs.
+- [x] Route by task complexity: `easy` → fast/cheap model, `hard` → powerful model
+- [x] Provider routing — switch between OpenAI, Anthropic, Gemini
+- [x] Protocol normalization — unified request/response format
+- [x] Fallback chain — if primary model fails, try next provider
+- [x] **Cost Circuit Breaker**: Hard limits to automatically kill an LLM loop if the task exceeds a defined budget cap ($X or Y tokens), preventing runaway costs.
 
 ---
 
@@ -76,9 +76,9 @@
 - Create: `server/migration/000006_token_usage.down.sql`
 
 **Scope:**
-- [ ] Track: model, tokens_in, tokens_out, cost, latency per request
-- [ ] Aggregate by project, agent, time period
-- [ ] API endpoint: `GET /api/v1/analytics/token-usage`
+- [x] Track: model, tokens_in, tokens_out, cost, latency per request
+- [x] Aggregate by project, agent, time period
+- [x] API endpoint: `GET /api/v1/analytics/token-usage`
 
 ---
 
@@ -89,10 +89,11 @@
 - Create: `server/internal/orchestrator/skill_executor.go`
 
 **Scope:**
-- [ ] Skills as tool definitions (JSON schema) passed to LLM
-- [ ] Skill execution — when LLM requests a tool call, execute the skill
-- [ ] Built-in skills: `run_tests`, `analyze_logs`, `generate_docs`, `create_migration`, `search_code`
-- [ ] Skill result injection — feed tool output back into LLM conversation
+- [x] Skills as tool definitions (JSON schema) passed to LLM
+- [x] Skill execution — when LLM requests a tool call, execute the skill
+- [x] Built-in skills: `run_tests`, `analyze_logs`, `generate_docs`, `create_migration`, `search_code`
+- [x] **Vá lỗi bằng Diff/Patch (Search-and-Replace tool)**: Implement the `apply_patch` built-in skill supporting search-and-replace block editing to minimize output tokens (agent only outputs blocks of code to be modified instead of rewriting the entire file).
+- [x] Skill result injection — feed tool output back into LLM conversation
 
 ---
 
@@ -102,9 +103,9 @@
 - Modify: `server/internal/handler/skill.go`
 
 **Scope:**
-- [ ] `POST /api/v1/skills/:id/test` — dry-run a skill with sample input
-- [ ] `GET /api/v1/agents/:id/skills` — list skills available to an agent
-- [ ] `POST /api/v1/agents/:id/skills` — assign skills to an agent
+- [x] `POST /api/v1/skills/:id/test` — dry-run a skill with sample input
+- [x] `GET /api/v1/agents/:id/skills` — list skills available to an agent
+- [x] `POST /api/v1/agents/:id/skills` — assign skills to an agent
 
 ---
 
@@ -115,20 +116,20 @@
 - Create: `server/internal/evals/datasets.go`
 
 **Scope:**
-- [ ] Golden datasets: store sample inputs and expected behaviors for skills and prompts.
-- [ ] LLM-as-a-judge: use an advanced model (e.g., Opus/GPT-4o) to grade outputs of smaller models.
-- [ ] CI/CD for AI: automatically run evals when modifying the Prompt Assembly or Skill definitions.
-- [ ] Reject deployment of new skills if eval scores drop below a threshold.
+- [x] Golden datasets: store sample inputs and expected behaviors for skills and prompts.
+- [x] LLM-as-a-judge: use an advanced model (e.g., Opus/GPT-4o) to grade outputs of smaller models.
+- [x] CI/CD for AI: automatically run evals when modifying the Prompt Assembly or Skill definitions.
+- [x] Reject deployment of new skills if eval scores drop below a threshold.
 
 ---
 
 ## Task 6: Web UI — Gateway Dashboard
 
 **Scope:**
-- [ ] Token usage charts (by project, by model, over time)
-- [ ] Model configuration page — manage providers, API keys, tier mappings
-- [ ] Skill management page — create/edit skills, test with sample inputs
-- [ ] Evals Dashboard — view historical eval scores and LLM-as-a-judge reasoning
+- [x] Token usage charts (by project, by model, over time)
+- [x] Model configuration page — manage providers, API keys, tier mappings
+- [x] Skill management page — create/edit skills, test with sample inputs
+- [x] Evals Dashboard — view historical eval scores and LLM-as-a-judge reasoning
 
 ---
 

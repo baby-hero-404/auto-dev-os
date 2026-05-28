@@ -1,0 +1,68 @@
+package handler
+
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
+	"github.com/go-chi/chi/v5"
+)
+
+type WorkflowHandler struct {
+	orch *orchestrator.Orchestrator
+}
+
+func NewWorkflowHandler(orch *orchestrator.Orchestrator) *WorkflowHandler {
+	return &WorkflowHandler{orch: orch}
+}
+
+func (h *WorkflowHandler) Execute(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	job, err := h.orch.Execute(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (h *WorkflowHandler) Status(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	status, err := h.orch.WorkflowStatus(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (h *WorkflowHandler) Logs(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	logs, err := h.orch.Logs(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if r.URL.Query().Get("stream") != "true" {
+		writeJSON(w, http.StatusOK, logs)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	for _, log := range logs {
+		_, _ = fmt.Fprintf(w, "event: log\ndata: %s\n\n", log.Message)
+	}
+}
+
+func (h *WorkflowHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	task, err := h.orch.ApproveMerge(r.Context(), taskID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}

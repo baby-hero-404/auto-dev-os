@@ -29,6 +29,18 @@ func NewAnthropic(apiKey, model string) *Anthropic {
 
 func (a *Anthropic) Name() string { return "anthropic" }
 
+func (a *Anthropic) Metadata() ProviderMetadata {
+	return ProviderMetadata{
+		Provider:          a.Name(),
+		Model:             a.model,
+		Tier:              tierForModel(a.model),
+		InputCostPer1K:    inputCostPer1K(a.model),
+		OutputCostPer1K:   outputCostPer1K(a.model),
+		MaxContextTokens:  200000,
+		MaxResponseTokens: 4096,
+	}
+}
+
 // Chat sends messages to the Anthropic Messages API.
 func (a *Anthropic) Chat(ctx context.Context, messages []Message) (*Response, error) {
 	// Anthropic requires system message to be separate from the messages array.

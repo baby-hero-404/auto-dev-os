@@ -152,6 +152,9 @@ Organization
 
 **Tính năng chính:**
 *   **Tạo Agent:** Định nghĩa tên, vai trò, nhà cung cấp (provider) mô hình AI, cấp độ kỹ năng và quyền hạn của từng Agent.
+*   **Cơ chế phân bổ (Assignment Strategy):** Hỗ trợ cấu hình phương thức hoạt động của Agent trong Organization:
+    *   **Tự động tham gia (Auto-Join):** Agent tự động tham gia vào tất cả các project hiện tại và mới được tạo thuộc Organization.
+    *   **Thêm thủ công (Manual Add):** Agent chỉ tham gia vào các project khi được chỉ định thủ công.
 *   **Self-improving Learning Loop:** Agent có khả năng tự đánh giá hiệu suất sau khi hoàn thành tác vụ, từ đó học hỏi và sinh ra các "kỹ năng" mới để tối ưu hóa hiệu suất trong tương lai (tham khảo từ Hermes Agent).
 *   **Cấp độ Agent:** Phân loại Agent dựa trên độ phức tạp của tác vụ có thể xử lý:
     *   **Easy:** Xử lý các tác vụ đơn giản như linting, cập nhật tài liệu, sửa lỗi nhỏ.
@@ -163,6 +166,7 @@ Organization
     *   **Frontend:** Phát triển giao diện người dùng (UI).
     *   **Reviewer:** Đánh giá và sửa lỗi mã nguồn.
     *   **QA:** Thực hiện kiểm thử và đảm bảo chất lượng.
+**Note:**: Các Agent phải tuân thủ theo các rule ở docs/manual/rule.md
 
 **Dự án tham khảo:**
 | Dự án     | Lý do tham khảo                                |

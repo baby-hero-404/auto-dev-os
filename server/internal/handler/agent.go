@@ -21,7 +21,26 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	a, err := h.svc.Create(r.Context(), projectID, input)
+	a, err := h.svc.AssignToProject(r.Context(), projectID, input)
+	if err != nil {
+		if isValidationErr(err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, a)
+}
+
+func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	var input models.CreateAgentInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	a, err := h.svc.Hire(r.Context(), orgID, input)
 	if err != nil {
 		if isValidationErr(err) {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -46,6 +65,16 @@ func (h *AgentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	agents, err := h.svc.ListByProjectID(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agents)
+}
+
+func (h *AgentHandler) ListOrg(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	agents, err := h.svc.ListByOrgID(r.Context(), orgID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

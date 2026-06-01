@@ -49,7 +49,7 @@ func (r *AgentRepo) CreateForOrg(ctx context.Context, orgID string, input models
 func (r *AgentRepo) GetByID(ctx context.Context, id string) (*models.Agent, error) {
 	a := &models.Agent{}
 	if err := r.db.WithContext(ctx).First(a, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get agent: %w", err)
+		return nil, fmt.Errorf("get agent: %w", mapError(err))
 	}
 	return a, nil
 }
@@ -141,7 +141,7 @@ func (r *AgentRepo) FindAvailableForTask(ctx context.Context, projectID, complex
 		Order("agents.created_at ASC").
 		First(&agent).Error
 	if err != nil {
-		return nil, fmt.Errorf("find available agent: %w", err)
+		return nil, fmt.Errorf("find available agent: %w", mapError(err))
 	}
 	return &agent, nil
 }
@@ -149,10 +149,10 @@ func (r *AgentRepo) FindAvailableForTask(ctx context.Context, projectID, complex
 func (r *AgentRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Agent{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete agent: %w", result.Error)
+		return fmt.Errorf("delete agent: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("delete agent: %w", ErrNotFound)
 	}
 	return nil
 }
@@ -160,10 +160,10 @@ func (r *AgentRepo) Delete(ctx context.Context, id string) error {
 func (r *AgentRepo) orgIDForProject(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	if err := r.db.WithContext(ctx).Table("projects").Select("org_id").Where("id = ?", projectID).Scan(&orgID).Error; err != nil {
-		return "", fmt.Errorf("get project org: %w", err)
+		return "", fmt.Errorf("get project org: %w", mapError(err))
 	}
 	if orgID == "" {
-		return "", fmt.Errorf("project not found")
+		return "", fmt.Errorf("get project org: %w", ErrNotFound)
 	}
 	return orgID, nil
 }

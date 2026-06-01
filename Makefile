@@ -31,7 +31,8 @@ dev-be: db-up
 dev-fe:
 	$(MAKE) web
 
-migrate:
+migrate: db-up
+	sleep 3
 	cd server && go run ./cmd/migrate
 
 # ── Database ─────────────────────────────────────────────

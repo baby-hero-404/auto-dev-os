@@ -6,15 +6,14 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 type WebhookHandler struct {
-	taskSvc *service.TaskService
+	taskSvc TaskService
 }
 
-func NewWebhookHandler(taskSvc *service.TaskService) *WebhookHandler {
+func NewWebhookHandler(taskSvc TaskService) *WebhookHandler {
 	return &WebhookHandler{taskSvc: taskSvc}
 }
 
@@ -44,7 +43,7 @@ func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.taskSvc.Create(r.Context(), projectID, input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, task)

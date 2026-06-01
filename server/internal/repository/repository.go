@@ -29,7 +29,15 @@ func (r *RepositoryRepo) Create(ctx context.Context, projectID string, input mod
 func (r *RepositoryRepo) GetByID(ctx context.Context, id string) (*models.Repository, error) {
 	repo := &models.Repository{}
 	if err := r.db.WithContext(ctx).First(repo, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get repository: %w", err)
+		return nil, fmt.Errorf("get repository: %w", mapError(err))
+	}
+	return repo, nil
+}
+
+func (r *RepositoryRepo) GetByURL(ctx context.Context, repoURL string) (*models.Repository, error) {
+	repo := &models.Repository{}
+	if err := r.db.WithContext(ctx).First(repo, "url = ?", repoURL).Error; err != nil {
+		return nil, fmt.Errorf("get repository by url: %w", mapError(err))
 	}
 	return repo, nil
 }
@@ -83,10 +91,10 @@ func (r *RepositoryRepo) MarkValidated(ctx context.Context, id string) error {
 func (r *RepositoryRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Repository{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete repository: %w", result.Error)
+		return fmt.Errorf("delete repository: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("repository not found")
+		return fmt.Errorf("delete repository: %w", ErrNotFound)
 	}
 	return nil
 }

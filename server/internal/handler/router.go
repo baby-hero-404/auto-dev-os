@@ -2,11 +2,12 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	mw "github.com/auto-code-os/auto-code-os/server/internal/middleware"
+	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -15,17 +16,22 @@ import (
 
 // Deps holds all service dependencies for the router.
 type Deps struct {
-	OrgSvc       *service.OrganizationService
-	ProjSvc      *service.ProjectService
-	RepoSvc      *service.RepositoryService
-	AgentSvc     *service.AgentService
-	TaskSvc      *service.TaskService
-	RuleSvc      *service.RuleService
-	SkillSvc     *service.SkillService
-	AnalyticsSvc *service.AnalyticsService
-	AuthSvc      *service.AuthService
-	Orch         *orchestrator.Orchestrator
-	WebPort      string
+	OrgSvc             OrganizationService
+	ProjSvc            ProjectService
+	RepoSvc            RepositoryService
+	AgentSvc           AgentService
+	TaskSvc            TaskService
+	RuleSvc            RuleService
+	SkillSvc           SkillService
+	AnalyticsSvc       AnalyticsService
+	DashboardSvc       AnalyticsDashboardService
+	AuditSvc           AuditService
+	AuthSvc            AuthService
+	MemorySvc          MemoryService
+	LearningSvc        LearningService
+	Orch               *orchestrator.Orchestrator
+	WebPort            string
+	CORSAllowedOrigins string
 }
 
 // NewRouter creates the chi router with all API v1 routes.
@@ -35,6 +41,7 @@ func NewRouter(d Deps) http.Handler {
 	// Global middleware
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
+	r.Use(observability.TraceMiddleware("auto-code-os-api"))
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -43,8 +50,12 @@ func NewRouter(d Deps) http.Handler {
 	if webPort == "" {
 		webPort = "32300"
 	}
+	allowedOrigins := []string{"http://localhost:" + webPort, "http://127.0.0.1:" + webPort}
+	if strings.TrimSpace(d.CORSAllowedOrigins) != "" {
+		allowedOrigins = splitCSV(d.CORSAllowedOrigins)
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:" + webPort, "http://127.0.0.1:" + webPort},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"Link"},
@@ -71,9 +82,14 @@ func NewRouter(d Deps) http.Handler {
 	ruleH := NewRuleHandler(d.RuleSvc)
 	skillH := NewSkillHandler(d.SkillSvc)
 	analyticsH := NewAnalyticsHandler(d.AnalyticsSvc)
+	dashboardH := NewAnalyticsDashboardHandler(d.DashboardSvc)
+	auditH := NewAuditHandler(d.AuditSvc)
+	prH := NewPRHandler(d.TaskSvc, d.AuditSvc)
 	authH := NewAuthHandler(d.AuthSvc)
 	webhookH := NewWebhookHandler(d.TaskSvc)
 	workflowH := NewWorkflowHandler(d.Orch)
+	memoryH := NewMemoryHandler(d.MemorySvc)
+	learningH := NewLearningHandler(d.LearningSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -150,6 +166,13 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/agents/{agentID}/skills", skillH.AssignToAgent)
 			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/agents/{agentID}", agentH.Delete)
 
+			// Phase 6: Episodic Memory
+			r.Get("/agents/{agentID}/memories", memoryH.ListByAgent)
+			r.Get("/agents/{agentID}/memories/search", memoryH.Search)
+
+			// Phase 6: Learning Suggestions
+			r.Get("/agents/{agentID}/suggestions", learningH.ListSuggestions)
+
 			r.Get("/tasks/{taskID}", taskH.GetByID)
 			r.Patch("/tasks/{taskID}", taskH.Update)
 			r.Delete("/tasks/{taskID}", taskH.Delete)
@@ -165,12 +188,34 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/tasks/{taskID}/logs", workflowH.Logs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
+			r.Get("/workflows/{jobID}/artifacts", workflowH.Artifacts)
 
 			r.Get("/rules/{ruleID}", ruleH.GetByID)
 			r.Patch("/rules/{ruleID}", ruleH.Update)
 			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/rules/{ruleID}", ruleH.Delete)
 
 			r.Get("/analytics/token-usage", analyticsH.TokenUsage)
+			r.Get("/analytics/overview", dashboardH.Overview)
+			r.Get("/analytics/agents", dashboardH.AgentPerformance)
+			r.Get("/analytics/tasks", dashboardH.TaskAnalytics)
+			r.Get("/analytics/workflows", dashboardH.WorkflowAnalytics)
+
+			// Audit logs
+			r.Get("/audit/logs", auditH.List)
+			r.Get("/audit/summary", auditH.Summary)
+
+			// PR approval/rejection
+			r.Post("/tasks/{taskID}/pr/approve", prH.Approve)
+			r.Post("/tasks/{taskID}/pr/reject", prH.Reject)
+
+			// Phase 6: Memory detail
+			r.Get("/memories/{memoryID}", memoryH.GetByID)
+			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/memories/{memoryID}", memoryH.Delete)
+
+			// Phase 6: Learning suggestion review
+			r.Get("/suggestions/{suggestionID}", learningH.GetSuggestion)
+			r.Post("/suggestions/{suggestionID}/approve", learningH.ApproveSuggestion)
+			r.Post("/suggestions/{suggestionID}/reject", learningH.RejectSuggestion)
 
 			// Skills (global, not project-scoped)
 			r.Route("/skills", func(r chi.Router) {
@@ -185,4 +230,16 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	return r
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }

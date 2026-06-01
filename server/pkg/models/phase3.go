@@ -77,3 +77,13 @@ type WorkflowStatus struct {
 	Job         *WorkflowJob         `json:"job,omitempty"`
 	Checkpoints []WorkflowCheckpoint `json:"checkpoints"`
 }
+
+type WorkflowArtifact struct {
+	ID        string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	JobID     string          `json:"job_id" gorm:"type:uuid;not null"`
+	TaskID    string          `json:"task_id" gorm:"type:uuid;not null"`
+	Step      string          `json:"step" gorm:"not null"`
+	Type      string          `json:"type" gorm:"not null"` // e.g. prompt, llm_response, patch, diff, test_output, review_findings
+	Payload   json.RawMessage `json:"payload" gorm:"type:jsonb;default:'{}'"`
+	CreatedAt time.Time       `json:"created_at"`
+}

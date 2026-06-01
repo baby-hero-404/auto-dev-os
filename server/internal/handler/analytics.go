@@ -4,15 +4,13 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
 )
 
 type AnalyticsHandler struct {
-	svc *service.AnalyticsService
+	svc AnalyticsService
 }
 
-func NewAnalyticsHandler(svc *service.AnalyticsService) *AnalyticsHandler {
+func NewAnalyticsHandler(svc AnalyticsService) *AnalyticsHandler {
 	return &AnalyticsHandler{svc: svc}
 }
 
@@ -29,7 +27,7 @@ func (h *AnalyticsHandler) TokenUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	usage, err := h.svc.TokenUsage(r.Context(), projectID, since)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, usage)

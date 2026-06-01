@@ -46,7 +46,7 @@ func (r *AuthRepo) CreateUserWithOrganization(ctx context.Context, input models.
 func (r *AuthRepo) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	user := &models.User{}
 	if err := r.db.WithContext(ctx).First(user, "email = ?", email).Error; err != nil {
-		return nil, fmt.Errorf("get user by email: %w", err)
+		return nil, fmt.Errorf("get user by email: %w", mapError(err))
 	}
 	return user, nil
 }
@@ -54,7 +54,7 @@ func (r *AuthRepo) GetUserByEmail(ctx context.Context, email string) (*models.Us
 func (r *AuthRepo) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	user := &models.User{}
 	if err := r.db.WithContext(ctx).First(user, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get user by id: %w", err)
+		return nil, fmt.Errorf("get user by id: %w", mapError(err))
 	}
 	return user, nil
 }

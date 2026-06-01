@@ -1,6 +1,6 @@
 # Phase 5 Implementation Plan — Dashboard + Analytics + PR & Human Review
 
-> **Status:** 📋 Planned
+> **Status:** ✅ Complete
 > **Depends on:** Phase 4 (AI Gateway + Skill System)
 
 **Goal:** Build the full observability and review layer — project dashboards, agent metrics, AI-generated PR summaries, and human approval workflows.
@@ -54,14 +54,16 @@
 ## Task 1: Dashboard Analytics Backend
 
 **Files:**
-- Create: `server/internal/service/analytics.go`
-- Create: `server/internal/handler/analytics.go`
+- Create: `server/internal/repository/analytics_dashboard.go`
+- Create: `server/internal/service/analytics_dashboard.go`
+- Create: `server/internal/handler/analytics_dashboard.go`
+- Create: `server/pkg/models/phase5.go`
 
 **Scope:**
-- [ ] `GET /api/v1/analytics/overview` — total tasks, agents, success rate, avg completion time
-- [ ] `GET /api/v1/analytics/agents` — per-agent: success rate, retry count, token usage, task count
-- [ ] `GET /api/v1/analytics/tasks` — task throughput over time, status distribution
-- [ ] `GET /api/v1/analytics/workflows` — workflow completion rates, average step durations
+- [x] `GET /api/v1/analytics/overview` — total tasks, agents, success rate, avg completion time
+- [x] `GET /api/v1/analytics/agents` — per-agent: success rate, retry count, token usage, task count
+- [x] `GET /api/v1/analytics/tasks` — task throughput over time, status distribution
+- [x] `GET /api/v1/analytics/workflows` — workflow completion rates, average step durations
 
 ---
 
@@ -72,9 +74,10 @@
 - Create: `server/migration/000007_audit_logs.down.sql`
 
 **Scope:**
-- [ ] Record immutable Audit Logs for all critical agent actions (file edits, API calls, tool executions).
+- [x] Record immutable Audit Logs for all critical agent actions (file edits, API calls, tool executions).
 - [ ] Implement request tracing (OpenTelemetry/Jaeger concept) to track the lifecycle of a task across Orchestrator, Gateway, and Sandbox.
-- [ ] Expose `GET /api/v1/audit/logs` for compliance and debugging.
+- [x] Expose `GET /api/v1/audit/logs` for compliance and debugging.
+- [x] Expose `GET /api/v1/audit/summary` for counts by action.
 
 ---
 
@@ -85,31 +88,31 @@
 - Create: `server/internal/orchestrator/pr_generator.go`
 
 **Scope:**
-- [ ] Auto-generate PR body: title, summary, changed files list, risk assessment
+- [x] Auto-generate PR body: title, summary, changed files list, risk assessment
 - [ ] AI PR assistant — when reviewer asks a question on the PR, agent explains context
-- [ ] Merge policy enforcement — require: all tests pass + human approval
-- [ ] `POST /api/v1/tasks/:id/pr/approve` — human approves PR from platform
-- [ ] `POST /api/v1/tasks/:id/pr/reject` — human rejects with feedback → triggers fix cycle
+- [x] Merge policy enforcement — require: all tests pass + human approval
+- [x] `POST /api/v1/tasks/:id/pr/approve` — human approves PR from platform
+- [x] `POST /api/v1/tasks/:id/pr/reject` — human rejects with feedback → triggers fix cycle
 
 ---
 
 ## Task 4: Web UI — Analytics Dashboard
 
 **Scope:**
-- [ ] Project dashboard — task status distribution chart, active agents, open PRs
-- [ ] Agent metrics panel — success rate, retries, token consumption, avg task time
-- [ ] Workflow timeline — visual step-by-step execution history
-- [ ] Token cost tracker — burn rate, budget remaining
+- [x] Project dashboard — task status distribution chart, active agents, open PRs
+- [x] Agent metrics panel — success rate, retries, token consumption, avg task time
+- [x] Workflow timeline — visual step-by-step execution history
+- [x] Token cost tracker — burn rate, budget remaining
 
 ---
 
 ## Task 5: Web UI — PR Review & Audit Interface
 
 **Scope:**
-- [ ] PR detail page — diff viewer, AI-generated summary, risk assessment badge
+- [x] PR detail page — diff viewer, AI-generated summary, risk assessment badge
 - [ ] Inline comments — reviewer can ask questions → AI responds
-- [ ] Approve/Reject buttons — triggers merge or fix cycle
-- [ ] Audit Log Viewer — table showing all agent system actions and API calls for compliance
+- [x] Approve/Reject buttons — triggers merge or fix cycle
+- [x] Audit Log Viewer — table showing all agent system actions and API calls for compliance
 
 ---
 

@@ -25,7 +25,7 @@ func (r *SkillRepo) Create(ctx context.Context, input models.CreateSkillInput) (
 func (r *SkillRepo) GetByID(ctx context.Context, id string) (*models.Skill, error) {
 	s := &models.Skill{}
 	if err := r.db.WithContext(ctx).First(s, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get skill: %w", err)
+		return nil, fmt.Errorf("get skill: %w", mapError(err))
 	}
 	return s, nil
 }
@@ -84,10 +84,10 @@ func (r *SkillRepo) Update(ctx context.Context, id string, input models.UpdateSk
 func (r *SkillRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Skill{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete skill: %w", result.Error)
+		return fmt.Errorf("delete skill: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("skill not found")
+		return fmt.Errorf("delete skill: %w", ErrNotFound)
 	}
 	return nil
 }

@@ -1,14 +1,16 @@
 "use client";
 
-import { FolderKanban, Wrench, Building, Settings, Zap, BookOpen, Bot, BarChart3 } from "lucide-react";
+import { FolderKanban, Wrench, Building, Settings, Zap, BookOpen, Bot, BarChart3, TrendingUp, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
   { label: "Projects", href: "/", icon: FolderKanban },
   { label: "Agents", href: "/agents", icon: Bot },
+  { label: "Analytics", href: "/analytics", icon: TrendingUp },
   { label: "Skills", href: "/skills", icon: Zap },
   { label: "Gateway", href: "/gateway", icon: BarChart3 },
+  { label: "Audit Log", href: "/audit", icon: ShieldCheck },
   { label: "Rules", href: "/rules", icon: Wrench },
   { label: "Knowledge", href: "/knowledge", icon: BookOpen },
   { label: "Organization", href: "/organization", icon: Building },

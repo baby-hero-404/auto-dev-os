@@ -256,6 +256,10 @@ auto_code_os/
 | `server/internal/gitops`       | `server/pkg/config` (for Git tokens), GitHub API      |
 | `server/pkg/llm`               | `server/pkg/config` (for API keys)                    |
 | `server/internal/sandbox`      | Docker SDK                                            |
+| `server/internal/handler/analytics_dashboard` | `server/internal/service/analytics_dashboard`   |
+| `server/internal/handler/audit`| `server/internal/service/audit`                       |
+| `server/internal/handler/pr`   | `server/internal/service/task`, `server/internal/service/audit` |
+| `server/internal/orchestrator/pr_generator` | `server/pkg/models`                          |
 | `web/`                         | `server/cmd/api` (via REST/gRPC API)                  |
 
 ## 7. Development Phases
@@ -264,11 +268,11 @@ auto_code_os/
 | :------ | :------------------------------------------------------- | :-------- |
 | Phase 0 | PoC CLI: Task → LLM → Code output                       | ✅ Done   |
 | Phase 1 | API Server + DB + CRUD (Org/Project/Task/Agent/Rule/Skill) | ✅ Done   |
-| Phase 2 | Auth + Git Integration + Web UI + Project System         | ⏳ Next   |
-| Phase 3a| Sandbox + Agent Manager + Orchestrator Core               | 📋 Plan   |
-| Phase 3b| Workflow Engine (DAG) + Prompt Assembly + Execution UI   | 📋 Plan   |
+| Phase 2 | Auth + Git Integration + Web UI + Project System         | ✅ Done   |
+| Phase 3a| Sandbox + Agent Manager + Orchestrator Core               | ✅ Done   |
+| Phase 3b| Workflow Engine (DAG) + Prompt Assembly + Execution UI   | ✅ Done   |
 | Phase 4 | AI Gateway (Tier Routing) + Skill System + Evals         | 📋 Plan   |
-| Phase 5 | Dashboard + Analytics + PR & Human Review                | 📋 Plan   |
+| Phase 5 | Dashboard + Analytics + PR & Human Review                | ✅ Done   |
 | Phase 6 | Remote Chatbots + Episodic Memory + Self-improving Agents| 📋 Plan   |
 
 ## 7.1 Migration Numbering Map

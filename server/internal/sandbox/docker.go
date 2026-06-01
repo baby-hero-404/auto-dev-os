@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"go.opentelemetry.io/otel"
 )
 
 type DockerConfig struct {
@@ -41,7 +42,16 @@ func NewDockerRuntime(config DockerConfig) (*DockerRuntime, error) {
 	return &DockerRuntime{client: cli, config: config}, nil
 }
 
+func (r *DockerRuntime) Health(ctx context.Context) error {
+	if _, err := r.client.Ping(ctx); err != nil {
+		return fmt.Errorf("ping docker daemon: %w", err)
+	}
+	return nil
+}
+
 func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandResult, error) {
+	ctx, span := otel.Tracer("auto-code-os/sandbox").Start(ctx, "sandbox.docker.run")
+	defer span.End()
 	if err := validateCommand(req.Command); err != nil {
 		return nil, err
 	}

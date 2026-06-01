@@ -47,6 +47,11 @@ func Migrate(databaseURL, migrationsPath string) error {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 
-	slog.Info("migrations applied successfully")
+	version, dirty, err := m.Version()
+	if err != nil {
+		slog.Info("migrations applied successfully")
+	} else {
+		slog.Info("migrations applied successfully", "version", version, "dirty", dirty)
+	}
 	return nil
 }

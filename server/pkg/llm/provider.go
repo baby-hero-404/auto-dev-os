@@ -83,16 +83,18 @@ type Provider interface {
 
 // NewProvider creates the appropriate LLM provider based on configuration.
 func NewProvider(cfg *config.Config) (Provider, error) {
-	switch cfg.LLMProvider {
+	switch cfg.LLM.Provider {
 	case "openai":
-		return NewOpenAI(cfg.APIKey, cfg.LLMModel), nil
+		return NewOpenAI(cfg.LLM.APIKey, cfg.LLM.Model), nil
 	case "anthropic":
-		return NewAnthropic(cfg.APIKey, cfg.LLMModel), nil
+		return NewAnthropic(cfg.LLM.APIKey, cfg.LLM.Model), nil
 	case "gemini":
-		return NewGemini(cfg.APIKey, cfg.LLMModel), nil
+		return NewGemini(cfg.LLM.APIKey, cfg.LLM.Model), nil
+	case "9router":
+		return NewNineRouter(cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.BaseURL), nil
 	case "gateway":
 		return NewGatewayFromConfig(cfg)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", cfg.LLMProvider)
+		return nil, fmt.Errorf("unsupported provider: %s", cfg.LLM.Provider)
 	}
 }

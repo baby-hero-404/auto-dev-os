@@ -36,6 +36,10 @@ func (a *PromptAssembler) Assemble(ctx context.Context, task models.Task) ([]llm
 	return a.AssembleForAgent(ctx, task, nil, nil)
 }
 
+type contextKey string
+
+const memoriesCtxKey contextKey = "retrieved_memories"
+
 func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []ToolDefinition, error) {
 	var contextBlock string
 	if a != nil && a.retriever != nil {
@@ -54,6 +58,9 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	if contextBlock != "" {
 		user += "\n\nContext:\n" + contextBlock
 	}
+	if memories, ok := ctx.Value(memoriesCtxKey).([]models.EpisodicMemory); ok && len(memories) > 0 {
+		user += "\n\nRetrieved Memories:\n" + formatMemories(memories)
+	}
 	messages := []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
@@ -61,6 +68,19 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	messages = append(messages, TruncateHistory(history, 12000)...)
 	return messages, BuiltinToolDefinitions(), nil
 }
+
+func formatMemories(memories []models.EpisodicMemory) string {
+	var b strings.Builder
+	for _, mem := range memories {
+		b.WriteString(fmt.Sprintf("[%s/%s] %s\n", mem.Tier, mem.Category, mem.Summary))
+		if mem.Content != "" && mem.Content != mem.Summary {
+			b.WriteString(fmt.Sprintf("Detail: %s\n", mem.Content))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 
 func formatContextSnippets(snippets []models.ContextSnippet) string {
 	var b strings.Builder

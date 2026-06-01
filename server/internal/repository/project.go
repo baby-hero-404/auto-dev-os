@@ -25,7 +25,7 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, error) {
 	p := &models.Project{}
 	if err := r.db.WithContext(ctx).First(p, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get project: %w", err)
+		return nil, fmt.Errorf("get project: %w", mapError(err))
 	}
 	return p, nil
 }
@@ -59,10 +59,10 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Project{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete project: %w", result.Error)
+		return fmt.Errorf("delete project: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("project not found")
+		return fmt.Errorf("delete project: %w", ErrNotFound)
 	}
 	return nil
 }

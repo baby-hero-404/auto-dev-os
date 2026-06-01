@@ -25,7 +25,7 @@ func (r *OrganizationRepo) Create(ctx context.Context, input models.CreateOrgani
 func (r *OrganizationRepo) GetByID(ctx context.Context, id string) (*models.Organization, error) {
 	org := &models.Organization{}
 	if err := r.db.WithContext(ctx).First(org, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get organization: %w", err)
+		return nil, fmt.Errorf("get organization: %w", mapError(err))
 	}
 	return org, nil
 }
@@ -59,10 +59,10 @@ func (r *OrganizationRepo) Update(ctx context.Context, id string, input models.U
 func (r *OrganizationRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Organization{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete organization: %w", result.Error)
+		return fmt.Errorf("delete organization: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("organization not found")
+		return fmt.Errorf("delete organization: %w", ErrNotFound)
 	}
 	return nil
 }

@@ -71,7 +71,7 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stderr, "🚀 Auto Code OS CLI v%s\n", version)
-	fmt.Fprintf(os.Stderr, "📡 Provider: %s (%s)\n", provider.Name(), cfg.LLMModel)
+	fmt.Fprintf(os.Stderr, "📡 Provider: %s (%s)\n", provider.Name(), cfg.LLM.Model)
 	fmt.Fprintf(os.Stderr, "📝 Task: %s\n", truncate(task, 80))
 	fmt.Fprintf(os.Stderr, "⏳ Generating...\n\n")
 

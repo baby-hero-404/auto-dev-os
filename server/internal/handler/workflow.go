@@ -20,7 +20,7 @@ func (h *WorkflowHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskID")
 	job, err := h.orch.Execute(r.Context(), taskID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
@@ -30,7 +30,7 @@ func (h *WorkflowHandler) Status(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskID")
 	status, err := h.orch.WorkflowStatus(r.Context(), taskID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
@@ -40,7 +40,7 @@ func (h *WorkflowHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskID")
 	logs, err := h.orch.Logs(r.Context(), taskID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 
@@ -61,8 +61,18 @@ func (h *WorkflowHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskID")
 	task, err := h.orch.ApproveMerge(r.Context(), taskID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *WorkflowHandler) Artifacts(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "jobID")
+	artifacts, err := h.orch.ListArtifacts(r.Context(), jobID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, artifacts)
 }

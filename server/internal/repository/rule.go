@@ -28,7 +28,7 @@ func (r *RuleRepo) Create(ctx context.Context, projectID *string, input models.C
 func (r *RuleRepo) GetByID(ctx context.Context, id string) (*models.Rule, error) {
 	rule := &models.Rule{}
 	if err := r.db.WithContext(ctx).First(rule, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get rule: %w", err)
+		return nil, fmt.Errorf("get rule: %w", mapError(err))
 	}
 	return rule, nil
 }
@@ -62,10 +62,10 @@ func (r *RuleRepo) Update(ctx context.Context, id string, input models.UpdateRul
 func (r *RuleRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Rule{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete rule: %w", result.Error)
+		return fmt.Errorf("delete rule: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("rule not found")
+		return fmt.Errorf("delete rule: %w", ErrNotFound)
 	}
 	return nil
 }

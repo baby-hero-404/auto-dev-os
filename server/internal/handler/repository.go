@@ -3,25 +3,20 @@ package handler
 import (
 	"net/http"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
 
-type RepositoryHandler struct{ svc *service.RepositoryService }
+type RepositoryHandler struct{ svc RepositoryService }
 
-func NewRepositoryHandler(svc *service.RepositoryService) *RepositoryHandler {
+func NewRepositoryHandler(svc RepositoryService) *RepositoryHandler {
 	return &RepositoryHandler{svc: svc}
 }
 
 func (h *RepositoryHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	if err := h.svc.ValidateToken(r.Context(), id); err != nil {
-		if isValidationErr(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"valid": true})
@@ -31,11 +26,7 @@ func (h *RepositoryHandler) ListRemoteRepos(w http.ResponseWriter, r *http.Reque
 	token := r.URL.Query().Get("token")
 	repos, err := h.svc.ListRemoteRepos(r.Context(), token)
 	if err != nil {
-		if isValidationErr(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repos)
@@ -45,7 +36,7 @@ func (h *RepositoryHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	repo, err := h.svc.Clone(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -60,11 +51,7 @@ func (h *RepositoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	repo, err := h.svc.Create(r.Context(), projectID, input)
 	if err != nil {
-		if isValidationErr(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, repo)
@@ -74,7 +61,7 @@ func (h *RepositoryHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	repo, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "repository not found")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -84,7 +71,7 @@ func (h *RepositoryHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	repos, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repos)
@@ -99,7 +86,7 @@ func (h *RepositoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	repo, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -108,7 +95,7 @@ func (h *RepositoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *RepositoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

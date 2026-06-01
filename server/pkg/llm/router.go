@@ -9,6 +9,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"go.opentelemetry.io/otel"
 )
 
 var ErrCircuitOpen = errors.New("llm gateway circuit breaker open")
@@ -37,6 +38,7 @@ type GatewayOptions struct {
 	MaxTokensPerCall   int
 	MaxCostUSDPerCall  float64
 	DefaultOutputLimit int
+	MaxRetries         int
 	Recorder           UsageRecorder
 }
 
@@ -46,6 +48,7 @@ type Gateway struct {
 	maxTokensPerCall   int
 	maxCostUSDPerCall  float64
 	defaultOutputLimit int
+	maxRetries         int
 	recorder           UsageRecorder
 }
 
@@ -59,6 +62,7 @@ func NewGateway(chains []FallbackChain, opts GatewayOptions) (*Gateway, error) {
 		maxTokensPerCall:   opts.MaxTokensPerCall,
 		maxCostUSDPerCall:  opts.MaxCostUSDPerCall,
 		defaultOutputLimit: opts.DefaultOutputLimit,
+		maxRetries:         opts.MaxRetries,
 		recorder:           opts.Recorder,
 	}
 	if g.defaultTier == "" {
@@ -85,26 +89,27 @@ func NewGatewayFromConfig(cfg *config.Config) (*Gateway, error) {
 
 func NewGatewayFromConfigWithRecorder(cfg *config.Config, recorder UsageRecorder) (*Gateway, error) {
 	chains := []FallbackChain{}
-	if cfg.OpenAIAPIKey != "" {
+	if cfg.LLM.OpenAIAPIKey != "" {
 		chains = append(chains,
-			newFallbackChain(TierFast, []Provider{NewOpenAI(cfg.OpenAIAPIKey, cfg.LLMFastModel)}),
-			newFallbackChain(TierBalanced, []Provider{NewOpenAI(cfg.OpenAIAPIKey, cfg.LLMBalancedModel)}),
-			newFallbackChain(TierPowerful, []Provider{NewOpenAI(cfg.OpenAIAPIKey, cfg.LLMPowerfulModel)}),
+			newFallbackChain(TierFast, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.FastModel)}),
+			newFallbackChain(TierBalanced, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.BalancedModel)}),
+			newFallbackChain(TierPowerful, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.PowerfulModel)}),
 		)
 	}
-	if cfg.AnthropicAPIKey != "" {
-		appendProvider(&chains, TierBalanced, NewAnthropic(cfg.AnthropicAPIKey, cfg.LLMAnthropicBalancedModel))
-		appendProvider(&chains, TierPowerful, NewAnthropic(cfg.AnthropicAPIKey, cfg.LLMAnthropicPowerfulModel))
+	if cfg.LLM.AnthropicAPIKey != "" {
+		appendProvider(&chains, TierBalanced, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicBalancedModel))
+		appendProvider(&chains, TierPowerful, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicPowerfulModel))
 	}
-	if cfg.GeminiAPIKey != "" {
-		appendProvider(&chains, TierFast, NewGemini(cfg.GeminiAPIKey, cfg.LLMGeminiFastModel))
-		appendProvider(&chains, TierBalanced, NewGemini(cfg.GeminiAPIKey, cfg.LLMGeminiBalancedModel))
+	if cfg.LLM.GeminiAPIKey != "" {
+		appendProvider(&chains, TierFast, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiFastModel))
+		appendProvider(&chains, TierBalanced, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiBalancedModel))
 	}
 	return NewGateway(chains, GatewayOptions{
 		DefaultTier:        TierBalanced,
-		MaxTokensPerCall:   cfg.LLMCircuitMaxTokens,
-		MaxCostUSDPerCall:  cfg.LLMCircuitMaxCostUSD,
-		DefaultOutputLimit: cfg.LLMDefaultOutputTokens,
+		MaxTokensPerCall:   cfg.LLM.CircuitMaxTokens,
+		MaxCostUSDPerCall:  cfg.LLM.CircuitMaxCostUSD,
+		DefaultOutputLimit: cfg.LLM.DefaultOutputTokens,
+		MaxRetries:         cfg.LLM.MaxRetries,
 		Recorder:           recorder,
 	})
 }
@@ -122,6 +127,8 @@ func appendProvider(chains *[]FallbackChain, tier string, provider Provider) {
 func (g *Gateway) Name() string { return "gateway" }
 
 func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, error) {
+	ctx, span := otel.Tracer("auto-code-os/llm").Start(ctx, "llm.gateway.chat")
+	defer span.End()
 	opts, _ := RouteOptionsFromContext(ctx)
 	tier := g.tierForComplexity(opts.Complexity)
 	chain, ok := g.chains[tier]
@@ -143,10 +150,8 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 
 	var failures []string
 	for _, provider := range chain.Providers {
-		start := time.Now()
 		meta := metadataForProvider(provider)
-		resp, err := provider.Chat(ctx, messages)
-		latency := time.Since(start).Milliseconds()
+		resp, latency, err := g.chatWithRetry(ctx, provider, messages)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s/%s: %v", provider.Name(), meta.Model, err))
 			g.record(ctx, opts, meta, nil, latency, "failed", err.Error())
@@ -165,6 +170,34 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 	}
 
 	return nil, fmt.Errorf("llm gateway exhausted fallbacks for tier %q: %s", tier, strings.Join(failures, "; "))
+}
+
+func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages []Message) (*Response, int64, error) {
+	attempts := g.maxRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	start := time.Now()
+	for attempt := 0; attempt < attempts; attempt++ {
+		resp, err := provider.Chat(ctx, messages)
+		if err == nil {
+			return resp, time.Since(start).Milliseconds(), nil
+		}
+		lastErr = err
+		if attempt == attempts-1 {
+			break
+		}
+		backoff := time.Duration(100*(1<<attempt)) * time.Millisecond
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, time.Since(start).Milliseconds(), ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, time.Since(start).Milliseconds(), lastErr
 }
 
 func (g *Gateway) tierForComplexity(complexity string) string {

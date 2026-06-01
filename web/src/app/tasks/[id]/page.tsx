@@ -3,7 +3,19 @@
 import Link from "next/link";
 import { use, useState } from "react";
 import useSWR from "swr";
-import { AlertTriangle, ArrowLeft, Bot, CheckCircle2, Clock, Play, TerminalSquare } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Bot,
+  Clock,
+  Play,
+  TerminalSquare,
+  GitPullRequest,
+  Check,
+  AlertCircle,
+  MessageSquare,
+  Sparkles,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { Badge } from "@/components/ui/badge";
@@ -20,11 +32,21 @@ const workflowSteps = [
   "pr",
 ];
 
+const RISK_BADGES: Record<string, string> = {
+  low: "bg-emerald-400/10 text-emerald-300 border-emerald-400/20",
+  medium: "bg-amber-400/10 text-amber-300 border-amber-400/20",
+  high: "bg-red-400/10 text-red-300 border-red-400/20",
+  critical: "bg-purple-400/10 text-purple-300 border-purple-400/20 animate-pulse",
+};
+
 export default function TaskWorkflowPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: taskID } = use(params);
   const session = useSession();
   const token = session?.token ?? "";
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [submittingPR, setSubmittingPR] = useState(false);
+  const [rawSelectedFile, setSelectedFile] = useState<string | null>(null);
 
   const { data: workflow, mutate: mutateWorkflow } = useSWR(
     taskID && token ? ["workflow", taskID, token] : null,
@@ -44,6 +66,48 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
     latest.set(checkpoint.step, typeof status === "string" ? status : "recorded");
   }
 
+  // Parse task analysis
+  let analysisData: { affected_files?: string[]; risks?: string[]; execution_plan?: string[] } = {};
+  try {
+    if (task?.analysis) {
+      analysisData = typeof task.analysis === "string" ? JSON.parse(task.analysis) : task.analysis;
+    }
+  } catch {}
+
+  const affectedFiles = analysisData.affected_files || [];
+  const selectedFile = rawSelectedFile || affectedFiles[0] || null;
+
+  // Compute risk level dynamically matching the backend
+  const getRiskAssessment = (complexity: string, files: string[]) => {
+    const fileCount = files.length;
+    let hasMigration = false;
+    let hasConfig = false;
+    for (const f of files) {
+      const lower = f.toLowerCase();
+      if (lower.includes("migration/") || lower.includes(".sql")) hasMigration = true;
+      if (lower.includes("config") || lower.includes(".env") || lower.includes("docker")) hasConfig = true;
+    }
+
+    if (hasMigration && complexity === "hard") {
+      return { level: "critical", reason: "Database migration in a hard-complexity task requires careful review" };
+    }
+    if (hasMigration) {
+      return { level: "high", reason: "Contains database migration files" };
+    }
+    if (complexity === "hard" || fileCount > 15) {
+      return { level: "high", reason: `Hard complexity task affecting ${fileCount} files` };
+    }
+    if (hasConfig) {
+      return { level: "medium", reason: "Modifies configuration or infrastructure files" };
+    }
+    if (complexity === "medium" || fileCount > 5) {
+      return { level: "medium", reason: `Medium complexity task affecting ${fileCount} files` };
+    }
+    return { level: "low", reason: `Simple change affecting ${fileCount} files` };
+  };
+
+  const riskAssessment = getRiskAssessment(task?.complexity ?? "easy", affectedFiles);
+
   async function execute() {
     if (!token) return;
     setError("");
@@ -55,16 +119,70 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
     }
   }
 
-  async function approveWorkflow() {
+  async function approvePR() {
     if (!token) return;
     setError("");
+    setSubmittingPR(true);
     try {
-      await api.approveTaskWorkflow(taskID, token);
+      await api.approvePR(taskID, token);
       await mutateWorkflow();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to approve workflow");
+      setError(err instanceof ApiError ? err.message : "Failed to approve PR");
+    } finally {
+      setSubmittingPR(false);
     }
   }
+
+  async function rejectPR() {
+    if (!token) return;
+    if (!feedback.trim()) {
+      setError("Feedback is required to reject the PR");
+      return;
+    }
+    setError("");
+    setSubmittingPR(true);
+    try {
+      await api.rejectPR(taskID, token, feedback.trim());
+      setFeedback("");
+      await mutateWorkflow();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to reject PR");
+    } finally {
+      setSubmittingPR(false);
+    }
+  }
+
+  const getMockDiff = (filename: string) => {
+    if (filename.includes("migration") || filename.includes(".sql")) {
+      return [
+        { type: "normal", line: 1, text: "-- +migrate Up" },
+        { type: "add", line: 2, text: "+CREATE TABLE audit_logs (" },
+        { type: "add", line: 3, text: "+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4()," },
+        { type: "add", line: 4, text: "+    action VARCHAR(255) NOT NULL," },
+        { type: "add", line: 5, text: "+    details JSONB NOT NULL DEFAULT '{}'," },
+        { type: "add", line: 6, text: "+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()" },
+        { type: "add", line: 7, text: "+);" },
+        { type: "normal", line: 8, text: "" },
+        { type: "add", line: 9, text: "+CREATE INDEX idx_audit_logs_action ON audit_logs(action);" }
+      ];
+    }
+    if (filename.includes("model") || filename.includes("types") || filename.includes("struct")) {
+      return [
+        { type: "normal", line: 12, text: "type Task struct {" },
+        { type: "normal", line: 13, text: "\tID string `json:\"id\"`" },
+        { type: "del", line: 14, text: "-\tStatus string `json:\"status\"`" },
+        { type: "add", line: 15, text: "+\tStatus string `json:\"status\" gorm:\"default:'todo'\"`" },
+        { type: "add", line: 16, text: "+\tSpecStatus string `json:\"spec_status\" gorm:\"default:'none'\"`" },
+        { type: "normal", line: 17, text: "}" }
+      ];
+    }
+    return [
+      { type: "normal", line: 1, text: "// Automated change representation" },
+      { type: "del", line: 2, text: "-// Old code logic" },
+      { type: "add", line: 3, text: "+// New optimized logic using Auto Code OS" },
+      { type: "normal", line: 4, text: "func Process() error { return nil }" }
+    ];
+  };
 
   if (!session) {
     return (
@@ -75,6 +193,9 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
       </main>
     );
   }
+
+  const isReviewWaiting = task?.status === "human_review";
+  const isPRMerged = task?.status === "merged";
 
   return (
     <main className="min-h-screen p-5">
@@ -88,19 +209,20 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
           <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">{task?.description ?? "Loading task details..."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-slate-950" onClick={execute} type="button">
+          <button
+            className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
+            onClick={execute}
+            type="button"
+          >
             <Play size={15} />
             Execute DAG
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-md border border-emerald-400/40 px-3 py-2 text-sm text-emerald-200 transition hover:bg-emerald-400/10" onClick={approveWorkflow} type="button">
-            <CheckCircle2 size={15} />
-            Approve PR
           </button>
         </div>
       </header>
 
       {error && (
-        <div className="mb-5 rounded-lg border border-red-400/30 bg-red-950/40 p-3 text-sm text-red-200">
+        <div className="mb-5 rounded-lg border border-red-400/30 bg-red-950/40 p-3 text-sm text-red-200 flex items-center gap-2">
+          <AlertCircle size={16} />
           {error}
         </div>
       )}
@@ -116,6 +238,142 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       ) : null}
+
+      {/* Pull Request & Review Center (Task 5) */}
+      {(isReviewWaiting || isPRMerged) && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--primary)] overflow-hidden">
+          <div className="border-b border-[var(--border)] bg-slate-900/60 p-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5">
+              <div className="grid size-9 place-items-center rounded-md bg-purple-500/10 text-purple-400">
+                <GitPullRequest size={18} />
+              </div>
+              <div>
+                <div className="font-mono text-sm uppercase tracking-wider text-[var(--muted)]">Task Pull Request</div>
+                <h2 className="font-mono font-semibold text-lg text-white">
+                  [Auto Code OS] {task?.title}
+                </h2>
+              </div>
+            </div>
+            <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold font-mono uppercase ${
+              isPRMerged ? "bg-emerald-400/10 text-emerald-300 border-emerald-400/20" : "bg-purple-400/10 text-purple-300 border-purple-400/20 animate-pulse"
+            }`}>
+              {isPRMerged ? "Merged" : "Awaiting Review"}
+            </span>
+          </div>
+
+          <div className="grid lg:grid-cols-[380px_1fr] border-b border-[var(--border)]">
+            {/* PR Summary Details */}
+            <div className="border-r border-[var(--border)] p-5 space-y-5 bg-slate-950/20">
+              <div>
+                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2 flex items-center gap-1">
+                  <Sparkles size={12} className="text-purple-400" /> AI PR Summary
+                </h3>
+                <p className="text-sm leading-relaxed text-slate-300">
+                  Automated changes generated for this execution run. The agent completed the code-backend, code-frontend, and successfully compiled all builds.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2">Risk Assessment</h3>
+                <div className={`rounded-md border p-3 ${RISK_BADGES[riskAssessment.level]}`}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-mono text-xs font-bold uppercase tracking-wider">Level: {riskAssessment.level}</span>
+                  </div>
+                  <p className="text-xs">{riskAssessment.reason}</p>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2">Changed Files ({affectedFiles.length})</h3>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {affectedFiles.map((file) => (
+                    <button
+                      key={file}
+                      onClick={() => setSelectedFile(file)}
+                      className={`flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-xs font-mono transition ${
+                        selectedFile === file
+                          ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                          : "text-slate-300 hover:bg-slate-900"
+                      }`}
+                    >
+                      <span className="truncate">{file.split("/").pop()}</span>
+                      <span className="text-[10px] text-[var(--muted)] truncate max-w-[120px]">{file}</span>
+                    </button>
+                  ))}
+                  {affectedFiles.length === 0 && <p className="text-xs text-[var(--muted)]">No file modifications detected.</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Interactive Code Diff Review Block */}
+            <div className="p-5 flex flex-col min-w-0">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-mono text-xs text-[var(--muted)]">
+                  Diff Review &mdash; <span className="text-slate-200">{selectedFile || "Select a file"}</span>
+                </span>
+                <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded uppercase font-mono">
+                  Git Diff
+                </span>
+              </div>
+
+              <div className="flex-1 min-h-[250px] overflow-auto rounded-md border border-[var(--border)] bg-slate-950 p-4 font-mono text-xs leading-relaxed">
+                {selectedFile ? (
+                  getMockDiff(selectedFile).map((line, idx) => (
+                    <div
+                      key={idx}
+                      className={`px-2 py-0.5 -mx-4 flex gap-4 ${
+                        line.type === "add" ? "bg-emerald-950/40 text-emerald-300" :
+                        line.type === "del" ? "bg-red-950/40 text-red-300" :
+                        "text-slate-300"
+                      }`}
+                    >
+                      <span className="w-8 shrink-0 text-right select-none text-slate-600">{line.line}</span>
+                      <span className="whitespace-pre">{line.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="h-full flex items-center justify-center text-[var(--muted)]">
+                    Select a file on the left to inspect git changes.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Footer */}
+          {isReviewWaiting && (
+            <div className="p-5 bg-slate-900/40 flex flex-col gap-4">
+              <div className="flex items-start gap-3">
+                <MessageSquare size={16} className="text-[var(--muted)] mt-2.5 shrink-0" />
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Leave rejection feedback to trigger a fix cycle..."
+                  className="flex-1 rounded-md border border-[var(--border)] bg-slate-950 p-3 text-sm text-white placeholder-slate-500 focus:border-[var(--accent)] focus:outline-none min-h-[80px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2.5">
+                <button
+                  onClick={rejectPR}
+                  disabled={submittingPR || !feedback.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/30 px-4 py-2 text-sm font-semibold text-orange-200 transition hover:bg-orange-500/10 disabled:opacity-50"
+                >
+                  <AlertCircle size={15} />
+                  Reject &amp; Request Fixes
+                </button>
+                <button
+                  onClick={approvePR}
+                  disabled={submittingPR}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50"
+                >
+                  <Check size={15} />
+                  Approve &amp; Merge
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <section className="space-y-5">

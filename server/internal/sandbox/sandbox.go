@@ -6,6 +6,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -42,6 +44,8 @@ func NewStubRuntime() *StubRuntime {
 }
 
 func (r *StubRuntime) Run(ctx context.Context, req CommandRequest) (*CommandResult, error) {
+	ctx, span := otel.Tracer("auto-code-os/sandbox").Start(ctx, "sandbox.stub.run")
+	defer span.End()
 	if err := validateCommand(req.Command); err != nil {
 		return nil, err
 	}

@@ -31,7 +31,7 @@ func (r *TaskRepo) Create(ctx context.Context, projectID string, input models.Cr
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	t := &models.Task{}
 	if err := r.db.WithContext(ctx).First(t, "id = ?", id).Error; err != nil {
-		return nil, fmt.Errorf("get task: %w", err)
+		return nil, fmt.Errorf("get task: %w", mapError(err))
 	}
 	return t, nil
 }
@@ -97,10 +97,10 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	result := r.db.WithContext(ctx).Delete(&models.Task{}, "id = ?", id)
 	if result.Error != nil {
-		return fmt.Errorf("delete task: %w", result.Error)
+		return fmt.Errorf("delete task: %w", mapError(result.Error))
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("task not found")
+		return fmt.Errorf("delete task: %w", ErrNotFound)
 	}
 	return nil
 }

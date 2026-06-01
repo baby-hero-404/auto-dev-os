@@ -121,13 +121,15 @@ export type TokenUsageSummary = {
 
 export type Agent = {
   id: string;
+  org_id?: string;
   project_id: string;
   name: string;
   role: string;
   provider: string;
   model: string;
-  level: number;
+  level: string;
   status: string;
+  assignment_strategy?: string;
   created_at: string;
   updated_at: string;
 };
@@ -147,4 +149,138 @@ export type Rule = {
   enforcement: "strict" | "advisory";
   created_at: string;
   updated_at: string;
+};
+
+// ─── Phase 5: Analytics + Audit + PR ─────────────────────────────────
+
+export type OverviewStats = {
+  total_projects: number;
+  total_tasks: number;
+  active_tasks: number;
+  completed_tasks: number;
+  failed_tasks: number;
+  running_agents: number;
+  total_agents: number;
+  success_rate: number;
+  avg_completion_ms: number;
+  open_prs: number;
+  total_token_cost: number;
+  total_tokens_used: number;
+};
+
+export type AgentStats = {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  provider: string;
+  model: string;
+  status: string;
+  task_count: number;
+  success_count: number;
+  fail_count: number;
+  success_rate: number;
+  retry_count: number;
+  total_tokens: number;
+  total_cost_usd: number;
+};
+
+export type TaskStatusDistribution = {
+  status: string;
+  count: number;
+};
+
+export type TaskTimeSeries = {
+  bucket: string;
+  created: number;
+  completed: number;
+  failed: number;
+};
+
+export type TaskAnalytics = {
+  distribution: TaskStatusDistribution[];
+  time_series: TaskTimeSeries[];
+};
+
+export type WorkflowStepStats = {
+  step: string;
+  avg_ms: number;
+  total_runs: number;
+  fail_count: number;
+};
+
+export type WorkflowAnalytics = {
+  total_workflows: number;
+  completed_count: number;
+  failed_count: number;
+  completion_rate: number;
+  avg_duration_ms: number;
+  step_stats: WorkflowStepStats[];
+};
+
+export type AuditLog = {
+  id: string;
+  org_id?: string;
+  user_id?: string;
+  agent_id?: string;
+  task_id?: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  details: Record<string, unknown>;
+  ip_address: string;
+  created_at: string;
+};
+
+export type EpisodicMemory = {
+  id: string;
+  agent_id: string;
+  project_id?: string;
+  task_id?: string;
+  session_id?: string;
+  tier: "working" | "episodic" | "semantic" | "procedural";
+  content: string;
+  summary: string;
+  category: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  access_count: number;
+  decay_score: number;
+  last_accessed: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KnowledgeEdge = {
+  id: string;
+  source_id: string;
+  target_id: string;
+  relation: string;
+  weight: number;
+  created_at: string;
+};
+
+export type LearningSuggestion = {
+  id: string;
+  agent_id: string;
+  project_id?: string;
+  task_id?: string;
+  suggestion_type: "rule" | "prompt_patch" | "skill" | "pattern";
+  title: string;
+  description: string;
+  content: string;
+  confidence: number;
+  status: "pending" | "approved" | "rejected" | "applied";
+  reviewed_by?: string;
+  reviewed_at?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MemorySearchResult = {
+  memory: EpisodicMemory;
+  bm25_score: number;
+  vector_score: number;
+  graph_score: number;
+  final_score: number;
 };

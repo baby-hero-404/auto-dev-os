@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -38,8 +39,8 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 		if err != nil {
 			return nil, err
 		}
-		if err := validateTransition(task.Status, *input.Status); err != nil {
-			return nil, err
+		if err := workflow.ValidateTaskTransition(task.Status, *input.Status); err != nil {
+			return nil, ErrValidation(err.Error())
 		}
 	}
 	return s.repo.Update(ctx, id, input)
@@ -72,6 +73,15 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		specStatus = models.TaskSpecStatusPendingReview
 		status = models.TaskStatusSpecReview
 	}
+	if task.Status != models.TaskStatusTodo &&
+		task.Status != models.TaskStatusAnalyzing &&
+		task.Status != models.TaskStatusSpecReview &&
+		task.Status != models.TaskStatusAssigned &&
+		task.Status != models.TaskStatusPlanning &&
+		task.Status != "" {
+		return nil, ErrValidation(fmt.Sprintf("invalid task transition from %q to %q during analysis", task.Status, status))
+	}
+
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{
 		Status:     &status,
 		Complexity: &analysis.Complexity,
@@ -104,17 +114,27 @@ func (s *TaskService) GetAnalysis(ctx context.Context, id string) (json.RawMessa
 }
 
 func (s *TaskService) ApproveAnalysis(ctx context.Context, id string) (*models.Task, error) {
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	specStatus := models.TaskSpecStatusApproved
 	status := models.TaskStatusPlanning
+	if err := workflow.ValidateTaskTransition(task.Status, status); err != nil {
+		return nil, ErrValidation(err.Error())
+	}
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{SpecStatus: &specStatus, Status: &status})
 }
 
 func (s *TaskService) RequestAnalysisChanges(ctx context.Context, id string, input models.ClarifyTaskInput) (*models.Task, error) {
-	specStatus := models.TaskSpecStatusChangesRequested
-	status := models.TaskStatusSpecReview
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	specStatus := models.TaskSpecStatusChangesRequested
+	status := models.TaskStatusSpecReview
+	if err := workflow.ValidateTaskTransition(task.Status, status); err != nil {
+		return nil, ErrValidation(err.Error())
 	}
 	description := task.Description
 	if strings.TrimSpace(input.Context) != "" {
@@ -189,15 +209,4 @@ func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
 	}
 }
 
-func validateTransition(from, to string) error {
-	allowed, ok := models.ValidTaskTransitions[from]
-	if !ok {
-		return fmt.Errorf("validation: unknown current status %q", from)
-	}
-	for _, s := range allowed {
-		if s == to {
-			return nil
-		}
-	}
-	return fmt.Errorf("validation: invalid transition from %q to %q", from, to)
-}
+

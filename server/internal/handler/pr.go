@@ -1,0 +1,96 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
+	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/go-chi/chi/v5"
+)
+
+// PRHandler handles PR approval and rejection endpoints.
+type PRHandler struct {
+	taskSvc  TaskService
+	auditSvc AuditService
+}
+
+func NewPRHandler(taskSvc TaskService, auditSvc AuditService) *PRHandler {
+	return &PRHandler{taskSvc: taskSvc, auditSvc: auditSvc}
+}
+
+// Approve approves a PR and transitions the task to merged status.
+// POST /api/v1/tasks/:taskID/pr/approve
+func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+
+	task, err := h.taskSvc.GetByID(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	// Validate task is in a reviewable state.
+	if task.Status != models.TaskStatusHumanReview {
+		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
+		return
+	}
+
+	// Transition to merged.
+	merged := models.TaskStatusMerged
+	updated, err := h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &merged})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	// Record audit log.
+	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRApproved, "task", taskID,
+		service.WithTaskID(taskID),
+	)
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// Reject rejects a PR with feedback and triggers a fix cycle.
+// POST /api/v1/tasks/:taskID/pr/reject
+func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+
+	task, err := h.taskSvc.GetByID(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	// Validate task is in a reviewable state.
+	if task.Status != models.TaskStatusHumanReview {
+		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
+		return
+	}
+
+	var input models.PRRejectInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if input.Feedback == "" {
+		writeError(w, http.StatusBadRequest, "feedback is required when rejecting a PR")
+		return
+	}
+
+	// Transition to fixing state to trigger the fix cycle.
+	fixing := models.TaskStatusFixing
+	updated, err := h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &fixing})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	// Record audit log with rejection feedback.
+	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRRejected, "task", taskID,
+		service.WithTaskID(taskID),
+		service.WithDetails(map[string]string{"feedback": input.Feedback}),
+	)
+
+	writeJSON(w, http.StatusOK, updated)
+}

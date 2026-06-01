@@ -27,7 +27,7 @@ func run() error {
 	// Run migrations
 	migrationsPath, _ := filepath.Abs("migration")
 	slog.Info("running migrations...", "path", migrationsPath)
-	if err := database.Migrate(cfg.DatabaseURL, migrationsPath); err != nil {
+	if err := database.Migrate(cfg.Database.URL, migrationsPath); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 

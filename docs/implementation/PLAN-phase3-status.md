@@ -90,6 +90,13 @@ This document provides a comprehensive review of all components implemented duri
   * **Action Controls:** Integrates execution triggers and manual merge/PR approvals directly.
   * **Sidebar:** Agent metadata and checkpoint history feeds.
 
+### 9. Orchestrator Core Enhancements (Completed June 2026)
+* **Structured LLM Parsing:** Fully parses Markdown JSON responses from the LLM to extract task plans, code patches, and review findings instead of storing raw texts.
+* **Sandbox Patching & Diffs:** Applies code modifications via `git apply patch.diff` inside the sandboxed workspace volume and captures the differential changes via `git diff`.
+* **Differential Step Review:** Refactored `StepReview` to read the active workspace diff and pass it directly to the reviewing agent for high-fidelity code auditing.
+* **GitOps Automation:** Wired `StepMerge` to `GitOpsClient` to automatically clone, branch (`autocode/task-{taskID}`), commit/push changes, and create a Pull Request on GitHub.
+* **Durable Artifact Persistence:** Chronologically stores prompt payloads, LLM responses, applied patches, git diffs, review findings, and test execution outcomes as `WorkflowArtifact` records in the GORM database.
+
 ---
 
 ## 🧪 Verification & Test Suite Status
@@ -100,4 +107,5 @@ go test ./... -count=1
 ```
 * **Workflow Engine:** Tests validation of output schema, cycle detection, parallel execution order, and string array validation.
 * **Context Retriever:** Tests explicit file matching, regex import-dependency tracking, and keyword fallback search.
+* **Orchestrator Integration:** Tests end-to-end execution of repository cloning, sandbox patch application, differential git diff capture, PR creation, and artifact store persistence.
 * **Frontend Compilation:** Next.js compiles with type check success.

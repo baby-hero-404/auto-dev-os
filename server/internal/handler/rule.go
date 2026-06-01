@@ -3,14 +3,13 @@ package handler
 import (
 	"net/http"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
 
-type RuleHandler struct{ svc *service.RuleService }
+type RuleHandler struct{ svc RuleService }
 
-func NewRuleHandler(svc *service.RuleService) *RuleHandler {
+func NewRuleHandler(svc RuleService) *RuleHandler {
 	return &RuleHandler{svc: svc}
 }
 
@@ -27,11 +26,7 @@ func (h *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.Create(r.Context(), pid, input)
 	if err != nil {
-		if isValidationErr(err) {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rule)
@@ -41,7 +36,7 @@ func (h *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
 	rule, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "rule not found")
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rule)
@@ -51,7 +46,7 @@ func (h *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	rules, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rules)
@@ -66,7 +61,7 @@ func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rule)
@@ -75,7 +70,7 @@ func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

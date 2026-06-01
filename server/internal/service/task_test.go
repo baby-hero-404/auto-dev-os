@@ -1,10 +1,11 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -83,7 +84,7 @@ func TestValidateTransition_Valid(t *testing.T) {
 		{models.TaskStatusHumanReview, models.TaskStatusMerged},
 	}
 	for _, tc := range tests {
-		if err := validateTransition(tc.from, tc.to); err != nil {
+		if err := workflow.ValidateTaskTransition(tc.from, tc.to); err != nil {
 			t.Errorf("transition %s→%s should be valid, got error: %v", tc.from, tc.to, err)
 		}
 	}
@@ -98,14 +99,14 @@ func TestValidateTransition_Invalid(t *testing.T) {
 		{models.TaskStatusMerged, models.TaskStatusCoding},
 	}
 	for _, tc := range tests {
-		if err := validateTransition(tc.from, tc.to); err == nil {
+		if err := workflow.ValidateTaskTransition(tc.from, tc.to); err == nil {
 			t.Errorf("transition %s→%s should be invalid, but no error returned", tc.from, tc.to)
 		}
 	}
 }
 
 func TestValidateTransition_UnknownStatus(t *testing.T) {
-	if err := validateTransition("unknown_status", models.TaskStatusCoding); err == nil {
+	if err := workflow.ValidateTaskTransition("unknown_status", models.TaskStatusCoding); err == nil {
 		t.Error("expected error for unknown current status")
 	}
 }
@@ -142,18 +143,11 @@ func TestErrValidation(t *testing.T) {
 	if err.Error() != "validation: test error" {
 		t.Errorf("unexpected error message: %q", err.Error())
 	}
-}
-
-// Ensure isValidationErr detects validation errors.
-func TestIsValidationErr(t *testing.T) {
-	if !isValidationErr(ErrValidation("test")) {
-		t.Error("expected isValidationErr to return true for validation error")
-	}
-	if isValidationErr(context.DeadlineExceeded) {
-		t.Error("expected isValidationErr to return false for non-validation error")
+	if !errors.Is(err, ErrInvalid) {
+		t.Error("expected errors.Is(err, ErrInvalid) to be true")
 	}
 }
 
 func isValidationErr(err error) bool {
-	return err != nil && len(err.Error()) > 12 && err.Error()[:12] == "validation: "
+	return errors.Is(err, ErrInvalid)
 }

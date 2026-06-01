@@ -184,20 +184,19 @@ func TestWriteError(t *testing.T) {
 	}
 }
 
-func TestIsValidationErr_Handler(t *testing.T) {
+func TestStatusForError(t *testing.T) {
 	tests := []struct {
 		err    error
-		expect bool
+		status int
 	}{
-		{service.ErrValidation("test"), true},
-		{nil, false},
+		{service.ErrValidation("bad input"), http.StatusBadRequest},
+		{service.ErrNotFoundf("missing task"), http.StatusNotFound},
+		{service.ErrConflictf("duplicate"), http.StatusConflict},
+		{service.ErrAuthorizationf("denied"), http.StatusUnauthorized},
 	}
 	for _, tc := range tests {
-		if tc.err == nil {
-			continue
-		}
-		if got := isValidationErr(tc.err); got != tc.expect {
-			t.Errorf("isValidationErr(%v) = %v, want %v", tc.err, got, tc.expect)
+		if got := statusForError(tc.err); got != tc.status {
+			t.Errorf("statusForError(%v) = %d, want %d", tc.err, got, tc.status)
 		}
 	}
 }

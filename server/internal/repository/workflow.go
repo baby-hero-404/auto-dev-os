@@ -30,7 +30,10 @@ func (r *WorkflowRepo) ClaimNext(ctx context.Context) (*models.WorkflowJob, erro
 			Where("status = ?", models.WorkflowJobStatusQueued).
 			Order("created_at ASC").
 			First(&job).Error; err != nil {
-			return err
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return fmt.Errorf("claim workflow job: %w", err)
 		}
 
 		return tx.Model(&job).Updates(map[string]any{
@@ -39,7 +42,7 @@ func (r *WorkflowRepo) ClaimNext(ctx context.Context) (*models.WorkflowJob, erro
 		}).Error
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claim workflow job: %w", err)
+		return nil, fmt.Errorf("claim workflow job: %w", mapError(err))
 	}
 	return &job, nil
 }
@@ -47,7 +50,7 @@ func (r *WorkflowRepo) ClaimNext(ctx context.Context) (*models.WorkflowJob, erro
 func (r *WorkflowRepo) LatestByTaskID(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
 	var job models.WorkflowJob
 	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("created_at DESC").First(&job).Error; err != nil {
-		return nil, fmt.Errorf("latest workflow job: %w", err)
+		return nil, fmt.Errorf("latest workflow job: %w", mapError(err))
 	}
 	return &job, nil
 }
@@ -55,10 +58,10 @@ func (r *WorkflowRepo) LatestByTaskID(ctx context.Context, taskID string) (*mode
 func (r *WorkflowRepo) UpdateJob(ctx context.Context, jobID string, updates map[string]any) (*models.WorkflowJob, error) {
 	var job models.WorkflowJob
 	if err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).Where("id = ?", jobID).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("update workflow job: %w", err)
+		return nil, fmt.Errorf("update workflow job: %w", mapError(err))
 	}
 	if err := r.db.WithContext(ctx).First(&job, "id = ?", jobID).Error; err != nil {
-		return nil, fmt.Errorf("reload workflow job: %w", err)
+		return nil, fmt.Errorf("reload workflow job: %w", mapError(err))
 	}
 	return &job, nil
 }

@@ -1,18 +1,35 @@
 package repository
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type WorkflowRepo struct{ db *gorm.DB }
+var logMu sync.RWMutex
+
+type WorkflowRepo struct {
+	db       *gorm.DB
+	fileRoot string
+}
 
 func NewWorkflowRepo(db *gorm.DB) *WorkflowRepo {
 	return &WorkflowRepo{db: db}
+}
+
+func (r *WorkflowRepo) SetLogFileRoot(root string) {
+	r.fileRoot = root
 }
 
 func (r *WorkflowRepo) Enqueue(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
@@ -26,14 +43,16 @@ func (r *WorkflowRepo) Enqueue(ctx context.Context, taskID string) (*models.Work
 func (r *WorkflowRepo) ClaimNext(ctx context.Context) (*models.WorkflowJob, error) {
 	var job models.WorkflowJob
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+		res := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("status = ?", models.WorkflowJobStatusQueued).
 			Order("created_at ASC").
-			First(&job).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return nil
-			}
-			return fmt.Errorf("claim workflow job: %w", err)
+			Limit(1).
+			Find(&job)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
 		}
 
 		return tx.Model(&job).Updates(map[string]any{
@@ -42,7 +61,11 @@ func (r *WorkflowRepo) ClaimNext(ctx context.Context) (*models.WorkflowJob, erro
 		}).Error
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claim workflow job: %w", mapError(err))
+		mapped := mapError(err)
+		if errors.Is(mapped, ErrNotFound) {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("claim workflow job: %w", mapped)
 	}
 	return &job, nil
 }
@@ -82,16 +105,82 @@ func (r *WorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) ([]mo
 }
 
 func (r *WorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
-	if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {
-		return fmt.Errorf("create task log: %w", err)
+	if r.fileRoot == "" {
+		if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {
+			return fmt.Errorf("create task log: %w", err)
+		}
+		return nil
 	}
+
+	if log.ID == "" {
+		log.ID = uuid.New().String()
+	}
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now()
+	}
+
+	logPath := filepath.Join(r.fileRoot, log.TaskID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+
+	logMu.Lock()
+	defer logMu.Unlock()
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(log)
+	if err != nil {
+		return fmt.Errorf("marshal log: %w", err)
+	}
+
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write log: %w", err)
+	}
+
 	return nil
 }
 
 func (r *WorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error) {
-	var logs []models.TaskLog
-	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("created_at ASC").Find(&logs).Error; err != nil {
-		return nil, fmt.Errorf("list task logs: %w", err)
+	if r.fileRoot == "" {
+		var logs []models.TaskLog
+		if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("created_at ASC").Find(&logs).Error; err != nil {
+			return nil, fmt.Errorf("list task logs: %w", err)
+		}
+		return logs, nil
 	}
+
+	logPath := filepath.Join(r.fileRoot, taskID+".jsonl")
+
+	logMu.RLock()
+	defer logMu.RUnlock()
+
+	f, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []models.TaskLog{}, nil
+		}
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	defer f.Close()
+
+	var logs []models.TaskLog
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var log models.TaskLog
+		if err := json.Unmarshal(scanner.Bytes(), &log); err != nil {
+			continue
+		}
+		logs = append(logs, log)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan log file: %w", err)
+	}
+
 	return logs, nil
 }

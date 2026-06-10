@@ -9,16 +9,80 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestNewGitHubProvider(t *testing.T) {
-	p := NewGitHubProvider()
+	p := NewGitHubProvider("")
 	if p == nil {
 		t.Fatal("expected non-nil provider")
 	}
 	if p.client == nil {
 		t.Error("expected non-nil http client")
+	}
+	if p.baseURL != defaultGitHubAPIURL {
+		t.Errorf("expected default baseURL %q, got %q", defaultGitHubAPIURL, p.baseURL)
+	}
+}
+
+func TestNewGitHubProvider_CustomBaseURL(t *testing.T) {
+	p := NewGitHubProvider("https://github.example.com/api/v3/")
+	if p.baseURL != "https://github.example.com/api/v3" {
+		t.Errorf("expected trimmed custom baseURL, got %q", p.baseURL)
+	}
+}
+
+func TestNormalizeGitURLToHTTPS(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "SCP-like SSH",
+			input: "git@github.com:sunshine12396/test.git",
+			want:  "https://github.com/sunshine12396/test.git",
+		},
+		{
+			name:  "Standard ssh scheme",
+			input: "ssh://git@github.com/sunshine12396/test.git",
+			want:  "https://github.com/sunshine12396/test.git",
+		},
+		{
+			name:  "git+ssh scheme",
+			input: "git+ssh://git@github.com/sunshine12396/test.git",
+			want:  "https://github.com/sunshine12396/test.git",
+		},
+		{
+			name:  "HTTPS",
+			input: "https://github.com/sunshine12396/test.git",
+			want:  "https://github.com/sunshine12396/test.git",
+		},
+		{
+			name:  "HTTP",
+			input: "http://github.com/sunshine12396/test.git",
+			want:  "http://github.com/sunshine12396/test.git",
+		},
+		{
+			name:    "empty url",
+			input:   "   ",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeGitURLToHTTPS(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NormalizeGitURLToHTTPS() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("NormalizeGitURLToHTTPS() got = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -82,7 +146,7 @@ func TestGitHubProvider_ValidateToken_MockServer(t *testing.T) {
 	defer server.Close()
 
 	// Create provider with mock client that redirects to test server.
-	p := NewGitHubProvider()
+	p := NewGitHubProvider("")
 	p.client = server.Client()
 
 	// We can't easily redirect the hardcoded URL, so test the authorize logic directly.
@@ -101,7 +165,7 @@ func TestGitHubProvider_ValidateToken_MockServer(t *testing.T) {
 }
 
 func TestGitHubProvider_Authorize_NoToken(t *testing.T) {
-	p := NewGitHubProvider()
+	p := NewGitHubProvider("")
 	req, _ := http.NewRequest("GET", "https://api.github.com/user", nil)
 	p.authorize(req, "")
 
@@ -113,36 +177,88 @@ func TestGitHubProvider_Authorize_NoToken(t *testing.T) {
 func TestGitHubProvider_ListRepos_MockServer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user/repos", func(w http.ResponseWriter, r *http.Request) {
-		repos := []map[string]any{
-			{"name": "repo1", "full_name": "user/repo1", "clone_url": "https://github.com/user/repo1.git", "default_branch": "main", "private": false},
-			{"name": "repo2", "full_name": "user/repo2", "clone_url": "https://github.com/user/repo2.git", "default_branch": "develop", "private": true},
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
+		repos := []map[string]any{{"name": "repo1", "full_name": "user/repo1", "clone_url": "https://github.com/user/repo1.git", "default_branch": "main", "private": false}}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(repos)
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	p := &GitHubProvider{client: server.Client()}
+	p := NewGitHubProvider(server.URL)
+	p.client = server.Client()
 
-	// Use the mock server URL.
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/user/repos?per_page=100&sort=updated", nil)
-	p.authorize(req, "test-token")
-	resp, err := p.client.Do(req)
+	repos, err := p.ListRepos(context.Background(), "test-token")
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		t.Fatalf("ListRepos failed: %v", err)
 	}
-	defer resp.Body.Close()
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if repos[0].FullName != "user/repo1" {
+		t.Errorf("unexpected repo: %+v", repos[0])
+	}
+}
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
+func TestGitHubProvider_ListRepos_PaginatesLinkHeader(t *testing.T) {
+	mux := http.NewServeMux()
+	var requests []string
+	mux.HandleFunc("/user/repos", func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.String())
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s/user/repos?per_page=100&sort=updated&page=2>; rel="next"`, r.Host))
+			json.NewEncoder(w).Encode([]map[string]any{{"name": "repo1", "full_name": "user/repo1", "clone_url": "https://github.com/user/repo1.git", "default_branch": "main", "private": false}})
+			return
+		}
+		json.NewEncoder(w).Encode([]map[string]any{{"name": "repo2", "full_name": "user/repo2", "clone_url": "https://github.com/user/repo2.git", "default_branch": "main", "private": false}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	p := NewGitHubProvider(server.URL)
+	p.client = server.Client()
+
+	repos, err := p.ListRepos(context.Background(), "test-token")
+	if err != nil {
+		t.Fatalf("ListRepos failed: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected 2 repos, got %d", len(repos))
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(requests), requests)
+	}
+}
+
+func TestGitHubProvider_CreatePR_IncludesErrorBody(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/owner/repo/pulls", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprintln(w, `{"message":"Validation Failed","errors":[{"message":"A pull request already exists"}]}`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	p := NewGitHubProvider(server.URL)
+	p.client = server.Client()
+
+	_, err := p.CreatePR(context.Background(), "owner", "repo", "title", "head", "main", "body", "token")
+	if err == nil {
+		t.Fatal("expected create pr error")
+	}
+	if !strings.Contains(err.Error(), "Validation Failed") || !strings.Contains(err.Error(), "A pull request already exists") {
+		t.Fatalf("expected error body in message, got: %v", err)
 	}
 }
 
 func TestGitHubProvider_CloneRepo_DefaultBranch(t *testing.T) {
 	// Test that empty branch defaults to "main" by checking it doesn't panic.
 	// Actual clone will fail without git, but we verify the branch default logic.
-	p := NewGitHubProvider()
+	p := NewGitHubProvider("")
 
 	// We just verify the provider handles empty branch without panic.
 	// The clone will fail because the URL doesn't exist.
@@ -173,7 +289,7 @@ func TestGitHubProvider_CloneRepo_FallbackToDefaultBranch(t *testing.T) {
 	runCmd(tempDir, "git", "init", "--initial-branch=master")
 	runCmd(tempDir, "git", "config", "user.name", "Test User")
 	runCmd(tempDir, "git", "config", "user.email", "test@example.com")
-	
+
 	// Create a dummy file and commit it so HEAD points to master and master has a commit
 	dummyFile := filepath.Join(tempDir, "dummy.txt")
 	if err := os.WriteFile(dummyFile, []byte("hello"), 0644); err != nil {
@@ -189,8 +305,8 @@ func TestGitHubProvider_CloneRepo_FallbackToDefaultBranch(t *testing.T) {
 	}
 	defer os.RemoveAll(cloneDest)
 
-	p := NewGitHubProvider()
-	
+	p := NewGitHubProvider("")
+
 	// Attempt to clone specifying 'main' (which doesn't exist).
 	// It should fail the first attempt, fall back to default branch 'master', and return 'master'.
 	clonedBranch, err := p.CloneRepo(context.Background(), tempDir, "", "main", cloneDest)

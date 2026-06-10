@@ -1,67 +1,56 @@
 "use client";
 
-import { Settings, Server, Shield, Palette } from "lucide-react";
+import { useState } from "react";
+import { Bot, GitBranch, Settings } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
+import { MembersPanel } from "@/components/settings/members-panel";
+import { GitAccountsPanel } from "@/components/settings/git-accounts-panel";
 
-const settingsCategories = [
-  {
-    icon: Server,
-    title: "API Configuration",
-    description: "Configure the backend API URL, LLM provider, and model selection.",
-    status: "Active",
-  },
-  {
-    icon: Shield,
-    title: "Security",
-    description: "Manage JWT secrets, webhook tokens, and API key rotation.",
-    status: "Active",
-  },
-  {
-    icon: Palette,
-    title: "Appearance",
-    description: "Theme preferences, dark mode settings, and font configuration.",
-    status: "Default",
-  },
-  {
-    icon: Settings,
-    title: "Agent Defaults",
-    description: "Default agent configuration: provider, model, token limits, and retry policies.",
-    status: "Phase 4",
-  },
+type SettingsTab = "providers" | "members" | "git";
+
+const tabs: Array<{ id: SettingsTab; label: string; icon: typeof Settings }> = [
+  { id: "members", label: "Members", icon: Bot },
+  { id: "git", label: "Git Accounts", icon: GitBranch },
 ];
 
 export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("members");
+
   return (
     <DashboardLayout>
-      <div className="mb-5">
+      <div className="mb-6">
         <h2 className="font-mono text-2xl font-semibold">Settings</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Platform configuration and preferences.
+        <p className="mt-1 text-sm text-content-muted">
+          Organization-level defaults, agent pool, and planned integrations.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {settingsCategories.map((category) => {
-          const Icon = category.icon;
+      <div className="mb-6 flex flex-wrap gap-2 border-b border-stroke">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
           return (
-            <div
-              key={category.title}
-              className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5 transition hover:border-[var(--accent)]/40"
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex items-center gap-2 border-b-2 px-1 pb-3 font-mono text-sm font-bold uppercase tracking-wider transition ${
+                activeTab === tab.id
+                  ? "border-brand-primary text-white"
+                  : "border-transparent text-content-muted hover:text-white"
+              }`}
+              type="button"
             >
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Icon size={18} className="text-[var(--accent)]" />
-                  <h3 className="font-mono font-semibold">{category.title}</h3>
-                </div>
-                <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-200">
-                  {category.status}
-                </span>
-              </div>
-              <p className="text-sm text-[var(--muted)]">{category.description}</p>
-            </div>
+              <Icon size={16} />
+              {tab.label}
+            </button>
           );
         })}
       </div>
+
+
+
+      {activeTab === "members" && <MembersPanel />}
+
+      {activeTab === "git" && <GitAccountsPanel />}
     </DashboardLayout>
   );
 }

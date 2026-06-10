@@ -42,6 +42,7 @@ type AgentService interface {
 	GetByID(context.Context, string) (*models.Agent, error)
 	ListByProjectID(context.Context, string) ([]models.Agent, error)
 	ListByOrgID(context.Context, string) ([]models.Agent, error)
+	ListRoleTemplates(context.Context) ([]models.RoleTemplate, error)
 	Update(context.Context, string, models.UpdateAgentInput) (*models.Agent, error)
 	Delete(context.Context, string) error
 }
@@ -118,4 +119,36 @@ type LearningService interface {
 	GetSuggestion(context.Context, string) (*models.LearningSuggestion, error)
 	ApproveSuggestion(context.Context, string, string) (*models.LearningSuggestion, error)
 	RejectSuggestion(context.Context, string, string, string) (*models.LearningSuggestion, error)
+}
+
+type GitAccountService interface {
+	Create(context.Context, string, models.CreateGitAccountInput) (*models.GitAccount, error)
+	GetByID(context.Context, string) (*models.GitAccount, error)
+	ListByOrgID(context.Context, string) ([]models.GitAccount, error)
+	Update(context.Context, string, models.UpdateGitAccountInput) (*models.GitAccount, error)
+	Delete(context.Context, string) error
+	TestConnection(context.Context, string) error
+}
+
+type ProviderCredentialService interface {
+	Create(context.Context, string, models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
+	ListByOrg(context.Context, string) ([]models.ProviderCredentialResponse, error)
+	Update(context.Context, string, models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
+	Delete(context.Context, string) error
+	TestConnection(context.Context, string) error
+}
+
+type VirtualKeyService interface {
+	Create(context.Context, string, models.CreateVirtualKeyInput) (*models.CreatedVirtualKeyResponse, error)
+	ListByOrg(context.Context, string) ([]models.VirtualKeyResponse, error)
+	GetByID(context.Context, string) (*models.VirtualKeyResponse, error)
+	Update(context.Context, string, models.UpdateVirtualKeyInput) (*models.VirtualKeyResponse, error)
+	Revoke(context.Context, string) error
+}
+
+type ModelRouteService interface {
+	Create(context.Context, string, models.CreateModelRouteInput) (*models.ModelRoute, error)
+	ListByOrg(context.Context, string) ([]models.ModelRoute, error)
+	Update(context.Context, string, models.UpdateModelRouteInput) (*models.ModelRoute, error)
+	Delete(context.Context, string) error
 }

@@ -35,12 +35,17 @@ type CommandResult struct {
 
 type Runtime interface {
 	Run(ctx context.Context, req CommandRequest) (*CommandResult, error)
+	Prewarm(ctx context.Context) error
 }
 
 type StubRuntime struct{}
 
 func NewStubRuntime() *StubRuntime {
 	return &StubRuntime{}
+}
+
+func (r *StubRuntime) Prewarm(ctx context.Context) error {
+	return nil
 }
 
 func (r *StubRuntime) Run(ctx context.Context, req CommandRequest) (*CommandResult, error) {

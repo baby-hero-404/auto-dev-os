@@ -11,7 +11,7 @@
 | **Database**       | PostgreSQL 17 + pgvector            | Relational + vector search for RAG/memory in one DB          |
 | **AI Gateway**     | Internal Go package (`pkg/llm`)     | Abstracts OpenAI, Anthropic, Google Gemini behind one interface |
 | **Task Queue**     | PostgreSQL (SKIP LOCKED)            | No extra infra needed for MVP; upgrade to Temporal later     |
-| **Git Integration**| go-git + GitHub/GitLab API          | Clone repos, create branches, push commits, open PRs         |
+| **Git Integration**| Local git CLI + GitHub API          | Clone repos, create branches, push commits, open PRs; supports GitHub Enterprise API base URLs |
 | **Workflow Engine**| Internal Go package (Phase 3)       | Orchestrates task → agent → sandbox → review → PR pipeline   |
 | **Containerization** | Docker + Docker Compose           | Self-hosted deployment, agent sandboxing                     |
 
@@ -138,7 +138,7 @@ auto_code_os/
 │              └───────────────────────────────────────┘               │
 │                                                                      │
 │              ┌───────────────────────────────────────┐               │
-│              │  Git Provider (GitHub / GitLab / Gitea)│               │
+│              │  Git Provider (GitHub / Enterprise)    │               │
 │              │                                       │               │
 │              │  Clone → Branch → Commit → Push → PR  │               │
 │              └───────────────────────────────────────┘               │
@@ -151,7 +151,7 @@ auto_code_os/
 | :---------- | :------------------------------------------------- | :-------------------------------------------------- |
 | **Organization** | Top-level tenant                              | `id`, `name`, `created_at`                          |
 | **Project** | Groups repos, rules, agents                        | `id`, `org_id`, `name`, `description`               |
-| **Repository** | Git repository linked to a project             | `id`, `project_id`, `url`, `provider`, `token`      |
+| **Repository** | Git repository linked to a project             | `id`, `project_id`, `url`, `provider`, `token`, `git_account_id` |
 | **Task**    | Unit of work for an agent (supports sub-tasks)     | `id`, `project_id`, `title`, `status`, `complexity`, `analysis`, `spec_status` |
 | **User**    | Developer / reviewer account                       | `id`, `email`, `password_hash`, `org_id`, `role`    |
 | **Agent**   | AI worker (supports self-improving loop & subagents)| `id`, `project_id`, `role`, `provider`, `model`, `tier` |

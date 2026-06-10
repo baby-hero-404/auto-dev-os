@@ -32,7 +32,18 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, 
 
 func (r *ProjectRepo) ListByOrgID(ctx context.Context, orgID string) ([]models.Project, error) {
 	var projects []models.Project
-	if err := r.db.WithContext(ctx).Where("org_id = ?", orgID).Order("created_at DESC").Find(&projects).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Model(&models.Project{}).
+		Select(`
+			projects.*,
+			(SELECT COUNT(*) FROM repositories WHERE repositories.project_id = projects.id) AS repositories_count,
+			(SELECT COUNT(*) FROM agents WHERE agents.project_id = projects.id) AS agents_count,
+			(SELECT COUNT(*) FROM tasks WHERE tasks.project_id = projects.id AND tasks.status IN ('done', 'completed', 'merged')) AS tasks_done_count,
+			(SELECT COUNT(*) FROM tasks WHERE tasks.project_id = projects.id) AS tasks_total_count
+		`).
+		Where("projects.org_id = ?", orgID).
+		Order("projects.created_at DESC").
+		Find(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 	return projects, nil

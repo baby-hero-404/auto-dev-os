@@ -16,9 +16,19 @@ func NewAgentManager(repo *repository.AgentRepo) *AgentManager {
 }
 
 func (m *AgentManager) Assign(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	agent, err := m.repo.FindAvailableForTask(ctx, task.ProjectID, task.Complexity)
-	if err != nil {
-		return nil, err
+	var agent *models.Agent
+	var err error
+	for _, role := range rolesForTask(task) {
+		agent, err = m.repo.FindAvailableByRole(ctx, task.ProjectID, role)
+		if err == nil {
+			break
+		}
+	}
+	if agent == nil {
+		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	status := models.AgentStatusAssigned
 	if _, err := m.repo.Update(ctx, agent.ID, models.UpdateAgentInput{Status: &status}); err != nil {
@@ -32,6 +42,17 @@ func (m *AgentManager) MarkRunning(ctx context.Context, agentID string) error {
 	status := models.AgentStatusRunning
 	_, err := m.repo.Update(ctx, agentID, models.UpdateAgentInput{Status: &status})
 	return err
+}
+
+func rolesForTask(task *models.Task) []string {
+	switch task.Complexity {
+	case models.TaskComplexityHard:
+		return []string{models.AgentRolePlanner, models.AgentRoleBackend, models.AgentRoleReviewer}
+	case models.TaskComplexityMedium:
+		return []string{models.AgentRoleBackend, models.AgentRoleReviewer, models.AgentRolePlanner}
+	default:
+		return []string{models.AgentRolePlanner, models.AgentRoleBackend}
+	}
 }
 
 func (m *AgentManager) Release(ctx context.Context, agentID string) error {

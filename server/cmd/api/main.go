@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/database"
+	aigateway "github.com/auto-code-os/auto-code-os/server/internal/gateway"
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/handler"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
@@ -57,7 +58,12 @@ func run() error {
 	}
 
 	// Connect to database
-	db, err := database.Connect(cfg.Database.URL)
+	db, err := database.ConnectWithPool(cfg.Database.URL, database.PoolConfig{
+		MaxOpenConns:           cfg.Database.MaxOpenConns,
+		MaxIdleConns:           cfg.Database.MaxIdleConns,
+		ConnMaxLifetimeSeconds: cfg.Database.ConnMaxLifetimeSeconds,
+		ConnMaxIdleTimeSeconds: cfg.Database.ConnMaxIdleTimeSeconds,
+	})
 	if err != nil {
 		return fmt.Errorf("connect db: %w", err)
 	}
@@ -67,11 +73,13 @@ func run() error {
 	projRepo := repository.NewProjectRepo(db)
 	repoRepo := repository.NewRepositoryRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	roleTemplateRepo := repository.NewRoleTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	ruleRepo := repository.NewRuleRepo(db)
 	skillRepo := repository.NewSkillRepo(db)
 	authRepo := repository.NewAuthRepo(db)
 	workflowRepo := repository.NewWorkflowRepo(db)
+	workflowRepo.SetLogFileRoot(cfg.Logging.FileRoot)
 	secretRepo := repository.NewSecretRepo(db)
 	analyticsRepo := repository.NewAnalyticsRepo(db)
 	dashboardRepo := repository.NewAnalyticsDashboardRepo(db)
@@ -79,29 +87,59 @@ func run() error {
 	memoryRepo := repository.NewMemoryRepo(db)
 	edgeRepo := repository.NewKnowledgeEdgeRepo(db)
 	suggestionRepo := repository.NewLearningSuggestionRepo(db)
+	gitAccountRepo := repository.NewGitAccountRepo(db)
+	providerCredentialRepo := repository.NewProviderCredentialRepo(db)
+	virtualKeyRepo := repository.NewVirtualKeyRepo(db)
+	modelRouteRepo := repository.NewModelRouteRepo(db)
 
+	secretCipher, err := service.NewSecretCipher(cfg.Auth.JWTSecret)
+	if err != nil {
+		return err
+	}
 	if _, err := service.NewSecretService(secretRepo, cfg.Auth.JWTSecret); err != nil {
 		return err
 	}
+	auditSvc := service.NewAuditService(auditRepo)
+	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc)
+	virtualKeySvc := service.NewVirtualKeyService(virtualKeyRepo).WithAudit(auditSvc)
+	modelRouteSvc := service.NewModelRouteService(modelRouteRepo)
 	sandboxRuntime, err := buildSandboxRuntime(cfg)
 	if err != nil {
 		return err
 	}
+
+	// Sandbox Registry Pre-warming
+	// Pull standard runtime images asynchronously on service start to reduce first Task Agent run latency.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		slog.Info("sandbox pre-warming started", "runtime", cfg.Sandbox.Runtime)
+		if err := sandboxRuntime.Prewarm(ctx); err != nil {
+			slog.Warn("sandbox pre-warming failed", "error", err)
+		} else {
+			slog.Info("sandbox pre-warming completed successfully")
+		}
+	}()
 	agentManager := orchestrator.NewAgentManager(agentRepo)
 	promptAssembler := orchestrator.NewPromptAssemblerWithRules(
 		retrieval.NewSimpleFileRetriever("."),
 		ruleRepo,
 		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
-	)
+	).WithSkillLister(skillRepo)
 	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentManager, sandboxRuntime, promptAssembler)
 	artifactRepo := repository.NewArtifactRepo(db)
 	orch.SetArtifactRepository(artifactRepo)
-	gitProvider := gitops.NewGitHubProvider()
+	gitProvider := gitops.NewGitHubProvider("")
 	gitOpsAdapter := gitops.NewGitOpsAdapter(gitProvider, repoRepo, cfg.Sandbox.WorkspaceRoot)
+	gitOpsAdapter.SetGitAccountLookup(gitAccountRepo)
 	orch.SetGitOpsClient(gitOpsAdapter)
 	orch.SetRepositoryRepository(repoRepo)
 	orch.SetWorkspaceRoot(cfg.Sandbox.WorkspaceRoot)
-	if provider, err := buildLLMProvider(cfg); err != nil {
+	orch.SetWorkspaceRetention(
+		time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
+		time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
+	)
+	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, virtualKeySvc, modelRouteSvc); err != nil {
 		slog.Warn("llm provider disabled", "error", err)
 	} else if provider != nil {
 		orch.SetLLMProvider(provider)
@@ -109,27 +147,42 @@ func run() error {
 
 	// Phase 6: Memory & Learning
 	memorySvc := service.NewMemoryService(memoryRepo, edgeRepo)
+	if cfg.LLM.OpenAIAPIKey != "" {
+		memorySvc.SetEmbedder(llm.NewOpenAIEmbedder(cfg.LLM.OpenAIAPIKey, cfg.LLM.EmbeddingModel))
+	} else {
+		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured")
+	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
+	learningSvc.SetSkillRepo(skillRepo)
+	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "resources", "prompt_base")))
 	memoryHooks := orchestrator.NewMemoryHooks(memorySvc)
 	learningEngine := orchestrator.NewLearningEngine(memorySvc, learningSvc, taskRepo)
 	// Attach hooks to orchestrator
 	orch.SetMemoryHooks(memoryHooks)
 	orch.SetLearningEngine(learningEngine)
 
+	repoSvc := service.NewRepositoryService(repoRepo)
+	repoSvc.SetProjectRepo(projRepo)
+	repoSvc.SetGitAccountRepo(gitAccountRepo)
+
 	deps := handler.Deps{
 		OrgSvc:             service.NewOrganizationService(orgRepo),
 		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo)),
-		RepoSvc:            service.NewRepositoryService(repoRepo),
-		AgentSvc:           service.NewAgentService(agentRepo),
+		RepoSvc:            repoSvc,
+		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo).WithSkillRepo(skillRepo),
 		TaskSvc:            service.NewTaskService(taskRepo),
 		RuleSvc:            service.NewRuleService(ruleRepo),
 		SkillSvc:           service.NewSkillService(skillRepo),
 		AnalyticsSvc:       service.NewAnalyticsService(analyticsRepo),
 		DashboardSvc:       service.NewAnalyticsDashboardService(dashboardRepo),
-		AuditSvc:           service.NewAuditService(auditRepo),
+		AuditSvc:           auditSvc,
 		AuthSvc:            service.NewAuthService(authRepo, cfg.Auth.JWTSecret),
 		MemorySvc:          memorySvc,
 		LearningSvc:        learningSvc,
+		GitAccountSvc:      service.NewGitAccountService(gitAccountRepo),
+		ProviderCredSvc:    credentialPoolSvc,
+		VirtualKeySvc:      virtualKeySvc,
+		ModelRouteSvc:      modelRouteSvc,
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,
@@ -158,6 +211,30 @@ func run() error {
 		}()
 		slog.Info("workflow queue worker started", "interval_ms", cfg.Worker.IntervalMS, "concurrency", cfg.Worker.Concurrency)
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.StartWorkspacePruner(workerCtx)
+	}()
+	slog.Info("workspace pruner started",
+		"retention_hours", cfg.Sandbox.WorkspaceRetentionHours,
+		"interval_minutes", cfg.Sandbox.WorkspaceCleanupIntervalMinutes,
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.StartLogPruner(workerCtx, cfg.Logging.LocalRetentionDays, cfg.Logging.FileRoot)
+	}()
+	slog.Info("local log file pruner started",
+		"retention_days", cfg.Logging.LocalRetentionDays,
+		"file_root", cfg.Logging.FileRoot,
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		aigateway.StartCooldownWorker(workerCtx, credentialPoolSvc, time.Minute)
+	}()
+	slog.Info("provider credential cooldown worker started")
 	go func() {
 		slog.Info("api server starting", "port", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -184,10 +261,24 @@ func run() error {
 	return srv.Shutdown(ctx)
 }
 
-func buildLLMProvider(cfg *config.Config) (llm.Provider, error) {
+func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPoolService, virtualKeys *service.VirtualKeyService, routes *service.ModelRouteService) (llm.Provider, error) {
 	switch cfg.LLM.Provider {
 	case "gateway":
-		return llm.NewProvider(cfg)
+		var fallback llm.Provider
+		if cfg.LLM.OpenAIAPIKey != "" || cfg.LLM.AnthropicAPIKey != "" || cfg.LLM.GeminiAPIKey != "" {
+			var err error
+			fallback, err = llm.NewProvider(cfg)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return aigateway.NewAIGateway(aigateway.Options{
+			FallbackProvider:  fallback,
+			CredentialPool:    credentialPool,
+			VirtualKeyService: virtualKeys,
+			ModelRouteService: routes,
+			Config:            cfg,
+		}), nil
 	case "9router":
 		if cfg.LLM.APIKey == "" && cfg.LLM.LLMAPIKey == "" {
 			return nil, nil

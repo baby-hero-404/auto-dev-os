@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import {
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { useRealtimeLogStore, type RealtimeLog } from "@/lib/store/use-realtime-log-store";
 import type { TaskLog, WorkflowStatus } from "@/lib/types";
 
 const STEPS = [
@@ -59,7 +60,7 @@ function StepBadge({ status }: { status: string }) {
     case "paused":
       return <Pause size={18} className="text-amber-400" />;
     default:
-      return <Circle size={18} className="text-[var(--muted)]" />;
+      return <Circle size={18} className="text-content-muted" />;
   }
 }
 
@@ -73,18 +74,35 @@ export default function MonitorPage({
   const token = session?.token ?? "";
   const logEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const realtimeLogs = useRealtimeLogStore((state) => state.logs);
+  const appendLogs = useRealtimeLogStore((state) => state.appendLogs);
+  const clearLogs = useRealtimeLogStore((state) => state.clearLogs);
 
   const { data: wfStatus, mutate: mutateStatus } = useSWR<WorkflowStatus>(
-    taskID && token ? ["wf-status", taskID, token] : null,
-    ([, id, t]) => api.taskWorkflow(id as string, t as string),
+    taskID ? ["wf-status", taskID] : null,
+    () => api.taskWorkflow(taskID as string, token),
     { refreshInterval: 3000 }
   );
 
-  const { data: logs = [], mutate: mutateLogs } = useSWR<TaskLog[]>(
-    taskID && token ? ["wf-logs", taskID, token] : null,
-    ([, id, t]) => api.taskLogs(id as string, t as string),
+  const { data: fetchedLogs, mutate: mutateLogs } = useSWR<TaskLog[]>(
+    taskID ? ["wf-logs", taskID] : null,
+    () => api.taskLogs(taskID as string, token),
     { refreshInterval: 2000 }
   );
+
+  const logs = useMemo(
+    () => realtimeLogs.filter((log) => log.streamId === taskID),
+    [realtimeLogs, taskID],
+  );
+
+  useEffect(() => {
+    clearLogs(taskID);
+  }, [clearLogs, taskID]);
+
+  useEffect(() => {
+    if (!fetchedLogs) return;
+    appendLogs(fetchedLogs.map((log) => toRealtimeLog(taskID, log)));
+  }, [appendLogs, fetchedLogs, taskID]);
 
   useEffect(() => {
     if (autoScroll && logEndRef.current) {
@@ -112,12 +130,12 @@ export default function MonitorPage({
   if (!session) {
     return (
       <main className="grid min-h-screen place-items-center p-6">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-6">
-          <p className="mb-4 text-sm text-[var(--muted)]">
+        <div className="rounded-lg border border-stroke bg-panel p-6">
+          <p className="mb-4 text-sm text-content-muted">
             Login required to view workflow monitor.
           </p>
           <Link
-            className="rounded-md bg-[var(--accent)] px-4 py-2 font-semibold text-slate-950"
+            className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950"
             href="/"
           >
             Back to login
@@ -130,10 +148,10 @@ export default function MonitorPage({
   return (
     <main className="min-h-screen p-5">
       {/* Header */}
-      <header className="mb-6 border-b border-[var(--border)] pb-5">
+      <header className="mb-6 border-b border-stroke pb-5">
         <Link
           href={`/projects/${projectID}`}
-          className="mb-3 inline-flex items-center gap-2 text-sm text-[var(--muted)] transition hover:text-white"
+          className="mb-3 inline-flex items-center gap-2 text-sm text-content-muted transition hover:text-white"
         >
           <ArrowLeft size={16} />
           Back to project
@@ -143,14 +161,14 @@ export default function MonitorPage({
             <h1 className="font-mono text-2xl font-semibold">
               {task?.title ?? "Workflow Monitor"}
             </h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
+            <p className="mt-1 text-sm text-content-muted">
               {task?.description?.slice(0, 120) ?? "Loading..."}
             </p>
           </div>
           <div className="flex gap-2">
             {(!job || job.status === "failed") && (
               <button
-                className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
+                className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
                 onClick={handleExecute}
               >
                 <Play size={16} />
@@ -182,7 +200,7 @@ export default function MonitorPage({
         {/* Left Column: Progress + Logs */}
         <div className="space-y-5">
           {/* Step Progress Bar */}
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <section className="rounded-lg border border-stroke bg-panel p-5">
             <h2 className="mb-4 font-mono text-lg font-semibold">
               Workflow Progress
             </h2>
@@ -205,7 +223,7 @@ export default function MonitorPage({
                       }`}
                     >
                       <StepBadge status={status} />
-                      <span className="mt-1 text-[11px] font-medium text-[var(--muted)]">
+                      <span className="mt-1 text-[11px] font-medium text-content-muted">
                         {step.label}
                       </span>
                     </div>
@@ -214,7 +232,7 @@ export default function MonitorPage({
                         className={`mx-0.5 h-px w-4 ${
                           status === "done"
                             ? "bg-emerald-400/60"
-                            : "bg-[var(--border)]"
+                            : "bg-stroke"
                         }`}
                       />
                     )}
@@ -224,13 +242,13 @@ export default function MonitorPage({
             </div>
             {task && (
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5">
                   {task.complexity}
                 </span>
-                <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5">
                   {task.spec_status}
                 </span>
-                <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5">
                   {task.status}
                 </span>
               </div>
@@ -238,13 +256,13 @@ export default function MonitorPage({
           </section>
 
           {/* Real-time Log Stream */}
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <section className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-mono text-lg font-semibold">
                 Execution Logs
               </h2>
               <button
-                className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] transition hover:bg-[var(--secondary)]"
+                className="rounded border border-stroke px-2 py-1 text-xs text-content-muted transition hover:bg-panel-muted"
                 onClick={() => setAutoScroll(!autoScroll)}
               >
                 {autoScroll ? "Pause scroll" : "Resume scroll"}
@@ -252,7 +270,7 @@ export default function MonitorPage({
             </div>
             <div className="max-h-[420px] overflow-y-auto rounded-md bg-slate-950 p-3 font-mono text-sm">
               {logs.length === 0 && (
-                <p className="text-[var(--muted)]">No logs yet. Execute the task to see output.</p>
+                <p className="text-content-muted">No logs yet. Execute the task to see output.</p>
               )}
               {logs.map((log) => (
                 <div
@@ -265,10 +283,10 @@ export default function MonitorPage({
                         : "text-slate-300"
                   }`}
                 >
-                  <span className="mr-2 text-[var(--muted)]">
-                    {new Date(log.created_at).toLocaleTimeString()}
+                  <span className="mr-2 text-content-muted">
+                    {new Date(log.createdAtEpoch).toLocaleTimeString()}
                   </span>
-                  <span className="mr-2 font-semibold uppercase text-[var(--muted)]">
+                  <span className="mr-2 font-semibold uppercase text-content-muted">
                     [{log.level}]
                   </span>
                   {log.message}
@@ -282,25 +300,25 @@ export default function MonitorPage({
         {/* Right Column: Agent Panel + Job Details */}
         <aside className="space-y-5">
           {/* Agent Activity Panel */}
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <section className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-3 flex items-center gap-2">
-              <Bot size={18} className="text-[var(--accent)]" />
+              <Bot size={18} className="text-brand-primary" />
               <h2 className="font-mono text-lg font-semibold">Agent</h2>
             </div>
             {job?.agent_id ? (
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-[var(--muted)]">Agent ID</span>
+                  <span className="text-content-muted">Agent ID</span>
                   <span className="font-mono text-xs">
                     {job.agent_id.slice(0, 8)}…
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[var(--muted)]">Current Step</span>
+                  <span className="text-content-muted">Current Step</span>
                   <span className="font-semibold">{job.step}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[var(--muted)]">Status</span>
+                  <span className="text-content-muted">Status</span>
                   <span
                     className={`font-semibold ${
                       job.status === "done"
@@ -316,12 +334,12 @@ export default function MonitorPage({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[var(--muted)]">Attempts</span>
+                  <span className="text-content-muted">Attempts</span>
                   <span>{job.attempts}</span>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-[var(--muted)]">
+              <p className="text-sm text-content-muted">
                 No agent assigned yet.
               </p>
             )}
@@ -338,12 +356,12 @@ export default function MonitorPage({
           )}
 
           {/* Checkpoints */}
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <section className="rounded-lg border border-stroke bg-panel p-5">
             <h2 className="mb-3 font-mono text-lg font-semibold">
               Checkpoints
             </h2>
             {checkpoints.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">
+              <p className="text-sm text-content-muted">
                 No checkpoints recorded.
               </p>
             ) : (
@@ -351,11 +369,11 @@ export default function MonitorPage({
                 {checkpoints.map((cp) => (
                   <div
                     key={cp.id}
-                    className="rounded-md border border-[var(--border)] bg-slate-950 p-2 text-xs"
+                    className="rounded-md border border-stroke bg-slate-950 p-2 text-xs"
                   >
                     <div className="flex justify-between">
                       <span className="font-semibold">{cp.step}</span>
-                      <span className="text-[var(--muted)]">
+                      <span className="text-content-muted">
                         {new Date(cp.created_at).toLocaleTimeString()}
                       </span>
                     </div>
@@ -368,4 +386,16 @@ export default function MonitorPage({
       </div>
     </main>
   );
+}
+
+function toRealtimeLog(taskID: string, log: TaskLog): RealtimeLog {
+  return {
+    id: log.id,
+    streamId: taskID,
+    source: "workflow",
+    level: log.level,
+    message: log.message,
+    createdAt: log.created_at,
+    createdAtEpoch: Date.parse(log.created_at),
+  };
 }

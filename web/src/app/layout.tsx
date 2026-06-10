@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { SWRProvider } from "@/lib/swr-config";
 
 export const metadata: Metadata = {
   title: "Auto Code OS",
@@ -16,7 +17,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <SWRProvider>{children}</SWRProvider>
+      </body>
     </html>
   );
 }
+

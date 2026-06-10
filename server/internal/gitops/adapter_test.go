@@ -28,7 +28,7 @@ func (m *mockGitProvider) CreateBranch(ctx context.Context, localPath, branchNam
 	return nil
 }
 
-func (m *mockGitProvider) CommitAndPush(ctx context.Context, localPath, message, token string) error {
+func (m *mockGitProvider) CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error {
 	m.commitMessage = message
 	m.pushToken = token
 	return nil
@@ -56,6 +56,17 @@ type mockRepoLookup struct {
 func (m *mockRepoLookup) GetByURL(ctx context.Context, repoURL string) (*models.Repository, error) {
 	if m.repo != nil && m.repo.URL == repoURL {
 		return m.repo, nil
+	}
+	return nil, errors.New("not found")
+}
+
+type mockGitAccountLookup struct {
+	account *models.GitAccount
+}
+
+func (m *mockGitAccountLookup) GetByID(ctx context.Context, id string) (*models.GitAccount, error) {
+	if m.account != nil && m.account.ID == id {
+		return m.account, nil
 	}
 	return nil, errors.New("not found")
 }
@@ -95,7 +106,7 @@ func TestGitOpsAdapter(t *testing.T) {
 	files := map[string]string{
 		"file1.txt": "hello world",
 	}
-	err = adapter.CommitAndPush(ctx, "https://github.com/test-owner/test-repo.git", "feature-branch", "commit msg", files)
+	err = adapter.CommitAndPush(ctx, "https://github.com/test-owner/test-repo.git", "feature-branch", "commit msg", files, "backend")
 	if err != nil {
 		t.Fatalf("CommitAndPush: %v", err)
 	}
@@ -122,5 +133,32 @@ func TestGitOpsAdapter(t *testing.T) {
 	}
 	if provider.prBase != "main" {
 		t.Errorf("expected main, got %s", provider.prBase)
+	}
+}
+
+func TestGitOpsAdapter_ProviderAndTokenForRepo_UsesLinkedAccountCredentials(t *testing.T) {
+	accountID := "git-account-1"
+	adapter := NewGitOpsAdapter(&mockGitProvider{}, &mockRepoLookup{}, "")
+	adapter.SetGitAccountLookup(&mockGitAccountLookup{
+		account: &models.GitAccount{
+			ID:      accountID,
+			BaseURL: "https://github.example.com/api/v3",
+			Token:   "account-token",
+		},
+	})
+
+	provider, token := adapter.providerAndTokenForRepo(context.Background(), &models.Repository{
+		GitAccountID: &accountID,
+	})
+
+	ghProvider, ok := provider.(*GitHubProvider)
+	if !ok {
+		t.Fatalf("expected GitHubProvider, got %T", provider)
+	}
+	if ghProvider.baseURL != "https://github.example.com/api/v3" {
+		t.Errorf("expected linked account baseURL, got %q", ghProvider.baseURL)
+	}
+	if token != "account-token" {
+		t.Errorf("expected linked account token, got %q", token)
 	}
 }

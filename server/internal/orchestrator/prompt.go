@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +19,12 @@ import (
 type PromptAssembler struct {
 	retriever retrieval.ContextRetriever
 	rules     *repository.RuleRepo
+	skills    AgentSkillLister
 	root      string
+}
+
+type AgentSkillLister interface {
+	ListByAgentID(context.Context, string) ([]models.Skill, error)
 }
 
 func NewPromptAssembler(retriever retrieval.ContextRetriever) *PromptAssembler {
@@ -30,6 +36,11 @@ func NewPromptAssemblerWithRules(retriever retrieval.ContextRetriever, rules *re
 		root = defaultPromptRoot()
 	}
 	return &PromptAssembler{retriever: retriever, rules: rules, root: root}
+}
+
+func (a *PromptAssembler) WithSkillLister(skills AgentSkillLister) *PromptAssembler {
+	a.skills = skills
+	return a
 }
 
 func (a *PromptAssembler) Assemble(ctx context.Context, task models.Task) ([]llm.Message, []ToolDefinition, error) {
@@ -66,7 +77,41 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-	return messages, BuiltinToolDefinitions(), nil
+	tools, err := a.toolDefinitionsForAgent(ctx, agent)
+	if err != nil {
+		return nil, nil, err
+	}
+	return messages, tools, nil
+}
+
+func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent) ([]ToolDefinition, error) {
+	if agent == nil || a == nil || a.skills == nil {
+		return BuiltinToolDefinitions(), nil
+	}
+	skills, err := a.skills.ListByAgentID(ctx, agent.ID)
+	if err != nil {
+		return nil, err
+	}
+	return ToolDefinitionsFromSkills(skills), nil
+}
+
+func ToolDefinitionsFromSkills(skills []models.Skill) []ToolDefinition {
+	tools := make([]ToolDefinition, 0, len(skills))
+	for _, skill := range skills {
+		if strings.TrimSpace(skill.Name) == "" {
+			continue
+		}
+		schema := skill.Schema
+		if len(schema) == 0 || !json.Valid(schema) {
+			schema = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		tools = append(tools, ToolDefinition{
+			Name:        skill.Name,
+			Description: skill.Description,
+			Parameters:  schema,
+		})
+	}
+	return tools
 }
 
 func formatMemories(memories []models.EpisodicMemory) string {
@@ -80,7 +125,6 @@ func formatMemories(memories []models.EpisodicMemory) string {
 	}
 	return b.String()
 }
-
 
 func formatContextSnippets(snippets []models.ContextSnippet) string {
 	var b strings.Builder

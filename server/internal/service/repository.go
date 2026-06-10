@@ -12,23 +12,75 @@ import (
 )
 
 type RepositoryService struct {
-	repo         *repository.RepositoryRepo
-	gitProvider  gitops.GitProvider
-	workspaceDir string
+	repo           *repository.RepositoryRepo
+	projRepo       *repository.ProjectRepo
+	gitAccountRepo *repository.GitAccountRepo
+	gitProvider    gitops.GitProvider
+	workspaceDir   string
+}
+
+type gitCredentials struct {
+	token   string
+	baseURL string
 }
 
 func NewRepositoryService(repo *repository.RepositoryRepo) *RepositoryService {
 	return &RepositoryService{
 		repo:         repo,
-		gitProvider:  gitops.NewGitHubProvider(),
+		gitProvider:  gitops.NewGitHubProvider(""),
 		workspaceDir: filepath.Join(os.TempDir(), "autocodeos", "repositories"),
 	}
+}
+
+func (s *RepositoryService) SetProjectRepo(r *repository.ProjectRepo) {
+	s.projRepo = r
+}
+
+func (s *RepositoryService) SetGitAccountRepo(r *repository.GitAccountRepo) {
+	s.gitAccountRepo = r
+}
+
+func (s *RepositoryService) resolveCredentials(ctx context.Context, repo *models.Repository) (gitCredentials, error) {
+	// 1. Project/Repo-level override (manual token)
+	if repo.Token != "" {
+		return gitCredentials{token: repo.Token}, nil
+	}
+
+	// 2. Specific Git Account link
+	if repo.GitAccountID != nil && *repo.GitAccountID != "" && s.gitAccountRepo != nil {
+		acc, err := s.gitAccountRepo.GetByID(ctx, *repo.GitAccountID)
+		if err == nil && acc.Token != "" {
+			return gitCredentials{token: acc.Token, baseURL: acc.BaseURL}, nil
+		}
+	}
+
+	// 3. Fallback: Org-level git account matching the repo provider
+	if s.projRepo != nil && s.gitAccountRepo != nil {
+		project, err := s.projRepo.GetByID(ctx, repo.ProjectID)
+		if err == nil && project != nil {
+			accounts, err := s.gitAccountRepo.ListByOrgID(ctx, project.OrgID)
+			if err == nil {
+				for _, acc := range accounts {
+					if acc.Provider == repo.Provider && acc.Token != "" {
+						return gitCredentials{token: acc.Token, baseURL: acc.BaseURL}, nil
+					}
+				}
+			}
+		}
+	}
+
+	return gitCredentials{}, nil
 }
 
 func (s *RepositoryService) Create(ctx context.Context, projectID string, input models.CreateRepositoryInput) (*models.Repository, error) {
 	if input.URL == "" {
 		return nil, ErrValidation("url is required")
 	}
+	normalized, err := gitops.NormalizeGitURLToHTTPS(input.URL)
+	if err != nil {
+		return nil, ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
+	}
+	input.URL = normalized
 	return s.repo.Create(ctx, projectID, input)
 }
 
@@ -41,6 +93,13 @@ func (s *RepositoryService) ListByProjectID(ctx context.Context, projectID strin
 }
 
 func (s *RepositoryService) Update(ctx context.Context, id string, input models.UpdateRepositoryInput) (*models.Repository, error) {
+	if input.URL != nil && *input.URL != "" {
+		normalized, err := gitops.NormalizeGitURLToHTTPS(*input.URL)
+		if err != nil {
+			return nil, ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
+		}
+		input.URL = &normalized
+	}
 	return s.repo.Update(ctx, id, input)
 }
 
@@ -53,10 +112,18 @@ func (s *RepositoryService) ValidateToken(ctx context.Context, id string) error 
 	if err != nil {
 		return err
 	}
-	if repo.Token == "" {
-		return ErrValidation("repository token is required")
+	creds, err := s.resolveCredentials(ctx, repo)
+	if err != nil {
+		return err
 	}
-	if err := s.gitProvider.ValidateToken(ctx, repo.Token); err != nil {
+	if creds.token == "" {
+		return ErrValidation("repository token or linked git account token is required")
+	}
+	provider := s.gitProvider
+	if creds.baseURL != "" {
+		provider = gitops.NewGitHubProvider(creds.baseURL)
+	}
+	if err := provider.ValidateToken(ctx, creds.token); err != nil {
 		return err
 	}
 	return s.repo.MarkValidated(ctx, id)
@@ -85,7 +152,13 @@ func (s *RepositoryService) Clone(ctx context.Context, id string) (*models.Repos
 	if _, err := s.repo.Update(ctx, id, models.UpdateRepositoryInput{CloneStatus: &cloning}); err != nil {
 		return nil, err
 	}
-	actualBranch, err := s.gitProvider.CloneRepo(ctx, repo.URL, repo.Token, repo.Branch, clonePath)
+	creds, err := s.resolveCredentials(ctx, repo)
+	if err != nil {
+		failed := "failed"
+		_, _ = s.repo.Update(context.Background(), id, models.UpdateRepositoryInput{CloneStatus: &failed})
+		return nil, err
+	}
+	actualBranch, err := s.gitProvider.CloneRepo(ctx, repo.URL, creds.token, repo.Branch, clonePath)
 	if err != nil {
 		failed := "failed"
 		_, _ = s.repo.Update(context.Background(), id, models.UpdateRepositoryInput{CloneStatus: &failed})

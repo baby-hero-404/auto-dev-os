@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -46,6 +47,16 @@ func (r *DockerRuntime) Health(ctx context.Context) error {
 	if _, err := r.client.Ping(ctx); err != nil {
 		return fmt.Errorf("ping docker daemon: %w", err)
 	}
+	return nil
+}
+
+func (r *DockerRuntime) Prewarm(ctx context.Context) error {
+	reader, err := r.client.ImagePull(ctx, r.config.Image, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull sandbox image: %w", err)
+	}
+	defer reader.Close()
+	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }
 

@@ -4,12 +4,16 @@ import "time"
 
 // Project groups repositories, agents, and rules under an organization.
 type Project struct {
-	ID          string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	OrgID       string    `json:"org_id" gorm:"type:uuid;not null"`
-	Name        string    `json:"name" gorm:"not null"`
-	Description string    `json:"description" gorm:"default:''"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	OrgID             string    `json:"org_id" gorm:"type:uuid;not null"`
+	Name              string    `json:"name" gorm:"not null"`
+	Description       string    `json:"description" gorm:"default:''"`
+	RepositoriesCount int       `json:"repositories_count,omitempty" gorm:"->"`
+	AgentsCount       int       `json:"agents_count,omitempty" gorm:"->"`
+	TasksDoneCount    int       `json:"tasks_done_count,omitempty" gorm:"->"`
+	TasksTotalCount   int       `json:"tasks_total_count,omitempty" gorm:"->"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // CreateProjectInput is the payload to create a project.

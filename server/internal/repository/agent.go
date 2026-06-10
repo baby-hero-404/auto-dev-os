@@ -35,13 +35,23 @@ func (r *AgentRepo) CreateForOrg(ctx context.Context, orgID string, input models
 	if strategy == "" {
 		strategy = models.AgentAssignmentManual
 	}
+	contextConfig := input.ContextConfig
+	if len(contextConfig) == 0 {
+		contextConfig = []byte(`{"max_input_tokens":128000}`)
+	}
 	a := &models.Agent{
-		OrgID: orgID, Name: input.Name, Role: input.Role,
-		Provider: input.Provider, Model: input.Model, Level: input.Level,
+		OrgID:              orgID,
+		Name:               input.Name,
+		Role:               input.Role,
+		Goal:               input.Goal,
+		AutonomyLevel:      input.AutonomyLevel,
+		ContextConfig:      contextConfig,
+		ModelRoute:         input.ModelRoute,
+		Status:             models.AgentStatusIdle,
 		AssignmentStrategy: strategy,
 	}
 	if err := r.db.WithContext(ctx).Create(a).Error; err != nil {
-		return nil, fmt.Errorf("create agent: %w", err)
+		return nil, fmt.Errorf("create agent: %w", mapError(err))
 	}
 	return a, nil
 }
@@ -77,6 +87,14 @@ func (r *AgentRepo) ListByOrgID(ctx context.Context, orgID string) ([]models.Age
 	return agents, nil
 }
 
+func (r *AgentRepo) ListByRole(ctx context.Context, orgID, role string) ([]models.Agent, error) {
+	var agents []models.Agent
+	if err := r.db.WithContext(ctx).Where("org_id = ? AND role = ?", orgID, role).Order("created_at DESC").Find(&agents).Error; err != nil {
+		return nil, fmt.Errorf("list agents by role: %w", err)
+	}
+	return agents, nil
+}
+
 func (r *AgentRepo) AssignToProject(ctx context.Context, projectID, agentID string) error {
 	var count int64
 	if err := r.db.WithContext(ctx).
@@ -108,14 +126,17 @@ func (r *AgentRepo) Update(ctx context.Context, id string, input models.UpdateAg
 	if input.Role != nil {
 		updates["role"] = *input.Role
 	}
-	if input.Provider != nil {
-		updates["provider"] = *input.Provider
+	if input.Goal != nil {
+		updates["goal"] = *input.Goal
 	}
-	if input.Model != nil {
-		updates["model"] = *input.Model
+	if input.AutonomyLevel != nil {
+		updates["autonomy_level"] = *input.AutonomyLevel
 	}
-	if input.Level != nil {
-		updates["level"] = *input.Level
+	if input.ContextConfig != nil {
+		updates["context_config"] = *input.ContextConfig
+	}
+	if input.ModelRoute != nil {
+		updates["model_route"] = *input.ModelRoute
 	}
 	if input.Status != nil {
 		updates["status"] = *input.Status
@@ -123,13 +144,33 @@ func (r *AgentRepo) Update(ctx context.Context, id string, input models.UpdateAg
 	if input.AssignmentStrategy != nil {
 		updates["assignment_strategy"] = *input.AssignmentStrategy
 	}
-	if err := r.db.WithContext(ctx).Model(a).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("update agent: %w", err)
+	if len(updates) == 0 {
+		return a, nil
 	}
-	return a, nil
+	if err := r.db.WithContext(ctx).Model(a).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("update agent: %w", mapError(err))
+	}
+	return r.GetByID(ctx, id)
 }
 
-func (r *AgentRepo) FindAvailableForTask(ctx context.Context, projectID, complexity string) (*models.Agent, error) {
+func (r *AgentRepo) FindAvailableByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
+	var agent models.Agent
+	err := r.db.WithContext(ctx).
+		Table("agents").
+		Joins("JOIN projects ON projects.org_id = agents.org_id").
+		Where("projects.id = ?", projectID).
+		Where("agents.role = ?", role).
+		Where("agents.status IN ?", []string{models.AgentStatusIdle, ""}).
+		Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
+		Order("agents.created_at ASC").
+		First(&agent).Error
+	if err != nil {
+		return nil, fmt.Errorf("find available agent by role: %w", mapError(err))
+	}
+	return &agent, nil
+}
+
+func (r *AgentRepo) FindAnyAvailable(ctx context.Context, projectID string) (*models.Agent, error) {
 	var agent models.Agent
 	err := r.db.WithContext(ctx).
 		Table("agents").
@@ -137,11 +178,10 @@ func (r *AgentRepo) FindAvailableForTask(ctx context.Context, projectID, complex
 		Where("projects.id = ?", projectID).
 		Where("agents.status IN ?", []string{models.AgentStatusIdle, ""}).
 		Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
-		Order(agentLevelOrderSQL(complexity)).
 		Order("agents.created_at ASC").
 		First(&agent).Error
 	if err != nil {
-		return nil, fmt.Errorf("find available agent: %w", mapError(err))
+		return nil, fmt.Errorf("find any available agent: %w", mapError(err))
 	}
 	return &agent, nil
 }
@@ -166,15 +206,4 @@ func (r *AgentRepo) orgIDForProject(ctx context.Context, projectID string) (stri
 		return "", fmt.Errorf("get project org: %w", ErrNotFound)
 	}
 	return orgID, nil
-}
-
-func agentLevelOrderSQL(complexity string) string {
-	switch complexity {
-	case models.TaskComplexityHard:
-		return "CASE agents.level WHEN 'hard' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
-	case models.TaskComplexityMedium:
-		return "CASE agents.level WHEN 'medium' THEN 0 WHEN 'hard' THEN 1 ELSE 2 END"
-	default:
-		return "CASE agents.level WHEN 'easy' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
-	}
 }

@@ -73,6 +73,15 @@ func (h *AgentHandler) ListOrg(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agents)
 }
 
+func (h *AgentHandler) ListRoleTemplates(w http.ResponseWriter, r *http.Request) {
+	templates, err := h.svc.ListRoleTemplates(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, templates)
+}
+
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
 	var input models.UpdateAgentInput

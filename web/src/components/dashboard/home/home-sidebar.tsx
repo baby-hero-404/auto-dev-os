@@ -1,8 +1,11 @@
 "use client";
 
-import { FolderKanban, Wrench, Building, Settings, Zap, BookOpen, Bot, BarChart3, TrendingUp, ShieldCheck } from "lucide-react";
+import { FolderKanban, Wrench, Building, Settings, Zap, BookOpen, Bot, BarChart3, TrendingUp, ShieldCheck, Cpu, KeyRound } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { useProjectStore } from "@/lib/store/use-project-store";
 
 const navItems = [
   { label: "Projects", href: "/", icon: FolderKanban },
@@ -10,45 +13,74 @@ const navItems = [
   { label: "Analytics", href: "/analytics", icon: TrendingUp },
   { label: "Skills", href: "/skills", icon: Zap },
   { label: "Gateway", href: "/gateway", icon: BarChart3 },
+  { label: "Virtual Keys", href: "/settings/virtual-keys", icon: KeyRound },
   { label: "Audit Log", href: "/audit", icon: ShieldCheck },
   { label: "Rules", href: "/rules", icon: Wrench },
   { label: "Knowledge", href: "/knowledge", icon: BookOpen },
   { label: "Organization", href: "/organization", icon: Building },
+  { label: "AI Providers", href: "/ai-providers", icon: Cpu },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-export function HomeSidebar() {
+type HomeSidebarProps = {
+  variant?: "desktop" | "mobile";
+  onNavigate?: () => void;
+};
+
+export function HomeSidebar({ variant = "desktop", onNavigate }: HomeSidebarProps = {}) {
   const pathname = usePathname();
+  const setActiveProjectId = useProjectStore((state) => state.setActiveProjectId);
+  const sidebarClassName =
+    variant === "desktop"
+      ? "hidden h-screen w-64 shrink-0 flex-col border-r border-stroke bg-surface md:flex"
+      : "flex h-full w-72 max-w-[85vw] shrink-0 flex-col border-r border-stroke bg-surface";
+
+  useEffect(() => {
+    const match = pathname.match(/^\/projects\/([^/]+)/);
+    setActiveProjectId(match?.[1] ?? null);
+  }, [pathname, setActiveProjectId]);
 
   return (
-    <aside className="hidden w-72 shrink-0 border-r border-[var(--border)] bg-slate-950/50 p-5 md:block">
-      <div className="mb-8 flex items-center gap-3">
-        <img src="/logo.png" alt="Auto Code OS Logo" className="size-10 rounded-md object-contain" />
+    <aside className={sidebarClassName}>
+      {/* Brand */}
+      <div className="flex items-center gap-3 border-b border-stroke px-5 py-5">
+        <Image src="/logo.png" alt="Auto Code OS Logo" width={36} height={36} className="rounded-lg object-contain" />
         <div>
-          <div className="font-mono font-semibold">Auto Code OS</div>
-          <div className="text-xs text-[var(--muted)]">AI-Native SDLC</div>
+          <div className="font-mono text-sm font-semibold tracking-tight">Auto Code OS</div>
+          <div className="text-[11px] text-content-muted">AI-Native SDLC</div>
         </div>
       </div>
-      <nav className="space-y-1 text-sm">
+
+      {/* Nav */}
+      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3 text-sm">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive =
+            item.href === "/"
+              ? pathname === "/" || pathname.startsWith("/projects")
+              : pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.label}
               href={item.href}
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition ${
+              onClick={onNavigate}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition-all duration-150 ${
                 isActive
-                  ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "text-slate-300 hover:bg-[var(--primary)]"
+                  ? "bg-brand-primary-muted text-brand-primary shadow-[inset_0_0_0_1px_rgba(34,197,94,0.2)]"
+                  : "text-content-muted hover:bg-panel hover:text-content"
               }`}
             >
-              <Icon size={17} />
-              {item.label}
+              <Icon size={16} className="shrink-0" />
+              <span>{item.label}</span>
             </Link>
           );
         })}
       </nav>
+
+      {/* Version footer */}
+      <div className="border-t border-stroke px-5 py-3">
+        <span className="font-mono text-[10px] text-content-muted">v0.1.0-alpha</span>
+      </div>
     </aside>
   );
 }

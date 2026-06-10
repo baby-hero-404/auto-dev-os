@@ -14,6 +14,7 @@ import {
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { useSession } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { LearningSuggestion } from "@/lib/types";
 import Link from "next/link";
@@ -30,9 +31,9 @@ export default function SuggestionsPage() {
   const [actioningID, setActioningID] = useState<string | null>(null);
 
   // Fetch all agents in organization staff pool
-  const { data: orgAgents = [], isLoading: loadingAgents } = useSWR(
-    session ? ["org-agents", orgID, token] : null,
-    ([, oid, t]) => api.listOrgAgents(oid, t),
+  const { data: orgAgents = [], isLoading: loadingAgents } = useAuthedSWR(
+    orgID ? ["org-agents", orgID] : null,
+    (t) => api.listOrgAgents(orgID, t),
   );
 
   const activeAgentID = selectedAgentID || orgAgents[0]?.id || "";
@@ -44,9 +45,9 @@ export default function SuggestionsPage() {
     isLoading: loadingSuggestions,
   } = useSWR(
     session && activeAgentID
-      ? ["suggestions", activeAgentID, selectedStatus, token]
+      ? ["suggestions", activeAgentID, selectedStatus]
       : null,
-    ([, aid, status, t]) => api.listSuggestions(aid, t, status),
+    () => api.listSuggestions(activeAgentID, token, selectedStatus),
   );
 
   const suggestionsList = suggestionData?.suggestions ?? [];
@@ -90,7 +91,7 @@ export default function SuggestionsPage() {
         <div className="flex items-center gap-2">
           <Link
             href="/knowledge"
-            className="flex items-center gap-1 text-xs font-mono text-[var(--muted)] hover:text-white transition"
+            className="flex items-center gap-1 text-xs font-mono text-content-muted hover:text-white transition"
           >
             <ChevronLeft size={14} />
             Back to Memory Browser
@@ -99,10 +100,10 @@ export default function SuggestionsPage() {
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <h2 className="font-mono text-2xl font-semibold flex items-center gap-2 text-white">
-              <Brain className="text-[var(--accent)]" />
+              <Brain className="text-brand-primary" />
               HITL Learning & Self-Improvement Loop
             </h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
+            <p className="mt-1 text-sm text-content-muted">
               Approve or reject automated optimization rules, prompts patches, and skill playbooks.
             </p>
           </div>
@@ -111,18 +112,18 @@ export default function SuggestionsPage() {
 
       <div className="grid gap-6 lg:grid-cols-[250px_1fr]">
         {/* Left Sidebar: Agent Selector */}
-        <aside className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-4 flex flex-col gap-4">
+        <aside className="rounded-lg border border-stroke bg-panel p-4 flex flex-col gap-4">
           <div>
-            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)] mb-2">
+            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted mb-2">
               Select Agent
             </h3>
             {loadingAgents ? (
-              <div className="flex items-center gap-2 text-sm text-[var(--muted)] py-2">
+              <div className="flex items-center gap-2 text-sm text-content-muted py-2">
                 <Loader2 size={16} className="animate-spin" />
                 Loading agents...
               </div>
             ) : orgAgents.length === 0 ? (
-              <p className="text-xs text-[var(--muted)] italic">No agents available.</p>
+              <p className="text-xs text-content-muted italic">No agents available.</p>
             ) : (
               <div className="space-y-1">
                 {orgAgents.map((agent) => (
@@ -131,7 +132,7 @@ export default function SuggestionsPage() {
                     onClick={() => setSelectedAgentID(agent.id)}
                     className={`w-full text-left rounded-md px-3 py-2 text-xs font-mono flex items-center justify-between transition cursor-pointer ${
                       activeAgentID === agent.id
-                        ? "bg-[var(--accent)] text-slate-950 font-bold"
+                        ? "bg-brand-primary text-slate-950 font-bold"
                         : "text-slate-300 hover:bg-slate-800"
                     }`}
                   >
@@ -147,7 +148,7 @@ export default function SuggestionsPage() {
         {/* Right Pane: Suggestions Queue */}
         <main className="flex flex-col gap-4">
           {/* Status Tabs */}
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="rounded-lg border border-stroke bg-panel p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               {["pending", "approved", "rejected", "applied"].map((status) => (
                 <button
@@ -158,8 +159,8 @@ export default function SuggestionsPage() {
                   }}
                   className={`rounded px-3 py-1.5 text-xs font-mono border transition cursor-pointer capitalize ${
                     selectedStatus === status
-                      ? "bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]"
-                      : "bg-slate-950 border-[var(--border)] text-[var(--muted)] hover:text-slate-200"
+                      ? "bg-brand-primary/15 border-brand-primary text-brand-primary"
+                      : "bg-slate-950 border-stroke text-content-muted hover:text-slate-200"
                   }`}
                 >
                   {status}
@@ -168,7 +169,7 @@ export default function SuggestionsPage() {
             </div>
 
             {selectedAgent && (
-              <span className="text-xs font-mono text-[var(--muted)]">
+              <span className="text-xs font-mono text-content-muted">
                 Agent: <span className="text-slate-200">{selectedAgent.name}</span>
               </span>
             )}
@@ -176,8 +177,8 @@ export default function SuggestionsPage() {
 
           {/* Suggestions List */}
           {loadingSuggestions ? (
-            <div className="flex flex-col items-center justify-center py-20 text-[var(--muted)] bg-[var(--primary)] border border-[var(--border)] rounded-lg">
-              <Loader2 size={32} className="animate-spin mb-3 text-[var(--accent)]" />
+            <div className="flex flex-col items-center justify-center py-20 text-content-muted bg-panel border border-stroke rounded-lg">
+              <Loader2 size={32} className="animate-spin mb-3 text-brand-primary" />
               <p className="text-sm font-mono">Fetching suggestion records...</p>
             </div>
           ) : suggestionsList.length === 0 ? (
@@ -196,7 +197,7 @@ export default function SuggestionsPage() {
                 return (
                   <article
                     key={suggestion.id}
-                    className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5 flex flex-col gap-4 transition hover:border-[var(--accent)]/30"
+                    className="rounded-lg border border-stroke bg-panel p-5 flex flex-col gap-4 transition hover:border-brand-primary/30"
                   >
                     <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                       <div>
@@ -204,21 +205,21 @@ export default function SuggestionsPage() {
                           <span className="rounded bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 text-[10px] font-mono text-indigo-300 font-bold uppercase tracking-wider">
                             {suggestion.suggestion_type}
                           </span>
-                          <span className="text-xs text-[var(--muted)] font-mono">
+                          <span className="text-xs text-content-muted font-mono">
                             ID: {suggestion.id.slice(0, 8)}...
                           </span>
                         </div>
                         <h3 className="font-mono text-sm font-bold text-white">{suggestion.title}</h3>
-                        <p className="mt-1.5 text-xs text-[var(--muted)] leading-relaxed">
+                        <p className="mt-1.5 text-xs text-content-muted leading-relaxed">
                           {suggestion.description}
                         </p>
                       </div>
 
                       {/* Confidence Score Gauge */}
                       <div className="flex flex-col items-center sm:items-end justify-center min-w-[100px]">
-                        <span className="text-[10px] font-mono text-[var(--muted)] uppercase">Confidence</span>
+                        <span className="text-[10px] font-mono text-content-muted uppercase">Confidence</span>
                         <div className="mt-1 flex items-center gap-2">
-                          <div className="h-2 w-16 bg-slate-900 border border-[var(--border)] rounded-full overflow-hidden">
+                          <div className="h-2 w-16 bg-slate-900 border border-stroke rounded-full overflow-hidden">
                             <div
                               className="h-full bg-emerald-400 rounded-full"
                               style={{ width: `${confidencePct}%` }}
@@ -231,11 +232,11 @@ export default function SuggestionsPage() {
 
                     {/* Content Section (Rule/Prompt Patch body) */}
                     <div>
-                      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--muted)]">
+                      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-content-muted">
                         <FileCode size={12} />
                         Proposed Content
                       </div>
-                      <pre className="rounded bg-slate-950 border border-[var(--border)] p-3.5 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+                      <pre className="rounded bg-slate-950 border border-stroke p-3.5 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
                         {suggestion.content}
                       </pre>
                     </div>
@@ -261,7 +262,7 @@ export default function SuggestionsPage() {
 
                     {/* Pending Action Buttons */}
                     {isPending && rejectionID !== suggestion.id && (
-                      <div className="flex gap-2 justify-end border-t border-[var(--border)]/60 pt-4 mt-1">
+                      <div className="flex gap-2 justify-end border-t border-stroke/60 pt-4 mt-1">
                         <button
                           onClick={() => setRejectionID(suggestion.id)}
                           className="rounded-md border border-red-500/20 bg-red-950/10 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-950/30 transition cursor-pointer flex items-center gap-1"
@@ -289,17 +290,17 @@ export default function SuggestionsPage() {
                     {rejectionID === suggestion.id && (
                       <form
                         onSubmit={handleRejectSubmit}
-                        className="border-t border-[var(--border)]/60 pt-4 mt-1 flex flex-col gap-3"
+                        className="border-t border-stroke/60 pt-4 mt-1 flex flex-col gap-3"
                       >
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-xs text-[var(--muted)] font-mono">
+                          <label className="text-xs text-content-muted font-mono">
                             Provide Feedback (Reason for rejection)
                           </label>
                           <textarea
                             value={rejectionFeedback}
                             onChange={(e) => setRejectionFeedback(e.target.value)}
                             placeholder="Why is this suggestion invalid? (e.g. incorrect pattern, conflicts with rule X)"
-                            className="rounded border border-[var(--border)] bg-slate-950 px-3 py-2 text-xs text-white h-20 focus:outline-none focus:border-red-500"
+                            className="rounded border border-stroke bg-slate-950 px-3 py-2 text-xs text-white h-20 focus:outline-none focus:border-red-500"
                             required
                           />
                         </div>
@@ -310,7 +311,7 @@ export default function SuggestionsPage() {
                               setRejectionID(null);
                               setRejectionFeedback("");
                             }}
-                            className="rounded border border-[var(--border)] bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:text-white cursor-pointer"
+                            className="rounded border border-stroke bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:text-white cursor-pointer"
                           >
                             Cancel
                           </button>

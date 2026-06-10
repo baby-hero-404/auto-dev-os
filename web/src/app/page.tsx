@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { FolderGit, Plus, X, Loader2 } from "lucide-react";
+import { Bot, CheckCircle2, Clock, FolderGit, GitBranch, Loader2, Plus, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { Project } from "@/lib/types";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
+import type { Project, Task } from "@/lib/types";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { StatsCards } from "@/components/dashboard/stats-cards";
 
@@ -22,13 +23,13 @@ export default function Home() {
   const orgID = session?.user.org_id ?? "";
 
   const { data: projects = [], mutate, error } = useSWR(
-    session ? ["projects", orgID, token] : null,
-    ([, oid, t]) => api.listProjects(oid, t),
+    session ? ["projects", orgID] : null,
+    () => api.listProjects(orgID, token),
   );
 
-  const { data: overview } = useSWR(
-    session ? ["analytics-overview", orgID, token] : null,
-    ([, oid, t]) => api.analyticsOverview(t, oid),
+  const { data: overview } = useAuthedSWR(
+    orgID ? ["analytics-overview", orgID] : null,
+    (t) => api.analyticsOverview(t, orgID),
   );
 
   const stats = useMemo(
@@ -76,7 +77,7 @@ export default function Home() {
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h2 className="font-mono text-2xl font-semibold">Projects</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
+          <p className="mt-1 text-sm text-content-muted">
             Link repositories, create tasks, and configure agents for execution.
           </p>
         </div>
@@ -85,7 +86,7 @@ export default function Home() {
             setCreationError("");
             setShowModal(true);
           }}
-          className="flex items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(244,63,94,0.15)] self-start sm:self-auto"
+          className="flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.2)] self-start sm:self-auto"
           type="button"
         >
           <Plus size={16} />
@@ -100,12 +101,12 @@ export default function Home() {
       )}
 
       {projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--primary)] p-12 text-center">
-          <div className="grid size-12 place-items-center rounded-xl bg-slate-900 text-[var(--accent)]">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stroke bg-panel p-12 text-center">
+          <div className="grid size-12 place-items-center rounded-xl bg-slate-900 text-brand-primary">
             <FolderGit size={24} />
           </div>
           <h3 className="mt-4 font-mono font-semibold">No projects configured</h3>
-          <p className="mt-2 max-w-sm text-sm text-[var(--muted)]">
+          <p className="mt-2 max-w-sm text-sm text-content-muted">
             Get started by creating a new project and linking it to a remote Git repository.
           </p>
           <button
@@ -113,7 +114,7 @@ export default function Home() {
               setCreationError("");
               setShowModal(true);
             }}
-            className="mt-5 flex items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
+            className="mt-5 flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
             type="button"
           >
             <Plus size={16} />
@@ -123,37 +124,7 @@ export default function Home() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {projects.map((project: Project) => (
-            <Link
-              key={project.id}
-              href={`/projects/${project.id}`}
-              className="group rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5 transition hover:border-[var(--accent)]/40 flex flex-col justify-between"
-            >
-              <div>
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-mono text-lg font-semibold group-hover:text-[var(--accent)] transition duration-150">
-                      {project.name}
-                    </h3>
-                    <p className="mt-2 line-clamp-2 text-sm text-[var(--muted)]">
-                      {project.description || "No project description provided."}
-                    </p>
-                  </div>
-                  <span className="rounded border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider text-emerald-300">
-                    active
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <div className="h-1.5 rounded-full bg-slate-950 overflow-hidden">
-                  <div className="h-full w-1/3 rounded-full bg-[var(--accent)]" />
-                </div>
-                <div className="mt-3 flex justify-between text-xs text-[var(--muted)] font-mono">
-                  <span>Tasks Configured</span>
-                  <span className="text-white">Active</span>
-                </div>
-              </div>
-            </Link>
+            <ProjectCard key={project.id} project={project} token={token} />
           ))}
         </div>
       )}
@@ -170,14 +141,14 @@ export default function Home() {
           />
 
           {/* Modal Container */}
-          <div className="relative w-full max-w-md transform overflow-hidden rounded-xl border border-[var(--border)] bg-slate-900 p-6 shadow-2xl transition-all duration-300 animate-[in_0.15s_ease-out]">
-            <div className="flex items-center justify-between border-b border-[var(--border)] pb-4">
+          <div className="relative w-full max-w-md transform overflow-hidden rounded-xl border border-stroke bg-slate-900 p-6 shadow-2xl transition-all duration-300 animate-[in_0.15s_ease-out]">
+            <div className="flex items-center justify-between border-b border-stroke pb-4">
               <h3 className="font-mono text-lg font-semibold text-white">Create New Project</h3>
               <button
                 onClick={() => {
                   if (!isSubmitting) setShowModal(false);
                 }}
-                className="rounded-md p-1 text-[var(--muted)] transition hover:bg-slate-800 hover:text-white cursor-pointer"
+                className="rounded-md p-1 text-content-muted transition hover:bg-slate-800 hover:text-white cursor-pointer"
                 disabled={isSubmitting}
                 type="button"
               >
@@ -187,14 +158,14 @@ export default function Home() {
 
             <form className="mt-4 flex flex-col gap-4" onSubmit={handleCreateProject}>
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">
-                  Project Name <span className="text-[var(--accent)]">*</span>
+                <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">
+                  Project Name <span className="text-brand-primary">*</span>
                 </label>
                 <input
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
                   placeholder="e.g. e-commerce-backend"
-                  className="rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)] transition"
+                  className="rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary transition"
                   disabled={isSubmitting}
                   required
                   autoFocus
@@ -202,14 +173,14 @@ export default function Home() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">
+                <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">
                   Description
                 </label>
                 <textarea
                   value={projectDescription}
                   onChange={(e) => setProjectDescription(e.target.value)}
                   placeholder="Optional brief details about the project goals, repository scope, or rules."
-                  className="min-h-[100px] rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)] transition resize-none"
+                  className="min-h-[100px] rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary transition resize-none"
                   disabled={isSubmitting}
                 />
               </div>
@@ -220,17 +191,17 @@ export default function Home() {
                 </p>
               )}
 
-              <div className="mt-2 flex items-center justify-end gap-3 border-t border-[var(--border)] pt-4">
+              <div className="mt-2 flex items-center justify-end gap-3 border-t border-stroke pt-4">
                 <button
                   onClick={() => setShowModal(false)}
-                  className="rounded-md border border-[var(--border)] bg-transparent px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                  className="rounded-md border border-stroke bg-transparent px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 cursor-pointer disabled:opacity-50"
                   disabled={isSubmitting}
                   type="button"
                 >
                   Cancel
                 </button>
                 <button
-                  className="flex items-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer disabled:opacity-50"
                   disabled={isSubmitting}
                   type="submit"
                 >
@@ -250,4 +221,184 @@ export default function Home() {
       )}
     </DashboardLayout>
   );
+}
+
+function ProjectCard({ project, token }: { project: Project; token: string }) {
+  const cardRef = useRef<HTMLAnchorElement>(null);
+  const isVisible = useIsNearViewport(cardRef);
+  const hasHydratedCounts =
+    project.repositories_count !== undefined ||
+    project.agents_count !== undefined ||
+    project.tasks_total_count !== undefined ||
+    project.tasks_done_count !== undefined;
+  const { data: meta } = useSWR(
+    token && isVisible && !hasHydratedCounts ? ["project-card-meta", project.id] : null,
+    async () => {
+      const [repositories, agents, tasks] = await Promise.allSettled([
+        api.listRepositories(project.id, token),
+        api.listAgents(project.id, token),
+        api.listTasks(project.id, token),
+      ]);
+
+      return {
+        repositories: repositories.status === "fulfilled" ? repositories.value : null,
+        agents: agents.status === "fulfilled" ? agents.value : null,
+        tasks: tasks.status === "fulfilled" ? tasks.value : null,
+      };
+    },
+  );
+
+  const tasks = meta?.tasks;
+  const totalTasks = project.tasks_total_count ?? tasks?.length ?? 0;
+  const doneTasks = project.tasks_done_count ?? tasks?.filter((task) => isDoneStatus(task.status)).length ?? 0;
+  const repositoriesCount = project.repositories_count ?? meta?.repositories?.length;
+  const agentsCount = project.agents_count ?? meta?.agents?.length;
+  const progress = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
+  const status = tasks ? deriveProjectStatus(tasks) : deriveHydratedProjectStatus(doneTasks, totalTasks, hasHydratedCounts);
+  const lastActivity = tasks ? latestActivity(tasks, project.updated_at) : project.updated_at;
+
+  return (
+    <Link
+      ref={cardRef}
+      href={`/projects/${project.id}`}
+      className="group glow-on-hover flex min-h-[230px] flex-col justify-between rounded-lg border border-stroke bg-panel p-5 transition hover:border-brand-primary/40"
+    >
+      <div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-mono text-lg font-semibold transition duration-150 group-hover:text-brand-primary">
+              {project.name}
+            </h3>
+            <p className="mt-2 line-clamp-2 text-sm text-content-muted">
+              {project.description || "No project description provided."}
+            </p>
+          </div>
+          <StatusBadge status={status} />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-xs text-content-muted">
+          <CardStat icon={GitBranch} label="Repos" value={repositoriesCount !== undefined ? repositoriesCount.toString() : "--"} />
+          <CardStat icon={Bot} label="Agents" value={agentsCount !== undefined ? agentsCount.toString() : "--"} />
+          <CardStat icon={CheckCircle2} label="Tasks" value={hasHydratedCounts || tasks ? `${doneTasks}/${totalTasks}` : "--"} />
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <div className="h-1.5 overflow-hidden rounded-full bg-slate-950">
+          <div className="h-full rounded-full bg-brand-primary transition-all" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3 font-mono text-xs text-content-muted">
+          <span>{progress}% complete</span>
+          <span className="inline-flex min-w-0 items-center gap-1 text-right">
+            <Clock size={12} />
+            <span className="truncate">{formatRelativeTime(lastActivity)}</span>
+          </span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function deriveHydratedProjectStatus(doneTasks: number, totalTasks: number, hasHydratedCounts: boolean) {
+  if (!hasHydratedCounts) return "loading";
+  if (totalTasks === 0) return "idle";
+  if (doneTasks === totalTasks) return "done";
+  return "active";
+}
+
+function useIsNearViewport<T extends Element>(ref: RefObject<T | null>) {
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    if (isVisible) return;
+    const node = ref.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "360px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [isVisible, ref]);
+
+  return isVisible;
+}
+
+function CardStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof GitBranch;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md border border-stroke bg-slate-950/50 p-2">
+      <div className="mb-1 flex items-center gap-1.5">
+        <Icon size={13} className="text-brand-primary" />
+        <span>{label}</span>
+      </div>
+      <div className="font-mono text-sm font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    loading: "border-slate-600/30 bg-slate-800 text-slate-300",
+    idle: "border-slate-600/30 bg-slate-800 text-slate-300",
+    active: "border-cyan-400/20 bg-cyan-400/10 text-cyan-300",
+    blocked: "border-red-400/20 bg-red-400/10 text-red-300",
+    done: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
+  };
+
+  return (
+    <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${styles[status] || styles.idle}`}>
+      {status}
+    </span>
+  );
+}
+
+function deriveProjectStatus(tasks: Task[]) {
+  if (tasks.length === 0) return "idle";
+  if (tasks.some((task) => ["failed", "blocked", "needs_changes", "changes_requested"].includes(task.status))) {
+    return "blocked";
+  }
+  if (tasks.some((task) => ["running", "in_progress", "approved", "queued", "analyzing", "coding", "reviewing", "testing"].includes(task.status))) {
+    return "active";
+  }
+  if (tasks.every((task) => isDoneStatus(task.status))) return "done";
+  return "idle";
+}
+
+function isDoneStatus(status: string) {
+  return ["done", "completed", "merged"].includes(status);
+}
+
+function latestActivity(tasks: Task[], fallback: string) {
+  return tasks.reduce((latest, task) => {
+    return new Date(task.updated_at).getTime() > new Date(latest).getTime() ? task.updated_at : latest;
+  }, fallback);
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "No activity";
+  const diffMs = Date.now() - timestamp;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return "just now";
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m ago`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+  return `${Math.floor(diffMs / day)}d ago`;
 }

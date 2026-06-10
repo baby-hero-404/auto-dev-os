@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import {
   AlertTriangle,
@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { useRealtimeLogStore, type RealtimeLog } from "@/lib/store/use-realtime-log-store";
+import type { TaskLog } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 
 const workflowSteps = [
@@ -47,17 +49,34 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
   const [feedback, setFeedback] = useState("");
   const [submittingPR, setSubmittingPR] = useState(false);
   const [rawSelectedFile, setSelectedFile] = useState<string | null>(null);
+  const realtimeLogs = useRealtimeLogStore((state) => state.logs);
+  const appendLogs = useRealtimeLogStore((state) => state.appendLogs);
+  const clearLogs = useRealtimeLogStore((state) => state.clearLogs);
 
   const { data: workflow, mutate: mutateWorkflow } = useSWR(
-    taskID && token ? ["workflow", taskID, token] : null,
-    ([, id, t]) => api.taskWorkflow(id, t),
-    { refreshInterval: 1500 },
+    taskID ? ["workflow", taskID] : null,
+    () => api.taskWorkflow(taskID, token),
+    { refreshInterval: (latestWorkflow) => (isWorkflowTerminal(latestWorkflow?.job?.status) ? 0 : 2500) },
   );
-  const { data: logs = [], mutate: mutateLogs } = useSWR(
-    taskID && token ? ["task-logs", taskID, token] : null,
-    ([, id, t]) => api.taskLogs(id, t),
-    { refreshInterval: 1500 },
+  const { data: fetchedLogs, mutate: mutateLogs } = useSWR(
+    taskID ? ["task-logs", taskID] : null,
+    () => api.taskLogs(taskID, token),
+    { refreshInterval: () => (isWorkflowTerminal(workflow?.job?.status) ? 0 : 3000) },
   );
+
+  const logs = useMemo(
+    () => realtimeLogs.filter((log) => log.streamId === taskID).slice(-200),
+    [realtimeLogs, taskID],
+  );
+
+  useEffect(() => {
+    clearLogs(taskID);
+  }, [clearLogs, taskID]);
+
+  useEffect(() => {
+    if (!fetchedLogs) return;
+    appendLogs(fetchedLogs.map((log) => toRealtimeLog(taskID, log)));
+  }, [appendLogs, fetchedLogs, taskID]);
 
   const task = workflow?.task;
   const latest = new Map<string, string>();
@@ -187,7 +206,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
   if (!session) {
     return (
       <main className="grid min-h-screen place-items-center p-6">
-        <Link className="rounded-md bg-[var(--accent)] px-4 py-2 font-semibold text-slate-950" href="/">
+        <Link className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950" href="/">
           Back to login
         </Link>
       </main>
@@ -199,18 +218,18 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
 
   return (
     <main className="min-h-screen p-5">
-      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-end">
+      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-stroke pb-5 md:flex-row md:items-end">
         <div>
-          <Link href={task ? `/projects/${task.project_id}` : "/"} className="mb-4 inline-flex items-center gap-2 text-sm text-[var(--muted)] transition hover:text-white">
+          <Link href={task ? `/projects/${task.project_id}` : "/"} className="mb-4 inline-flex items-center gap-2 text-sm text-content-muted transition hover:text-white">
             <ArrowLeft size={16} />
             Project
           </Link>
           <h1 className="font-mono text-3xl font-semibold">{task?.title ?? "Task workflow"}</h1>
-          <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">{task?.description ?? "Loading task details..."}</p>
+          <p className="mt-1 max-w-3xl text-sm text-content-muted">{task?.description ?? "Loading task details..."}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
+            className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
             onClick={execute}
             type="button"
           >
@@ -241,14 +260,14 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
 
       {/* Pull Request & Review Center (Task 5) */}
       {(isReviewWaiting || isPRMerged) && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--primary)] overflow-hidden">
-          <div className="border-b border-[var(--border)] bg-slate-900/60 p-5 flex flex-wrap items-center justify-between gap-4">
+        <section className="mb-6 rounded-lg border border-stroke bg-panel overflow-hidden">
+          <div className="border-b border-stroke bg-slate-900/60 p-5 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               <div className="grid size-9 place-items-center rounded-md bg-purple-500/10 text-purple-400">
                 <GitPullRequest size={18} />
               </div>
               <div>
-                <div className="font-mono text-sm uppercase tracking-wider text-[var(--muted)]">Task Pull Request</div>
+                <div className="font-mono text-sm uppercase tracking-wider text-content-muted">Task Pull Request</div>
                 <h2 className="font-mono font-semibold text-lg text-white">
                   [Auto Code OS] {task?.title}
                 </h2>
@@ -261,11 +280,11 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
             </span>
           </div>
 
-          <div className="grid lg:grid-cols-[380px_1fr] border-b border-[var(--border)]">
+          <div className="grid lg:grid-cols-[380px_1fr] border-b border-stroke">
             {/* PR Summary Details */}
-            <div className="border-r border-[var(--border)] p-5 space-y-5 bg-slate-950/20">
+            <div className="border-r border-stroke p-5 space-y-5 bg-slate-950/20">
               <div>
-                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2 flex items-center gap-1">
+                <h3 className="font-mono text-xs uppercase tracking-wider text-content-muted mb-2 flex items-center gap-1">
                   <Sparkles size={12} className="text-purple-400" /> AI PR Summary
                 </h3>
                 <p className="text-sm leading-relaxed text-slate-300">
@@ -274,7 +293,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
               </div>
 
               <div>
-                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2">Risk Assessment</h3>
+                <h3 className="font-mono text-xs uppercase tracking-wider text-content-muted mb-2">Risk Assessment</h3>
                 <div className={`rounded-md border p-3 ${RISK_BADGES[riskAssessment.level]}`}>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="font-mono text-xs font-bold uppercase tracking-wider">Level: {riskAssessment.level}</span>
@@ -284,7 +303,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
               </div>
 
               <div>
-                <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--muted)] mb-2">Changed Files ({affectedFiles.length})</h3>
+                <h3 className="font-mono text-xs uppercase tracking-wider text-content-muted mb-2">Changed Files ({affectedFiles.length})</h3>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
                   {affectedFiles.map((file) => (
                     <button
@@ -292,15 +311,15 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
                       onClick={() => setSelectedFile(file)}
                       className={`flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-xs font-mono transition ${
                         selectedFile === file
-                          ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                          ? "bg-brand-primary/10 text-brand-primary"
                           : "text-slate-300 hover:bg-slate-900"
                       }`}
                     >
                       <span className="truncate">{file.split("/").pop()}</span>
-                      <span className="text-[10px] text-[var(--muted)] truncate max-w-[120px]">{file}</span>
+                      <span className="text-[10px] text-content-muted truncate max-w-[120px]">{file}</span>
                     </button>
                   ))}
-                  {affectedFiles.length === 0 && <p className="text-xs text-[var(--muted)]">No file modifications detected.</p>}
+                  {affectedFiles.length === 0 && <p className="text-xs text-content-muted">No file modifications detected.</p>}
                 </div>
               </div>
             </div>
@@ -308,7 +327,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
             {/* Interactive Code Diff Review Block */}
             <div className="p-5 flex flex-col min-w-0">
               <div className="mb-3 flex items-center justify-between">
-                <span className="font-mono text-xs text-[var(--muted)]">
+                <span className="font-mono text-xs text-content-muted">
                   Diff Review &mdash; <span className="text-slate-200">{selectedFile || "Select a file"}</span>
                 </span>
                 <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded uppercase font-mono">
@@ -316,7 +335,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
                 </span>
               </div>
 
-              <div className="flex-1 min-h-[250px] overflow-auto rounded-md border border-[var(--border)] bg-slate-950 p-4 font-mono text-xs leading-relaxed">
+              <div className="flex-1 min-h-[250px] overflow-auto rounded-md border border-stroke bg-slate-950 p-4 font-mono text-xs leading-relaxed">
                 {selectedFile ? (
                   getMockDiff(selectedFile).map((line, idx) => (
                     <div
@@ -332,7 +351,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
                     </div>
                   ))
                 ) : (
-                  <div className="h-full flex items-center justify-center text-[var(--muted)]">
+                  <div className="h-full flex items-center justify-center text-content-muted">
                     Select a file on the left to inspect git changes.
                   </div>
                 )}
@@ -344,12 +363,12 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
           {isReviewWaiting && (
             <div className="p-5 bg-slate-900/40 flex flex-col gap-4">
               <div className="flex items-start gap-3">
-                <MessageSquare size={16} className="text-[var(--muted)] mt-2.5 shrink-0" />
+                <MessageSquare size={16} className="text-content-muted mt-2.5 shrink-0" />
                 <textarea
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
                   placeholder="Leave rejection feedback to trigger a fix cycle..."
-                  className="flex-1 rounded-md border border-[var(--border)] bg-slate-950 p-3 text-sm text-white placeholder-slate-500 focus:border-[var(--accent)] focus:outline-none min-h-[80px]"
+                  className="flex-1 rounded-md border border-stroke bg-slate-950 p-3 text-sm text-white placeholder-slate-500 focus:border-brand-primary focus:outline-none min-h-[80px]"
                 />
               </div>
               <div className="flex justify-end gap-2.5">
@@ -364,7 +383,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
                 <button
                   onClick={approvePR}
                   disabled={submittingPR}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50"
                 >
                   <Check size={15} />
                   Approve &amp; Merge
@@ -377,7 +396,7 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
 
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <section className="space-y-5">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <h2 className="font-mono text-lg font-semibold">Workflow Progress</h2>
               {task && <Badge value={task.status} />}
@@ -388,40 +407,40 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
               {workflowSteps.map((step) => {
                 const status = latest.get(step) ?? "pending";
                 return (
-                  <div key={step} className="rounded-md border border-[var(--border)] bg-slate-950 p-3">
+                  <div key={step} className="rounded-md border border-stroke bg-slate-950 p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="font-mono text-sm">{step}</span>
                       <WorkflowDot status={status} />
                     </div>
-                    <div className="text-xs uppercase tracking-wide text-[var(--muted)]">{status}</div>
+                    <div className="text-xs uppercase tracking-wide text-content-muted">{status}</div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-4 flex items-center gap-2">
-              <TerminalSquare size={18} className="text-[var(--accent)]" />
+              <TerminalSquare size={18} className="text-brand-primary" />
               <h2 className="font-mono text-lg font-semibold">Execution Logs</h2>
             </div>
             <div className="max-h-[520px] overflow-auto rounded-md bg-slate-950 p-4 font-mono text-xs">
               {logs.map((log) => (
-                <div key={log.id} className="mb-2 grid gap-2 border-b border-[var(--border)]/50 pb-2 md:grid-cols-[150px_70px_1fr]">
-                  <span className="text-[var(--muted)]">{new Date(log.created_at).toLocaleTimeString()}</span>
+                <div key={log.id} className="mb-2 grid gap-2 border-b border-stroke/50 pb-2 md:grid-cols-[150px_70px_1fr]">
+                  <span className="text-content-muted">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>
                   <span className={log.level === "error" ? "text-red-300" : log.level === "warn" ? "text-amber-300" : "text-emerald-300"}>{log.level}</span>
                   <span className="whitespace-pre-wrap">{log.message}</span>
                 </div>
               ))}
-              {logs.length === 0 && <p className="text-[var(--muted)]">No logs yet. Execute the workflow to start.</p>}
+              {logs.length === 0 && <p className="text-content-muted">No logs yet. Execute the workflow to start.</p>}
             </div>
           </div>
         </section>
 
         <aside className="space-y-5">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-4 flex items-center gap-2">
-              <Bot size={18} className="text-[var(--accent)]" />
+              <Bot size={18} className="text-brand-primary" />
               <h2 className="font-mono text-lg font-semibold">Agent Activity</h2>
             </div>
             <dl className="space-y-3 text-sm">
@@ -432,25 +451,41 @@ export default function TaskWorkflowPage({ params }: { params: Promise<{ id: str
             </dl>
           </div>
 
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-4 flex items-center gap-2">
-              <Clock size={18} className="text-[var(--accent)]" />
+              <Clock size={18} className="text-brand-primary" />
               <h2 className="font-mono text-lg font-semibold">Checkpoints</h2>
             </div>
             <div className="space-y-2 text-sm">
               {(workflow?.checkpoints ?? []).slice().reverse().map((checkpoint) => (
-                <div key={checkpoint.id} className="rounded-md border border-[var(--border)] bg-slate-950 p-3">
-                  <div className="font-mono text-[var(--accent)]">{checkpoint.step}</div>
-                  <div className="text-xs text-[var(--muted)]">{new Date(checkpoint.created_at).toLocaleString()}</div>
+                <div key={checkpoint.id} className="rounded-md border border-stroke bg-slate-950 p-3">
+                  <div className="font-mono text-brand-primary">{checkpoint.step}</div>
+                  <div className="text-xs text-content-muted">{new Date(checkpoint.created_at).toLocaleString()}</div>
                 </div>
               ))}
-              {(workflow?.checkpoints ?? []).length === 0 && <p className="text-[var(--muted)]">No checkpoints recorded.</p>}
+              {(workflow?.checkpoints ?? []).length === 0 && <p className="text-content-muted">No checkpoints recorded.</p>}
             </div>
           </div>
         </aside>
       </div>
     </main>
   );
+}
+
+function isWorkflowTerminal(status?: string) {
+  return status === "done" || status === "completed" || status === "failed" || status === "merged";
+}
+
+function toRealtimeLog(taskID: string, log: TaskLog): RealtimeLog {
+  return {
+    id: log.id,
+    streamId: taskID,
+    source: "workflow",
+    level: log.level,
+    message: log.message,
+    createdAt: log.created_at,
+    createdAtEpoch: Date.parse(log.created_at),
+  };
 }
 
 function WorkflowDot({ status }: { status: string }) {
@@ -466,7 +501,7 @@ function WorkflowDot({ status }: { status: string }) {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-content-muted">{label}</dt>
       <dd className="mt-1 break-all font-mono">{value}</dd>
     </div>
   );

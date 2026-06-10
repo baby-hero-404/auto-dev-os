@@ -49,7 +49,7 @@ func (r *MemoryRepo) GetByID(ctx context.Context, id string) (*models.EpisodicMe
 	}
 	// Bump access metrics (fire-and-forget)
 	r.db.WithContext(ctx).Model(&mem).Updates(map[string]any{
-		"access_count": gorm.Expr("access_count + 1"),
+		"access_count":  gorm.Expr("access_count + 1"),
 		"last_accessed": time.Now(),
 	})
 	mem.AccessCount++
@@ -80,40 +80,6 @@ func (r *MemoryRepo) ListBySession(ctx context.Context, sessionID string) ([]mod
 		return nil, fmt.Errorf("list memories by session: %w", err)
 	}
 	return memories, nil
-}
-
-// SearchBM25 performs full-text search using PostgreSQL ts_rank.
-func (r *MemoryRepo) SearchBM25(ctx context.Context, query, agentID string, limit int) ([]models.MemorySearchResult, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	var results []models.MemorySearchResult
-	rows, err := r.db.WithContext(ctx).Raw(`
-		SELECT em.*, ts_rank(tsv, plainto_tsquery('english', ?)) AS bm25_score
-		FROM episodic_memories em
-		WHERE em.agent_id = ?
-		  AND em.tsv @@ plainto_tsquery('english', ?)
-		ORDER BY bm25_score DESC
-		LIMIT ?
-	`, query, agentID, query, limit).Rows()
-	if err != nil {
-		return nil, fmt.Errorf("bm25 search: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var mem models.EpisodicMemory
-		var score float64
-		if err := r.db.ScanRows(rows, &mem); err != nil {
-			return nil, fmt.Errorf("scan bm25 row: %w", err)
-		}
-		// Extract score from the last column — re-query for simplicity
-		results = append(results, models.MemorySearchResult{
-			Memory:    mem,
-			BM25Score: score,
-		})
-	}
-	return results, nil
 }
 
 // SearchBM25Ranked performs full-text search and returns memories with proper ranking scores.

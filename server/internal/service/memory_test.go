@@ -7,6 +7,19 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
+type testEmbedder struct {
+	inputs []string
+}
+
+func (e *testEmbedder) Embed(_ context.Context, input string) ([]float32, error) {
+	e.inputs = append(e.inputs, input)
+	return []float32{0.1, 0.2, 0.3}, nil
+}
+
+func (e *testEmbedder) Name() string {
+	return "test"
+}
+
 func TestStripSecrets(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -119,5 +132,27 @@ func TestMemoryService_RecordObservation_Validation(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for empty content")
+	}
+}
+
+func TestMemoryService_RecordObservation_EmbedsAfterSecretStripping(t *testing.T) {
+	embedder := &testEmbedder{}
+	svc := NewMemoryService(nil, nil)
+	svc.SetEmbedder(embedder)
+
+	func() {
+		defer func() {
+			_ = recover()
+		}()
+		_, _ = svc.RecordObservation(context.Background(), models.CreateMemoryInput{
+			AgentID: "agent-1",
+			Content: "Using token: secret-value to call API",
+		})
+	}()
+	if len(embedder.inputs) != 1 {
+		t.Fatalf("expected embedder to be called once, got %d", len(embedder.inputs))
+	}
+	if embedder.inputs[0] != "Using [REDACTED] to call API" {
+		t.Fatalf("expected cleaned content before embedding, got %q", embedder.inputs[0])
 	}
 }

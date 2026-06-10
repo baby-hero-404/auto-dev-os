@@ -6,10 +6,10 @@ export function StatsCards({ stats }: { stats: { label: string; value: string }[
       {stats.map((stat) => (
         <div
           key={stat.label}
-          className="group rounded-lg border border-[var(--border)] bg-[var(--primary)] p-4 transition hover:border-[var(--accent)]/40"
+          className="group rounded-lg border border-stroke bg-panel p-4 transition hover:border-brand-primary/40"
         >
-          <div className="text-sm text-[var(--muted)]">{stat.label}</div>
-          <div className="mt-2 font-mono text-3xl font-semibold transition group-hover:text-[var(--accent)]">
+          <div className="text-sm text-content-muted">{stat.label}</div>
+          <div className="mt-2 font-mono text-3xl font-semibold transition group-hover:text-brand-primary">
             {stat.value}
           </div>
         </div>

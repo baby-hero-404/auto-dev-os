@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -15,10 +18,20 @@ import (
 type LearningService struct {
 	suggestions *repository.LearningSuggestionRepo
 	rules       *repository.RuleRepo
+	skills      *repository.SkillRepo
+	promptRoot  string
 }
 
 func NewLearningService(suggestions *repository.LearningSuggestionRepo, rules *repository.RuleRepo) *LearningService {
 	return &LearningService{suggestions: suggestions, rules: rules}
+}
+
+func (s *LearningService) SetSkillRepo(skills *repository.SkillRepo) {
+	s.skills = skills
+}
+
+func (s *LearningService) SetPromptRoot(promptRoot string) {
+	s.promptRoot = filepath.Clean(promptRoot)
 }
 
 // CreateSuggestion proposes a new learning suggestion for human review.
@@ -124,17 +137,11 @@ func (s *LearningService) applySuggestion(ctx context.Context, suggestion *model
 	case models.SuggestionTypeRule:
 		return s.applyRuleSuggestion(ctx, suggestion)
 	case models.SuggestionTypePromptPatch:
-		// Prompt patches are logged for manual application — no auto-apply yet
-		slog.Info("learning: prompt patch approved — manual application required", "id", suggestion.ID)
-		return nil
+		return s.applyPromptPatchSuggestion(ctx, suggestion)
 	case models.SuggestionTypeSkill:
-		// Skills are logged for manual registration
-		slog.Info("learning: skill suggestion approved — manual registration required", "id", suggestion.ID)
-		return nil
+		return s.applySkillSuggestion(ctx, suggestion)
 	case models.SuggestionTypePattern:
-		// Patterns are informational
-		slog.Info("learning: pattern approved — stored for reference", "id", suggestion.ID)
-		return nil
+		return s.applySkillSuggestion(ctx, suggestion)
 	default:
 		return nil
 	}
@@ -178,4 +185,155 @@ func (s *LearningService) applyRuleSuggestion(ctx context.Context, suggestion *m
 		"rule_id", rule.ID,
 	)
 	return nil
+}
+
+func (s *LearningService) applySkillSuggestion(ctx context.Context, suggestion *models.LearningSuggestion) error {
+	if s.skills == nil {
+		return fmt.Errorf("skill repository not configured")
+	}
+
+	input := skillInputFromSuggestion(suggestion)
+	skill, err := s.skills.Create(ctx, input)
+	if err != nil {
+		return fmt.Errorf("apply skill suggestion: %w", err)
+	}
+
+	return s.markApplied(ctx, suggestion.ID, map[string]any{
+		"applied_skill_id": skill.ID,
+		"applied_at":       time.Now(),
+	})
+}
+
+func (s *LearningService) applyPromptPatchSuggestion(ctx context.Context, suggestion *models.LearningSuggestion) error {
+	if s.promptRoot == "" {
+		return fmt.Errorf("prompt root not configured")
+	}
+
+	patch, err := parsePromptPatch(suggestion.Content)
+	if err != nil {
+		return err
+	}
+	target, err := safeJoin(s.promptRoot, patch.Path)
+	if err != nil {
+		return err
+	}
+	current, err := os.ReadFile(target)
+	if err != nil {
+		return fmt.Errorf("read prompt patch target: %w", err)
+	}
+	currentText := string(current)
+	if !strings.Contains(currentText, patch.Search) {
+		return fmt.Errorf("apply prompt patch: search text not found in %s", patch.Path)
+	}
+	updated := strings.Replace(currentText, patch.Search, patch.Replace, 1)
+	if err := os.WriteFile(target, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write prompt patch target: %w", err)
+	}
+
+	return s.markApplied(ctx, suggestion.ID, map[string]any{
+		"patched_path": patch.Path,
+		"applied_at":   time.Now(),
+	})
+}
+
+func (s *LearningService) markApplied(ctx context.Context, suggestionID string, metadata map[string]any) error {
+	if s.suggestions == nil {
+		return fmt.Errorf("suggestion repository not configured")
+	}
+	applied := models.SuggestionStatusApplied
+	metaJSON, _ := json.Marshal(metadata)
+	feedback := string(metaJSON)
+	_, err := s.suggestions.Update(ctx, suggestionID, models.UpdateSuggestionInput{
+		Status:   &applied,
+		Feedback: &feedback,
+	})
+	return err
+}
+
+type skillSuggestionContent struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Schema      json.RawMessage `json:"schema"`
+}
+
+func skillInputFromSuggestion(suggestion *models.LearningSuggestion) models.CreateSkillInput {
+	var parsed skillSuggestionContent
+	if err := json.Unmarshal([]byte(suggestion.Content), &parsed); err == nil && parsed.Name != "" {
+		if len(parsed.Schema) == 0 {
+			parsed.Schema = json.RawMessage("{}")
+		}
+		return models.CreateSkillInput{
+			Name:        parsed.Name,
+			Description: parsed.Description,
+			Schema:      parsed.Schema,
+		}
+	}
+
+	schema, _ := json.Marshal(map[string]any{
+		"source":          "learning_loop",
+		"suggestion_id":   suggestion.ID,
+		"suggestion_type": suggestion.SuggestionType,
+		"content":         suggestion.Content,
+	})
+	return models.CreateSkillInput{
+		Name:        slugSkillName(suggestion.Title),
+		Description: firstNonEmpty(suggestion.Description, suggestion.Content),
+		Schema:      schema,
+	}
+}
+
+type promptPatch struct {
+	Path    string `json:"path"`
+	Search  string `json:"search"`
+	Replace string `json:"replace"`
+}
+
+func parsePromptPatch(content string) (promptPatch, error) {
+	var patch promptPatch
+	if err := json.Unmarshal([]byte(content), &patch); err != nil {
+		return patch, fmt.Errorf("prompt_patch content must be JSON with path, search, replace: %w", err)
+	}
+	if patch.Path == "" || patch.Search == "" {
+		return patch, fmt.Errorf("prompt_patch requires path and search")
+	}
+	return patch, nil
+}
+
+func safeJoin(root, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("prompt_patch path must be relative")
+	}
+	target := filepath.Clean(filepath.Join(root, rel))
+	rootWithSep := root + string(os.PathSeparator)
+	if target != root && !strings.HasPrefix(target, rootWithSep) {
+		return "", fmt.Errorf("prompt_patch path escapes prompt root")
+	}
+	return target, nil
+}
+
+func slugSkillName(title string) string {
+	name := strings.ToLower(strings.TrimSpace(title))
+	name = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r == '-' || r == '_' || r == ' ' {
+			return '-'
+		}
+		return -1
+	}, name)
+	name = strings.Trim(name, "-")
+	if name == "" {
+		return "learned-skill"
+	}
+	return "learned-" + name
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

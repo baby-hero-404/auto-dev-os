@@ -1,11 +1,11 @@
 "use client";
 
-import useSWR from "swr";
 import { BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Activity, Coins, Gauge, Router, type LucideIcon } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { useSession } from "@/lib/session";
 import { api } from "@/lib/api";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
 import type { TokenUsageSummary } from "@/lib/types";
 
 function formatCost(value: number) {
@@ -18,9 +18,9 @@ function compactNumber(value: number) {
 
 export default function GatewayPage() {
   const session = useSession();
-  const { data: usage } = useSWR(
-    session ? ["token-usage", session.token] : null,
-    ([, token]) => api.tokenUsage(token, 30),
+  const { data: usage } = useAuthedSWR(
+    ["token-usage"],
+    (token) => api.tokenUsage(token, 30),
   );
 
   const safeUsage = usage || [];
@@ -46,11 +46,11 @@ export default function GatewayPage() {
       <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="font-mono text-2xl font-semibold">Gateway</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
+          <p className="mt-1 text-sm text-content-muted">
             Model routing, token spend, and latency over the last 30 days.
           </p>
         </div>
-        <div className="rounded-full border border-[var(--border)] bg-[var(--primary)] px-3 py-1 text-xs text-[var(--muted)]">
+        <div className="rounded-full border border-stroke bg-panel px-3 py-1 text-xs text-content-muted">
           Phase 4 telemetry
         </div>
       </div>
@@ -62,10 +62,10 @@ export default function GatewayPage() {
         <MetricCard icon={Gauge} label="Avg latency" value={`${Math.round(avgLatency)} ms`} />
       </div>
 
-      <section className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+      <section className="mb-5 rounded-lg border border-stroke bg-panel p-5">
         <div className="mb-4">
           <h3 className="font-mono font-semibold">Token Usage By Route</h3>
-          <p className="text-sm text-[var(--muted)]">Grouped by provider and routing tier.</p>
+          <p className="text-sm text-content-muted">Grouped by provider and routing tier.</p>
         </div>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -78,15 +78,15 @@ export default function GatewayPage() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 formatter={(value: any, name: any) => [name === "cost" ? formatCost(Number(value)) : compactNumber(Number(value)), name]}
               />
-              <Bar dataKey="tokens" fill="var(--accent)" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="tokens" fill="var(--color-brand-primary)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--primary)]">
+      <div className="overflow-hidden rounded-lg border border-stroke bg-panel">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-[var(--border)] text-xs uppercase tracking-wide text-[var(--muted)]">
+          <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted">
             <tr>
               <th className="px-4 py-3">Route</th>
               <th className="px-4 py-3">Model</th>
@@ -98,8 +98,8 @@ export default function GatewayPage() {
           </thead>
           <tbody>
             {safeUsage.map((item) => (
-              <tr key={`${item.provider}-${item.model}-${item.tier}`} className="border-b border-[var(--border)]/60">
-                <td className="px-4 py-3 font-mono text-[var(--accent)]">{item.provider}/{item.tier}</td>
+              <tr key={`${item.provider}-${item.model}-${item.tier}`} className="border-b border-stroke/60">
+                <td className="px-4 py-3 font-mono text-brand-primary">{item.provider}/{item.tier}</td>
                 <td className="px-4 py-3">{item.model}</td>
                 <td className="px-4 py-3">{compactNumber(item.requests)}</td>
                 <td className="px-4 py-3">{compactNumber(item.total_tokens)}</td>
@@ -109,7 +109,7 @@ export default function GatewayPage() {
             ))}
             {safeUsage.length === 0 && (
               <tr>
-                <td className="px-4 py-8 text-center text-[var(--muted)]" colSpan={6}>
+                <td className="px-4 py-8 text-center text-content-muted" colSpan={6}>
                   No gateway usage recorded yet.
                 </td>
               </tr>
@@ -123,12 +123,12 @@ export default function GatewayPage() {
 
 function MetricCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
-    <article className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-4">
-      <div className="mb-3 grid size-9 place-items-center rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+    <article className="rounded-lg border border-stroke bg-panel p-4">
+      <div className="mb-3 grid size-9 place-items-center rounded-md bg-brand-primary/10 text-brand-primary">
         <Icon size={18} />
       </div>
       <div className="font-mono text-xl font-semibold">{value}</div>
-      <div className="text-sm text-[var(--muted)]">{label}</div>
+      <div className="text-sm text-content-muted">{label}</div>
     </article>
   );
 }

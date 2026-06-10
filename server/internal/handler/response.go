@@ -46,7 +46,7 @@ func statusForError(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrNotFound), errors.Is(err, repository.ErrNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, service.ErrConflict):
+	case errors.Is(err, service.ErrConflict), errors.Is(err, repository.ErrConflict):
 		return http.StatusConflict
 	case errors.Is(err, service.ErrAuthorization):
 		return http.StatusUnauthorized

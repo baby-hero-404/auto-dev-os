@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -125,6 +127,10 @@ func (m *mockSandboxRuntime) Health(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockSandboxRuntime) Prewarm(ctx context.Context) error {
+	return nil
+}
+
 type mockLLMProvider struct {
 	responses map[string]string
 }
@@ -162,12 +168,17 @@ func (m *mockGitOpsClient) CloneRepo(ctx context.Context, repoURL, token, branch
 	return branch, nil
 }
 
+func (m *mockGitOpsClient) CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error) {
+	m.clonedRepo = repoURL
+	return branch, nil
+}
+
 func (m *mockGitOpsClient) CreateBranch(ctx context.Context, repoURL, branchName string) error {
 	m.createdBranch = branchName
 	return nil
 }
 
-func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string) error {
+func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error {
 	m.committedMsg = message
 	return nil
 }
@@ -210,12 +221,12 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	task := &models.Task{
-		ID:         "task-123",
-		ProjectID:  "proj-123",
-		Title:      "Test Task",
+		ID:          "task-123",
+		ProjectID:   "proj-123",
+		Title:       "Test Task",
 		Description: "Write tests for the server package.",
-		Complexity: models.TaskComplexityEasy,
-		SpecStatus: models.TaskSpecStatusApproved,
+		Complexity:  models.TaskComplexityEasy,
+		SpecStatus:  models.TaskSpecStatusApproved,
 	}
 
 	job := &models.WorkflowJob{
@@ -366,5 +377,91 @@ func TestParseJSONMarkdown(t *testing.T) {
 				t.Errorf("got %s, want %s", string(raw), string(expectedRaw))
 			}
 		})
+	}
+}
+
+func TestOrchestrator_RemoveWorkspaceSafety(t *testing.T) {
+	root := t.TempDir()
+	orch := NewOrchestrator(nil, nil, nil, nil)
+	orch.SetWorkspaceRoot(root)
+
+	if err := os.MkdirAll(filepath.Join(root, "task-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := orch.removeWorkspace("task-1"); err != nil {
+		t.Fatalf("remove workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "task-1")); !os.IsNotExist(err) {
+		t.Fatalf("expected workspace removed, got err=%v", err)
+	}
+	if err := orch.removeWorkspace(""); err == nil {
+		t.Fatal("expected empty task id to be rejected")
+	}
+	if err := orch.removeWorkspace("../outside"); err == nil {
+		t.Fatal("expected escaping task id to be rejected")
+	}
+}
+
+func TestOrchestrator_PruneWorkspacesHonorsRetention(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old-task")
+	newDir := filepath.Join(root, "new-task")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(oldDir, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	orch := NewOrchestrator(nil, nil, nil, nil)
+	orch.SetWorkspaceRoot(root)
+	orch.SetWorkspaceRetention(time.Hour, time.Hour)
+
+	removed, err := orch.pruneWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("prune workspaces: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 removed workspace, got %d", removed)
+	}
+	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+		t.Fatalf("expected old workspace removed, got err=%v", err)
+	}
+	if _, err := os.Stat(newDir); err != nil {
+		t.Fatalf("expected new workspace retained: %v", err)
+	}
+}
+
+func TestOrchestrator_PruneLogsHonorsRetention(t *testing.T) {
+	root := t.TempDir()
+	oldFile := filepath.Join(root, "old-task.jsonl")
+	newFile := filepath.Join(root, "new-task.jsonl")
+	if err := os.WriteFile(oldFile, []byte("log line 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newFile, []byte("log line 2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().AddDate(0, 0, -15) // older than 14 days
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := pruneLogFiles(context.Background(), 14, root)
+	if err != nil {
+		t.Fatalf("prune log files: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 removed log file, got %d", removed)
+	}
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Fatalf("expected old log file removed, got err=%v", err)
+	}
+	if _, err := os.Stat(newFile); err != nil {
+		t.Fatalf("expected new log file retained: %v", err)
 	}
 }

@@ -29,6 +29,10 @@ type Deps struct {
 	AuthSvc            AuthService
 	MemorySvc          MemoryService
 	LearningSvc        LearningService
+	GitAccountSvc      GitAccountService
+	ProviderCredSvc    ProviderCredentialService
+	VirtualKeySvc      VirtualKeyService
+	ModelRouteSvc      ModelRouteService
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
@@ -90,6 +94,10 @@ func NewRouter(d Deps) http.Handler {
 	workflowH := NewWorkflowHandler(d.Orch)
 	memoryH := NewMemoryHandler(d.MemorySvc)
 	learningH := NewLearningHandler(d.LearningSvc)
+	gitAccH := NewGitAccountHandler(d.GitAccountSvc)
+	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
+	virtualKeyH := NewVirtualKeyHandler(d.VirtualKeySvc)
+	modelRouteH := NewModelRouteHandler(d.ModelRouteSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -123,6 +131,34 @@ func NewRouter(d Deps) http.Handler {
 					r.Route("/projects", func(r chi.Router) {
 						r.Post("/", projH.Create)
 						r.Get("/", projH.List)
+					})
+
+					r.Route("/git-accounts", func(r chi.Router) {
+						r.Post("/", gitAccH.Create)
+						r.Get("/", gitAccH.List)
+					})
+
+					r.Route("/provider-credentials", func(r chi.Router) {
+						r.Post("/", providerCredH.Create)
+						r.Get("/", providerCredH.List)
+						r.Put("/{credentialID}", providerCredH.Update)
+						r.Delete("/{credentialID}", providerCredH.Delete)
+						r.Post("/{credentialID}/test", providerCredH.Test)
+					})
+
+					r.Route("/virtual-keys", func(r chi.Router) {
+						r.Post("/", virtualKeyH.Create)
+						r.Get("/", virtualKeyH.List)
+						r.Get("/{virtualKeyID}", virtualKeyH.GetByID)
+						r.Put("/{virtualKeyID}", virtualKeyH.Update)
+						r.Delete("/{virtualKeyID}", virtualKeyH.Revoke)
+					})
+
+					r.Route("/model-routes", func(r chi.Router) {
+						r.Post("/", modelRouteH.Create)
+						r.Get("/", modelRouteH.List)
+						r.Put("/{routeID}", modelRouteH.Update)
+						r.Delete("/{routeID}", modelRouteH.Delete)
 					})
 				})
 			})
@@ -160,11 +196,17 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/repositories/{repoID}/validate", repoH.ValidateToken)
 			r.Post("/repositories/{repoID}/clone", repoH.Clone)
 
+			r.Get("/git-accounts/{accID}", gitAccH.GetByID)
+			r.Patch("/git-accounts/{accID}", gitAccH.Update)
+			r.Delete("/git-accounts/{accID}", gitAccH.Delete)
+			r.Post("/git-accounts/{accID}/test", gitAccH.Test)
+
 			r.Get("/agents/{agentID}", agentH.GetByID)
 			r.Patch("/agents/{agentID}", agentH.Update)
 			r.Get("/agents/{agentID}/skills", skillH.ListAgentSkills)
 			r.Post("/agents/{agentID}/skills", skillH.AssignToAgent)
 			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/agents/{agentID}", agentH.Delete)
+			r.Get("/role-templates", agentH.ListRoleTemplates)
 
 			// Phase 6: Episodic Memory
 			r.Get("/agents/{agentID}/memories", memoryH.ListByAgent)

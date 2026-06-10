@@ -16,10 +16,15 @@ type RepositoryLookup interface {
 	GetByURL(ctx context.Context, repoURL string) (*models.Repository, error)
 }
 
+type GitAccountLookup interface {
+	GetByID(ctx context.Context, id string) (*models.GitAccount, error)
+}
+
 type GitOpsAdapter struct {
-	provider GitProvider
-	repoDb   RepositoryLookup
-	rootPath string
+	provider     GitProvider
+	repoDb       RepositoryLookup
+	gitAccountDb GitAccountLookup
+	rootPath     string
 }
 
 func NewGitOpsAdapter(provider GitProvider, repoDb RepositoryLookup, rootPath string) *GitOpsAdapter {
@@ -33,6 +38,10 @@ func NewGitOpsAdapter(provider GitProvider, repoDb RepositoryLookup, rootPath st
 	}
 }
 
+func (a *GitOpsAdapter) SetGitAccountLookup(lookup GitAccountLookup) {
+	a.gitAccountDb = lookup
+}
+
 func (a *GitOpsAdapter) localPath(ctx context.Context, repoID string) string {
 	if taskID := observability.TaskID(ctx); taskID != "" {
 		return filepath.Join(a.rootPath, taskID)
@@ -44,7 +53,27 @@ func (a *GitOpsAdapter) CloneRepo(ctx context.Context, repoURL, token, branch, l
 	return a.provider.CloneRepo(ctx, repoURL, token, branch, localPath)
 }
 
+// CloneForTask looks up the repository by URL, resolves credentials from the
+// linked GitAccount (falling back to repo.Token), and clones using the correct
+// provider and token. This keeps credential resolution out of the orchestrator.
+func (a *GitOpsAdapter) CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error) {
+	normalized, err := NormalizeGitURLToHTTPS(repoURL)
+	if err == nil {
+		repoURL = normalized
+	}
+	repo, err := a.repoDb.GetByURL(ctx, repoURL)
+	if err != nil {
+		return "", fmt.Errorf("lookup repo %s: %w", repoURL, err)
+	}
+	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	return provider.CloneRepo(ctx, repoURL, token, branch, localPath)
+}
+
 func (a *GitOpsAdapter) CreateBranch(ctx context.Context, repoURL, branchName string) error {
+	normalized, err := NormalizeGitURLToHTTPS(repoURL)
+	if err == nil {
+		repoURL = normalized
+	}
 	repo, err := a.repoDb.GetByURL(ctx, repoURL)
 	if err != nil {
 		return err
@@ -53,7 +82,11 @@ func (a *GitOpsAdapter) CreateBranch(ctx context.Context, repoURL, branchName st
 	return a.provider.CreateBranch(ctx, path, branchName)
 }
 
-func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string) error {
+func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error {
+	normalized, err := NormalizeGitURLToHTTPS(repoURL)
+	if err == nil {
+		repoURL = normalized
+	}
 	repo, err := a.repoDb.GetByURL(ctx, repoURL)
 	if err != nil {
 		return err
@@ -71,10 +104,33 @@ func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, 
 		}
 	}
 
-	return a.provider.CommitAndPush(ctx, path, message, repo.Token)
+	_, token := a.providerAndTokenForRepo(ctx, repo)
+	return a.provider.CommitAndPush(ctx, path, message, token, agentRole)
+}
+
+func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *models.Repository) (GitProvider, string) {
+	token := repo.Token
+	if repo.GitAccountID == nil || *repo.GitAccountID == "" || a.gitAccountDb == nil {
+		return a.provider, token
+	}
+	acc, err := a.gitAccountDb.GetByID(ctx, *repo.GitAccountID)
+	if err != nil {
+		return a.provider, token
+	}
+	if token == "" {
+		token = acc.Token
+	}
+	if acc.BaseURL == "" {
+		return a.provider, token
+	}
+	return NewGitHubProvider(acc.BaseURL), token
 }
 
 func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error) {
+	normalized, err := NormalizeGitURLToHTTPS(repoURL)
+	if err == nil {
+		repoURL = normalized
+	}
 	repo, err := a.repoDb.GetByURL(ctx, repoURL)
 	if err != nil {
 		return "", err
@@ -94,5 +150,6 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 
 	// Call underlying provider to create PR
 	// head is branchName, base is the default branch from the repository model
-	return a.provider.CreatePR(ctx, owner, repoName, title, branchName, repo.Branch, body, repo.Token)
+	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	return provider.CreatePR(ctx, owner, repoName, title, branchName, repo.Branch, body, token)
 }

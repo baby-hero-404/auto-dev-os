@@ -27,6 +27,7 @@ import {
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { useSession } from "@/lib/session";
 import { api } from "@/lib/api";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
 
 function compactNumber(value: number) {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
@@ -58,22 +59,23 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function AnalyticsPage() {
   const session = useSession();
+  const orgID = session?.user.org_id ?? "";
 
-  const { data: overview } = useSWR(
-    session ? ["analytics-overview", session.token] : null,
-    ([, token]) => api.analyticsOverview(token),
+  const { data: overview } = useAuthedSWR(
+    orgID ? ["analytics-overview", orgID] : null,
+    (token) => api.analyticsOverview(token, orgID),
   );
-  const { data: agentStats = [] } = useSWR(
-    session ? ["analytics-agents", session.token] : null,
-    ([, token]) => api.analyticsAgents(token),
+  const { data: agentStats = [] } = useAuthedSWR(
+    orgID ? ["analytics-agents", orgID] : null,
+    (token) => api.analyticsAgents(token, orgID),
   );
-  const { data: taskAnalytics } = useSWR(
-    session ? ["analytics-tasks", session.token] : null,
-    ([, token]) => api.analyticsTasks(token),
+  const { data: taskAnalytics } = useAuthedSWR(
+    orgID ? ["analytics-tasks", orgID] : null,
+    (token) => api.analyticsTasks(token, orgID),
   );
-  const { data: workflowAnalytics } = useSWR(
-    session ? ["analytics-workflows", session.token] : null,
-    ([, token]) => api.analyticsWorkflows(token),
+  const { data: workflowAnalytics } = useAuthedSWR(
+    orgID ? ["analytics-workflows", orgID] : null,
+    (token) => api.analyticsWorkflows(token, orgID),
   );
 
   return (
@@ -81,11 +83,11 @@ export default function AnalyticsPage() {
       <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="font-mono text-2xl font-semibold">Analytics</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
+          <p className="mt-1 text-sm text-content-muted">
             Platform performance, agent metrics, and workflow health.
           </p>
         </div>
-        <div className="rounded-full border border-[var(--border)] bg-[var(--primary)] px-3 py-1 text-xs text-[var(--muted)]">
+        <div className="rounded-full border border-stroke bg-panel px-3 py-1 text-xs text-content-muted">
           Phase 5 dashboard
         </div>
       </div>
@@ -103,9 +105,9 @@ export default function AnalyticsPage() {
       {/* Charts row */}
       <div className="mb-6 grid gap-5 lg:grid-cols-2">
         {/* Task Throughput Chart */}
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+        <section className="rounded-lg border border-stroke bg-panel p-5">
           <h3 className="mb-1 font-mono font-semibold">Task Throughput</h3>
-          <p className="mb-4 text-sm text-[var(--muted)]">Tasks created, completed, and failed over time.</p>
+          <p className="mb-4 text-sm text-content-muted">Tasks created, completed, and failed over time.</p>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={taskAnalytics?.time_series ?? []}>
@@ -140,9 +142,9 @@ export default function AnalyticsPage() {
         </section>
 
         {/* Status Distribution Chart */}
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+        <section className="rounded-lg border border-stroke bg-panel p-5">
           <h3 className="mb-1 font-mono font-semibold">Task Status Distribution</h3>
-          <p className="mb-4 text-sm text-[var(--muted)]">Current task breakdown by lifecycle state.</p>
+          <p className="mb-4 text-sm text-content-muted">Current task breakdown by lifecycle state.</p>
           <div className="flex items-center gap-6">
             <div className="h-52 w-52 shrink-0">
               <ResponsiveContainer width="100%" height="100%">
@@ -172,7 +174,7 @@ export default function AnalyticsPage() {
               {(taskAnalytics?.distribution ?? []).map((d) => (
                 <div key={d.status} className="flex items-center gap-2">
                   <span className="block size-2.5 rounded-full" style={{ background: STATUS_COLORS[d.status] ?? "#475569" }} />
-                  <span className="text-[var(--muted)]">{d.status}</span>
+                  <span className="text-content-muted">{d.status}</span>
                   <span className="font-mono font-semibold">{d.count}</span>
                 </div>
               ))}
@@ -182,28 +184,28 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Workflow Analytics */}
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+      <section className="mb-6 rounded-lg border border-stroke bg-panel p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="font-mono font-semibold">Workflow Performance</h3>
-            <p className="text-sm text-[var(--muted)]">Completion rates and average step durations.</p>
+            <p className="text-sm text-content-muted">Completion rates and average step durations.</p>
           </div>
           <div className="flex gap-4 text-center text-sm">
             <div>
-              <div className="font-mono text-xl font-semibold text-[var(--accent)]">
+              <div className="font-mono text-xl font-semibold text-brand-primary">
                 {Math.round(workflowAnalytics?.completion_rate ?? 0)}%
               </div>
-              <div className="text-xs text-[var(--muted)]">Completion</div>
+              <div className="text-xs text-content-muted">Completion</div>
             </div>
             <div>
               <div className="font-mono text-xl font-semibold">
                 {formatDuration(workflowAnalytics?.avg_duration_ms ?? 0)}
               </div>
-              <div className="text-xs text-[var(--muted)]">Avg Duration</div>
+              <div className="text-xs text-content-muted">Avg Duration</div>
             </div>
             <div>
               <div className="font-mono text-xl font-semibold">{compactNumber(workflowAnalytics?.total_workflows ?? 0)}</div>
-              <div className="text-xs text-[var(--muted)]">Total Runs</div>
+              <div className="text-xs text-content-muted">Total Runs</div>
             </div>
           </div>
         </div>
@@ -218,21 +220,21 @@ export default function AnalyticsPage() {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 formatter={(value: any) => [`${Math.round(Number(value) / 1000)}s`, "Avg Duration"]}
               />
-              <Bar dataKey="avg_ms" fill="var(--accent)" radius={[0, 6, 6, 0]} />
+              <Bar dataKey="avg_ms" fill="var(--color-brand-primary)" radius={[0, 6, 6, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </section>
 
       {/* Agent Performance Table */}
-      <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--primary)]">
-        <div className="border-b border-[var(--border)] p-5">
+      <section className="overflow-hidden rounded-lg border border-stroke bg-panel">
+        <div className="border-b border-stroke p-5">
           <h3 className="font-mono font-semibold">Agent Performance</h3>
-          <p className="text-sm text-[var(--muted)]">Per-agent metrics, success rates, and token consumption.</p>
+          <p className="text-sm text-content-muted">Per-agent metrics, success rates, and token consumption.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-[var(--border)] text-xs uppercase tracking-wide text-[var(--muted)]">
+            <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted">
               <tr>
                 <th className="px-4 py-3">Agent</th>
                 <th className="px-4 py-3">Role</th>
@@ -245,24 +247,22 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {agentStats.map((agent) => (
-                <tr key={agent.agent_id} className="border-b border-[var(--border)]/60 transition hover:bg-slate-900/50">
+              {agentStats?.map((agent) => (
+                <tr key={agent.agent_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                   <td className="px-4 py-3">
                     <div className="font-medium">{agent.agent_name}</div>
-                    <div className="text-xs text-[var(--muted)]">{agent.provider}/{agent.model}</div>
+                    <div className="text-xs text-content-muted">{agent.model_route}</div>
                   </td>
                   <td className="px-4 py-3 capitalize">{agent.role}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                      agent.status === "idle" ? "bg-slate-700/50 text-slate-300" :
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${agent.status === "idle" ? "bg-slate-700/50 text-slate-300" :
                       agent.status === "busy" || agent.status === "running" ? "bg-emerald-400/10 text-emerald-300" :
-                      "bg-slate-700/50 text-slate-400"
-                    }`}>
-                      <span className={`size-1.5 rounded-full ${
-                        agent.status === "idle" ? "bg-slate-400" :
+                        "bg-slate-700/50 text-slate-400"
+                      }`}>
+                      <span className={`size-1.5 rounded-full ${agent.status === "idle" ? "bg-slate-400" :
                         agent.status === "busy" || agent.status === "running" ? "bg-emerald-400 animate-pulse" :
-                        "bg-slate-500"
-                      }`} />
+                          "bg-slate-500"
+                        }`} />
                       {agent.status}
                     </span>
                   </td>
@@ -271,7 +271,7 @@ export default function AnalyticsPage() {
                     <div className="flex items-center gap-2">
                       <div className="h-1.5 w-16 rounded-full bg-slate-700">
                         <div
-                          className="h-1.5 rounded-full bg-[var(--accent)] transition-all"
+                          className="h-1.5 rounded-full bg-brand-primary transition-all"
                           style={{ width: `${Math.min(agent.success_rate, 100)}%` }}
                         />
                       </div>
@@ -283,9 +283,9 @@ export default function AnalyticsPage() {
                   <td className="px-4 py-3 font-mono">{formatCost(agent.total_cost_usd)}</td>
                 </tr>
               ))}
-              {agentStats.length === 0 && (
+              {agentStats?.length === 0 && (
                 <tr>
-                  <td className="px-4 py-8 text-center text-[var(--muted)]" colSpan={8}>
+                  <td className="px-4 py-8 text-center text-content-muted" colSpan={8}>
                     No agent data available yet.
                   </td>
                 </tr>
@@ -300,14 +300,14 @@ export default function AnalyticsPage() {
 
 function StatCard({ icon: Icon, label, value, accent }: { icon: LucideIcon; label: string; value: string; accent?: boolean }) {
   return (
-    <article className="group rounded-lg border border-[var(--border)] bg-[var(--primary)] p-4 transition hover:border-[var(--accent)]/40">
-      <div className="mb-2 grid size-8 place-items-center rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+    <article className="group rounded-lg border border-stroke bg-panel p-4 transition hover:border-brand-primary/40">
+      <div className="mb-2 grid size-8 place-items-center rounded-md bg-brand-primary/10 text-brand-primary">
         <Icon size={16} />
       </div>
-      <div className={`font-mono text-xl font-semibold transition ${accent ? "text-[var(--accent)]" : "group-hover:text-[var(--accent)]"}`}>
+      <div className={`font-mono text-xl font-semibold transition ${accent ? "text-brand-primary" : "group-hover:text-brand-primary"}`}>
         {value}
       </div>
-      <div className="text-xs text-[var(--muted)]">{label}</div>
+      <div className="text-xs text-content-muted">{label}</div>
     </article>
   );
 }

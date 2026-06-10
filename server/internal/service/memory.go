@@ -17,10 +17,20 @@ import (
 type MemoryService struct {
 	memories *repository.MemoryRepo
 	edges    *repository.KnowledgeEdgeRepo
+	embedder MemoryEmbedder
 }
 
 func NewMemoryService(memories *repository.MemoryRepo, edges *repository.KnowledgeEdgeRepo) *MemoryService {
 	return &MemoryService{memories: memories, edges: edges}
+}
+
+type MemoryEmbedder interface {
+	Embed(ctx context.Context, input string) ([]float32, error)
+	Name() string
+}
+
+func (s *MemoryService) SetEmbedder(embedder MemoryEmbedder) {
+	s.embedder = embedder
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -39,6 +49,15 @@ func (s *MemoryService) RecordObservation(ctx context.Context, input models.Crea
 	// Strip potential secrets before storage
 	cleaned := stripSecrets(input.Content)
 	hash := sha256Hash(cleaned)
+	embedding := input.Embedding
+	if len(embedding) == 0 && s.embedder != nil {
+		generated, err := s.embedder.Embed(ctx, embeddingText(cleaned, input.Summary))
+		if err != nil {
+			slog.Warn("memory embedding generation failed, storing memory without vector", "error", err)
+		} else {
+			embedding = generated
+		}
+	}
 
 	tier := input.Tier
 	if tier == "" {
@@ -60,6 +79,7 @@ func (s *MemoryService) RecordObservation(ctx context.Context, input models.Crea
 		ContentHash: hash,
 		Category:    category,
 		Tags:        input.Tags,
+		Embedding:   models.Embedding(embedding),
 	}
 
 	if err := s.memories.Create(ctx, mem); err != nil {
@@ -129,8 +149,16 @@ func (s *MemoryService) Search(ctx context.Context, input models.MemorySearchInp
 		slog.Warn("bm25 search failed, continuing with other streams", "error", err)
 	}
 
-	// Stream 2: Vector search (only if embedding is provided)
+	// Stream 2: Vector search. Generate the query embedding when the caller did not provide one.
 	var vectorResults []models.MemorySearchResult
+	if len(input.Embedding) == 0 && input.Query != "" && s.embedder != nil {
+		generated, embedErr := s.embedder.Embed(ctx, input.Query)
+		if embedErr != nil {
+			slog.Warn("memory query embedding generation failed, continuing without vector stream", "error", embedErr)
+		} else {
+			input.Embedding = generated
+		}
+	}
 	if len(input.Embedding) > 0 {
 		literal := embeddingToLiteral(input.Embedding)
 		vectorResults, err = s.memories.SearchVector(ctx, literal, input.AgentID, fetchLimit)
@@ -156,6 +184,13 @@ func (s *MemoryService) Search(ctx context.Context, input models.MemorySearchInp
 		merged = merged[:input.Limit]
 	}
 	return merged, nil
+}
+
+func embeddingText(content, summary string) string {
+	if strings.TrimSpace(summary) == "" {
+		return content
+	}
+	return summary + "\n\n" + content
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -53,3 +53,24 @@ func outputCostPer1K(model string) float64 {
 		return 0.015
 	}
 }
+
+// MetadataForModel returns normalized metadata for a provider/model pair.
+func MetadataForModel(provider, model string) ProviderMetadata {
+	return ProviderMetadata{
+		Provider:        provider,
+		Model:           model,
+		Tier:            tierForModel(model),
+		InputCostPer1K:  inputCostPer1K(model),
+		OutputCostPer1K: outputCostPer1K(model),
+	}
+}
+
+// EstimateCost returns the estimated USD cost for the given token usage.
+func EstimateCost(promptTokens, outputTokens int, meta ProviderMetadata) float64 {
+	return estimateCost(promptTokens, outputTokens, meta)
+}
+
+// EstimateMessageTokens approximates input token count for budget preflight.
+func EstimateMessageTokens(messages []Message) int {
+	return estimateMessageTokens(messages)
+}

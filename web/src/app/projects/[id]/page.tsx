@@ -6,21 +6,24 @@ import useSWR from "swr";
 import { ArrowLeft, CheckCircle2, GitBranch, Play, Plus, RefreshCw, ShieldAlert, Bot, Settings, List, Save, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { Repository, Task, Skill } from "@/lib/types";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
+import type { Agent, Repository, Task, Skill } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { InfoBlock } from "@/components/ui/info-block";
 
 export default function ProjectDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectID } = use(params);
   const session = useSession();
-  const [activeTab, setActiveTab] = useState<"tasks" | "settings">("tasks");
+  const [activeTab, setActiveTab] = useState<"tasks" | "members" | "settings">("tasks");
   const [repoURL, setRepoURL] = useState("");
   const [repoToken, setRepoToken] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
+  const [taskComplexity, setTaskComplexity] = useState<"easy" | "medium" | "hard">("easy");
   const [changeRequest, setChangeRequest] = useState("");
   const [repoError, setRepoError] = useState("");
   const [taskError, setTaskError] = useState("");
+  const [selectedGitAccountID, setSelectedGitAccountID] = useState("");
 
   // Settings states
   const [updatedName, setUpdatedName] = useState("");
@@ -36,6 +39,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
 
   // Skill assignment states
   const [assigningSkillMap, setAssigningSkillMap] = useState<Record<string, string>>({}); // agentID -> skillID
+  const [skillErrorMap, setSkillErrorMap] = useState<Record<string, string>>({});
 
   // Staff assignment states
   const [selectedStaff, setSelectedStaff] = useState("");
@@ -46,9 +50,9 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
   const orgID = session?.user.org_id ?? "";
 
   const { data: project, mutate: mutateProject } = useSWR(
-    projectID && token ? ["project", projectID, token] : null,
-    async ([, id, t]) => {
-      const p = await api.getProject(id, t);
+    projectID && token ? ["project", projectID] : null,
+    async () => {
+      const p = await api.getProject(projectID, token);
       if (p && !isProjectDataLoaded) {
         setUpdatedName(p.name);
         setUpdatedDescription(p.description || "");
@@ -58,43 +62,49 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
     }
   );
 
-  const { data: repositories = [], mutate: mutateRepos } = useSWR(projectID && token ? ["repositories", projectID, token] : null, ([, id, t]) => api.listRepositories(id, t));
-  const { data: tasks = [], mutate: mutateTasks } = useSWR(projectID && token ? ["tasks", projectID, token] : null, ([, id, t]) => api.listTasks(id, t));
+  const { data: repositories = [], mutate: mutateRepos } = useSWR(projectID && token ? ["repositories", projectID] : null, () => api.listRepositories(projectID, token));
+  const { data: tasks = [], mutate: mutateTasks } = useSWR(projectID && token ? ["tasks", projectID] : null, () => api.listTasks(projectID, token));
 
   // Fetch project members (assigned agents)
   const { data: projectAgents = [], mutate: mutateProjectAgents } = useSWR(
-    projectID && token ? ["project-agents", projectID, token] : null,
-    ([, pid, t]) => api.listAgents(pid, t),
+    projectID && token ? ["project-agents", projectID] : null,
+    () => api.listAgents(projectID, token),
   );
 
   // Fetch organization staff pool agents
-  const { data: orgAgents = [] } = useSWR(
-    session ? ["org-agents", orgID, token] : null,
-    ([, oid, t]) => api.listOrgAgents(oid, t),
+  const { data: orgAgents = [] } = useAuthedSWR(
+    orgID ? ["org-agents", orgID] : null,
+    (t) => api.listOrgAgents(orgID, t),
   );
 
   // Fetch project rules
   const { data: rules = [], mutate: mutateRules } = useSWR(
-    projectID && token ? ["rules", projectID, token] : null,
-    ([, pid, t]) => api.listRules(pid, t),
+    projectID && token ? ["rules", projectID] : null,
+    () => api.listRules(projectID, token),
+  );
+
+  // Fetch organization Git Accounts
+  const { data: gitAccounts = [] } = useAuthedSWR(
+    orgID ? ["git-accounts", orgID] : null,
+    (t) => api.listGitAccounts(orgID, t),
   );
 
   // Fetch all global skills
-  const { data: globalSkills = [] } = useSWR(
-    token ? ["global-skills", token] : null,
-    ([, t]) => api.listSkills(t),
+  const { data: globalSkills = [] } = useAuthedSWR(
+    ["global-skills"],
+    (t) => api.listSkills(t),
   );
 
   // Fetch assigned skills for each agent assigned to this project
   const { data: agentSkills = {}, mutate: mutateAgentSkills } = useSWR(
-    session && projectAgents.length > 0 ? ["agent-skills", projectAgents.map((a) => a.id).join(","), token] : null,
-    async ([, idsStr, t]) => {
-      const ids = idsStr.split(",");
+    session && projectAgents.length > 0 ? ["agent-skills", projectAgents.map((a) => a.id).join(",")] : null,
+    async () => {
+      const ids = projectAgents.map((a) => a.id);
       const map: Record<string, Skill[]> = {};
       await Promise.all(
         ids.map(async (aid) => {
           try {
-            const list = await api.listAgentSkills(aid, t);
+            const list = await api.listAgentSkills(aid, token);
             map[aid] = list;
           } catch (e) {
             console.error("Failed to fetch skills for agent", aid, e);
@@ -111,6 +121,8 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
       staff.assignment_strategy !== "auto_join" &&
       !projectAgents.some((pa) => pa.id === staff.id)
   );
+  const inheritedAgents = projectAgents.filter((agent) => agent.assignment_strategy === "auto_join");
+  const manualProjectAgents = projectAgents.filter((agent) => agent.assignment_strategy !== "auto_join");
 
   async function handleAssignStaff(e: FormEvent) {
     e.preventDefault();
@@ -125,9 +137,9 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
       await api.createAgent(projectID, token, {
         name: staff.name,
         role: staff.role,
-        provider: staff.provider,
-        model: staff.model,
-        level: staff.level,
+        goal: staff.goal,
+        autonomy_level: staff.autonomy_level,
+        model_route: staff.model_route,
         assignment_strategy: staff.assignment_strategy,
         agent_id: staff.id,
       });
@@ -190,6 +202,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
     const skillID = assigningSkillMap[agentID];
     if (!skillID || !token) return;
 
+    setSkillErrorMap((prev) => ({ ...prev, [agentID]: "" }));
     try {
       await api.assignSkillToAgent(agentID, skillID, token);
       setAssigningSkillMap((prev) => {
@@ -199,7 +212,10 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
       });
       mutateAgentSkills();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Failed to assign skill");
+      setSkillErrorMap((prev) => ({
+        ...prev,
+        [agentID]: err instanceof ApiError ? err.message : "Failed to assign skill",
+      }));
     }
   }
 
@@ -220,9 +236,11 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
         provider: "github",
         branch: "main",
         token: repoToken.trim(),
+        git_account_id: selectedGitAccountID || undefined,
       });
       setRepoURL("");
       setRepoToken("");
+      setSelectedGitAccountID("");
       mutateRepos();
     } catch (err) {
       setRepoError(errorMessage(err, "Failed to link repository"));
@@ -244,12 +262,13 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
       await api.createTask(projectID, token, {
         title,
         description: taskDescription.trim(),
-        complexity: "easy",
+        complexity: taskComplexity,
         priority: 0,
         labels: [],
       });
       setTaskTitle("");
       setTaskDescription("");
+      setTaskComplexity("easy");
       mutateTasks();
     } catch (err) {
       setTaskError(errorMessage(err, "Failed to create task"));
@@ -280,9 +299,9 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
   if (!session) {
     return (
       <main className="grid min-h-screen place-items-center p-6">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-6">
-          <p className="mb-4 text-sm text-[var(--muted)]">Login from the dashboard before opening a project.</p>
-          <Link className="rounded-md bg-[var(--accent)] px-4 py-2 font-semibold text-slate-950" href="/">
+        <div className="rounded-lg border border-stroke bg-panel p-6">
+          <p className="mb-4 text-sm text-content-muted">Login from the dashboard before opening a project.</p>
+          <Link className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950" href="/">
             Back to login
           </Link>
         </div>
@@ -292,46 +311,61 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
 
   return (
     <main className="min-h-screen p-5">
-      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-end">
+      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-stroke pb-5 md:flex-row md:items-end">
         <div>
-          <Link href="/" className="mb-4 inline-flex items-center gap-2 text-sm text-[var(--muted)] transition hover:text-white">
+          <Link href="/" className="mb-4 inline-flex items-center gap-2 text-sm text-content-muted transition hover:text-white">
             <ArrowLeft size={16} />
             Projects
           </Link>
           <h1 className="font-mono text-3xl font-semibold">{project?.name ?? "Project"}</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">{project?.description ?? "Repository and task workspace"}</p>
+          <p className="mt-1 text-sm text-content-muted">{project?.description ?? "Repository and task workspace"}</p>
         </div>
-        <div className="rounded-md border border-[var(--border)] bg-[var(--primary)] px-3 py-2 text-sm text-[var(--muted)]">Project ID: {projectID}</div>
+        <div className="rounded-md border border-stroke bg-panel px-3 py-2 text-sm text-content-muted">Project ID: {projectID}</div>
       </header>
 
       <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
         <section className="space-y-5">
           {/* Repositories Card */}
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-4 flex items-center gap-2">
-              <GitBranch size={18} className="text-[var(--accent)]" />
+              <GitBranch size={18} className="text-brand-primary" />
               <h2 className="font-mono text-lg font-semibold">Repositories</h2>
             </div>
             <form className="space-y-3" onSubmit={createRepository}>
-              <input value={repoURL} onChange={(e) => setRepoURL(e.target.value)} placeholder="https://github.com/org/repo.git" className="w-full rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white" />
-              <input value={repoToken} onChange={(e) => setRepoToken(e.target.value)} placeholder="GitHub token" type="password" className="w-full rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white" />
+              <input value={repoURL} onChange={(e) => setRepoURL(e.target.value)} placeholder="https://github.com/org/repo.git" className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white" />
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-content-muted pl-1">Git Account Credential</span>
+                <select
+                  value={selectedGitAccountID}
+                  onChange={(e) => setSelectedGitAccountID(e.target.value)}
+                  className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none"
+                >
+                  <option value="">None / Manual Override Token</option>
+                  {gitAccounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.display_name} ({acc.base_url ? "GitHub Enterprise" : "GitHub"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <input value={repoToken} onChange={(e) => setRepoToken(e.target.value)} placeholder="Manual token override (optional)" type="password" className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white" />
               {repoError && (
                 <p className="rounded border border-red-400/30 bg-red-950/40 p-2 text-xs text-red-200">
                   {repoError}
                 </p>
               )}
-              <button className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-slate-950 cursor-pointer" type="submit">
+              <button className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 cursor-pointer" type="submit">
                 <Plus size={16} />
                 Link repository
               </button>
             </form>
             <div className="mt-4 space-y-3">
               {repositories.map((repo: Repository) => (
-                <div key={repo.id} className="rounded-md border border-[var(--border)] bg-slate-950 p-3">
+                <div key={repo.id} className="rounded-md border border-stroke bg-slate-950 p-3">
                   <div className="break-all text-sm">{repo.url}</div>
-                  <div className="mt-2 flex items-center justify-between text-xs text-[var(--muted)]">
+                  <div className="mt-2 flex items-center justify-between text-xs text-content-muted">
                     <span>{repo.clone_status}</span>
-                    <button className="inline-flex items-center gap-1 rounded border border-[var(--border)] px-2 py-1 transition hover:bg-[var(--secondary)] cursor-pointer" onClick={() => cloneRepository(repo.id)} type="button">
+                    <button className="inline-flex items-center gap-1 rounded border border-stroke px-2 py-1 transition hover:bg-panel-muted cursor-pointer" onClick={() => cloneRepository(repo.id)} type="button">
                       <RefreshCw size={13} />
                       Clone
                     </button>
@@ -341,96 +375,27 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
             </div>
           </div>
 
-          {/* Project Members / Assigned Agents Card */}
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bot size={18} className="text-[var(--accent)]" />
-                <h2 className="font-mono text-lg font-semibold">Project Members</h2>
-              </div>
-              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs text-[var(--muted)] font-mono border border-[var(--border)]">
-                {projectAgents.length}
-              </span>
-            </div>
-
-            {/* List current members */}
-            <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1 mb-4">
-              {projectAgents.length === 0 ? (
-                <p className="text-xs text-[var(--muted)] italic">No members assigned yet.</p>
-              ) : (
-                projectAgents.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between rounded bg-slate-950 p-2.5 border border-[var(--border)]/50"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-semibold text-white">
-                          {member.name}
-                        </span>
-                        <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-[var(--muted)]">
-                          {member.role}
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-[var(--muted)] mt-0.5">
-                        {member.provider}/{member.model}
-                      </div>
-                    </div>
-                    <Badge value={member.level || "easy"} />
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Assign member form */}
-            {assignableStaff.length > 0 && (
-              <form className="mt-3 border-t border-[var(--border)] pt-4" onSubmit={handleAssignStaff}>
-                <label className="mb-1.5 block text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">
-                  Assign Staff Member
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={selectedStaff}
-                    onChange={(e) => setSelectedStaff(e.target.value)}
-                    className="flex-1 rounded border border-[var(--border)] bg-slate-950 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[var(--accent)] cursor-pointer"
-                    disabled={isAssigning}
-                  >
-                    <option value="">— Choose a staff member —</option>
-                    {assignableStaff.map((staff) => (
-                      <option key={staff.id} value={staff.id}>
-                        {staff.name} ({staff.role})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    disabled={!selectedStaff || isAssigning}
-                    className="rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                    type="submit"
-                  >
-                    Add
-                  </button>
-                </div>
-                {assignError && (
-                  <p className="mt-2 text-xs text-red-400">
-                    {assignError}
-                  </p>
-                )}
-              </form>
-            )}
-          </div>
-
           {/* Create Task Card */}
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5">
+          <div className="rounded-lg border border-stroke bg-panel p-5">
             <h2 className="mb-4 font-mono text-lg font-semibold">Create task</h2>
             <form className="space-y-3" onSubmit={createTask}>
-              <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Task title" className="w-full rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white" />
-              <textarea value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} placeholder="Description, context, files, expected behavior" rows={5} className="w-full rounded-md border border-[var(--border)] bg-slate-950 px-3 py-2 text-sm text-white" />
+              <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Task title" className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white" />
+              <select
+                value={taskComplexity}
+                onChange={(e) => setTaskComplexity(e.target.value as "easy" | "medium" | "hard")}
+                className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white"
+              >
+                <option value="easy">easy</option>
+                <option value="medium">medium</option>
+                <option value="hard">hard</option>
+              </select>
+              <textarea value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} placeholder="Description, context, files, expected behavior" rows={5} className="w-full rounded-md border border-stroke bg-slate-950 px-3 py-2 text-sm text-white" />
               {taskError && (
                 <p className="rounded border border-red-400/30 bg-red-950/40 p-2 text-xs text-red-200">
                   {taskError}
                 </p>
               )}
-              <button className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-slate-950 cursor-pointer" type="submit">
+              <button className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 cursor-pointer" type="submit">
                 <Plus size={16} />
                 Create task
               </button>
@@ -439,30 +404,41 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
         </section>
 
         {/* Right Section containing Tabs */}
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--primary)] p-5 flex flex-col">
+        <section className="rounded-lg border border-stroke bg-panel p-5 flex flex-col">
           {/* Tab Navigation header */}
-          <div className="mb-5 flex gap-5 border-b border-[var(--border)]">
+          <div className="mb-5 flex gap-5 border-b border-stroke">
             <button
               onClick={() => setActiveTab("tasks")}
               className={`flex items-center gap-2 pb-2.5 text-sm font-mono font-bold uppercase tracking-wider transition cursor-pointer border-b-2 ${
                 activeTab === "tasks"
-                  ? "border-[var(--accent)] text-white"
-                  : "border-transparent text-[var(--muted)] hover:text-white"
+                  ? "border-brand-primary text-white"
+                  : "border-transparent text-content-muted hover:text-white"
               }`}
             >
               <List size={16} />
               Tasks
             </button>
             <button
+              onClick={() => setActiveTab("members")}
+              className={`flex items-center gap-2 pb-2.5 text-sm font-mono font-bold uppercase tracking-wider transition cursor-pointer border-b-2 ${
+                activeTab === "members"
+                  ? "border-brand-primary text-white"
+                  : "border-transparent text-content-muted hover:text-white"
+              }`}
+            >
+              <Bot size={16} />
+              Members
+            </button>
+            <button
               onClick={() => setActiveTab("settings")}
               className={`flex items-center gap-2 pb-2.5 text-sm font-mono font-bold uppercase tracking-wider transition cursor-pointer border-b-2 ${
                 activeTab === "settings"
-                  ? "border-[var(--accent)] text-white"
-                  : "border-transparent text-[var(--muted)] hover:text-white"
+                  ? "border-brand-primary text-white"
+                  : "border-transparent text-content-muted hover:text-white"
               }`}
             >
               <Settings size={16} />
-              Settings & Skills
+              Settings & Rules
             </button>
           </div>
 
@@ -470,10 +446,10 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
           {activeTab === "tasks" && (
             <div className="space-y-4">
               {tasks.length === 0 ? (
-                <p className="text-sm text-[var(--muted)] italic">No tasks created yet.</p>
+                <p className="text-sm text-content-muted italic">No tasks created yet.</p>
               ) : (
                 tasks.map((task: Task) => (
-                  <article key={task.id} className="rounded-lg border border-[var(--border)] bg-slate-950 p-4">
+                  <article key={task.id} className="rounded-lg border border-stroke bg-slate-950 p-4">
                     <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -482,13 +458,13 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                           <Badge value={task.spec_status} />
                           <Badge value={task.status} />
                         </div>
-                        <p className="mt-2 text-sm text-[var(--muted)]">{task.description || "No description"}</p>
+                        <p className="mt-2 text-sm text-content-muted">{task.description || "No description"}</p>
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-2">
-                        <Link className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-2 text-sm transition hover:bg-[var(--secondary)] cursor-pointer" href={`/projects/${projectID}/tasks/${task.id}/monitor`}>
+                        <Link className="inline-flex items-center gap-2 rounded-md border border-stroke px-3 py-2 text-sm transition hover:bg-panel-muted cursor-pointer" href={`/projects/${projectID}/tasks/${task.id}/monitor`}>
                           Workflow
                         </Link>
-                        <button className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-2 text-sm transition hover:bg-[var(--secondary)] cursor-pointer" onClick={() => analyze(task.id)} type="button">
+                        <button className="inline-flex items-center gap-2 rounded-md border border-stroke px-3 py-2 text-sm transition hover:bg-panel-muted cursor-pointer" onClick={() => analyze(task.id)} type="button">
                           <Play size={15} />
                           Analyze
                         </button>
@@ -509,7 +485,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                     )}
 
                     <div className="mt-4 flex flex-col gap-2 md:flex-row">
-                      <input value={changeRequest} onChange={(e) => setChangeRequest(e.target.value)} placeholder="Request spec changes" className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)]" />
+                      <input value={changeRequest} onChange={(e) => setChangeRequest(e.target.value)} placeholder="Request spec changes" className="min-w-0 flex-1 rounded-md border border-stroke bg-page px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary" />
                       <button className="inline-flex items-center justify-center gap-2 rounded-md border border-amber-400/40 px-3 py-2 text-sm text-amber-200 transition hover:bg-amber-400/10 cursor-pointer" onClick={() => requestChanges(task.id)} type="button">
                         <ShieldAlert size={15} />
                         Request changes
@@ -521,32 +497,127 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
             </div>
           )}
 
+          {/* TAB CONTENT: MEMBERS */}
+          {activeTab === "members" && (
+            <div className="space-y-6">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <ProjectMetric label="Total members" value={projectAgents.length.toString()} />
+                <ProjectMetric label="Inherited" value={inheritedAgents.length.toString()} />
+                <ProjectMetric label="Project-specific" value={manualProjectAgents.length.toString()} />
+              </div>
+
+              <section className="rounded-lg border border-stroke bg-slate-950 p-5">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-stroke pb-3">
+                  <div>
+                    <h3 className="font-mono font-semibold text-white">Inherited from Global</h3>
+                    <p className="text-sm text-content-muted">Auto-join agents are inherited by every project.</p>
+                  </div>
+                  <Badge value="auto_join" />
+                </div>
+
+                {inheritedAgents.length === 0 ? (
+                  <p className="text-sm italic text-content-muted">No auto-join agents in the organization pool.</p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {inheritedAgents.map((agent) => (
+                      <ProjectAgentCard
+                        key={agent.id}
+                        agent={agent}
+                        badge="Global"
+                        skillsCount={(agentSkills[agent.id] || []).length}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-stroke bg-slate-950 p-5">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-stroke pb-3">
+                  <div>
+                    <h3 className="font-mono font-semibold text-white">Project-specific</h3>
+                    <p className="text-sm text-content-muted">Manual assignments from the organization agent pool.</p>
+                  </div>
+                  <Badge value="manual" />
+                </div>
+
+                {manualProjectAgents.length === 0 ? (
+                  <p className="text-sm italic text-content-muted">No manual agents assigned to this project.</p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {manualProjectAgents.map((agent) => (
+                      <ProjectAgentCard
+                        key={agent.id}
+                        agent={agent}
+                        badge="Manual"
+                        skillsCount={(agentSkills[agent.id] || []).length}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <form className="mt-5 border-t border-stroke pt-4" onSubmit={handleAssignStaff}>
+                  <label className="mb-1.5 block font-mono text-xs font-bold uppercase tracking-wider text-content-muted">
+                    Assign from organization pool
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      value={selectedStaff}
+                      onChange={(e) => setSelectedStaff(e.target.value)}
+                      className="min-w-0 flex-1 rounded border border-stroke bg-slate-900 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none"
+                      disabled={isAssigning || assignableStaff.length === 0}
+                    >
+                      <option value="">
+                        {assignableStaff.length === 0 ? "No manual agents available" : "Choose a manual agent"}
+                      </option>
+                      {assignableStaff.map((staff) => (
+                        <option key={staff.id} value={staff.id}>
+                          {staff.name} ({staff.role})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={!selectedStaff || isAssigning}
+                      className="rounded bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50"
+                      type="submit"
+                    >
+                      {isAssigning ? "Assigning..." : "Assign"}
+                    </button>
+                  </div>
+                  {assignError && <p className="mt-2 text-xs text-red-400">{assignError}</p>}
+                  <p className="mt-2 text-xs text-content-muted">
+                    Removing a project-only assignment is hidden until the backend supports deleting from `project_agents`.
+                  </p>
+                </form>
+              </section>
+            </div>
+          )}
+
           {/* TAB CONTENT: SETTINGS & SKILLS */}
           {activeTab === "settings" && (
             <div className="space-y-6">
               {/* Project General info Form */}
-              <div className="rounded-lg border border-[var(--border)] bg-slate-950 p-5">
-                <div className="mb-4 flex items-center gap-2 border-b border-[var(--border)] pb-2">
-                  <Settings size={18} className="text-[var(--accent)]" />
+              <div className="rounded-lg border border-stroke bg-slate-950 p-5">
+                <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-2">
+                  <Settings size={18} className="text-brand-primary" />
                   <h3 className="font-mono font-semibold text-white">Project Metadata</h3>
                 </div>
                 <form onSubmit={handleUpdateProject} className="space-y-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">Project Name</label>
+                    <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Project Name</label>
                     <input
                       value={updatedName}
                       onChange={(e) => setUpdatedName(e.target.value)}
-                      className="rounded border border-[var(--border)] bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)]"
+                      className="rounded border border-stroke bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary"
                       required
                       disabled={isUpdatingProject}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">Description</label>
+                    <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Description</label>
                     <textarea
                       value={updatedDescription}
                       onChange={(e) => setUpdatedDescription(e.target.value)}
-                      className="min-h-[80px] rounded border border-[var(--border)] bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)] resize-none"
+                      className="min-h-[80px] rounded border border-stroke bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary resize-none"
                       disabled={isUpdatingProject}
                     />
                   </div>
@@ -556,7 +627,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                   <button
                     type="submit"
                     disabled={isUpdatingProject}
-                    className="flex items-center gap-2 rounded bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                    className="flex items-center gap-2 rounded bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
                   >
                     <Save size={16} />
                     {isUpdatingProject ? "Saving..." : "Save Project Settings"}
@@ -565,21 +636,21 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
               </div>
 
               {/* Project Rules Card */}
-              <div className="rounded-lg border border-[var(--border)] bg-slate-950 p-5">
-                <div className="mb-4 flex items-center gap-2 border-b border-[var(--border)] pb-2">
-                  <ShieldCheck size={18} className="text-[var(--accent)]" />
+              <div className="rounded-lg border border-stroke bg-slate-950 p-5">
+                <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-2">
+                  <ShieldCheck size={18} className="text-brand-primary" />
                   <h3 className="font-mono font-semibold text-white">Project Rules</h3>
                 </div>
 
                 {/* Display existing rules */}
                 <div className="space-y-3 mb-4 max-h-[200px] overflow-y-auto pr-1">
                   {rules.length === 0 ? (
-                    <p className="text-xs text-[var(--muted)] italic">No rules defined for this project.</p>
+                    <p className="text-xs text-content-muted italic">No rules defined for this project.</p>
                   ) : (
                     rules.map((rule) => (
-                      <div key={rule.id} className="rounded border border-[var(--border)]/50 bg-slate-900 p-3 text-sm">
+                      <div key={rule.id} className="rounded border border-stroke/50 bg-slate-900 p-3 text-sm">
                         <p className="text-white whitespace-pre-wrap">{rule.content}</p>
-                        <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--muted)] font-mono">
+                        <div className="mt-2 flex items-center gap-2 text-[10px] text-content-muted font-mono">
                           <span>Enforcement: <span className="text-emerald-300 font-bold uppercase">{rule.enforcement}</span></span>
                           <span>•</span>
                           <span>Scope: <span className="text-white uppercase">{rule.scope}</span></span>
@@ -590,20 +661,20 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                 </div>
 
                 {/* Add new project rule form */}
-                <form onSubmit={handleAddRule} className="space-y-3 pt-3 border-t border-[var(--border)]/40">
-                  <label className="block text-xs font-mono font-bold uppercase tracking-wider text-[var(--muted)]">Add Custom Rule</label>
+                <form onSubmit={handleAddRule} className="space-y-3 pt-3 border-t border-stroke/40">
+                  <label className="block text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Add Custom Rule</label>
                   <textarea
                     value={ruleContent}
                     onChange={(e) => setRuleContent(e.target.value)}
                     placeholder="e.g. Always write Unit Tests for all new repository helper functions."
-                    className="min-h-[85px] w-full rounded border border-[var(--border)] bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)] resize-none"
+                    className="min-h-[85px] w-full rounded border border-stroke bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary resize-none"
                     disabled={isAddingRule}
                   />
                   {ruleError && <p className="text-xs text-red-400">{ruleError}</p>}
                   <button
                     type="submit"
                     disabled={isAddingRule || !ruleContent.trim()}
-                    className="flex items-center gap-2 rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                    className="flex items-center gap-2 rounded bg-brand-primary px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
                   >
                     <Plus size={14} />
                     Add Rule
@@ -612,15 +683,15 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
               </div>
 
               {/* Agent Skills Management panel */}
-              <div className="rounded-lg border border-[var(--border)] bg-slate-950 p-5">
-                <div className="mb-4 flex items-center gap-2 border-b border-[var(--border)] pb-2">
-                  <Bot size={18} className="text-[var(--accent)]" />
+              <div className="rounded-lg border border-stroke bg-slate-950 p-5">
+                <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-2">
+                  <Bot size={18} className="text-brand-primary" />
                   <h3 className="font-mono font-semibold text-white">Agent Skills Configuration</h3>
                 </div>
 
                 <div className="space-y-4">
                   {projectAgents.length === 0 ? (
-                    <p className="text-xs text-[var(--muted)] italic">No agents assigned to this project yet.</p>
+                    <p className="text-xs text-content-muted italic">No agents assigned to this project yet.</p>
                   ) : (
                     projectAgents.map((agent) => {
                       const assignedSkills = agentSkills[agent.id] || [];
@@ -630,24 +701,24 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
                       );
 
                       return (
-                        <div key={agent.id} className="rounded border border-[var(--border)]/40 bg-slate-900 p-4 space-y-3">
+                        <div key={agent.id} className="rounded border border-stroke/40 bg-slate-900 p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <div>
                               <h4 className="font-mono text-sm font-bold text-white">{agent.name}</h4>
-                              <p className="text-xs text-[var(--muted)] uppercase font-mono tracking-wide">{agent.role}</p>
+                              <p className="text-xs text-content-muted uppercase font-mono tracking-wide">{agent.role}</p>
                             </div>
-                            <Badge value={agent.level} />
+                            <Badge value={agent.autonomy_level} />
                           </div>
 
                           {/* Render skills badges */}
                           <div>
-                            <span className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--muted)] mb-1">Active Skills:</span>
+                            <span className="block text-[10px] font-mono font-bold uppercase tracking-wider text-content-muted mb-1">Active Skills:</span>
                             {assignedSkills.length === 0 ? (
-                              <p className="text-xs text-[var(--muted)] italic">No skills assigned.</p>
+                              <p className="text-xs text-content-muted italic">No skills assigned.</p>
                             ) : (
                               <div className="flex flex-wrap gap-1.5">
                                 {assignedSkills.map((s) => (
-                                  <span key={s.id} className="rounded bg-slate-950 border border-[var(--border)] px-2 py-0.5 text-xs text-white" title={s.description}>
+                                  <span key={s.id} className="rounded bg-slate-950 border border-stroke px-2 py-0.5 text-xs text-white" title={s.description}>
                                     {s.name}
                                   </span>
                                 ))}
@@ -657,32 +728,39 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
 
                           {/* Skill Assignment form */}
                           {assignableSkills.length > 0 && (
-                            <div className="flex gap-2 pt-2 border-t border-[var(--border)]/30">
-                              <select
-                                value={assigningSkillMap[agent.id] || ""}
-                                onChange={(e) =>
-                                  setAssigningSkillMap((prev) => ({
-                                    ...prev,
-                                    [agent.id]: e.target.value,
-                                  }))
-                                }
-                                className="flex-1 rounded border border-[var(--border)] bg-slate-950 px-2 py-1 text-xs text-white focus:outline-none focus:border-[var(--accent)] cursor-pointer"
-                              >
-                                <option value="">— Assign Skill —</option>
-                                {assignableSkills.map((s) => (
-                                  <option key={s.id} value={s.id} title={s.description}>
-                                    {s.name}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={() => handleAssignSkill(agent.id)}
-                                disabled={!assigningSkillMap[agent.id]}
-                                className="rounded bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                                type="button"
-                              >
-                                Assign
-                              </button>
+                            <div className="space-y-2 border-t border-stroke/30 pt-2">
+                              <div className="flex gap-2">
+                                <select
+                                  value={assigningSkillMap[agent.id] || ""}
+                                  onChange={(e) =>
+                                    setAssigningSkillMap((prev) => ({
+                                      ...prev,
+                                      [agent.id]: e.target.value,
+                                    }))
+                                  }
+                                  className="flex-1 rounded border border-stroke bg-slate-950 px-2 py-1 text-xs text-white focus:outline-none focus:border-brand-primary cursor-pointer"
+                                >
+                                  <option value="">— Assign Skill —</option>
+                                  {assignableSkills.map((s) => (
+                                    <option key={s.id} value={s.id} title={s.description}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => handleAssignSkill(agent.id)}
+                                  disabled={!assigningSkillMap[agent.id]}
+                                  className="rounded bg-brand-primary px-3 py-1 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                                  type="button"
+                                >
+                                  Assign
+                                </button>
+                              </div>
+                              {skillErrorMap[agent.id] && (
+                                <p className="rounded border border-red-500/20 bg-red-950/40 p-2 text-xs text-red-200">
+                                  {skillErrorMap[agent.id]}
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -701,4 +779,45 @@ export default function ProjectDetail({ params }: { params: Promise<{ id: string
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof ApiError ? err.message : fallback;
+}
+
+function ProjectMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <article className="rounded-lg border border-stroke bg-slate-950 p-4">
+      <div className="font-mono text-lg font-semibold text-white">{value}</div>
+      <div className="text-xs text-content-muted">{label}</div>
+    </article>
+  );
+}
+
+function ProjectAgentCard({
+  agent,
+  badge,
+  skillsCount,
+}: {
+  agent: Agent;
+  badge: string;
+  skillsCount: number;
+}) {
+  return (
+    <article className="rounded-lg border border-stroke bg-slate-900 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="truncate font-mono font-semibold text-white">{agent.name}</h4>
+          <p className="truncate text-xs text-content-muted">{agent.model_route}</p>
+        </div>
+        <span className="rounded border border-stroke bg-slate-950 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
+          {badge}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Badge value={agent.role} />
+        <Badge value={agent.autonomy_level || "supervised"} />
+        <Badge value={agent.status || "idle"} />
+        <span className="rounded border border-stroke bg-slate-950 px-2 py-0.5 text-xs text-slate-300">
+          {skillsCount} skills
+        </span>
+      </div>
+    </article>
+  );
 }

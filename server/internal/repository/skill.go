@@ -38,6 +38,17 @@ func (r *SkillRepo) List(ctx context.Context) ([]models.Skill, error) {
 	return skills, nil
 }
 
+func (r *SkillRepo) ListByNames(ctx context.Context, names []string) ([]models.Skill, error) {
+	var skills []models.Skill
+	if len(names) == 0 {
+		return skills, nil
+	}
+	if err := r.db.WithContext(ctx).Where("name IN ?", names).Order("name ASC").Find(&skills).Error; err != nil {
+		return nil, fmt.Errorf("list skills by names: %w", err)
+	}
+	return skills, nil
+}
+
 func (r *SkillRepo) ListByAgentID(ctx context.Context, agentID string) ([]models.Skill, error) {
 	var skills []models.Skill
 	err := r.db.WithContext(ctx).
@@ -58,6 +69,24 @@ func (r *SkillRepo) AssignToAgent(ctx context.Context, agentID, skillID string) 
 		return fmt.Errorf("assign skill to agent: %w", err)
 	}
 	return nil
+}
+
+func (r *SkillRepo) ReplaceAgentSkills(ctx context.Context, agentID string, skillIDs []string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&models.AgentSkill{}, "agent_id = ?", agentID).Error; err != nil {
+			return fmt.Errorf("clear agent skills: %w", err)
+		}
+		for _, skillID := range skillIDs {
+			if skillID == "" {
+				continue
+			}
+			assignment := models.AgentSkill{AgentID: agentID, SkillID: skillID}
+			if err := tx.FirstOrCreate(&assignment, "agent_id = ? AND skill_id = ?", agentID, skillID).Error; err != nil {
+				return fmt.Errorf("assign skill to agent: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func (r *SkillRepo) Update(ctx context.Context, id string, input models.UpdateSkillInput) (*models.Skill, error) {

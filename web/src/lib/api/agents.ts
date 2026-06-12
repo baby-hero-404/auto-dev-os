@@ -59,6 +59,26 @@ export const skills = {
   list(token: string) {
     return request<Skill[]>("/skills", { token });
   },
+  seed(token: string) {
+    return request<Skill[]>("/skills/seed", { method: "POST", token });
+  },
+  create(token: string, input: { name: string; description: string; schema: Record<string, unknown> }) {
+    return request<Skill>("/skills", {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  update(skillID: string, token: string, input: { name?: string; description?: string; schema?: Record<string, unknown> }) {
+    return request<Skill>(`/skills/${skillID}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  remove(skillID: string, token: string) {
+    return request<void>(`/skills/${skillID}`, { method: "DELETE", token });
+  },
   listForAgent(agentID: string, token: string) {
     return request<Skill[]>(`/agents/${agentID}/skills`, { token });
   },
@@ -67,6 +87,13 @@ export const skills = {
       method: "POST",
       token,
       body: JSON.stringify({ skill_id: skillID }),
+    });
+  },
+  replaceForAgent(agentID: string, skillIDs: string[], token: string) {
+    return request<{ status: string }>(`/agents/${agentID}/skills`, {
+      method: "PUT",
+      token,
+      body: JSON.stringify({ skill_ids: skillIDs }),
     });
   },
 };

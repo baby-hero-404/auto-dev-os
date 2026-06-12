@@ -18,11 +18,13 @@ type ToolDefinition struct {
 }
 
 type SkillCall struct {
-	Name      string         `json:"name"`
-	Input     map[string]any `json:"input"`
-	Workspace string         `json:"workspace"`
-	TaskID    string         `json:"task_id"`
-	AgentID   string         `json:"agent_id"`
+	Name         string         `json:"name"`
+	Input        map[string]any `json:"input"`
+	Workspace    string         `json:"workspace"`
+	TaskID       string         `json:"task_id"`
+	AgentID      string         `json:"agent_id"`
+	AgentName    string         `json:"agent_name,omitempty"`
+	AllowedTools []string       `json:"allowed_tools,omitempty"`
 }
 
 type SkillResult struct {
@@ -42,6 +44,8 @@ func NewSkillExecutor(runtime sandbox.Runtime) *SkillExecutor {
 
 func BuiltinToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
+		toolDefinition("read_file", "Read a workspace file.", `{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"max_bytes":{"type":"integer","default":12000}}}`),
+		toolDefinition("write_file", "Write content to a workspace file.", `{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}`),
 		toolDefinition("run_tests", "Run project tests inside the sandbox.", `{"type":"object","properties":{"command":{"type":"string","default":"go test ./..."}}}`),
 		toolDefinition("analyze_logs", "Read and summarize a local log file.", `{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"max_bytes":{"type":"integer","default":4000}}}`),
 		toolDefinition("generate_docs", "Generate documentation text from a topic and source summary.", `{"type":"object","required":["topic"],"properties":{"topic":{"type":"string"},"summary":{"type":"string"}}}`),
@@ -56,10 +60,21 @@ func toolDefinition(name, description, schema string) ToolDefinition {
 }
 
 func (e *SkillExecutor) Execute(ctx context.Context, call SkillCall) SkillResult {
+	if !callAllowsTool(call) {
+		agentName := call.AgentName
+		if agentName == "" {
+			agentName = call.AgentID
+		}
+		return skillError(call.Name, fmt.Sprintf("agent %s is not authorized to use tool %s", agentName, call.Name))
+	}
 	if call.Workspace == "" {
 		return skillError(call.Name, "workspace is required")
 	}
 	switch call.Name {
+	case "read_file":
+		return e.readFile(call)
+	case "write_file":
+		return e.writeFile(call)
 	case "run_tests":
 		return e.runSandboxCommand(ctx, call, stringInput(call.Input, "command", "go test ./..."))
 	case "analyze_logs":
@@ -75,6 +90,49 @@ func (e *SkillExecutor) Execute(ctx context.Context, call SkillCall) SkillResult
 	default:
 		return skillError(call.Name, "unknown skill")
 	}
+}
+
+func callAllowsTool(call SkillCall) bool {
+	if len(call.AllowedTools) == 0 {
+		return true
+	}
+	for _, tool := range call.AllowedTools {
+		if strings.EqualFold(strings.TrimSpace(tool), call.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *SkillExecutor) readFile(call SkillCall) SkillResult {
+	target, err := safeWorkspacePath(call.Workspace, stringInput(call.Input, "path", ""))
+	if err != nil {
+		return skillError(call.Name, err.Error())
+	}
+	maxBytes := intInput(call.Input, "max_bytes", 12000)
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return skillError(call.Name, err.Error())
+	}
+	if len(data) > maxBytes {
+		data = data[:maxBytes]
+	}
+	return SkillResult{Name: call.Name, Success: true, Output: string(data)}
+}
+
+func (e *SkillExecutor) writeFile(call SkillCall) SkillResult {
+	target, err := safeWorkspacePath(call.Workspace, stringInput(call.Input, "path", ""))
+	if err != nil {
+		return skillError(call.Name, err.Error())
+	}
+	content := stringInput(call.Input, "content", "")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return skillError(call.Name, err.Error())
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		return skillError(call.Name, err.Error())
+	}
+	return SkillResult{Name: call.Name, Success: true, Output: fmt.Sprintf("wrote %s", stringInput(call.Input, "path", ""))}
 }
 
 func (e *SkillExecutor) runSandboxCommand(ctx context.Context, call SkillCall, command string) SkillResult {

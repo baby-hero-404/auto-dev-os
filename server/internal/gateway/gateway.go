@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -142,10 +143,30 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (*llm.Resp
 				failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
 				break
 			}
-			resp, err := provider.Chat(ctx, messages)
+			var resp *llm.Response
+			attempts := 4
+			for attempt := 0; attempt < attempts; attempt++ {
+				resp, err = provider.Chat(ctx, messages)
+				if err == nil {
+					break
+				}
+				if isTransientError(err) && attempt < attempts-1 {
+					backoff := time.Duration(1000*(1<<attempt)) * time.Millisecond
+					log.Printf("[AIGateway] Transient error calling %s/%s: %v. Retrying in %v (attempt %d/%d)...", entry.Provider, entry.Model, err, backoff, attempt+1, attempts)
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return nil, ctx.Err()
+					case <-timer.C:
+					}
+					continue
+				}
+				break
+			}
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
-				if isRateLimitError(err) {
+				if isTransientError(err) {
 					_ = g.credentialPool.SetCooldown(ctx, cred.ID, time.Now().Add(g.cooldown))
 					excluded[cred.ID] = true
 					continue
@@ -209,6 +230,7 @@ func defaultEntries(cfg *config.Config, complexity string) []models.ComboEntry {
 	case llm.TierPowerful:
 		add("openai", cfg.LLM.PowerfulModel, 0)
 		add("anthropic", cfg.LLM.AnthropicPowerfulModel, 1)
+		add("gemini", cfg.LLM.GeminiBalancedModel, 2)
 	default:
 		add("openai", cfg.LLM.BalancedModel, 0)
 		add("anthropic", cfg.LLM.AnthropicBalancedModel, 1)
@@ -244,15 +266,18 @@ func estimateCost(messages []llm.Message, opts llm.RouteOptions, entry models.Co
 	return llm.EstimateCost(llm.EstimateMessageTokens(messages), outputTokens, meta)
 }
 
-func isRateLimitError(err error) bool {
+func isTransientError(err error) bool {
 	var statusErr interface{ HTTPStatusCode() int }
 	if errors.As(err, &statusErr) {
 		statusCode := statusErr.HTTPStatusCode()
-		return statusCode == 429 || statusCode == 402
+		return statusCode == 429 || statusCode == 402 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "status 429") || strings.Contains(msg, "status 402") ||
-		strings.Contains(msg, "rate limit") || strings.Contains(msg, "quota")
+		strings.Contains(msg, "status 500") || strings.Contains(msg, "status 502") ||
+		strings.Contains(msg, "status 503") || strings.Contains(msg, "status 504") ||
+		strings.Contains(msg, "rate limit") || strings.Contains(msg, "quota") ||
+		strings.Contains(msg, "temporarily unavailable") || strings.Contains(msg, "high demand")
 }
 
 func tierForComplexity(complexity string) string {

@@ -8,10 +8,13 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-type SkillService struct{ repo *repository.SkillRepo }
+type SkillService struct {
+	repo       *repository.SkillRepo
+	skillsRoot string
+}
 
-func NewSkillService(repo *repository.SkillRepo) *SkillService {
-	return &SkillService{repo: repo}
+func NewSkillService(repo *repository.SkillRepo, skillsRoot string) *SkillService {
+	return &SkillService{repo: repo, skillsRoot: skillsRoot}
 }
 
 func (s *SkillService) Create(ctx context.Context, input models.CreateSkillInput) (*models.Skill, error) {
@@ -46,6 +49,13 @@ func (s *SkillService) AssignToAgent(ctx context.Context, agentID, skillID strin
 	return s.repo.AssignToAgent(ctx, agentID, skillID)
 }
 
+func (s *SkillService) ReplaceAgentSkills(ctx context.Context, agentID string, skillIDs []string) error {
+	if agentID == "" {
+		return ErrValidation("agent id is required")
+	}
+	return s.repo.ReplaceAgentSkills(ctx, agentID, skillIDs)
+}
+
 func (s *SkillService) Test(ctx context.Context, id string, input map[string]any) (map[string]any, error) {
 	skill, err := s.GetByID(ctx, id)
 	if err != nil {
@@ -66,4 +76,37 @@ func (s *SkillService) Update(ctx context.Context, id string, input models.Updat
 
 func (s *SkillService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *SkillService) SeedDefaultSkills(ctx context.Context) ([]models.Skill, error) {
+	defaults, err := loadPromptBaseSkills(s.skillsRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(defaults))
+	for i, d := range defaults {
+		names[i] = d.Name
+	}
+	existing, err := s.repo.ListByNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	existingNames := make(map[string]bool)
+	for _, skill := range existing {
+		existingNames[skill.Name] = true
+	}
+
+	var created []models.Skill
+	for _, input := range defaults {
+		if existingNames[input.Name] {
+			continue
+		}
+		skill, err := s.repo.Create(ctx, input)
+		if err != nil {
+			continue
+		}
+		created = append(created, *skill)
+	}
+	return created, nil
 }

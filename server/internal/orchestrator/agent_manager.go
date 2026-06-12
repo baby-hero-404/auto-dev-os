@@ -38,6 +38,22 @@ func (m *AgentManager) Assign(ctx context.Context, task *models.Task) (*models.A
 	return agent, nil
 }
 
+func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleReviewer)
+	if err != nil {
+		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	status := models.AgentStatusAssigned
+	if _, err := m.repo.Update(ctx, agent.ID, models.UpdateAgentInput{Status: &status}); err != nil {
+		return nil, err
+	}
+	agent.Status = status
+	return agent, nil
+}
+
 func (m *AgentManager) MarkRunning(ctx context.Context, agentID string) error {
 	status := models.AgentStatusRunning
 	_, err := m.repo.Update(ctx, agentID, models.UpdateAgentInput{Status: &status})

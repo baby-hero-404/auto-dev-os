@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
@@ -13,13 +14,16 @@ import (
 type mockGitProvider struct {
 	createdBranch string
 	commitMessage string
+	commitPath    string
 	pushToken     string
 	prTitle       string
 	prHead        string
 	prBase        string
+	clonedURL     string
 }
 
 func (m *mockGitProvider) CloneRepo(ctx context.Context, repoURL, token, branch, localPath string) (string, error) {
+	m.clonedURL = repoURL
 	return "main", nil
 }
 
@@ -29,6 +33,7 @@ func (m *mockGitProvider) CreateBranch(ctx context.Context, localPath, branchNam
 }
 
 func (m *mockGitProvider) CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error {
+	m.commitPath = localPath
 	m.commitMessage = message
 	m.pushToken = token
 	return nil
@@ -160,5 +165,118 @@ func TestGitOpsAdapter_ProviderAndTokenForRepo_UsesLinkedAccountCredentials(t *t
 	}
 	if token != "account-token" {
 		t.Errorf("expected linked account token, got %q", token)
+	}
+}
+
+func TestGitOpsAdapter_CommitAndPush_UsesLinkedAccountToken(t *testing.T) {
+	accountID := "git-account-1"
+	provider := &mockGitProvider{}
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:           "repo-123",
+			URL:          "https://github.com/test-owner/test-repo.git",
+			Token:        "",
+			Branch:       "main",
+			GitAccountID: &accountID,
+		},
+	}
+	tmpDir := t.TempDir()
+	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir)
+	adapter.SetGitAccountLookup(&mockGitAccountLookup{
+		account: &models.GitAccount{
+			ID:    accountID,
+			Token: "account-token",
+		},
+	})
+	ctx := observability.WithTaskID(context.Background(), "task-456")
+
+	if err := adapter.CommitAndPush(ctx, "https://github.com/test-owner/test-repo.git", "feature", "commit msg", nil, "backend"); err != nil {
+		t.Fatalf("CommitAndPush: %v", err)
+	}
+	if provider.pushToken != "account-token" {
+		t.Fatalf("expected linked account token, got %q", provider.pushToken)
+	}
+	if provider.commitPath != filepath.Join(tmpDir, "task-456") {
+		t.Fatalf("expected task workspace path, got %q", provider.commitPath)
+	}
+}
+
+func TestGitOpsAdapter_CommitAndPush_RejectsEscapingFilePath(t *testing.T) {
+	provider := &mockGitProvider{}
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:  "repo-123",
+			URL: "https://github.com/test-owner/test-repo.git",
+		},
+	}
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+
+	err := adapter.CommitAndPush(context.Background(), "https://github.com/test-owner/test-repo.git", "feature", "commit msg", map[string]string{
+		"../outside.txt": "escape",
+	}, "backend")
+	if err == nil {
+		t.Fatal("expected path escape error")
+	}
+	if provider.commitMessage != "" {
+		t.Fatal("commit should not run after path validation failure")
+	}
+}
+
+func TestGitOpsAdapter_LookupRepository_FallsBackToOriginalURL(t *testing.T) {
+	provider := &mockGitProvider{}
+	sshURL := "git@github.com:test-owner/test-repo.git"
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:  "repo-123",
+			URL: sshURL,
+		},
+	}
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+
+	if err := adapter.CreateBranch(context.Background(), sshURL, "feature"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+	if provider.createdBranch != "feature" {
+		t.Fatalf("expected branch to be created after original URL fallback")
+	}
+}
+
+func TestGitOpsAdapter_CreatePullRequest_UsesMainWhenRepoBranchEmpty(t *testing.T) {
+	provider := &mockGitProvider{}
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:  "repo-123",
+			URL: "https://github.com/test-owner/test-repo.git",
+		},
+	}
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+
+	_, err := adapter.CreatePullRequest(context.Background(), "https://github.com/test-owner/test-repo.git", "feature", "title", "body")
+	if err != nil {
+		t.Fatalf("CreatePullRequest: %v", err)
+	}
+	if provider.prBase != "main" {
+		t.Fatalf("expected fallback base branch main, got %q", provider.prBase)
+	}
+}
+
+func TestGitOpsAdapter_CreatePullRequest_ParsesOriginalSSHURL(t *testing.T) {
+	provider := &mockGitProvider{}
+	sshURL := "git@github.com:test-owner/test-repo.git"
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:     "repo-123",
+			URL:    sshURL,
+			Branch: "main",
+		},
+	}
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+
+	prURL, err := adapter.CreatePullRequest(context.Background(), sshURL, "feature", "title", "body")
+	if err != nil {
+		t.Fatalf("CreatePullRequest: %v", err)
+	}
+	if prURL != "https://github.com/test-owner/test-repo/pull/1" {
+		t.Fatalf("expected PR URL from parsed SSH repo, got %q", prURL)
 	}
 }

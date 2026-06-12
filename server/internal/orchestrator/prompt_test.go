@@ -19,6 +19,10 @@ func (l fakeAgentSkillLister) ListByAgentID(context.Context, string) ([]models.S
 	return l.skills, l.err
 }
 
+func (l fakeAgentSkillLister) List(context.Context) ([]models.Skill, error) {
+	return l.skills, l.err
+}
+
 func TestDetectRuleConflictsRejectsGlobalOverride(t *testing.T) {
 	err := DetectRuleConflicts(
 		[]models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
@@ -77,7 +81,7 @@ func TestPromptAssembler_AssembleForAgentUsesOnlyAssignedSkills(t *testing.T) {
 	}
 }
 
-func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsNoTools(t *testing.T) {
+func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsSafeDefaultTools(t *testing.T) {
 	assembler := NewPromptAssembler(nil).WithSkillLister(fakeAgentSkillLister{})
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleQA}
@@ -86,7 +90,23 @@ func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsNoTools(t *tes
 	if err != nil {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Fatalf("expected no tools for agent without assigned skills, got %#v", tools)
+	if len(tools) != 2 {
+		t.Fatalf("expected safe default tools for agent without assigned skills, got %#v", tools)
+	}
+	if tools[0].Name != "read_file" || tools[1].Name != "write_file" {
+		t.Fatalf("unexpected default tools: %#v", tools)
+	}
+}
+
+func TestFilterToolsBySkillsUsesSchemaAllowedTools(t *testing.T) {
+	tools := FilterToolsBySkills(BuiltinToolDefinitions(), []models.Skill{{
+		Name:   "custom_code_skill",
+		Schema: json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
+	}})
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %#v", tools)
+	}
+	if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
+		t.Fatalf("unexpected tools: %#v", tools)
 	}
 }

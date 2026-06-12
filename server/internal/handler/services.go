@@ -34,6 +34,7 @@ type RepositoryService interface {
 	ListByProjectID(context.Context, string) ([]models.Repository, error)
 	Update(context.Context, string, models.UpdateRepositoryInput) (*models.Repository, error)
 	Delete(context.Context, string) error
+	GetRemoteBranches(context.Context, string, string, *string) ([]string, error)
 }
 
 type AgentService interface {
@@ -65,10 +66,14 @@ type TaskService interface {
 
 type RuleService interface {
 	Create(context.Context, *string, models.CreateRuleInput) (*models.Rule, error)
+	CreateGlobal(context.Context, string, models.CreateRuleInput) (*models.Rule, error)
 	GetByID(context.Context, string) (*models.Rule, error)
 	ListByProjectID(context.Context, string) ([]models.Rule, error)
+	ListGlobalByOrgID(context.Context, string) ([]models.Rule, error)
 	Update(context.Context, string, models.UpdateRuleInput) (*models.Rule, error)
 	Delete(context.Context, string) error
+	SeedDefaultRules(context.Context, string) ([]models.Rule, error)
+	SeedGlobalDefaultRules(context.Context, string) ([]models.Rule, error)
 }
 
 type SkillService interface {
@@ -77,9 +82,11 @@ type SkillService interface {
 	List(context.Context) ([]models.Skill, error)
 	ListByAgentID(context.Context, string) ([]models.Skill, error)
 	AssignToAgent(context.Context, string, string) error
+	ReplaceAgentSkills(context.Context, string, []string) error
 	Test(context.Context, string, map[string]any) (map[string]any, error)
 	Update(context.Context, string, models.UpdateSkillInput) (*models.Skill, error)
 	Delete(context.Context, string) error
+	SeedDefaultSkills(context.Context) ([]models.Skill, error)
 }
 
 type AnalyticsService interface {
@@ -136,6 +143,7 @@ type ProviderCredentialService interface {
 	Update(context.Context, string, models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
 	Delete(context.Context, string) error
 	TestConnection(context.Context, string) error
+	TestConnectionInput(context.Context, models.TestProviderCredentialInput) error
 }
 
 type VirtualKeyService interface {

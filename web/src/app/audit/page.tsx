@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import useSWR from "swr";
 import {
   Bot,
@@ -240,9 +240,8 @@ export default function AuditLogPage() {
                 const isSecret = log.action === "secret.accessed";
 
                 return (
-                  <>
+                  <Fragment key={log.id}>
                     <tr
-                      key={log.id}
                       onClick={() => setExpandedLog(isExpanded ? null : log.id)}
                       className={`border-b border-stroke/60 cursor-pointer transition hover:bg-slate-900/50 ${
                         isExpanded ? "bg-slate-900/20" : ""
@@ -334,7 +333,7 @@ export default function AuditLogPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
               {filteredLogs.length === 0 && (

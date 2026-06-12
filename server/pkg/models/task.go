@@ -34,8 +34,8 @@ const (
 
 // ValidTaskTransitions defines allowed status transitions.
 var ValidTaskTransitions = map[string][]string{
-	TaskStatusTodo:        {TaskStatusAnalyzing, TaskStatusAssigned},
-	TaskStatusAnalyzing:   {TaskStatusSpecReview, TaskStatusPlanning, TaskStatusCoding, TaskStatusFailed},
+	TaskStatusTodo:        {TaskStatusAnalyzing, TaskStatusAssigned, TaskStatusPlanning, TaskStatusCoding},
+	TaskStatusAnalyzing:   {TaskStatusSpecReview, TaskStatusPlanning, TaskStatusCoding, TaskStatusTesting, TaskStatusFailed},
 	TaskStatusSpecReview:  {TaskStatusPlanning, TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
 	TaskStatusAssigned:    {TaskStatusPlanning, TaskStatusCoding, TaskStatusInProgress, TaskStatusFailed},
 	TaskStatusPlanning:    {TaskStatusCoding, TaskStatusTodo, TaskStatusInProgress, TaskStatusFailed},
@@ -46,7 +46,7 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusHumanReview: {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
 	TaskStatusMerged:      {},
 	TaskStatusInProgress:  {TaskStatusHumanReview, TaskStatusCompleted, TaskStatusFailed},
-	TaskStatusFailed:      {TaskStatusTodo, TaskStatusInProgress},
+	TaskStatusFailed:      {TaskStatusTodo, TaskStatusInProgress, TaskStatusAnalyzing},
 	TaskStatusCompleted:   {},
 }
 
@@ -86,6 +86,7 @@ type CreateTaskInput struct {
 	Priority     int      `json:"priority"`
 	Labels       []string `json:"labels"`
 	ParentTaskID *string  `json:"parent_task_id,omitempty"`
+	AgentID      *string  `json:"agent_id,omitempty"`
 }
 
 // UpdateTaskInput is the payload to partially update a task.
@@ -109,6 +110,9 @@ type TaskAnalysis struct {
 	Risks                  []string `json:"risks"`
 	ExecutionPlan          []string `json:"execution_plan"`
 	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
+	ProposalMD             string   `json:"proposal_md,omitempty"`
+	DesignMD               string   `json:"design_md,omitempty"`
+	TasksMD                string   `json:"tasks_md,omitempty"`
 }
 
 type ClarifyTaskInput struct {

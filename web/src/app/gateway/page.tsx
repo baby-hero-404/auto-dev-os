@@ -17,7 +17,7 @@ function compactNumber(value: number) {
 }
 
 export default function GatewayPage() {
-  const session = useSession();
+  useSession();
   const { data: usage } = useAuthedSWR(
     ["token-usage"],
     (token) => api.tokenUsage(token, 30),

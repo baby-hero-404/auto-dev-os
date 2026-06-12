@@ -37,6 +37,8 @@ export type Repository = {
   clone_path: string;
   clone_status: string;
   last_validated_at?: string;
+  git_account_id?: string;
+  token?: string;
 };
 
 export type Task = {
@@ -156,6 +158,7 @@ export type Organization = {
 
 export type Rule = {
   id: string;
+  org_id?: string;
   project_id?: string;
   scope: "global" | "project";
   content: string;
@@ -328,6 +331,12 @@ export type CreateProviderCredentialInput = {
   api_key: string;
   base_url?: string;
   priority?: number;
+};
+
+export type TestProviderCredentialInput = {
+  provider: string;
+  api_key: string;
+  base_url?: string;
 };
 
 export type UpdateProviderCredentialInput = {

@@ -29,13 +29,14 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	projectID := "test-project-1"
+	orgID := "test-org-1"
 	ruleID := "rule-uuid-123"
 
 	// 1. Create Test
 	t.Run("Create", func(t *testing.T) {
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "rules"`)).
-			WithArgs(projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(nil, projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ruleID))
 		mock.ExpectCommit()
 
@@ -52,10 +53,30 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("CreateGlobal", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "rules"`)).
+			WithArgs(orgID, nil, models.RuleScopeGlobal, "Never expose secrets.", models.RuleEnforcementStrict, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ruleID))
+		mock.ExpectCommit()
+
+		rule, err := repo.CreateGlobal(ctx, orgID, models.CreateRuleInput{
+			Content:     "Never expose secrets.",
+			Scope:       models.RuleScopeGlobal,
+			Enforcement: models.RuleEnforcementStrict,
+		})
+		if err != nil {
+			t.Fatalf("create global failed: %v", err)
+		}
+		if rule.OrgID == nil || *rule.OrgID != orgID {
+			t.Errorf("expected org ID %q, got %#v", orgID, rule.OrgID)
+		}
+	})
+
 	// 2. GetByID Test
 	t.Run("GetByID", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "project_id", "scope", "content", "enforcement"}).
-			AddRow(ruleID, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict)
+		rows := sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
+			AddRow(ruleID, nil, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict)
 
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE id = $1`)).
 			WithArgs(ruleID, 1).
@@ -72,11 +93,11 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 
 	// 3. ListByProjectID Test
 	t.Run("ListByProjectID", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "project_id", "scope", "content", "enforcement"}).
-			AddRow(ruleID, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict)
+		rows := sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
+			AddRow(ruleID, nil, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict)
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE project_id = $1 OR scope = 'global'`)).
-			WithArgs(projectID).
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE project_id = $1 OR (scope = $2 AND org_id = (SELECT org_id FROM projects WHERE id = $3))`)).
+			WithArgs(projectID, models.RuleScopeGlobal, projectID).
 			WillReturnRows(rows)
 
 		rules, err := repo.ListByProjectID(ctx, projectID)
@@ -88,13 +109,30 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("ListGlobalByOrgID", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
+			AddRow(ruleID, &orgID, nil, models.RuleScopeGlobal, "Never expose secrets.", models.RuleEnforcementStrict)
+
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE org_id = $1 AND scope = $2`)).
+			WithArgs(orgID, models.RuleScopeGlobal).
+			WillReturnRows(rows)
+
+		rules, err := repo.ListGlobalByOrgID(ctx, orgID)
+		if err != nil {
+			t.Fatalf("list global failed: %v", err)
+		}
+		if len(rules) != 1 {
+			t.Errorf("expected 1 global rule, got %d", len(rules))
+		}
+	})
+
 	// 4. Update Test
 	t.Run("Update", func(t *testing.T) {
 		// Mock GetByID inside Update
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE id = $1`)).
 			WithArgs(ruleID, 1).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "scope", "content", "enforcement"}).
-				AddRow(ruleID, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
+				AddRow(ruleID, nil, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict))
 
 		// Mock Updates query
 		mock.ExpectBegin()

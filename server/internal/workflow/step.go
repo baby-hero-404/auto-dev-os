@@ -35,6 +35,25 @@ func StepNameOrder() []string {
 // It accepts a map of step runners keyed by step ID constants.
 // The orchestrator provides these runners via its stepRunners method.
 func DefaultWorkflow(runners map[string]StepFunc) Definition {
+	return HardWorkflow(runners)
+}
+
+func EasyWorkflow(runners map[string]StepFunc) Definition {
+	statusSchema := Schema{Fields: map[string]FieldSchema{
+		"status": {Type: FieldString, Required: false},
+	}}
+
+	steps := []StepDefinition{
+		{ID: StepAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepAnalyze]},
+		{ID: StepCodeBackend, Name: "Code", DependsOn: []string{StepAnalyze}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]},
+		{ID: StepTest, Name: "Test", DependsOn: []string{StepCodeBackend}, OutputSchema: statusSchema, Run: runners[StepTest]},
+		{ID: StepPR, Name: "PR", DependsOn: []string{StepTest}, OutputSchema: statusSchema, Run: runners[StepPR]},
+	}
+
+	return Definition{Name: "auto-code-os-easy-workflow", Steps: steps}
+}
+
+func MediumWorkflow(runners map[string]StepFunc) Definition {
 	statusSchema := Schema{Fields: map[string]FieldSchema{
 		"status": {Type: FieldString, Required: false},
 	}}
@@ -51,7 +70,13 @@ func DefaultWorkflow(runners map[string]StepFunc) Definition {
 		{ID: StepPR, Name: "PR", DependsOn: []string{StepTest}, OutputSchema: statusSchema, Run: runners[StepPR]},
 	}
 
-	return Definition{Name: "auto-code-os-workflow", Steps: steps}
+	return Definition{Name: "auto-code-os-medium-workflow", Steps: steps}
+}
+
+func HardWorkflow(runners map[string]StepFunc) Definition {
+	def := MediumWorkflow(runners)
+	def.Name = "auto-code-os-hard-workflow"
+	return def
 }
 
 // DescribeStep returns a human-readable description for a step name.

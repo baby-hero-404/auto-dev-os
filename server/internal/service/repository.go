@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -170,4 +174,70 @@ func (s *RepositoryService) Clone(ctx context.Context, id string) (*models.Repos
 		CloneStatus: &cloned,
 		Branch:      &actualBranch,
 	})
+}
+
+func (s *RepositoryService) GetRemoteBranches(ctx context.Context, repoURL string, token string, gitAccountID *string) ([]string, error) {
+	if repoURL == "" {
+		return nil, ErrValidation("repository url is required")
+	}
+
+	actualToken := token
+	if actualToken == "" && gitAccountID != nil && *gitAccountID != "" && s.gitAccountRepo != nil {
+		acc, err := s.gitAccountRepo.GetByID(ctx, *gitAccountID)
+		if err == nil && acc.Token != "" {
+			actualToken = acc.Token
+		}
+	}
+
+	normalized, err := gitops.NormalizeGitURLToHTTPS(repoURL)
+	if err != nil {
+		return nil, ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
+	}
+
+	cloneURL := normalized
+	if actualToken != "" {
+		parsed, err := url.Parse(normalized)
+		if err == nil && parsed.Scheme == "https" {
+			parsed.User = url.UserPassword("x-access-token", actualToken)
+			cloneURL = parsed.String()
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", cloneURL)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=",
+		"SSH_ASKPASS=",
+		"GCM_INTERACTIVE=false",
+	)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := stderr.String()
+		if actualToken != "" {
+			errMsg = strings.ReplaceAll(errMsg, actualToken, "[redacted]")
+		}
+		return nil, fmt.Errorf("git ls-remote failed: %w: %s", err, errMsg)
+	}
+
+	var branches []string
+	lines := strings.Split(stdout.String(), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			ref := parts[1]
+			if strings.HasPrefix(ref, "refs/heads/") {
+				branch := strings.TrimPrefix(ref, "refs/heads/")
+				branches = append(branches, branch)
+			}
+		}
+	}
+	return branches, nil
 }

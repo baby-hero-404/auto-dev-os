@@ -167,12 +167,12 @@ func run() error {
 
 	deps := handler.Deps{
 		OrgSvc:             service.NewOrganizationService(orgRepo),
-		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo)),
+		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo, cfg.Sandbox.SkillsRoot)),
 		RepoSvc:            repoSvc,
 		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo).WithSkillRepo(skillRepo),
 		TaskSvc:            service.NewTaskService(taskRepo),
 		RuleSvc:            service.NewRuleService(ruleRepo),
-		SkillSvc:           service.NewSkillService(skillRepo),
+		SkillSvc:           service.NewSkillService(skillRepo, cfg.Sandbox.SkillsRoot),
 		AnalyticsSvc:       service.NewAnalyticsService(analyticsRepo),
 		DashboardSvc:       service.NewAnalyticsDashboardService(dashboardRepo),
 		AuditSvc:           auditSvc,
@@ -262,16 +262,26 @@ func run() error {
 }
 
 func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPoolService, virtualKeys *service.VirtualKeyService, routes *service.ModelRouteService) (llm.Provider, error) {
-	switch cfg.LLM.Provider {
-	case "gateway":
-		var fallback llm.Provider
-		if cfg.LLM.OpenAIAPIKey != "" || cfg.LLM.AnthropicAPIKey != "" || cfg.LLM.GeminiAPIKey != "" {
-			var err error
+	var fallback llm.Provider
+	var err error
+
+	if cfg.LLM.Provider != "gateway" && cfg.LLM.Provider != "" {
+		if cfg.LLM.APIKey != "" || cfg.LLM.LLMAPIKey != "" {
 			fallback, err = llm.NewProvider(cfg)
 			if err != nil {
 				return nil, err
 			}
 		}
+	} else {
+		if cfg.LLM.OpenAIAPIKey != "" || cfg.LLM.AnthropicAPIKey != "" || cfg.LLM.GeminiAPIKey != "" {
+			fallback, err = llm.NewProvider(cfg)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if credentialPool != nil {
 		return aigateway.NewAIGateway(aigateway.Options{
 			FallbackProvider:  fallback,
 			CredentialPool:    credentialPool,
@@ -279,17 +289,9 @@ func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPool
 			ModelRouteService: routes,
 			Config:            cfg,
 		}), nil
-	case "9router":
-		if cfg.LLM.APIKey == "" && cfg.LLM.LLMAPIKey == "" {
-			return nil, nil
-		}
-		return llm.NewProvider(cfg)
-	default:
-		if cfg.LLM.APIKey == "" {
-			return nil, nil
-		}
-		return llm.NewProvider(cfg)
 	}
+
+	return fallback, nil
 }
 
 func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {

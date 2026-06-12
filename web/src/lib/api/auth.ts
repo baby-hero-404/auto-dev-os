@@ -18,3 +18,10 @@ export function login(input: { email: string; password: string }) {
 export function getOrganization(orgID: string, token: string) {
   return request<Organization>(`/organizations/${orgID}`, { token });
 }
+
+export function refresh(input: { refresh_token: string }) {
+  return request<AuthResponse>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}

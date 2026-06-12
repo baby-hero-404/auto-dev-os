@@ -78,6 +78,7 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		task.Status != models.TaskStatusSpecReview &&
 		task.Status != models.TaskStatusAssigned &&
 		task.Status != models.TaskStatusPlanning &&
+		task.Status != models.TaskStatusFailed &&
 		task.Status != "" {
 		return nil, ErrValidation(fmt.Sprintf("invalid task transition from %q to %q during analysis", task.Status, status))
 	}
@@ -206,6 +207,9 @@ func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
 			"Run automated tests before PR creation.",
 		},
 		ClarificationQuestions: questions,
+		ProposalMD:             fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description),
+		DesignMD:               "## Design\n\nImplementation design placeholder.\n",
+		TasksMD:                "## Tasks\n\n- [ ] Task execution workflow step\n",
 	}
 }
 

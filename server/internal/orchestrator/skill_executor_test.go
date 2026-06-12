@@ -52,3 +52,25 @@ func TestSkillExecutor_RejectsWorkspaceEscape(t *testing.T) {
 		t.Fatal("expected workspace escape to fail")
 	}
 }
+
+func TestSkillExecutor_RejectsUnauthorizedTool(t *testing.T) {
+	executor := NewSkillExecutor(nil)
+	result := executor.Execute(context.Background(), SkillCall{
+		Name:         "apply_patch",
+		AgentID:      "agent-1",
+		AgentName:    "Backend Agent",
+		Workspace:    t.TempDir(),
+		AllowedTools: []string{"read_file"},
+		Input: map[string]any{
+			"path":    "main.go",
+			"search":  "old",
+			"replace": "new",
+		},
+	})
+	if result.Success {
+		t.Fatal("expected unauthorized tool call to fail")
+	}
+	if result.Error != "agent Backend Agent is not authorized to use tool apply_patch" {
+		t.Fatalf("unexpected error: %q", result.Error)
+	}
+}

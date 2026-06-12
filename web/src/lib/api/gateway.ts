@@ -5,6 +5,7 @@ import type {
   CreateVirtualKeyInput,
   ModelRoute,
   ProviderCredential,
+  TestProviderCredentialInput,
   UpdateModelRouteInput,
   UpdateProviderCredentialInput,
   UpdateVirtualKeyInput,
@@ -40,6 +41,13 @@ export const providerCredentials = {
     return request<{ status: string }>(`/organizations/${orgID}/provider-credentials/${credentialID}/test`, {
       method: "POST",
       token,
+    });
+  },
+  testInput(orgID: string, token: string, input: TestProviderCredentialInput) {
+    return request<{ status: string }>(`/organizations/${orgID}/provider-credentials/test`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
     });
   },
 };

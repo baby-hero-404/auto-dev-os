@@ -16,11 +16,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <main className="flex h-screen overflow-hidden bg-page">
+    <main className="flex h-screen overflow-hidden bg-background">
       <HomeSidebar />
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <HomeHeader onMenuClick={() => setIsNavOpen(true)} />
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-surface/50 px-4 py-5 sm:px-5 lg:px-6">
           <div className="mx-auto w-full max-w-[1600px]">{children}</div>
         </div>
       </section>
@@ -28,14 +28,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       {isNavOpen && (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
           <button
-            className="absolute inset-0 h-full w-full bg-slate-950/70 backdrop-blur-sm"
+            className="absolute inset-0 h-full w-full bg-foreground/20 backdrop-blur-sm"
             onClick={() => setIsNavOpen(false)}
             aria-label="Close navigation"
             type="button"
           />
           <div className="relative z-10 h-full">
             <button
-              className="absolute right-3 top-3 z-20 rounded-md border border-stroke bg-page p-2 transition hover:bg-panel"
+              className="absolute right-3 top-3 z-20 rounded-lg border border-stroke bg-card p-2 transition hover:bg-surface"
               onClick={() => setIsNavOpen(false)}
               title="Close navigation"
               type="button"

@@ -20,6 +20,25 @@ web:
 	cd web && NEXT_PUBLIC_API_URL=http://localhost:$(SERVER_PORT)/api/v1 PORT=$(WEB_PORT) npm run dev
 
 dev:
+	@echo "Clearing port conflicts..."
+	-@for port in $(SERVER_PORT) $(WEB_PORT); do \
+		pids=$$(lsof -t -i :$$port 2>/dev/null); \
+		if [ ! -z "$$pids" ]; then \
+			echo "Killing lsof processes on port $$port: $$pids"; \
+			kill -9 $$pids 2>/dev/null || true; \
+		fi; \
+		sspids=$$(ss -tulpn 2>/dev/null | grep -E ":$$port\b" | grep -oE "pid=[0-9]+" | cut -d= -f2); \
+		if [ ! -z "$$sspids" ]; then \
+			echo "Killing ss processes on port $$port: $$sspids"; \
+			kill -9 $$sspids 2>/dev/null || true; \
+		fi; \
+		cid=$$(docker ps -q --filter "publish=$$port" 2>/dev/null); \
+		if [ ! -z "$$cid" ]; then \
+			echo "Stopping container $$cid on port $$port..."; \
+			docker stop $$cid 2>/dev/null || true; \
+		fi; \
+	done
+	@sleep 1
 	make db-up
 	$(MAKE) -j2 api web
 

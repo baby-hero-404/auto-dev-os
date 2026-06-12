@@ -25,6 +25,23 @@ func (r *RuleRepo) Create(ctx context.Context, projectID *string, input models.C
 	return rule, nil
 }
 
+func (r *RuleRepo) CreateGlobal(ctx context.Context, orgID string, input models.CreateRuleInput) (*models.Rule, error) {
+	scope := input.Scope
+	if scope == "" {
+		scope = models.RuleScopeGlobal
+	}
+	rule := &models.Rule{
+		OrgID:       &orgID,
+		Scope:       scope,
+		Content:     input.Content,
+		Enforcement: input.Enforcement,
+	}
+	if err := r.db.WithContext(ctx).Create(rule).Error; err != nil {
+		return nil, fmt.Errorf("create global rule: %w", err)
+	}
+	return rule, nil
+}
+
 func (r *RuleRepo) GetByID(ctx context.Context, id string) (*models.Rule, error) {
 	rule := &models.Rule{}
 	if err := r.db.WithContext(ctx).First(rule, "id = ?", id).Error; err != nil {
@@ -35,8 +52,22 @@ func (r *RuleRepo) GetByID(ctx context.Context, id string) (*models.Rule, error)
 
 func (r *RuleRepo) ListByProjectID(ctx context.Context, projectID string) ([]models.Rule, error) {
 	var rules []models.Rule
-	if err := r.db.WithContext(ctx).Where("project_id = ? OR scope = 'global'", projectID).Order("scope, created_at DESC").Find(&rules).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where(`project_id = ? OR (scope = ? AND org_id = (SELECT org_id FROM projects WHERE id = ?))`, projectID, models.RuleScopeGlobal, projectID).
+		Order("scope, created_at DESC").
+		Find(&rules).Error; err != nil {
 		return nil, fmt.Errorf("list rules: %w", err)
+	}
+	return rules, nil
+}
+
+func (r *RuleRepo) ListGlobalByOrgID(ctx context.Context, orgID string) ([]models.Rule, error) {
+	var rules []models.Rule
+	if err := r.db.WithContext(ctx).
+		Where("org_id = ? AND scope = ?", orgID, models.RuleScopeGlobal).
+		Order("created_at DESC").
+		Find(&rules).Error; err != nil {
+		return nil, fmt.Errorf("list global rules: %w", err)
 	}
 	return rules, nil
 }

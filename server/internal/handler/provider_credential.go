@@ -72,3 +72,16 @@ func (h *ProviderCredentialHandler) Test(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, envelope{"status": "configured"})
 }
+
+func (h *ProviderCredentialHandler) TestInput(w http.ResponseWriter, r *http.Request) {
+	var input models.TestProviderCredentialInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.svc.TestConnectionInput(r.Context(), input); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{"status": "ok"})
+}

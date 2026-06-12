@@ -323,3 +323,28 @@ func TestGitHubProvider_CloneRepo_FallbackToDefaultBranch(t *testing.T) {
 		t.Error("expected dummy.txt to exist in clone destination")
 	}
 }
+
+func TestIntegration_GitHubProvider_CloneRepo(t *testing.T) {
+	repoURL := os.Getenv("TEST_GITHUB_REPO")
+	token := os.Getenv("GITHUB_ACCESS_TOKEN")
+
+	if repoURL == "" {
+		t.Skip("TEST_GITHUB_REPO not set, skipping integration test")
+	}
+
+	cloneDest, err := os.MkdirTemp("", "gitops-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(cloneDest)
+
+	p := NewGitHubProvider("")
+	clonedBranch, err := p.CloneRepo(context.Background(), repoURL, token, "", cloneDest)
+	if err != nil {
+		t.Fatalf("CloneRepo integration failed: %v", err)
+	}
+
+	if clonedBranch == "" {
+		t.Errorf("expected a cloned branch, got empty")
+	}
+}

@@ -177,6 +177,43 @@ func (p *GitHubProvider) CreatePR(ctx context.Context, owner, repo, title, head,
 	return out.HTMLURL, nil
 }
 
+func (p *GitHubProvider) MergePR(ctx context.Context, owner, repo, prURL, token string) error {
+	// Extract pull_number from prURL
+	// e.g. https://github.com/owner/repo/pull/123
+	parts := strings.Split(prURL, "/")
+	if len(parts) == 0 {
+		return fmt.Errorf("invalid PR URL: %s", prURL)
+	}
+	pullNumber := parts[len(parts)-1]
+
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/merge", p.baseURL, owner, repo, pullNumber)
+	
+	payload, err := json.Marshal(map[string]string{
+		"merge_method": "merge",
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	p.authorize(req, token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("github merge pr returned %s: %s", resp.Status, githubErrorMessage(resp.Body))
+	}
+	return nil
+}
+
 func (p *GitHubProvider) ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error) {
 	type ghRepo struct {
 		Name          string `json:"name"`

@@ -48,6 +48,7 @@ export const api = {
   approveTaskWorkflow: projects.tasks.approveWorkflow,
   approvePR: projects.tasks.approvePR,
   rejectPR: projects.tasks.rejectPR,
+  taskArtifacts: projects.tasks.artifacts,
 
   listAgents: agents.list,
   createAgent: agents.create,

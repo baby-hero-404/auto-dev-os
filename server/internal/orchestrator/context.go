@@ -27,9 +27,9 @@ type ContextRetriever interface {
 
 // ContextBudget defines hard limits to prevent context token explosion.
 type ContextBudget struct {
-	MaxFiles       int
+	MaxFiles        int
 	MaxBytesPerFile int
-	MaxTotalBytes  int
+	MaxTotalBytes   int
 }
 
 // DefaultBudget returns sensible defaults for the 4-tier retriever.

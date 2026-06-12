@@ -16,6 +16,7 @@ type GitProvider interface {
 	CreateBranch(ctx context.Context, localPath, branchName string) error
 	CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error
 	CreatePR(ctx context.Context, owner, repo, title, head, base, body, token string) (string, error)
+	MergePR(ctx context.Context, owner, repo, prURL, token string) error
 	ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error)
 	ValidateToken(ctx context.Context, token string) error
 }

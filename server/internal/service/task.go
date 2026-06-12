@@ -208,9 +208,8 @@ func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
 		},
 		ClarificationQuestions: questions,
 		ProposalMD:             fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description),
+		SpecsMD:                fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description),
 		DesignMD:               "## Design\n\nImplementation design placeholder.\n",
 		TasksMD:                "## Tasks\n\n- [ ] Task execution workflow step\n",
 	}
 }
-
-

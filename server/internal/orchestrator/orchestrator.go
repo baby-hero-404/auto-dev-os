@@ -46,6 +46,7 @@ type GitOpsClient interface {
 	CreateBranch(ctx context.Context, repoURL, branchName string) error
 	CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error
 	CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error)
+	MergePullRequest(ctx context.Context, repoURL, prURL string) error
 }
 
 type MemoryRecorder interface {
@@ -563,10 +564,73 @@ The JSON object MUST have the following structure:
   "risks": ["list", "of", "potential", "risks", "and", "challenges"],
   "execution_plan": ["step-by-step", "plan", "to", "implement", "this", "task"],
   "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
-  "proposal_md": "Markdown content for proposal.md (in OpenSpec format, why/what changes/impact)",
-  "design_md": "Markdown content for design.md (in OpenSpec format, technical approach, detailed design)",
-  "tasks_md": "Markdown content for tasks.md (in OpenSpec format, implementation checklist)"
-}`
+  "proposal_md": "Markdown for proposal.md (use the template below)",
+  "specs_md": "Markdown for specs.md (use the template below)",
+  "design_md": "Markdown for design.md (use the template below)",
+  "tasks_md": "Markdown for tasks.md (use the template below)"
+}
+
+=== OPENSPEC TEMPLATE: proposal.md ===
+## Why
+(1-2 sentences: what problem does this solve? Why now?)
+
+## What Changes
+(Bullet list of specific changes. Mark breaking changes with **BREAKING**.)
+
+## Capabilities
+### New Capabilities
+- ` + "`<name>`" + `: <brief description>
+
+### Modified Capabilities
+- ` + "`<existing-name>`" + `: <what requirement is changing>
+
+## Impact
+(Affected code, APIs, dependencies, systems)
+
+=== OPENSPEC TEMPLATE: specs.md ===
+Use delta operations as section headers:
+## ADDED Requirements
+### Requirement: <name>
+<Description using SHALL/MUST language>
+
+#### Scenario: <scenario name>
+- **WHEN** <condition>
+- **THEN** <expected outcome>
+
+## MODIFIED Requirements
+(Same format, include full updated content)
+
+## REMOVED Requirements
+### Requirement: <name>
+**Reason**: <why removed>
+**Migration**: <how to migrate>
+
+=== OPENSPEC TEMPLATE: design.md ===
+## Context
+(Background, current state, constraints)
+
+## Goals / Non-Goals
+**Goals:** ...
+**Non-Goals:** ...
+
+## Decisions
+(Key technical choices with rationale)
+
+## Risks / Trade-offs
+(Known limitations, format: [Risk] → Mitigation)
+
+## Open Questions
+(Outstanding decisions or unknowns)
+
+=== OPENSPEC TEMPLATE: tasks.md ===
+Group related tasks under numbered headings. Each task MUST be a checkbox.
+## 1. <Group Name>
+- [ ] 1.1 <Task description>
+- [ ] 1.2 <Task description>
+
+## 2. <Group Name>
+- [ ] 2.1 <Task description>
+`
 				res, err := o.runLLMStep(ctx, task, agent, jobID, workflow.StepAnalyze, instruction)
 				if err == nil {
 					if parsed, ok := res["parsed"].(map[string]any); ok {
@@ -607,6 +671,9 @@ The JSON object MUST have the following structure:
 						if proposal, ok := parsed["proposal_md"].(string); ok {
 							analysis.ProposalMD = proposal
 						}
+						if specs, ok := parsed["specs_md"].(string); ok {
+							analysis.SpecsMD = specs
+						}
 						if design, ok := parsed["design_md"].(string); ok {
 							analysis.DesignMD = design
 						}
@@ -635,6 +702,11 @@ The JSON object MUST have the following structure:
 					proposalContent = fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description)
 					analysis.ProposalMD = proposalContent
 				}
+				specsContent := analysis.SpecsMD
+				if specsContent == "" {
+					specsContent = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description)
+					analysis.SpecsMD = specsContent
+				}
 				designContent := analysis.DesignMD
 				if designContent == "" {
 					designContent = "## Design\n\nImplementation design details.\n"
@@ -655,6 +727,7 @@ The JSON object MUST have the following structure:
 					analysis.TasksMD = tasksContent
 				}
 				_ = os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposalContent), 0o644)
+				_ = os.WriteFile(filepath.Join(changeDir, "specs.md"), []byte(specsContent), 0o644)
 				_ = os.WriteFile(filepath.Join(changeDir, "design.md"), []byte(designContent), 0o644)
 				_ = os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasksContent), 0o644)
 				meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", changeName, task.ID)
@@ -1539,4 +1612,3 @@ func deriveChangeName(task *models.Task) string {
 	}
 	return slug
 }
-

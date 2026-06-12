@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog } from "../types";
+import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -125,6 +125,9 @@ export const tasks = {
       token,
       body: JSON.stringify({ feedback }),
     });
+  },
+  artifacts(jobID: string, token: string) {
+    return request<WorkflowArtifact[]>(`/workflows/${jobID}/artifacts`, { token });
   },
 };
 

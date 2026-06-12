@@ -122,40 +122,40 @@ func isSkillMatchingRole(skillName string, agentRole string) bool {
 	switch agentRole {
 	case "backend", "backend-specialist":
 		backendSkills := map[string]bool{
-			"bash-linux":             true,
-			"golang-best-practices":  true,
-			"nodejs-best-practices":  true,
-			"python-patterns":        true,
-			"database-design":        true,
-			"api-patterns":           true,
-			"systematic-debugging":   true,
-			"clean-code":             true,
+			"bash-linux":            true,
+			"golang-best-practices": true,
+			"nodejs-best-practices": true,
+			"python-patterns":       true,
+			"database-design":       true,
+			"api-patterns":          true,
+			"systematic-debugging":  true,
+			"clean-code":            true,
 		}
 		return backendSkills[skillName]
 	case "frontend", "frontend-specialist":
 		frontendSkills := map[string]bool{
-			"react-patterns":         true,
-			"nextjs-best-practices":  true,
-			"tailwind-patterns":      true,
-			"ux-ui-pro-max":          true,
-			"frontend-design":        true,
-			"clean-code":             true,
+			"react-patterns":        true,
+			"nextjs-best-practices": true,
+			"tailwind-patterns":     true,
+			"ux-ui-pro-max":         true,
+			"frontend-design":       true,
+			"clean-code":            true,
 		}
 		return frontendSkills[skillName]
 	case "reviewer":
 		reviewerSkills := map[string]bool{
-			"code-review-checklist":  true,
-			"review-pre-commit-git":  true,
-			"clean-code":             true,
+			"code-review-checklist": true,
+			"review-pre-commit-git": true,
+			"clean-code":            true,
 		}
 		return reviewerSkills[skillName]
 	case "qa", "test-engineer":
 		qaSkills := map[string]bool{
-			"testing-patterns":             true,
-			"tdd-workflow":                 true,
-			"webapp-testing":               true,
+			"testing-patterns":               true,
+			"tdd-workflow":                   true,
+			"webapp-testing":                 true,
 			"verification-before-completion": true,
-			"clean-code":                   true,
+			"clean-code":                     true,
 		}
 		return qaSkills[skillName]
 	case "security-auditor":

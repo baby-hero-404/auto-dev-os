@@ -111,6 +111,7 @@ type TaskAnalysis struct {
 	ExecutionPlan          []string `json:"execution_plan"`
 	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
 	ProposalMD             string   `json:"proposal_md,omitempty"`
+	SpecsMD                string   `json:"specs_md,omitempty"`
 	DesignMD               string   `json:"design_md,omitempty"`
 	TasksMD                string   `json:"tasks_md,omitempty"`
 }

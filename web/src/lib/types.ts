@@ -65,6 +65,20 @@ export type TaskAnalysis = {
   risks: string[];
   execution_plan: string[];
   clarification_questions?: string[];
+  proposal_md?: string;
+  specs_md?: string;
+  design_md?: string;
+  tasks_md?: string;
+};
+
+export type WorkflowArtifact = {
+  id: string;
+  job_id: string;
+  step: string;
+  type: "diff" | "patch" | string;
+  name: string;
+  payload: unknown;
+  created_at: string;
 };
 
 export type WorkflowJob = {

@@ -19,12 +19,12 @@ import (
 type PromptAssembler struct {
 	retriever retrieval.ContextRetriever
 	rules     *repository.RuleRepo
-	skills    AgentSkillLister
+	skills    SkillLister
 	root      string
 }
 
-type AgentSkillLister interface {
-	ListByAgentID(context.Context, string) ([]models.Skill, error)
+type SkillLister interface {
+	List(context.Context) ([]models.Skill, error)
 }
 
 func NewPromptAssembler(retriever retrieval.ContextRetriever) *PromptAssembler {
@@ -38,7 +38,7 @@ func NewPromptAssemblerWithRules(retriever retrieval.ContextRetriever, rules *re
 	return &PromptAssembler{retriever: retriever, rules: rules, root: root}
 }
 
-func (a *PromptAssembler) WithSkillLister(skills AgentSkillLister) *PromptAssembler {
+func (a *PromptAssembler) WithSkillLister(skills SkillLister) *PromptAssembler {
 	a.skills = skills
 	return a
 }
@@ -61,11 +61,14 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		contextBlock = formatContextSnippets(snippets)
 	}
 
-	system, err := a.systemPrompt(ctx, task, agent)
+	system, projectRules, err := a.systemPrompt(ctx, task, agent)
 	if err != nil {
 		return nil, nil, err
 	}
 	user := "Task: " + task.Title + "\n\n" + task.Description
+	if len(projectRules) > 0 {
+		user += "\n\nProject Rules:\n" + formatRules(projectRules)
+	}
 	if contextBlock != "" {
 		user += "\n\nContext:\n" + contextBlock
 	}
@@ -88,11 +91,84 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 	if agent == nil || a == nil || a.skills == nil {
 		return BuiltinToolDefinitions(), nil
 	}
-	skills, err := a.skills.ListByAgentID(ctx, agent.ID)
+	allSkills, err := a.skills.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return ToolDefinitionsFromSkills(skills), nil
+	skills := make([]models.Skill, 0, len(allSkills))
+	for _, skill := range allSkills {
+		if isSkillMatchingRole(skill.Name, agent.Role) {
+			skills = append(skills, skill)
+		}
+	}
+	return FilterToolsBySkills(BuiltinToolDefinitions(), skills), nil
+}
+
+func isSkillMatchingRole(skillName string, agentRole string) bool {
+	agentRole = strings.ToLower(agentRole)
+	skillName = strings.ToLower(skillName)
+
+	// Always assign clean-code to developer/reviewer agents
+	if skillName == "clean-code" && (agentRole == "backend" || agentRole == "frontend" || agentRole == "reviewer") {
+		return true
+	}
+
+	switch agentRole {
+	case "backend", "backend-specialist":
+		backendSkills := map[string]bool{
+			"bash-linux":            true,
+			"golang-best-practices": true,
+			"nodejs-best-practices": true,
+			"python-patterns":       true,
+			"database-design":       true,
+			"api-patterns":          true,
+			"systematic-debugging":  true,
+			"clean-code":            true,
+		}
+		return backendSkills[skillName]
+	case "frontend", "frontend-specialist":
+		frontendSkills := map[string]bool{
+			"react-patterns":        true,
+			"nextjs-best-practices": true,
+			"tailwind-patterns":     true,
+			"ux-ui-pro-max":         true,
+			"frontend-design":       true,
+			"clean-code":            true,
+		}
+		return frontendSkills[skillName]
+	case "reviewer":
+		reviewerSkills := map[string]bool{
+			"code-review-checklist": true,
+			"review-pre-commit-git": true,
+			"clean-code":            true,
+		}
+		return reviewerSkills[skillName]
+	case "qa", "test-engineer":
+		qaSkills := map[string]bool{
+			"testing-patterns":               true,
+			"tdd-workflow":                   true,
+			"webapp-testing":                 true,
+			"verification-before-completion": true,
+			"clean-code":                     true,
+		}
+		return qaSkills[skillName]
+	case "security-auditor":
+		securitySkills := map[string]bool{
+			"red-teaming":           true,
+			"vulnerability-scanner": true,
+			"red-team-tactics":      true,
+		}
+		return securitySkills[skillName]
+	case "planner", "project-planner":
+		plannerSkills := map[string]bool{
+			"architecture":   true,
+			"plan-writing":   true,
+			"project-memory": true,
+			"brainstorming":  true,
+		}
+		return plannerSkills[skillName]
+	}
+	return false
 }
 
 func ToolDefinitionsFromSkills(skills []models.Skill) []ToolDefinition {
@@ -112,6 +188,94 @@ func ToolDefinitionsFromSkills(skills []models.Skill) []ToolDefinition {
 		})
 	}
 	return tools
+}
+
+func FilterToolsBySkills(tools []ToolDefinition, skills []models.Skill) []ToolDefinition {
+	allowed := allowedToolSetFromSkills(skills)
+	if len(allowed) == 0 {
+		allowed = map[string]bool{"read_file": true, "write_file": true}
+	}
+	filtered := make([]ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		if allowed[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	if len(filtered) == 0 {
+		for _, tool := range tools {
+			if tool.Name == "read_file" || tool.Name == "write_file" {
+				filtered = append(filtered, tool)
+			}
+		}
+	}
+	return filtered
+}
+
+func allowedToolSetFromSkills(skills []models.Skill) map[string]bool {
+	allowed := map[string]bool{}
+	for _, skill := range skills {
+		addAllowedTool(allowed, skill.Name)
+		if len(skill.Schema) == 0 || !json.Valid(skill.Schema) {
+			continue
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(skill.Schema, &schema); err != nil {
+			continue
+		}
+		for _, key := range []string{"tool", "tools", "default_tools", "allowed_tools"} {
+			addSchemaTools(allowed, schema[key])
+		}
+		if category, ok := schema["category"].(string); ok {
+			addToolsForCategory(allowed, category)
+		}
+	}
+	return allowed
+}
+
+func addSchemaTools(allowed map[string]bool, value any) {
+	switch v := value.(type) {
+	case string:
+		addAllowedTool(allowed, v)
+	case []any:
+		for _, item := range v {
+			if name, ok := item.(string); ok {
+				addAllowedTool(allowed, name)
+			}
+		}
+	}
+}
+
+func addAllowedTool(allowed map[string]bool, name string) {
+	normalized := strings.TrimSpace(strings.ToLower(name))
+	if normalized == "" {
+		return
+	}
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "read_file", "write_file", "run_tests", "analyze_logs", "generate_docs", "create_migration", "search_code", "apply_patch":
+		allowed[normalized] = true
+	}
+}
+
+func addToolsForCategory(allowed map[string]bool, category string) {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "test", "testing", "qa":
+		allowed["run_tests"] = true
+		allowed["analyze_logs"] = true
+	case "database", "db", "migration":
+		allowed["create_migration"] = true
+		allowed["read_file"] = true
+		allowed["write_file"] = true
+	case "docs", "documentation":
+		allowed["generate_docs"] = true
+		allowed["read_file"] = true
+	case "code", "file", "git":
+		allowed["read_file"] = true
+		allowed["write_file"] = true
+		allowed["search_code"] = true
+		allowed["apply_patch"] = true
+	}
 }
 
 func formatMemories(memories []models.EpisodicMemory) string {
@@ -141,7 +305,7 @@ func formatContextSnippets(snippets []models.ContextSnippet) string {
 	return b.String()
 }
 
-func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, agent *models.Agent) (string, error) {
+func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, agent *models.Agent) (string, []models.Rule, error) {
 	root := defaultPromptRoot()
 	if a != nil && a.root != "" {
 		root = a.root
@@ -158,22 +322,19 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 
 	globalRules, projectRules, err := a.loadRules(ctx, task.ProjectID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := DetectRuleConflicts(globalRules, projectRules); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(globalRules) > 0 {
-		parts = append(parts, "# Global Rules\n"+formatRules(globalRules))
-	}
-	if len(projectRules) > 0 {
-		parts = append(parts, "# Project Rules\n"+formatRules(projectRules))
+		parts = append(parts, "# Global Rules [IMMUTABLE - DO NOT OVERRIDE]\n"+formatRules(globalRules))
 	}
 	parts = append(parts, `# Execution Rules
 - Prefer apply_patch for source edits instead of rewriting full files.
 - Run tests through run_tests when a change is executable.
 - Return structured JSON when the workflow step requests JSON output.`)
-	return strings.TrimSpace(strings.Join(parts, "\n\n")), nil
+	return strings.TrimSpace(strings.Join(parts, "\n\n")), projectRules, nil
 }
 
 func (a *PromptAssembler) loadRules(ctx context.Context, projectID string) ([]models.Rule, []models.Rule, error) {

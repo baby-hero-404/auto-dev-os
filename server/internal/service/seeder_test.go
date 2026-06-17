@@ -9,7 +9,7 @@ import (
 )
 
 func TestSeederService_Constructor(t *testing.T) {
-	svc := NewSeederService(nil, nil)
+	svc := NewSeederService(nil, nil, "")
 	if svc == nil {
 		t.Fatal("expected non-nil SeederService")
 	}
@@ -25,7 +25,7 @@ func TestSeederService_ConstructorWithRepos(t *testing.T) {
 	// Verify repos are wired correctly (types only, not calling DB).
 	var rr *repository.RuleRepo
 	var sr *repository.SkillRepo
-	svc := NewSeederService(rr, sr)
+	svc := NewSeederService(rr, sr, "")
 	if svc == nil {
 		t.Fatal("expected non-nil SeederService")
 	}
@@ -38,7 +38,7 @@ func TestSeederService_DefaultRuleCount(t *testing.T) {
 	expectedRuleCount := 9
 	// We can't easily count without calling seedRules, but we verify
 	// the constructor works and the type is correct.
-	svc := NewSeederService(nil, nil)
+	svc := NewSeederService(nil, nil, "")
 	if svc == nil {
 		t.Fatal("expected non-nil SeederService")
 	}
@@ -47,12 +47,12 @@ func TestSeederService_DefaultRuleCount(t *testing.T) {
 }
 
 func TestSeederService_DefaultSkillCount(t *testing.T) {
-	svc := NewSeederService(nil, nil)
+	svc := NewSeederService(nil, nil, "")
 	if svc == nil {
 		t.Fatal("expected non-nil SeederService")
 	}
 
-	skills, err := loadPromptBaseSkills()
+	skills, err := loadPromptBaseSkills("")
 	if err != nil {
 		t.Fatalf("loadPromptBaseSkills returned error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSeederService_DefaultSkillCount(t *testing.T) {
 		if metadata["source"] != "prompt_base" {
 			t.Fatalf("expected source=prompt_base for skill %q, got %q", skill.Name, metadata["source"])
 		}
-		if !strings.HasPrefix(metadata["path"], "antigravity/skills/") {
+		if !strings.HasPrefix(metadata["path"], "system/") {
 			t.Fatalf("expected prompt_base skill path for %q, got %q", skill.Name, metadata["path"])
 		}
 

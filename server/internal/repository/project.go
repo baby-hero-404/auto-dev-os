@@ -37,7 +37,7 @@ func (r *ProjectRepo) ListByOrgID(ctx context.Context, orgID string) ([]models.P
 		Select(`
 			projects.*,
 			(SELECT COUNT(*) FROM repositories WHERE repositories.project_id = projects.id) AS repositories_count,
-			(SELECT COUNT(*) FROM agents WHERE agents.project_id = projects.id) AS agents_count,
+			(SELECT COUNT(*) FROM agents WHERE agents.org_id = projects.org_id AND (agents.assignment_strategy = 'auto_join' OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = projects.id))) AS agents_count,
 			(SELECT COUNT(*) FROM tasks WHERE tasks.project_id = projects.id AND tasks.status IN ('done', 'completed', 'merged')) AS tasks_done_count,
 			(SELECT COUNT(*) FROM tasks WHERE tasks.project_id = projects.id) AS tasks_total_count
 		`).

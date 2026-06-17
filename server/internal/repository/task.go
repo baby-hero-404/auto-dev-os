@@ -20,7 +20,7 @@ func (r *TaskRepo) Create(ctx context.Context, projectID string, input models.Cr
 		ProjectID: projectID, Title: input.Title, Description: input.Description,
 		Complexity: input.Complexity, Priority: input.Priority,
 		Labels: pq.StringArray(input.Labels), ParentTaskID: input.ParentTaskID,
-		SpecStatus: models.TaskSpecStatusNone,
+		AgentID: input.AgentID, SpecStatus: models.TaskSpecStatusNone,
 	}
 	if err := r.db.WithContext(ctx).Create(t).Error; err != nil {
 		return nil, fmt.Errorf("create task: %w", err)

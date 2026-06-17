@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-const geminiAPIURL = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
+const geminiAPIURL = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
 
 // Gemini implements the Provider interface for the Google Gemini API.
 type Gemini struct {
@@ -77,12 +77,13 @@ func (g *Gemini) Chat(ctx context.Context, messages []Message) (*Response, error
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf(geminiAPIURL, g.model, g.apiKey)
+	url := fmt.Sprintf(geminiAPIURL, g.model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -108,8 +109,18 @@ func (g *Gemini) Chat(ctx context.Context, messages []Message) (*Response, error
 		return nil, fmt.Errorf("Gemini returned no content")
 	}
 
+	part := result.Candidates[0].Content.Parts[0]
+	if part.FunctionCall != nil {
+		return nil, fmt.Errorf("Gemini attempted to make a function call: %s", part.FunctionCall.Name)
+	}
+
+	content := part.Text
+	if content == "" {
+		fmt.Printf("DEBUG: Gemini returned empty content. Raw response: %s\n", string(respBody))
+	}
+
 	return &Response{
-		Content:      result.Candidates[0].Content.Parts[0].Text,
+		Content:      content,
 		Model:        g.model,
 		PromptTokens: result.UsageMetadata.PromptTokenCount,
 		OutputTokens: result.UsageMetadata.CandidatesTokenCount,
@@ -135,7 +146,10 @@ type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Text string `json:"text"`
+				Text         string `json:"text"`
+				FunctionCall *struct {
+					Name string `json:"name"`
+				} `json:"functionCall,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`

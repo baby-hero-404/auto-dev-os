@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -50,13 +49,13 @@ func (p *GitHubProvider) CloneRepo(ctx context.Context, repoURL, token, branch, 
 
 	var cloneCmd *exec.Cmd
 	if branch != "" {
-		cloneCmd = exec.CommandContext(ctx, "git", "clone", "--branch", branch, "--single-branch", cloneURL, localPath)
+		cloneCmd = gitCommand(ctx, "clone", "--branch", branch, "--single-branch", cloneURL, localPath)
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			outStr := string(output)
 			if strings.Contains(outStr, "Remote branch") || strings.Contains(outStr, "Could not find remote branch") {
 				// Retry with the default branch
 				os.RemoveAll(localPath)
-				fallbackCmd := exec.CommandContext(ctx, "git", "clone", "--single-branch", cloneURL, localPath)
+				fallbackCmd := gitCommand(ctx, "clone", "--single-branch", cloneURL, localPath)
 				if fallbackOutput, fallbackErr := fallbackCmd.CombinedOutput(); fallbackErr != nil {
 					return "", fmt.Errorf("git clone: %w: %s (fallback failed: %s)", err, sanitizeToken(outStr, token), sanitizeToken(string(fallbackOutput), token))
 				}
@@ -65,13 +64,13 @@ func (p *GitHubProvider) CloneRepo(ctx context.Context, repoURL, token, branch, 
 			}
 		}
 	} else {
-		cloneCmd = exec.CommandContext(ctx, "git", "clone", "--single-branch", cloneURL, localPath)
+		cloneCmd = gitCommand(ctx, "clone", "--single-branch", cloneURL, localPath)
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git clone: %w: %s", err, sanitizeToken(string(output), token))
 		}
 	}
 
-	actualBranchCmd := exec.CommandContext(ctx, "git", "-C", localPath, "rev-parse", "--abbrev-ref", "HEAD")
+	actualBranchCmd := gitCommand(ctx, "-C", localPath, "rev-parse", "--abbrev-ref", "HEAD")
 	actualBranchOutput, err := actualBranchCmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to get active branch name: %w: %s", err, string(actualBranchOutput))
@@ -81,7 +80,16 @@ func (p *GitHubProvider) CloneRepo(ctx context.Context, repoURL, token, branch, 
 }
 
 func (p *GitHubProvider) CreateBranch(ctx context.Context, localPath, branchName string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", localPath, "checkout", "-b", branchName)
+	// Detach HEAD so we are not on the branch we want to delete.
+	detachCmd := gitCommand(ctx, "-C", localPath, "checkout", "--detach")
+	_ = detachCmd.Run()
+
+	// Force delete the branch if it already exists.
+	deleteCmd := gitCommand(ctx, "-C", localPath, "branch", "-D", branchName)
+	_ = deleteCmd.Run()
+
+	// Create and checkout the clean branch.
+	cmd := gitCommand(ctx, "-C", localPath, "checkout", "-b", branchName)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git checkout branch: %w: %s", err, string(output))
 	}
@@ -90,8 +98,6 @@ func (p *GitHubProvider) CreateBranch(ctx context.Context, localPath, branchName
 
 func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error {
 	// Build git identity from the agent role performing this task.
-	// Format: user.name = "AutoCodeOS [backend-specialist]"
-	//         user.email = "backend-specialist@autocodeos.local"
 	if agentRole == "" {
 		agentRole = "agent"
 	}
@@ -102,40 +108,37 @@ func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, 
 		{"git", "-C", localPath, "config", "user.email", gitEmail},
 	}
 	for _, args := range identityCommands {
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd := gitCommand(ctx, args[1:]...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("%s: %w: %s", strings.Join(args, " "), err, string(output))
 		}
 	}
 
 	// Stage all changes.
-	addCmd := exec.CommandContext(ctx, "git", "-C", localPath, "add", ".")
+	addCmd := gitCommand(ctx, "-C", localPath, "add", ".")
 	if output, err := addCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %w: %s", err, sanitizeToken(string(output), token))
 	}
 
 	// Check if there is anything to commit (avoid crash on clean working tree).
-	statusCmd := exec.CommandContext(ctx, "git", "-C", localPath, "diff", "--cached", "--quiet")
+	statusCmd := gitCommand(ctx, "-C", localPath, "diff", "--cached", "--quiet")
+	hasChanges := true
 	if err := statusCmd.Run(); err == nil {
-		// Exit code 0 means no staged changes — nothing to commit.
-		return nil
-	} else {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			return fmt.Errorf("git diff --cached --quiet: %w", err)
+		hasChanges = false
+	}
+
+	// Commit if there are changes.
+	if hasChanges {
+		commitCmd := gitCommand(ctx, "-C", localPath, "commit", "-m", message)
+		if output, err := commitCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git commit: %w: %s", err, sanitizeToken(string(output), token))
 		}
 	}
 
-	// Commit and push.
-	commitPush := [][]string{
-		{"git", "-C", localPath, "commit", "-m", message},
-		{"git", "-C", localPath, "push", "origin", "HEAD"},
-	}
-	for _, args := range commitPush {
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("%s: %w: %s", strings.Join(args, " "), err, sanitizeToken(string(output), token))
-		}
+	// Always force-push origin HEAD to ensure the remote branch is created or updated.
+	pushCmd := gitCommand(ctx, "-C", localPath, "push", "-f", "origin", "HEAD")
+	if output, err := pushCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git push: %w: %s", err, sanitizeToken(string(output), token))
 	}
 	return nil
 }
@@ -172,6 +175,43 @@ func (p *GitHubProvider) CreatePR(ctx context.Context, owner, repo, title, head,
 		return "", err
 	}
 	return out.HTMLURL, nil
+}
+
+func (p *GitHubProvider) MergePR(ctx context.Context, owner, repo, prURL, token string) error {
+	// Extract pull_number from prURL
+	// e.g. https://github.com/owner/repo/pull/123
+	parts := strings.Split(prURL, "/")
+	if len(parts) == 0 {
+		return fmt.Errorf("invalid PR URL: %s", prURL)
+	}
+	pullNumber := parts[len(parts)-1]
+
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/merge", p.baseURL, owner, repo, pullNumber)
+	
+	payload, err := json.Marshal(map[string]string{
+		"merge_method": "merge",
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	p.authorize(req, token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("github merge pr returned %s: %s", resp.Status, githubErrorMessage(resp.Body))
+	}
+	return nil
 }
 
 func (p *GitHubProvider) ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error) {

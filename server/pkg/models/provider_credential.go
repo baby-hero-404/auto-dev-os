@@ -35,6 +35,12 @@ type CreateProviderCredentialInput struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+type TestProviderCredentialInput struct {
+	Provider string `json:"provider"`
+	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url,omitempty"`
+}
+
 type UpdateProviderCredentialInput struct {
 	Label    *string          `json:"label,omitempty"`
 	APIKey   *string          `json:"api_key,omitempty"`

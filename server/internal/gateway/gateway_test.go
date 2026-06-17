@@ -177,13 +177,13 @@ func TestAIGatewayChatReturnsExhaustedRoutesWithVirtualKey(t *testing.T) {
 }
 
 func TestIsRateLimitErrorSupportsTypedStatusAndStringFallback(t *testing.T) {
-	if !isRateLimitError(HTTPStatusError{StatusCode: 402}) {
+	if !isTransientError(HTTPStatusError{StatusCode: 402}) {
 		t.Fatalf("expected typed 402 to be rate limit")
 	}
-	if !isRateLimitError(errors.New("provider quota exceeded")) {
+	if !isTransientError(errors.New("provider quota exceeded")) {
 		t.Fatalf("expected quota string to be rate limit")
 	}
-	if isRateLimitError(errors.New("connection refused")) {
+	if isTransientError(errors.New("connection refused")) {
 		t.Fatalf("did not expect generic connection error to be rate limit")
 	}
 }

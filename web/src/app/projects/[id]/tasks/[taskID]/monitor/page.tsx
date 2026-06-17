@@ -1,7 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useRef, useState } from "react";
-import useSWR from "swr";
+import { use, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -16,10 +15,7 @@ import {
   Terminal,
   ShieldCheck,
 } from "lucide-react";
-import { api } from "@/lib/api";
-import { useSession } from "@/lib/session";
-import { useRealtimeLogStore, type RealtimeLog } from "@/lib/store/use-realtime-log-store";
-import type { TaskLog, WorkflowStatus } from "@/lib/types";
+import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 
 const STEPS = [
   { id: "analyze", label: "Analyze", icon: Circle },
@@ -70,39 +66,19 @@ export default function MonitorPage({
   params: Promise<{ id: string; taskID: string }>;
 }) {
   const { id: projectID, taskID } = use(params);
-  const session = useSession();
-  const token = session?.token ?? "";
   const logEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const realtimeLogs = useRealtimeLogStore((state) => state.logs);
-  const appendLogs = useRealtimeLogStore((state) => state.appendLogs);
-  const clearLogs = useRealtimeLogStore((state) => state.clearLogs);
 
-  const { data: wfStatus, mutate: mutateStatus } = useSWR<WorkflowStatus>(
-    taskID ? ["wf-status", taskID] : null,
-    () => api.taskWorkflow(taskID as string, token),
-    { refreshInterval: 3000 }
-  );
+  const {
+    task,
+    workflow,
+    logs,
+    execute,
+    approvePR,
+  } = useTaskWorkflow(taskID);
 
-  const { data: fetchedLogs, mutate: mutateLogs } = useSWR<TaskLog[]>(
-    taskID ? ["wf-logs", taskID] : null,
-    () => api.taskLogs(taskID as string, token),
-    { refreshInterval: 2000 }
-  );
-
-  const logs = useMemo(
-    () => realtimeLogs.filter((log) => log.streamId === taskID),
-    [realtimeLogs, taskID],
-  );
-
-  useEffect(() => {
-    clearLogs(taskID);
-  }, [clearLogs, taskID]);
-
-  useEffect(() => {
-    if (!fetchedLogs) return;
-    appendLogs(fetchedLogs.map((log) => toRealtimeLog(taskID, log)));
-  }, [appendLogs, fetchedLogs, taskID]);
+  const job = workflow?.job;
+  const checkpoints = workflow?.checkpoints ?? [];
 
   useEffect(() => {
     if (autoScroll && logEndRef.current) {
@@ -110,55 +86,20 @@ export default function MonitorPage({
     }
   }, [logs, autoScroll]);
 
-  async function handleExecute() {
-    if (!token) return;
-    await api.executeTask(taskID, token);
-    mutateStatus();
-    mutateLogs();
-  }
-
-  async function handleApprove() {
-    if (!token) return;
-    await api.approveTaskWorkflow(taskID, token);
-    mutateStatus();
-  }
-
-  const task = wfStatus?.task;
-  const job = wfStatus?.job;
-  const checkpoints = wfStatus?.checkpoints ?? [];
-
-  if (!session) {
-    return (
-      <main className="grid min-h-screen place-items-center p-6">
-        <div className="rounded-lg border border-stroke bg-panel p-6">
-          <p className="mb-4 text-sm text-content-muted">
-            Login required to view workflow monitor.
-          </p>
-          <Link
-            className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950"
-            href="/"
-          >
-            Back to login
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen p-5">
       {/* Header */}
       <header className="mb-6 border-b border-stroke pb-5">
         <Link
           href={`/projects/${projectID}`}
-          className="mb-3 inline-flex items-center gap-2 text-sm text-content-muted transition hover:text-white"
+          className="mb-3 inline-flex items-center gap-2 text-sm text-content-muted transition hover:text-foreground dark:hover:text-white"
         >
           <ArrowLeft size={16} />
           Back to project
         </Link>
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <h1 className="font-mono text-2xl font-semibold">
+            <h1 className="font-mono text-2xl font-semibold text-foreground dark:text-white">
               {task?.title ?? "Workflow Monitor"}
             </h1>
             <p className="mt-1 text-sm text-content-muted">
@@ -166,19 +107,24 @@ export default function MonitorPage({
             </p>
           </div>
           <div className="flex gap-2">
-            {(!job || job.status === "failed") && (
-              <button
-                className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90"
-                onClick={handleExecute}
-              >
-                <Play size={16} />
-                Execute
-              </button>
-            )}
+            {(!job || job.status === "failed") &&
+              task &&
+              (task.spec_status === "approved" ||
+                task.spec_status === "auto_approved" ||
+                task.status === "todo" ||
+                task.status === "approved") && (
+                <button
+                  className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
+                  onClick={execute}
+                >
+                  <Play size={16} />
+                  Execute
+                </button>
+              )}
             {task?.status === "human_review" && (
               <button
-                className="inline-flex items-center gap-2 rounded-md border border-emerald-400/40 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-400/10"
-                onClick={handleApprove}
+                className="inline-flex items-center gap-2 rounded-md border border-success/40 px-4 py-2 text-sm font-semibold text-success transition hover:bg-success/10 cursor-pointer"
+                onClick={approvePR}
               >
                 <CheckCircle2 size={16} />
                 Approve Merge
@@ -201,7 +147,7 @@ export default function MonitorPage({
         <div className="space-y-5">
           {/* Step Progress Bar */}
           <section className="rounded-lg border border-stroke bg-panel p-5">
-            <h2 className="mb-4 font-mono text-lg font-semibold">
+            <h2 className="mb-4 font-mono text-lg font-semibold text-foreground dark:text-white">
               Workflow Progress
             </h2>
             <div className="flex items-center gap-1 overflow-x-auto pb-2">
@@ -214,16 +160,16 @@ export default function MonitorPage({
                     <div
                       className={`flex flex-col items-center rounded-lg px-3 py-2 transition ${
                         status === "running"
-                          ? "bg-sky-950/50 ring-1 ring-sky-400/30"
+                          ? "bg-sky-50 dark:bg-sky-950/50 ring-1 ring-sky-400/30"
                           : status === "done"
-                            ? "bg-emerald-950/30"
-                            : status === "failed"
-                              ? "bg-red-950/30"
-                              : ""
-                      }`}
+                          ? "bg-emerald-50 dark:bg-emerald-950/30"
+                          : status === "failed"
+                          ? "bg-red-50 dark:bg-red-950/30"
+                          : "bg-white dark:bg-slate-950"
+                      } border border-stroke`}
                     >
                       <StepBadge status={status} />
-                      <span className="mt-1 text-[11px] font-medium text-content-muted">
+                      <span className="mt-1 text-[11px] font-semibold text-foreground dark:text-white">
                         {step.label}
                       </span>
                     </div>
@@ -242,13 +188,13 @@ export default function MonitorPage({
             </div>
             {task && (
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full border border-stroke px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5 text-content-muted">
                   {task.complexity}
                 </span>
-                <span className="rounded-full border border-stroke px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5 text-content-muted">
                   {task.spec_status}
                 </span>
-                <span className="rounded-full border border-stroke px-2 py-0.5">
+                <span className="rounded-full border border-stroke px-2 py-0.5 text-content-muted">
                   {task.status}
                 </span>
               </div>
@@ -258,17 +204,17 @@ export default function MonitorPage({
           {/* Real-time Log Stream */}
           <section className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-mono text-lg font-semibold">
+              <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">
                 Execution Logs
               </h2>
               <button
-                className="rounded border border-stroke px-2 py-1 text-xs text-content-muted transition hover:bg-panel-muted"
+                className="rounded border border-stroke px-2 py-1 text-xs text-content-muted transition hover:bg-panel-muted cursor-pointer"
                 onClick={() => setAutoScroll(!autoScroll)}
               >
                 {autoScroll ? "Pause scroll" : "Resume scroll"}
               </button>
             </div>
-            <div className="max-h-[420px] overflow-y-auto rounded-md bg-slate-950 p-3 font-mono text-sm">
+            <div className="max-h-[420px] overflow-y-auto rounded-md bg-slate-50 dark:bg-slate-950 p-3 font-mono text-xs border border-stroke">
               {logs.length === 0 && (
                 <p className="text-content-muted">No logs yet. Execute the task to see output.</p>
               )}
@@ -277,10 +223,10 @@ export default function MonitorPage({
                   key={log.id}
                   className={`py-0.5 ${
                     log.level === "error"
-                      ? "text-red-300"
+                      ? "text-red-600 dark:text-red-300"
                       : log.level === "warn"
-                        ? "text-amber-300"
-                        : "text-slate-300"
+                      ? "text-amber-600 dark:text-amber-300"
+                      : "text-slate-800 dark:text-slate-300"
                   }`}
                 >
                   <span className="mr-2 text-content-muted">
@@ -303,31 +249,31 @@ export default function MonitorPage({
           <section className="rounded-lg border border-stroke bg-panel p-5">
             <div className="mb-3 flex items-center gap-2">
               <Bot size={18} className="text-brand-primary" />
-              <h2 className="font-mono text-lg font-semibold">Agent</h2>
+              <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">Agent</h2>
             </div>
             {job?.agent_id ? (
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-content-muted">Agent ID</span>
-                  <span className="font-mono text-xs">
+                  <span className="font-mono text-xs text-foreground dark:text-white">
                     {job.agent_id.slice(0, 8)}…
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-content-muted">Current Step</span>
-                  <span className="font-semibold">{job.step}</span>
+                  <span className="font-semibold text-foreground dark:text-white">{job.step}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-content-muted">Status</span>
                   <span
                     className={`font-semibold ${
                       job.status === "done"
-                        ? "text-emerald-400"
+                        ? "text-emerald-600 dark:text-emerald-400"
                         : job.status === "failed"
-                          ? "text-red-400"
-                          : job.status === "running"
-                            ? "text-sky-400"
-                            : "text-amber-400"
+                        ? "text-red-600 dark:text-red-400"
+                        : job.status === "running"
+                        ? "text-sky-600 dark:text-sky-400"
+                        : "text-amber-600 dark:text-amber-400"
                     }`}
                   >
                     {job.status}
@@ -335,7 +281,7 @@ export default function MonitorPage({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-content-muted">Attempts</span>
-                  <span>{job.attempts}</span>
+                  <span className="text-foreground dark:text-white">{job.attempts}</span>
                 </div>
               </div>
             ) : (
@@ -357,7 +303,7 @@ export default function MonitorPage({
 
           {/* Checkpoints */}
           <section className="rounded-lg border border-stroke bg-panel p-5">
-            <h2 className="mb-3 font-mono text-lg font-semibold">
+            <h2 className="mb-3 font-mono text-lg font-semibold text-foreground dark:text-white">
               Checkpoints
             </h2>
             {checkpoints.length === 0 ? (
@@ -369,10 +315,10 @@ export default function MonitorPage({
                 {checkpoints.map((cp) => (
                   <div
                     key={cp.id}
-                    className="rounded-md border border-stroke bg-slate-950 p-2 text-xs"
+                    className="rounded-md border border-stroke bg-white dark:bg-slate-950 p-2 text-xs"
                   >
                     <div className="flex justify-between">
-                      <span className="font-semibold">{cp.step}</span>
+                      <span className="font-semibold text-foreground dark:text-white">{cp.step}</span>
                       <span className="text-content-muted">
                         {new Date(cp.created_at).toLocaleTimeString()}
                       </span>
@@ -386,16 +332,4 @@ export default function MonitorPage({
       </div>
     </main>
   );
-}
-
-function toRealtimeLog(taskID: string, log: TaskLog): RealtimeLog {
-  return {
-    id: log.id,
-    streamId: taskID,
-    source: "workflow",
-    level: log.level,
-    message: log.message,
-    createdAt: log.created_at,
-    createdAtEpoch: Date.parse(log.created_at),
-  };
 }

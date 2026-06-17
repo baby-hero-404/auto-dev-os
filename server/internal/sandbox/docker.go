@@ -51,6 +51,12 @@ func (r *DockerRuntime) Health(ctx context.Context) error {
 }
 
 func (r *DockerRuntime) Prewarm(ctx context.Context) error {
+	// First check if the image already exists locally.
+	_, _, err := r.client.ImageInspectWithRaw(ctx, r.config.Image)
+	if err == nil {
+		return nil
+	}
+
 	reader, err := r.client.ImagePull(ctx, r.config.Image, image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull sandbox image: %w", err)

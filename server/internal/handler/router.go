@@ -54,7 +54,7 @@ func NewRouter(d Deps) http.Handler {
 	if webPort == "" {
 		webPort = "32300"
 	}
-	allowedOrigins := []string{"http://localhost:" + webPort, "http://127.0.0.1:" + webPort}
+	allowedOrigins := []string{"http://localhost:3000", "http://localhost:" + webPort, "http://127.0.0.1:" + webPort}
 	if strings.TrimSpace(d.CORSAllowedOrigins) != "" {
 		allowedOrigins = splitCSV(d.CORSAllowedOrigins)
 	}
@@ -133,6 +133,12 @@ func NewRouter(d Deps) http.Handler {
 						r.Get("/", projH.List)
 					})
 
+					r.Route("/rules", func(r chi.Router) {
+						r.Get("/", ruleH.ListGlobal)
+						r.With(mw.RequireRole(models.UserRoleAdmin)).Post("/", ruleH.CreateGlobal)
+						r.With(mw.RequireRole(models.UserRoleAdmin)).Post("/seed", ruleH.SeedGlobal)
+					})
+
 					r.Route("/git-accounts", func(r chi.Router) {
 						r.Post("/", gitAccH.Create)
 						r.Get("/", gitAccH.List)
@@ -141,6 +147,7 @@ func NewRouter(d Deps) http.Handler {
 					r.Route("/provider-credentials", func(r chi.Router) {
 						r.Post("/", providerCredH.Create)
 						r.Get("/", providerCredH.List)
+						r.Post("/test", providerCredH.TestInput)
 						r.Put("/{credentialID}", providerCredH.Update)
 						r.Delete("/{credentialID}", providerCredH.Delete)
 						r.Post("/{credentialID}/test", providerCredH.Test)
@@ -185,11 +192,13 @@ func NewRouter(d Deps) http.Handler {
 				r.Route("/rules", func(r chi.Router) {
 					r.Post("/", ruleH.Create)
 					r.Get("/", ruleH.List)
+					r.Post("/seed", ruleH.Seed)
 				})
 			})
 
 			// Standalone resource endpoints
 			r.Get("/repositories/remote", repoH.ListRemoteRepos)
+			r.Post("/repositories/branches", repoH.GetBranches)
 			r.Get("/repositories/{repoID}", repoH.GetByID)
 			r.Patch("/repositories/{repoID}", repoH.Update)
 			r.Delete("/repositories/{repoID}", repoH.Delete)
@@ -203,8 +212,6 @@ func NewRouter(d Deps) http.Handler {
 
 			r.Get("/agents/{agentID}", agentH.GetByID)
 			r.Patch("/agents/{agentID}", agentH.Update)
-			r.Get("/agents/{agentID}/skills", skillH.ListAgentSkills)
-			r.Post("/agents/{agentID}/skills", skillH.AssignToAgent)
 			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/agents/{agentID}", agentH.Delete)
 			r.Get("/role-templates", agentH.ListRoleTemplates)
 
@@ -263,6 +270,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Route("/skills", func(r chi.Router) {
 				r.Post("/", skillH.Create)
 				r.Get("/", skillH.List)
+				r.Post("/seed", skillH.Seed)
 				r.Get("/{skillID}", skillH.GetByID)
 				r.Patch("/{skillID}", skillH.Update)
 				r.Post("/{skillID}/test", skillH.Test)

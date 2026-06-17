@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -57,11 +58,7 @@ func (a *GitOpsAdapter) CloneRepo(ctx context.Context, repoURL, token, branch, l
 // linked GitAccount (falling back to repo.Token), and clones using the correct
 // provider and token. This keeps credential resolution out of the orchestrator.
 func (a *GitOpsAdapter) CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error) {
-	normalized, err := NormalizeGitURLToHTTPS(repoURL)
-	if err == nil {
-		repoURL = normalized
-	}
-	repo, err := a.repoDb.GetByURL(ctx, repoURL)
+	repoURL, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return "", fmt.Errorf("lookup repo %s: %w", repoURL, err)
 	}
@@ -70,11 +67,7 @@ func (a *GitOpsAdapter) CloneForTask(ctx context.Context, repoURL, branch, local
 }
 
 func (a *GitOpsAdapter) CreateBranch(ctx context.Context, repoURL, branchName string) error {
-	normalized, err := NormalizeGitURLToHTTPS(repoURL)
-	if err == nil {
-		repoURL = normalized
-	}
-	repo, err := a.repoDb.GetByURL(ctx, repoURL)
+	_, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return err
 	}
@@ -83,11 +76,7 @@ func (a *GitOpsAdapter) CreateBranch(ctx context.Context, repoURL, branchName st
 }
 
 func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error {
-	normalized, err := NormalizeGitURLToHTTPS(repoURL)
-	if err == nil {
-		repoURL = normalized
-	}
-	repo, err := a.repoDb.GetByURL(ctx, repoURL)
+	_, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return err
 	}
@@ -95,7 +84,10 @@ func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, 
 
 	// If files are explicitly provided (which is optional but supported), write them to local path.
 	for file, content := range files {
-		fullPath := filepath.Join(path, file)
+		fullPath, err := safeRepoPath(path, file)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			return fmt.Errorf("create file directory %s: %w", file, err)
 		}
@@ -104,8 +96,8 @@ func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, 
 		}
 	}
 
-	_, token := a.providerAndTokenForRepo(ctx, repo)
-	return a.provider.CommitAndPush(ctx, path, message, token, agentRole)
+	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	return provider.CommitAndPush(ctx, path, message, token, agentRole)
 }
 
 func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *models.Repository) (GitProvider, string) {
@@ -127,29 +119,151 @@ func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *model
 }
 
 func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error) {
-	normalized, err := NormalizeGitURLToHTTPS(repoURL)
-	if err == nil {
-		repoURL = normalized
-	}
-	repo, err := a.repoDb.GetByURL(ctx, repoURL)
+	repoURL, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Parse owner and repo from repoURL
-	parsed, err := url.Parse(repoURL)
+	path := a.localPath(ctx, repo.ID)
+	baseBranch := repo.Branch
+	if baseBranch == "" {
+		baseBranch = "main" // fallback
+	}
+
+	// Local check to see if there are any commits between base branch and task branch.
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "log", fmt.Sprintf("%s..%s", baseBranch, branchName), "--oneline")
+	if output, err := cmd.CombinedOutput(); err == nil {
+		if len(strings.TrimSpace(string(output))) == 0 {
+			observability.Info(ctx, "skipping PR creation because branch has no commits relative to base branch",
+				"branch", branchName, "base", baseBranch)
+			return fmt.Sprintf("no changes detected (branch %s has no commits relative to %s)", branchName, baseBranch), nil
+		}
+	} else {
+		// If baseBranch isn't main but master, try master.
+		if baseBranch == "main" {
+			cmd = exec.CommandContext(ctx, "git", "-C", path, "log", fmt.Sprintf("master..%s", branchName), "--oneline")
+			if output, err2 := cmd.CombinedOutput(); err2 == nil && len(strings.TrimSpace(string(output))) == 0 {
+				observability.Info(ctx, "skipping PR creation because branch has no commits relative to master",
+					"branch", branchName)
+				return fmt.Sprintf("no changes detected (branch %s has no commits relative to master)", branchName), nil
+			}
+		}
+	}
+
+	owner, repoName, err := parseRepoOwnerName(repoURL)
 	if err != nil {
-		return "", fmt.Errorf("parse repo URL %s: %w", repoURL, err)
+		return "", err
 	}
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) < 2 {
-		return "", fmt.Errorf("invalid repository URL path: %s", parsed.Path)
-	}
-	owner := parts[0]
-	repoName := strings.TrimSuffix(parts[1], ".git")
 
 	// Call underlying provider to create PR
 	// head is branchName, base is the default branch from the repository model
 	provider, token := a.providerAndTokenForRepo(ctx, repo)
-	return provider.CreatePR(ctx, owner, repoName, title, branchName, repo.Branch, body, token)
+	prURL, err := provider.CreatePR(ctx, owner, repoName, title, branchName, baseBranch, body, token)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no commits between") {
+			observability.Info(ctx, "github API reported no commits between branches; returning friendly status",
+				"branch", branchName, "base", baseBranch)
+			return fmt.Sprintf("no changes detected (branch %s has no commits relative to %s)", branchName, baseBranch), nil
+		}
+		return "", err
+	}
+	return prURL, nil
+}
+
+func (a *GitOpsAdapter) MergePullRequest(ctx context.Context, repoURL, prURL string) error {
+	repoURL, repo, err := a.lookupRepository(ctx, repoURL)
+	if err != nil {
+		return err
+	}
+
+	owner, repoName, err := parseRepoOwnerName(repoURL)
+	if err != nil {
+		return err
+	}
+
+	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	if provider == nil {
+		return fmt.Errorf("no provider available for repo %s", repoURL)
+	}
+
+	return provider.MergePR(ctx, owner, repoName, prURL, token)
+}
+
+func (a *GitOpsAdapter) lookupRepository(ctx context.Context, repoURL string) (string, *models.Repository, error) {
+	if a.repoDb == nil {
+		return repoURL, nil, fmt.Errorf("repository lookup is not configured")
+	}
+	original := strings.TrimSpace(repoURL)
+	normalized := original
+	if candidate, err := NormalizeGitURLToHTTPS(original); err == nil {
+		normalized = candidate
+	}
+	repo, err := a.repoDb.GetByURL(ctx, normalized)
+	if err == nil {
+		return normalized, repo, nil
+	}
+	if original != "" && original != normalized {
+		if repo, originalErr := a.repoDb.GetByURL(ctx, original); originalErr == nil {
+			return normalized, repo, nil
+		}
+	}
+	return normalized, nil, err
+}
+
+func safeRepoPath(root, rel string) (string, error) {
+	if strings.TrimSpace(rel) == "" {
+		return "", fmt.Errorf("file path is required")
+	}
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("file path %q must be relative", rel)
+	}
+	cleanRel := filepath.Clean(rel)
+	parts := strings.Split(cleanRel, string(os.PathSeparator))
+	if len(parts) > 0 && parts[0] == ".git" {
+		return "", fmt.Errorf("file path %q is not allowed to modify .git internals", rel)
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(absRoot, cleanRel)
+	if target != absRoot && !strings.HasPrefix(target, absRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("file path %q escapes repository workspace", rel)
+	}
+
+	current := absRoot
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err == nil && (info.Mode()&os.ModeSymlink) != 0 {
+			return "", fmt.Errorf("file path %q contains a symlink component %q", rel, part)
+		}
+	}
+
+	return target, nil
+}
+
+func parseRepoOwnerName(repoURL string) (string, string, error) {
+	parseURL := repoURL
+	if normalized, err := NormalizeGitURLToHTTPS(repoURL); err == nil {
+		parseURL = normalized
+	}
+	parsed, err := url.Parse(parseURL)
+	if err != nil {
+		return "", "", fmt.Errorf("parse repo URL %s: %w", repoURL, err)
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid repository URL path: %s", parsed.Path)
+	}
+	owner := parts[0]
+	repoName := strings.TrimSuffix(parts[1], ".git")
+	if owner == "" || repoName == "" {
+		return "", "", fmt.Errorf("invalid repository URL path: %s", parsed.Path)
+	}
+	return owner, repoName, nil
 }

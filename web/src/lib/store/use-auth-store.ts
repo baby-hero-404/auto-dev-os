@@ -5,6 +5,7 @@ import type { AuthResponse } from "@/lib/types";
 
 export type Session = {
   token: string;
+  refresh_token: string;
   user: AuthResponse["user"];
 };
 

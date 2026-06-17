@@ -9,7 +9,6 @@ type AgentInput = {
   context_config?: Record<string, unknown>;
   model_route: string;
   assignment_strategy?: string;
-  skill_ids?: string[];
   agent_id?: string;
 };
 
@@ -59,14 +58,24 @@ export const skills = {
   list(token: string) {
     return request<Skill[]>("/skills", { token });
   },
-  listForAgent(agentID: string, token: string) {
-    return request<Skill[]>(`/agents/${agentID}/skills`, { token });
+  seed(token: string) {
+    return request<Skill[]>("/skills/seed", { method: "POST", token });
   },
-  assignToAgent(agentID: string, skillID: string, token: string) {
-    return request<{ status: string }>(`/agents/${agentID}/skills`, {
+  create(token: string, input: { name: string; description: string; schema: Record<string, unknown> }) {
+    return request<Skill>("/skills", {
       method: "POST",
       token,
-      body: JSON.stringify({ skill_id: skillID }),
+      body: JSON.stringify(input),
     });
+  },
+  update(skillID: string, token: string, input: { name?: string; description?: string; schema?: Record<string, unknown> }) {
+    return request<Skill>(`/skills/${skillID}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  remove(skillID: string, token: string) {
+    return request<void>(`/skills/${skillID}`, { method: "DELETE", token });
   },
 };

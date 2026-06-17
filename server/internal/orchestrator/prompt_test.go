@@ -15,7 +15,7 @@ type fakeAgentSkillLister struct {
 	err    error
 }
 
-func (l fakeAgentSkillLister) ListByAgentID(context.Context, string) ([]models.Skill, error) {
+func (l fakeAgentSkillLister) List(context.Context) ([]models.Skill, error) {
 	return l.skills, l.err
 }
 
@@ -47,18 +47,18 @@ func TestTruncateHistoryKeepsRecentMessages(t *testing.T) {
 	}
 }
 
-func TestPromptAssembler_AssembleForAgentUsesOnlyAssignedSkills(t *testing.T) {
+func TestPromptAssembler_AssembleForAgentUsesRoleMatchedSkills(t *testing.T) {
 	assembler := NewPromptAssembler(nil).WithSkillLister(fakeAgentSkillLister{
 		skills: []models.Skill{
 			{
-				Name:        "run_tests",
-				Description: "Run tests",
-				Schema:      json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+				Name:        "api-patterns",
+				Description: "API implementation patterns",
+				Schema:      json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
 			},
 			{
-				Name:        "search_code",
-				Description: "Search code",
-				Schema:      json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+				Name:        "webapp-testing",
+				Description: "Web app testing",
+				Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
 			},
 		},
 	})
@@ -70,14 +70,14 @@ func TestPromptAssembler_AssembleForAgentUsesOnlyAssignedSkills(t *testing.T) {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
 	if len(tools) != 2 {
-		t.Fatalf("expected 2 assigned tools, got %d: %#v", len(tools), tools)
+		t.Fatalf("expected 2 role-matched tools, got %d: %#v", len(tools), tools)
 	}
-	if tools[0].Name != "run_tests" || tools[1].Name != "search_code" {
+	if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
 		t.Fatalf("unexpected tools: %#v", tools)
 	}
 }
 
-func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsNoTools(t *testing.T) {
+func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsSafeDefaultTools(t *testing.T) {
 	assembler := NewPromptAssembler(nil).WithSkillLister(fakeAgentSkillLister{})
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleQA}
@@ -86,7 +86,23 @@ func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsNoTools(t *tes
 	if err != nil {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Fatalf("expected no tools for agent without assigned skills, got %#v", tools)
+	if len(tools) != 2 {
+		t.Fatalf("expected safe default tools for agent without assigned skills, got %#v", tools)
+	}
+	if tools[0].Name != "read_file" || tools[1].Name != "write_file" {
+		t.Fatalf("unexpected default tools: %#v", tools)
+	}
+}
+
+func TestFilterToolsBySkillsUsesSchemaAllowedTools(t *testing.T) {
+	tools := FilterToolsBySkills(BuiltinToolDefinitions(), []models.Skill{{
+		Name:   "custom_code_skill",
+		Schema: json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
+	}})
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %#v", tools)
+	}
+	if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
+		t.Fatalf("unexpected tools: %#v", tools)
 	}
 }

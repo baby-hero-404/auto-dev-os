@@ -18,6 +18,7 @@ type fakeProviderCredentialService struct {
 	updated models.UpdateProviderCredentialInput
 	deleted string
 	tested  string
+	testRaw models.TestProviderCredentialInput
 }
 
 func (s *fakeProviderCredentialService) Create(_ context.Context, orgID string, input models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
@@ -54,6 +55,11 @@ func (s *fakeProviderCredentialService) Delete(_ context.Context, id string) err
 
 func (s *fakeProviderCredentialService) TestConnection(_ context.Context, id string) error {
 	s.tested = id
+	return nil
+}
+
+func (s *fakeProviderCredentialService) TestConnectionInput(_ context.Context, input models.TestProviderCredentialInput) error {
+	s.testRaw = input
 	return nil
 }
 

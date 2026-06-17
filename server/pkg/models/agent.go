@@ -63,7 +63,6 @@ type CreateAgentInput struct {
 	ContextConfig      json.RawMessage `json:"context_config,omitempty"`
 	ModelRoute         string          `json:"model_route"`
 	AssignmentStrategy string          `json:"assignment_strategy"`
-	SkillIDs           []string        `json:"skill_ids,omitempty"`
 	AgentID            string          `json:"agent_id,omitempty"`
 }
 
@@ -77,7 +76,6 @@ type UpdateAgentInput struct {
 	ModelRoute         *string          `json:"model_route,omitempty"`
 	Status             *string          `json:"status,omitempty"`
 	AssignmentStrategy *string          `json:"assignment_strategy,omitempty"`
-	SkillIDs           []string         `json:"skill_ids,omitempty"`
 }
 
 type RoleTemplate struct {

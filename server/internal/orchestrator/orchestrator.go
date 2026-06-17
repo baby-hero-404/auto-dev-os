@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"regexp"
+
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
@@ -25,6 +27,7 @@ import (
 
 type AgentAssigner interface {
 	Assign(ctx context.Context, task *models.Task) (*models.Agent, error)
+	AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error)
 	MarkRunning(ctx context.Context, agentID string) error
 	Release(ctx context.Context, agentID string) error
 }
@@ -43,6 +46,7 @@ type GitOpsClient interface {
 	CreateBranch(ctx context.Context, repoURL, branchName string) error
 	CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error
 	CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error)
+	MergePullRequest(ctx context.Context, repoURL, prURL string) error
 }
 
 type MemoryRecorder interface {
@@ -347,7 +351,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 	o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("assigned agent %s", agent.Name))
 
-	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusAssigned || task.Status == "" {
+	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusAssigned || task.Status == models.TaskStatusFailed || task.Status == "" {
 		if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusAnalyzing); err != nil {
 			o.fail(ctx, job, err)
 			return
@@ -416,7 +420,16 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		},
 	}
 
-	def := workflow.DefaultWorkflow(o.stepRunners(task, agent, job.ID))
+	runners := o.stepRunners(task, agent, job.ID)
+	var def workflow.Definition
+	switch task.Complexity {
+	case models.TaskComplexityEasy:
+		def = workflow.EasyWorkflow(runners)
+	case models.TaskComplexityHard:
+		def = workflow.HardWorkflow(runners)
+	default:
+		def = workflow.MediumWorkflow(runners)
+	}
 	result, err := engine.Run(ctx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID})
 
 	finalStatus := models.WorkflowJobStatusDone
@@ -526,7 +539,7 @@ func taskReadyForExecution(task *models.Task) bool {
 }
 
 func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID string) map[string]workflow.StepFunc {
-	return map[string]workflow.StepFunc{
+	runners := map[string]workflow.StepFunc{
 		workflow.StepAnalyze: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
 			if o.prompts != nil {
 				messages, tools, err := o.prompts.AssembleForAgent(ctx, *task, agent, nil)
@@ -538,7 +551,189 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			if taskReadyForExecution(task) {
 				return map[string]any{"complexity": task.Complexity, "spec_status": task.SpecStatus}, nil
 			}
-			analysis := deriveWorkflowAnalysis(task)
+
+			var analysis models.TaskAnalysis
+			if o.llm != nil {
+				instruction := `Analyze this task and output the proposed specification as a valid JSON object.
+You must output ONLY a valid JSON object (or inside a ` + "```json" + ` block).
+The JSON object MUST have the following structure:
+{
+  "complexity": "easy" | "medium" | "hard",
+  "scope": "A clear, detailed description of the scope of the change",
+  "affected_files": ["list", "of", "files", "expected", "to", "be", "modified"],
+  "risks": ["list", "of", "potential", "risks", "and", "challenges"],
+  "execution_plan": ["step-by-step", "plan", "to", "implement", "this", "task"],
+  "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
+  "proposal_md": "Markdown for proposal.md (use the template below)",
+  "specs_md": "Markdown for specs.md (use the template below)",
+  "design_md": "Markdown for design.md (use the template below)",
+  "tasks_md": "Markdown for tasks.md (use the template below)"
+}
+
+=== OPENSPEC TEMPLATE: proposal.md ===
+## Why
+(1-2 sentences: what problem does this solve? Why now?)
+
+## What Changes
+(Bullet list of specific changes. Mark breaking changes with **BREAKING**.)
+
+## Capabilities
+### New Capabilities
+- ` + "`<name>`" + `: <brief description>
+
+### Modified Capabilities
+- ` + "`<existing-name>`" + `: <what requirement is changing>
+
+## Impact
+(Affected code, APIs, dependencies, systems)
+
+=== OPENSPEC TEMPLATE: specs.md ===
+Use delta operations as section headers:
+## ADDED Requirements
+### Requirement: <name>
+<Description using SHALL/MUST language>
+
+#### Scenario: <scenario name>
+- **WHEN** <condition>
+- **THEN** <expected outcome>
+
+## MODIFIED Requirements
+(Same format, include full updated content)
+
+## REMOVED Requirements
+### Requirement: <name>
+**Reason**: <why removed>
+**Migration**: <how to migrate>
+
+=== OPENSPEC TEMPLATE: design.md ===
+## Context
+(Background, current state, constraints)
+
+## Goals / Non-Goals
+**Goals:** ...
+**Non-Goals:** ...
+
+## Decisions
+(Key technical choices with rationale)
+
+## Risks / Trade-offs
+(Known limitations, format: [Risk] → Mitigation)
+
+## Open Questions
+(Outstanding decisions or unknowns)
+
+=== OPENSPEC TEMPLATE: tasks.md ===
+Group related tasks under numbered headings. Each task MUST be a checkbox.
+## 1. <Group Name>
+- [ ] 1.1 <Task description>
+- [ ] 1.2 <Task description>
+
+## 2. <Group Name>
+- [ ] 2.1 <Task description>
+`
+				res, err := o.runLLMStep(ctx, task, agent, jobID, workflow.StepAnalyze, instruction)
+				if err == nil {
+					if parsed, ok := res["parsed"].(map[string]any); ok {
+						if comp, ok := parsed["complexity"].(string); ok {
+							analysis.Complexity = comp
+						}
+						if scope, ok := parsed["scope"].(string); ok {
+							analysis.Scope = scope
+						}
+						if aff, ok := parsed["affected_files"].([]any); ok {
+							for _, item := range aff {
+								if s, ok := item.(string); ok {
+									analysis.AffectedFiles = append(analysis.AffectedFiles, s)
+								}
+							}
+						}
+						if risks, ok := parsed["risks"].([]any); ok {
+							for _, item := range risks {
+								if s, ok := item.(string); ok {
+									analysis.Risks = append(analysis.Risks, s)
+								}
+							}
+						}
+						if execPlan, ok := parsed["execution_plan"].([]any); ok {
+							for _, item := range execPlan {
+								if s, ok := item.(string); ok {
+									analysis.ExecutionPlan = append(analysis.ExecutionPlan, s)
+								}
+							}
+						}
+						if questions, ok := parsed["clarification_questions"].([]any); ok {
+							for _, item := range questions {
+								if s, ok := item.(string); ok {
+									analysis.ClarificationQuestions = append(analysis.ClarificationQuestions, s)
+								}
+							}
+						}
+						if proposal, ok := parsed["proposal_md"].(string); ok {
+							analysis.ProposalMD = proposal
+						}
+						if specs, ok := parsed["specs_md"].(string); ok {
+							analysis.SpecsMD = specs
+						}
+						if design, ok := parsed["design_md"].(string); ok {
+							analysis.DesignMD = design
+						}
+						if tasks, ok := parsed["tasks_md"].(string); ok {
+							analysis.TasksMD = tasks
+						}
+					}
+				} else {
+					analysis = deriveWorkflowAnalysis(task)
+				}
+			} else {
+				analysis = deriveWorkflowAnalysis(task)
+			}
+
+			if analysis.Complexity == "" {
+				analysis.Complexity = models.TaskComplexityEasy
+			}
+
+			// Generate and write actual OpenSpec files
+			localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+			changeName := deriveChangeName(task)
+			changeDir := filepath.Join(localPath, "openspec", "changes", changeName)
+			if err := os.MkdirAll(changeDir, 0o755); err == nil {
+				proposalContent := analysis.ProposalMD
+				if proposalContent == "" {
+					proposalContent = fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description)
+					analysis.ProposalMD = proposalContent
+				}
+				specsContent := analysis.SpecsMD
+				if specsContent == "" {
+					specsContent = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description)
+					analysis.SpecsMD = specsContent
+				}
+				designContent := analysis.DesignMD
+				if designContent == "" {
+					designContent = "## Design\n\nImplementation design details.\n"
+					analysis.DesignMD = designContent
+				}
+				tasksContent := analysis.TasksMD
+				if tasksContent == "" {
+					var builder strings.Builder
+					builder.WriteString("## Tasks\n\n")
+					if len(analysis.ExecutionPlan) > 0 {
+						for _, step := range analysis.ExecutionPlan {
+							builder.WriteString(fmt.Sprintf("- [ ] %s\n", step))
+						}
+					} else {
+						builder.WriteString("- [ ] Implement changes\n")
+					}
+					tasksContent = builder.String()
+					analysis.TasksMD = tasksContent
+				}
+				_ = os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposalContent), 0o644)
+				_ = os.WriteFile(filepath.Join(changeDir, "specs.md"), []byte(specsContent), 0o644)
+				_ = os.WriteFile(filepath.Join(changeDir, "design.md"), []byte(designContent), 0o644)
+				_ = os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasksContent), 0o644)
+				meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", changeName, task.ID)
+				_ = os.WriteFile(filepath.Join(changeDir, ".openspec.yaml"), []byte(meta), 0o644)
+			}
+
 			raw, err := json.Marshal(analysis)
 			if err != nil {
 				return nil, err
@@ -551,8 +746,8 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 				specStatus = models.TaskSpecStatusAutoApproved
 				status = models.TaskStatusCoding
 			} else {
-				specStatus = models.TaskSpecStatusAutoApproved
-				status = models.TaskStatusPlanning
+				specStatus = models.TaskSpecStatusPendingReview
+				status = models.TaskStatusSpecReview
 			}
 			if _, err := o.tasks.Update(ctx, task.ID, models.UpdateTaskInput{
 				Complexity: &analysis.Complexity,
@@ -573,8 +768,11 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return map[string]any{"complexity": analysis.Complexity, "spec_status": specStatus}, nil
 		},
 		workflow.StepPlan: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
+			t, err := o.tasks.GetByID(ctx, task.ID)
+			if err == nil && t.Complexity == models.TaskComplexityEasy {
+				return map[string]any{"status": "skipped", "info": "skipped plan step for easy task"}, nil
+			}
 			var out map[string]any
-			var err error
 			if o.llm != nil {
 				out, err = o.runLLMStep(ctx, task, agent, jobID, workflow.StepPlan, "Create a concise JSON execution plan with subtasks, risks, and test strategy.")
 			} else {
@@ -615,6 +813,25 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return nil, fmt.Errorf("llm provider is not configured")
 		},
 		workflow.StepCodeFrontend: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
+			t, err := o.tasks.GetByID(ctx, task.ID)
+			if err == nil {
+				if t.Complexity == models.TaskComplexityEasy {
+					return map[string]any{"status": "skipped", "info": "skipped frontend step for easy task"}, nil
+				}
+				var analysis models.TaskAnalysis
+				if json.Unmarshal(t.Analysis, &analysis) == nil {
+					hasFrontend := false
+					for _, file := range analysis.AffectedFiles {
+						if strings.HasPrefix(file, "web/") || strings.HasSuffix(file, ".tsx") || strings.HasSuffix(file, ".css") || strings.HasSuffix(file, ".html") {
+							hasFrontend = true
+							break
+						}
+					}
+					if !hasFrontend {
+						return map[string]any{"status": "skipped", "info": "no frontend files affected"}, nil
+					}
+				}
+			}
 			if o.llm != nil {
 				out, err := o.runLLMStep(ctx, task, agent, jobID, workflow.StepCodeFrontend, "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.")
 				if err != nil {
@@ -637,6 +854,10 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return nil, fmt.Errorf("llm provider is not configured")
 		},
 		workflow.StepMerge: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
+			t, err := o.tasks.GetByID(ctx, task.ID)
+			if err == nil && t.Complexity == models.TaskComplexityEasy {
+				return map[string]any{"status": "skipped", "info": "skipped merge step for easy task"}, nil
+			}
 			diffText, err := o.captureWorkspaceDiff(ctx, task, agent, workflow.StepMerge)
 			if err != nil {
 				return nil, fmt.Errorf("merge check failed: %w", err)
@@ -651,10 +872,23 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			}, nil
 		},
 		workflow.StepReview: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
+			t, err := o.tasks.GetByID(ctx, task.ID)
+			if err == nil && t.Complexity == models.TaskComplexityEasy {
+				return map[string]any{"status": "skipped", "info": "skipped review step for easy task"}, nil
+			}
+			reviewerAgent := agent
+			if manager, ok := o.agents.(interface {
+				AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error)
+			}); ok {
+				if rev, err := manager.AssignReviewer(ctx, task); err == nil && rev != nil {
+					reviewerAgent = rev
+					o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf("assigned reviewer agent %s for review step", reviewerAgent.Name))
+				}
+			}
 			if o.llm != nil {
 				diffText, _ := o.captureWorkspaceDiff(ctx, task, agent, workflow.StepReview)
 				instruction := "Review the proposed changes. Here is the current workspace diff:\n\n" + diffText + "\n\nReturn JSON findings with severity, file, line, and recommendation."
-				out, err := o.runLLMStep(ctx, task, agent, jobID, workflow.StepReview, instruction)
+				out, err := o.runLLMStep(ctx, task, reviewerAgent, jobID, workflow.StepReview, instruction)
 				if err != nil {
 					return nil, err
 				}
@@ -679,6 +913,10 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return nil, fmt.Errorf("llm provider is not configured")
 		},
 		workflow.StepFix: func(ctx context.Context, stepCtx workflow.StepContext) (map[string]any, error) {
+			t, err := o.tasks.GetByID(ctx, task.ID)
+			if err == nil && t.Complexity == models.TaskComplexityEasy {
+				return map[string]any{"status": "skipped", "info": "skipped fix step for easy task"}, nil
+			}
 			if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
 				if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
 					if findings, exists := parsed["findings"]; exists {
@@ -769,6 +1007,112 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			}, nil
 		},
 	}
+
+	for stepID, runner := range runners {
+		runners[stepID] = o.withCheckpointRecovery(task, agent, stepID, runner)
+	}
+	return runners
+}
+
+func (o *Orchestrator) getSuccessfulCheckpoint(ctx context.Context, taskID string, step string) (map[string]any, bool) {
+	checkpoints, err := o.workflows.ListCheckpoints(ctx, taskID)
+	if err != nil {
+		return nil, false
+	}
+	var latestSuccess *models.WorkflowCheckpoint
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		cp := checkpoints[i]
+		if cp.Step == step {
+			var state map[string]any
+			if err := json.Unmarshal(cp.State, &state); err == nil {
+				if state["status"] == "success" {
+					latestSuccess = &cp
+					break
+				}
+			}
+		}
+	}
+	if latestSuccess != nil {
+		var state map[string]any
+		_ = json.Unmarshal(latestSuccess.State, &state)
+		if out, ok := state["output"].(map[string]any); ok {
+			return out, true
+		}
+		return map[string]any{}, true
+	}
+	return nil, false
+}
+
+func (o *Orchestrator) getSavedPatch(ctx context.Context, taskID string, step string) (string, error) {
+	if o.artifacts == nil {
+		return "", fmt.Errorf("artifacts repository is not configured")
+	}
+	arts, err := o.artifacts.ListByTaskID(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	var latestPatch *models.WorkflowArtifact
+	for i := len(arts) - 1; i >= 0; i-- {
+		art := arts[i]
+		if art.Step == step && art.Type == "patch" {
+			latestPatch = &art
+			break
+		}
+	}
+	if latestPatch == nil {
+		return "", fmt.Errorf("no patch artifact found for step %s", step)
+	}
+	var patch string
+	if err := json.Unmarshal(latestPatch.Payload, &patch); err == nil {
+		return patch, nil
+	}
+	return string(latestPatch.Payload), nil
+}
+
+func (o *Orchestrator) withCheckpointRecovery(task *models.Task, agent *models.Agent, stepID string, runner workflow.StepFunc) workflow.StepFunc {
+	return func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
+		if stepID != workflow.StepAnalyze {
+			if output, exists := o.getSuccessfulCheckpoint(ctx, task.ID, stepID); exists {
+				o.log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: resuming from previous successful checkpoint", stepID))
+
+				if stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix {
+					if patch, err := o.getSavedPatch(ctx, task.ID, stepID); err == nil && patch != "" {
+						o.log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: re-applying saved patch to workspace", stepID))
+						if applyErr := o.applyPatch(ctx, task, agent, stepID, patch); applyErr != nil {
+							o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("step %s: failed to re-apply patch (%v), rerunning step", stepID, applyErr))
+							return runner(ctx, sc)
+						}
+					}
+				}
+
+				switch stepID {
+				case workflow.StepPlan:
+					_, _ = o.updateTaskStatus(ctx, task.ID, models.TaskStatusCoding)
+				case workflow.StepMerge:
+					_, _ = o.updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing)
+				case workflow.StepReview:
+					nextStatus := models.TaskStatusTesting
+					if parsed, ok := output["parsed"].(map[string]any); ok {
+						if findings, exists := parsed["findings"]; exists {
+							if slice, ok := findings.([]any); ok && len(slice) > 0 {
+								nextStatus = models.TaskStatusFixing
+							}
+						}
+					}
+					_, _ = o.updateTaskStatus(ctx, task.ID, nextStatus)
+				case workflow.StepFix:
+					_, _ = o.updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing)
+				case workflow.StepTest:
+					_, _ = o.updateTaskStatus(ctx, task.ID, models.TaskStatusTesting)
+				case workflow.StepPR:
+					_, _ = o.updateTaskStatus(ctx, task.ID, models.TaskStatusHumanReview)
+				}
+
+				return output, nil
+			}
+		}
+		return runner(ctx, sc)
+	}
 }
 
 func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
@@ -785,7 +1129,14 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 	} else {
 		messages = []llm.Message{{Role: "user", Content: task.Title + "\n\n" + task.Description}}
 	}
-	messages = append(messages, llm.Message{Role: "user", Content: "Workflow step: " + stepID + "\n\n" + instruction})
+	fullInstruction := instruction
+	if stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix || stepID == workflow.StepPlan || stepID == workflow.StepAnalyze {
+		fullInstruction += "\n\nCRITICAL REQUIREMENT: Do NOT output any tool calls, function calls, or markdown block thoughts. You do NOT have tool execution capabilities in this single-shot step. You MUST output ONLY a valid JSON object matching the requested format directly (or inside a ```json ``` block)."
+	}
+	if stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix {
+		fullInstruction += "\n\nCRITICAL REQUIREMENT: The patch/diff field MUST contain a valid Unified Git Diff (starting with 'diff --git') representing all source code changes. Do NOT output raw file contents. Do NOT include any text outside the JSON structure."
+	}
+	messages = append(messages, llm.Message{Role: "user", Content: "Workflow step: " + stepID + "\n\n" + fullInstruction})
 
 	// Save prompt artifact
 	_ = o.saveArtifact(ctx, jobID, task.ID, stepID, "prompt", messages)
@@ -796,6 +1147,7 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		ProjectID:  task.ProjectID,
 		AgentID:    agent.ID,
 		TaskID:     task.ID,
+		RouteName:  agent.ModelRoute,
 	})
 	resp, err := o.llm.Chat(ctx, messages)
 	if err != nil {
@@ -931,11 +1283,28 @@ func (o *Orchestrator) cleanupWorkspaceAfterFinalState(ctx context.Context, task
 	if o.retention.Retention != 0 {
 		return
 	}
-	if err := o.removeWorkspace(taskID); err != nil {
-		observability.Warn(ctx, "workspace cleanup failed", "task_id", taskID, "error", err)
-		return
+	if o.tasks != nil {
+		task, err := o.tasks.GetByID(ctx, taskID)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "record not found") {
+				_ = o.removeWorkspace(taskID)
+			}
+			return
+		}
+		if task.Status == models.TaskStatusCompleted || task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusFailed {
+			if err := o.removeWorkspace(taskID); err != nil {
+				observability.Warn(ctx, "workspace cleanup failed", "task_id", taskID, "error", err)
+				return
+			}
+			observability.Info(ctx, "workspace cleaned after final state", "task_id", taskID)
+		}
+	} else {
+		if err := o.removeWorkspace(taskID); err != nil {
+			observability.Warn(ctx, "workspace cleanup failed", "task_id", taskID, "error", err)
+			return
+		}
+		observability.Info(ctx, "workspace cleaned after final state", "task_id", taskID)
 	}
-	observability.Info(ctx, "workspace cleaned after final state", "task_id", taskID)
 }
 
 func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
@@ -962,14 +1331,33 @@ func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
 			observability.Warn(ctx, "workspace prune stat failed", "name", entry.Name(), "error", err)
 			continue
 		}
-		if info.ModTime().After(cutoff) {
-			continue
+		taskID := entry.Name()
+		if o.tasks != nil {
+			task, err := o.tasks.GetByID(ctx, taskID)
+			if err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "record not found") {
+					if err := o.removeWorkspace(taskID); err == nil {
+						removed++
+					}
+				}
+				continue
+			}
+			if task.Status == models.TaskStatusCompleted || task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusFailed {
+				if err := o.removeWorkspace(taskID); err != nil {
+					observability.Warn(ctx, "workspace prune remove failed", "name", taskID, "error", err)
+					continue
+				}
+				removed++
+			}
+		} else {
+			if info.ModTime().Before(cutoff) {
+				if err := o.removeWorkspace(entry.Name()); err != nil {
+					observability.Warn(ctx, "workspace prune remove failed", "name", entry.Name(), "error", err)
+					continue
+				}
+				removed++
+			}
 		}
-		if err := o.removeWorkspace(entry.Name()); err != nil {
-			observability.Warn(ctx, "workspace prune remove failed", "name", entry.Name(), "error", err)
-			continue
-		}
-		removed++
 	}
 	return removed, nil
 }
@@ -1047,6 +1435,44 @@ func (o *Orchestrator) applyPatch(ctx context.Context, task *models.Task, agent 
 	if patchText == "" {
 		return nil
 	}
+
+	// Scan lines of patch to extract modified files
+	lines := strings.Split(patchText, "\n")
+	var modifiedFiles []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+++ b/") {
+			file := strings.TrimPrefix(line, "+++ b/")
+			file = strings.TrimSpace(file)
+			if file != "/dev/null" {
+				modifiedFiles = append(modifiedFiles, file)
+			}
+		} else if strings.HasPrefix(line, "--- a/") {
+			file := strings.TrimPrefix(line, "--- a/")
+			file = strings.TrimSpace(file)
+			if file != "/dev/null" {
+				modifiedFiles = append(modifiedFiles, file)
+			}
+		}
+	}
+
+	// Enforce affected files if specified
+	if task.Analysis != nil {
+		var analysis models.TaskAnalysis
+		if err := json.Unmarshal(task.Analysis, &analysis); err == nil && len(analysis.AffectedFiles) > 0 {
+			// Create a lookup map for allowed files
+			allowed := make(map[string]bool)
+			for _, f := range analysis.AffectedFiles {
+				allowed[f] = true
+			}
+			// Validate all files modified in the patch
+			for _, file := range modifiedFiles {
+				if !allowed[file] {
+					return fmt.Errorf("security violation: patch attempts to modify file %q which is not in the approved affected_files spec %v", file, analysis.AffectedFiles)
+				}
+			}
+		}
+	}
+
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	fullPath := filepath.Join(localPath, "patch.diff")
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -1055,7 +1481,7 @@ func (o *Orchestrator) applyPatch(ctx context.Context, task *models.Task, agent 
 	if err := os.WriteFile(fullPath, []byte(patchText), 0o644); err != nil {
 		return err
 	}
-	_, err := o.runSandboxStep(ctx, task, agent, stepID+"_apply_patch", "git apply patch.diff")
+	_, err := o.runSandboxStep(ctx, task, agent, stepID+"_apply_patch", "git apply --recount --whitespace=nowarn patch.diff")
 	if err != nil {
 		return fmt.Errorf("git apply patch: %w", err)
 	}
@@ -1167,4 +1593,22 @@ func pruneLogFiles(ctx context.Context, retentionDays int, fileRoot string) (int
 		pruned++
 	}
 	return pruned, nil
+}
+
+func deriveChangeName(task *models.Task) string {
+	slug := strings.ToLower(task.Title)
+	reg := regexp.MustCompile(`[^a-z0-9]+`)
+	slug = reg.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if len(slug) > 30 {
+		slug = slug[:30]
+	}
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "task-" + task.ID
+		if len(slug) > 13 {
+			slug = slug[:13]
+		}
+	}
+	return slug
 }

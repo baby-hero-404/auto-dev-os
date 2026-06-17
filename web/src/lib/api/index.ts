@@ -33,6 +33,8 @@ export const api = {
   createRepository: projects.repositories.create,
   validateRepository: projects.repositories.validate,
   cloneRepository: projects.repositories.clone,
+  updateRepository: projects.repositories.update,
+  getRemoteBranches: projects.repositories.getBranches,
 
   listTasks: projects.tasks.list,
   getTask: projects.tasks.get,
@@ -46,6 +48,7 @@ export const api = {
   approveTaskWorkflow: projects.tasks.approveWorkflow,
   approvePR: projects.tasks.approvePR,
   rejectPR: projects.tasks.rejectPR,
+  taskArtifacts: projects.tasks.artifacts,
 
   listAgents: agents.list,
   createAgent: agents.create,
@@ -56,11 +59,19 @@ export const api = {
   deleteAgent: agents.remove,
 
   listRules: projects.rules.list,
+  listGlobalRules: projects.rules.listGlobal,
   createRule: projects.rules.create,
+  createGlobalRule: projects.rules.createGlobal,
+  seedGlobalRules: projects.rules.seedGlobal,
+  updateRule: projects.rules.update,
+  deleteRule: projects.rules.remove,
+  seedRules: projects.rules.seed,
 
   listSkills: agents.skills.list,
-  listAgentSkills: agents.skills.listForAgent,
-  assignSkillToAgent: agents.skills.assignToAgent,
+  seedSkills: agents.skills.seed,
+  createSkill: agents.skills.create,
+  updateSkill: agents.skills.update,
+  deleteSkill: agents.skills.remove,
 
   tokenUsage: analytics.tokenUsage,
   analyticsOverview: analytics.overview,
@@ -76,6 +87,7 @@ export const api = {
   updateProviderCredential: gateway.providerCredentials.update,
   deleteProviderCredential: gateway.providerCredentials.remove,
   testProviderCredential: gateway.providerCredentials.test,
+  testProviderCredentialInput: gateway.providerCredentials.testInput,
   listVirtualKeys: gateway.virtualKeys.list,
   createVirtualKey: gateway.virtualKeys.create,
   getVirtualKey: gateway.virtualKeys.get,

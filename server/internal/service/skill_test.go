@@ -8,7 +8,7 @@ import (
 )
 
 func TestSkillService_Create_EmptyName(t *testing.T) {
-	svc := NewSkillService(nil)
+	svc := NewSkillService(nil, "")
 
 	_, err := svc.Create(context.Background(), models.CreateSkillInput{Name: ""})
 	if err == nil {
@@ -20,7 +20,7 @@ func TestSkillService_Create_EmptyName(t *testing.T) {
 }
 
 func TestSkillService_Create_NilRepo(t *testing.T) {
-	svc := NewSkillService(nil)
+	svc := NewSkillService(nil, "")
 
 	defer func() {
 		if r := recover(); r == nil {

@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_rules_org_id;
+ALTER TABLE rules DROP COLUMN IF EXISTS org_id;

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -12,7 +11,6 @@ import (
 type AgentService struct {
 	repo          *repository.AgentRepo
 	roleTemplates *repository.RoleTemplateRepo
-	skills        *repository.SkillRepo
 }
 
 func NewAgentService(repo *repository.AgentRepo) *AgentService {
@@ -24,24 +22,12 @@ func (s *AgentService) WithRoleTemplateRepo(repo *repository.RoleTemplateRepo) *
 	return s
 }
 
-func (s *AgentService) WithSkillRepo(repo *repository.SkillRepo) *AgentService {
-	s.skills = repo
-	return s
-}
-
 func (s *AgentService) Create(ctx context.Context, projectID string, input models.CreateAgentInput) (*models.Agent, error) {
 	prepared, err := s.prepareCreateInput(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	agent, err := s.repo.Create(ctx, projectID, prepared)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.assignSkills(ctx, agent.ID, prepared.SkillIDs); err != nil {
-		return nil, err
-	}
-	return agent, nil
+	return s.repo.Create(ctx, projectID, prepared)
 }
 
 func (s *AgentService) Hire(ctx context.Context, orgID string, input models.CreateAgentInput) (*models.Agent, error) {
@@ -49,14 +35,7 @@ func (s *AgentService) Hire(ctx context.Context, orgID string, input models.Crea
 	if err != nil {
 		return nil, err
 	}
-	agent, err := s.repo.CreateForOrg(ctx, orgID, prepared)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.assignSkills(ctx, agent.ID, prepared.SkillIDs); err != nil {
-		return nil, err
-	}
-	return agent, nil
+	return s.repo.CreateForOrg(ctx, orgID, prepared)
 }
 
 func (s *AgentService) AssignToProject(ctx context.Context, projectID string, input models.CreateAgentInput) (*models.Agent, error) {
@@ -109,16 +88,7 @@ func (s *AgentService) Update(ctx context.Context, id string, input models.Updat
 		defaultRoute := "balanced"
 		input.ModelRoute = &defaultRoute
 	}
-	agent, err := s.repo.Update(ctx, id, input)
-	if err != nil {
-		return nil, err
-	}
-	if input.SkillIDs != nil {
-		if err := s.assignSkills(ctx, agent.ID, input.SkillIDs); err != nil {
-			return nil, err
-		}
-	}
-	return agent, nil
+	return s.repo.Update(ctx, id, input)
 }
 
 func (s *AgentService) Delete(ctx context.Context, id string) error {
@@ -159,31 +129,12 @@ func (s *AgentService) prepareCreateInput(ctx context.Context, input models.Crea
 			if input.Goal == "" {
 				input.Goal = template.DefaultGoal
 			}
-			if len(input.SkillIDs) == 0 && s.skills != nil {
-				var toolNames []string
-				if err := json.Unmarshal(template.DefaultTools, &toolNames); err == nil {
-					skills, err := s.skills.ListByNames(ctx, toolNames)
-					if err != nil {
-						return input, err
-					}
-					for _, skill := range skills {
-						input.SkillIDs = append(input.SkillIDs, skill.ID)
-					}
-				}
-			}
 		}
 	}
 	if input.Goal == "" {
 		return input, ErrValidation("goal is required")
 	}
 	return input, nil
-}
-
-func (s *AgentService) assignSkills(ctx context.Context, agentID string, skillIDs []string) error {
-	if s.skills == nil || skillIDs == nil {
-		return nil
-	}
-	return s.skills.ReplaceAgentSkills(ctx, agentID, skillIDs)
 }
 
 func validateAgentAssignmentStrategy(strategy string) error {

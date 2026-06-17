@@ -22,79 +22,110 @@ export function LoginForm() {
         mode === "login"
           ? await api.login({ email, password })
           : await api.register({ email, password, org_name: orgName });
-      saveSession({ token: response.tokens.access_token, user: response.user });
+      saveSession({
+        token: response.tokens.access_token,
+        refresh_token: response.tokens.refresh_token,
+        user: response.user,
+      });
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Authentication failed");
     }
   }
 
   return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
-      <section className="glass-panel w-full max-w-md rounded-lg p-6">
-        <div className="mb-8 flex items-center gap-3">
-          <Image src="/logo.png" alt="Auto Code OS Logo" width={44} height={44} className="rounded-md object-contain" />
-          <div>
-            <h1 className="font-mono text-xl font-semibold">Auto Code OS</h1>
-            <p className="text-sm text-content-muted">Secure AI SDLC control plane</p>
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-background px-4 py-12">
+      {/* Background Decorative Mesh Gradients */}
+      <div className="pointer-events-none absolute -left-48 -top-48 size-96 rounded-full bg-brand-primary/10 blur-[120px]" />
+      <div className="pointer-events-none absolute -right-48 -bottom-48 size-96 rounded-full bg-accent/10 blur-[120px]" />
+
+      <section className="relative z-10 w-full max-w-[420px] rounded-xl border border-stroke bg-card p-8 shadow-xl transition-all duration-200">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-4 overflow-hidden rounded-xl bg-brand-primary/10 p-2 shadow-inner">
+            <Image
+              src="/logo.png"
+              alt="Auto Code OS Logo"
+              width={48}
+              height={48}
+              className="rounded-lg object-contain"
+            />
           </div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">Auto Code OS</h1>
+          <p className="mt-1.5 text-sm text-content-muted">Secure AI SDLC control plane</p>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 rounded-md border border-stroke p-1">
+        {/* Tab Toggle */}
+        <div className="mb-6 grid grid-cols-2 rounded-lg bg-surface p-1 border border-stroke">
           <button
-            className={`rounded px-3 py-2 text-sm transition ${mode === "login" ? "bg-brand-primary text-slate-950" : "text-content-muted hover:bg-surface hover:text-white"}`}
-            onClick={() => setMode("login")}
             type="button"
+            onClick={() => setMode("login")}
+            className={`rounded-md py-1.5 text-sm font-semibold transition-all duration-200 cursor-pointer ${
+              mode === "login"
+                ? "bg-card text-foreground shadow-sm border border-stroke/50"
+                : "text-content-muted hover:text-foreground"
+            }`}
           >
             Login
           </button>
           <button
-            className={`rounded px-3 py-2 text-sm transition ${mode === "register" ? "bg-brand-primary text-slate-950" : "text-content-muted hover:bg-surface hover:text-white"}`}
-            onClick={() => setMode("register")}
             type="button"
+            onClick={() => setMode("register")}
+            className={`rounded-md py-1.5 text-sm font-semibold transition-all duration-200 cursor-pointer ${
+              mode === "register"
+                ? "bg-card text-foreground shadow-sm border border-stroke/50"
+                : "text-content-muted hover:text-foreground"
+            }`}
           >
             Register
           </button>
         </div>
 
         <form className="space-y-4" onSubmit={handleAuth}>
-          <label className="block text-sm">
-            <span className="mb-2 block text-content-muted">Email</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-muted">Email</span>
             <input
               name="email"
               type="email"
               required
-              className="w-full rounded-md border border-stroke bg-page px-3 py-2 text-white focus:border-brand-primary focus:outline-none"
+              className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              placeholder="you@example.com"
             />
           </label>
-          <label className="block text-sm">
-            <span className="mb-2 block text-content-muted">Password</span>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-content-muted">Password</span>
             <input
               name="password"
               type="password"
               minLength={8}
               required
-              className="w-full rounded-md border border-stroke bg-page px-3 py-2 text-white focus:border-brand-primary focus:outline-none"
+              className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              placeholder="••••••••"
             />
           </label>
+
           {mode === "register" && (
-            <label className="block text-sm">
-              <span className="mb-2 block text-content-muted">Organization</span>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-content-muted">Organization Name</span>
               <input
                 name="org_name"
-                className="w-full rounded-md border border-stroke bg-page px-3 py-2 text-white focus:border-brand-primary focus:outline-none"
+                required
+                className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+                placeholder="Acme Corp"
               />
             </label>
           )}
+
           {authError && (
-            <p className="rounded-md border border-red-400/40 bg-red-950/40 px-3 py-2 text-sm text-red-100">
+            <div className="rounded border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-500 font-medium leading-relaxed">
               {authError}
-            </p>
+            </div>
           )}
+
           <button
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950 transition hover:opacity-90"
             type="submit"
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 font-semibold text-white shadow-lg shadow-brand-primary/10 hover:opacity-90 hover:shadow-brand-primary/20 active:scale-[0.98] transition-all duration-150 cursor-pointer"
           >
-            <Lock size={16} />
+            <Lock size={15} />
             Continue
           </button>
         </form>

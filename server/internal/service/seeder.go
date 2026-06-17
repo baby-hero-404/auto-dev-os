@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -15,8 +16,9 @@ import (
 
 // SeederService seeds default rules and skills when a new project is created.
 type SeederService struct {
-	ruleRepo  *repository.RuleRepo
-	skillRepo *repository.SkillRepo
+	ruleRepo   *repository.RuleRepo
+	skillRepo  *repository.SkillRepo
+	skillsRoot string
 }
 
 type promptBaseRegistry struct {
@@ -31,15 +33,16 @@ type promptBaseSkill struct {
 }
 
 // NewSeederService creates a SeederService with the required repositories.
-func NewSeederService(ruleRepo *repository.RuleRepo, skillRepo *repository.SkillRepo) *SeederService {
-	return &SeederService{ruleRepo: ruleRepo, skillRepo: skillRepo}
+func NewSeederService(ruleRepo *repository.RuleRepo, skillRepo *repository.SkillRepo, skillsRoot string) *SeederService {
+	return &SeederService{ruleRepo: ruleRepo, skillRepo: skillRepo, skillsRoot: skillsRoot}
 }
 
 // SeedProject inserts default rules and skills for a newly created project.
 // Errors are logged but do not prevent project creation from succeeding.
 func (s *SeederService) SeedProject(ctx context.Context, projectID string) {
-	s.seedRules(ctx, projectID)
-	s.seedSkills(ctx)
+	// Seeding of default rules and skills disabled as requested
+	// s.seedRules(ctx, projectID)
+	// s.seedSkills(ctx)
 }
 
 func (s *SeederService) seedRules(ctx context.Context, projectID string) {
@@ -100,7 +103,7 @@ func (s *SeederService) seedRules(ctx context.Context, projectID string) {
 }
 
 func (s *SeederService) seedSkills(ctx context.Context) {
-	defaults, err := loadPromptBaseSkills()
+	defaults, err := loadPromptBaseSkills(s.skillsRoot)
 	if err != nil {
 		slog.Warn("load prompt base skills failed", "error", err)
 		return
@@ -115,10 +118,16 @@ func (s *SeederService) seedSkills(ctx context.Context) {
 	slog.Info("seeded default skills", "count", len(defaults))
 }
 
-func loadPromptBaseSkills() ([]models.CreateSkillInput, error) {
-	registryPath, err := promptBaseRegistryPath()
-	if err != nil {
-		return nil, err
+func loadPromptBaseSkills(skillsRoot string) ([]models.CreateSkillInput, error) {
+	var registryPath string
+	var err error
+	if skillsRoot != "" {
+		registryPath = filepath.Join(skillsRoot, "registry.min.json")
+	} else {
+		registryPath, err = promptBaseRegistryPath()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	raw, err := os.ReadFile(registryPath)
@@ -138,11 +147,20 @@ func loadPromptBaseSkills() ([]models.CreateSkillInput, error) {
 				continue
 			}
 
+			// Map legacy path format (e.g. "antigravity/skills/tech/react-patterns")
+			// to the centralized system subfolders (e.g. "system/tech/react-patterns")
+			relPath := skill.Path
+			if strings.HasPrefix(relPath, "antigravity/skills/") {
+				relPath = filepath.Join("system", strings.TrimPrefix(relPath, "antigravity/skills/"))
+			} else {
+				relPath = filepath.Join("system", category, skill.ID)
+			}
+
 			schema, err := json.Marshal(map[string]string{
 				"source":   "prompt_base",
 				"category": category,
 				"registry": skill.ID,
-				"path":     skill.Path,
+				"path":     relPath,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("marshal prompt base skill schema for %q: %w", skill.Name, err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -14,6 +16,7 @@ type GitProvider interface {
 	CreateBranch(ctx context.Context, localPath, branchName string) error
 	CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error
 	CreatePR(ctx context.Context, owner, repo, title, head, base, body, token string) (string, error)
+	MergePR(ctx context.Context, owner, repo, prURL, token string) error
 	ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error)
 	ValidateToken(ctx context.Context, token string) error
 }
@@ -59,4 +62,18 @@ func NormalizeGitURLToHTTPS(rawURL string) (string, error) {
 	}
 
 	return rawURL, nil
+}
+
+// gitCommand creates an exec.Cmd for git and disables credential prompts
+// by injecting environment variables. This prevents the OS from popping up
+// credential windows (like VS Code GitHub extension) during background operations.
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=",
+		"SSH_ASKPASS=",
+		"GCM_INTERACTIVE=false",
+	)
+	return cmd
 }

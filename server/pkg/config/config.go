@@ -55,6 +55,7 @@ type SandboxConfig struct {
 	Runtime                         string `mapstructure:"runtime"`
 	Image                           string `mapstructure:"image"`
 	WorkspaceRoot                   string `mapstructure:"workspace_root"`
+	SkillsRoot                      string `mapstructure:"skills_root"`
 	WorkspaceRetentionHours         int    `mapstructure:"workspace_retention_hours"`
 	WorkspaceCleanupIntervalMinutes int    `mapstructure:"workspace_cleanup_interval_minutes"`
 	MemoryMB                        int64  `mapstructure:"memory_mb"`
@@ -180,17 +181,17 @@ func configureLLM(cfg *LLMConfig) error {
 	switch cfg.Provider {
 	case "openai":
 		if cfg.Model == "" {
-			cfg.Model = "gpt-4o"
+			cfg.Model = "gpt-5.5"
 		}
 		cfg.APIKey = cfg.OpenAIAPIKey
 	case "anthropic":
 		if cfg.Model == "" {
-			cfg.Model = "claude-sonnet-4-20250514"
+			cfg.Model = "claude-sonnet-4-6"
 		}
 		cfg.APIKey = cfg.AnthropicAPIKey
 	case "gemini":
 		if cfg.Model == "" {
-			cfg.Model = "gemini-2.5-pro"
+			cfg.Model = "gemini-3.1-pro-preview"
 		}
 		cfg.APIKey = cfg.GeminiAPIKey
 	case "9router":

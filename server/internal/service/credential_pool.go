@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,13 @@ type CredentialStrategy string
 const (
 	StrategyFillFirst  CredentialStrategy = "fill_first"
 	StrategyRoundRobin CredentialStrategy = "round_robin"
+)
+
+const (
+	testOpenAIModel    = "gpt-5.4-mini"
+	testAnthropicModel = "claude-haiku-4-5"
+	testGeminiModel    = "gemini-3.1-flash-lite"
+	testNineRouterMode = "balanced"
 )
 
 type DecryptedCredential struct {
@@ -171,6 +179,23 @@ func (s *CredentialPoolService) TestConnection(ctx context.Context, id string) e
 	return nil
 }
 
+func (s *CredentialPoolService) TestConnectionInput(ctx context.Context, input models.TestProviderCredentialInput) error {
+	provider := strings.ToLower(strings.TrimSpace(input.Provider))
+	if !isAllowedProvider(provider) {
+		return ErrValidation("unsupported provider")
+	}
+	if strings.TrimSpace(input.APIKey) == "" {
+		return ErrValidation("api_key is required")
+	}
+	if s.connectionTester == nil {
+		return nil
+	}
+	return s.connectionTester(ctx, models.ProviderCredential{
+		Provider: provider,
+		BaseURL:  strings.TrimSpace(input.BaseURL),
+	}, strings.TrimSpace(input.APIKey))
+}
+
 func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, provider string, strategy CredentialStrategy, excludeIDs map[string]bool) (*DecryptedCredential, error) {
 	creds, err := s.repo.ListActiveByOrgAndProvider(ctx, orgID, strings.ToLower(provider))
 	if err != nil {
@@ -203,6 +228,7 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 	if err != nil {
 		return nil, err
 	}
+	apiKey = getAPIKeyOrEnvFallback(selected.Provider, apiKey)
 	s.recordAudit(ctx, models.AuditActionProviderCredentialUsed, &selected, map[string]any{
 		"provider": selected.Provider,
 		"label":    selected.Label,
@@ -284,6 +310,8 @@ func testProviderConnection(ctx context.Context, cred models.ProviderCredential,
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	apiKey = getAPIKeyOrEnvFallback(cred.Provider, apiKey)
+
 	provider, err := providerForCredentialTest(cred, apiKey)
 	if err != nil {
 		return err
@@ -298,14 +326,41 @@ func testProviderConnection(ctx context.Context, cred models.ProviderCredential,
 func providerForCredentialTest(cred models.ProviderCredential, apiKey string) (llm.Provider, error) {
 	switch strings.ToLower(strings.TrimSpace(cred.Provider)) {
 	case "openai":
-		return llm.NewOpenAI(apiKey, "gpt-4o-mini"), nil
+		return llm.NewOpenAI(apiKey, testOpenAIModel), nil
 	case "anthropic":
-		return llm.NewAnthropic(apiKey, "claude-3-5-haiku-latest"), nil
+		return llm.NewAnthropic(apiKey, testAnthropicModel), nil
 	case "gemini":
-		return llm.NewGemini(apiKey, "gemini-1.5-flash"), nil
+		return llm.NewGemini(apiKey, testGeminiModel), nil
 	case "9router":
-		return llm.NewNineRouter(apiKey, "openai/gpt-4o-mini", cred.BaseURL), nil
+		return llm.NewNineRouter(apiKey, testNineRouterMode, cred.BaseURL), nil
 	default:
 		return nil, ErrValidation("unsupported provider")
 	}
+}
+
+func getAPIKeyOrEnvFallback(provider string, apiKey string) string {
+	apiKey = strings.TrimSpace(apiKey)
+	isPlaceholder := apiKey == "" ||
+		strings.Contains(apiKey, "your-") ||
+		strings.Contains(apiKey, "placeholder") ||
+		apiKey == "sk-test"
+	if !isPlaceholder {
+		return apiKey
+	}
+
+	switch strings.ToLower(provider) {
+	case "openai":
+		if envKey := os.Getenv("OPENAI_API_KEY"); envKey != "" && !strings.Contains(envKey, "your-") {
+			return envKey
+		}
+	case "anthropic":
+		if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" && !strings.Contains(envKey, "your-") {
+			return envKey
+		}
+	case "gemini":
+		if envKey := os.Getenv("GEMINI_API_KEY"); envKey != "" && !strings.Contains(envKey, "your-") {
+			return envKey
+		}
+	}
+	return apiKey
 }

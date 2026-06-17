@@ -52,6 +52,41 @@ func (h *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rules)
 }
 
+func (h *RuleHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	var input models.CreateRuleInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	rule, err := h.svc.CreateGlobal(r.Context(), orgID, input)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rule)
+}
+
+func (h *RuleHandler) ListGlobal(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	rules, err := h.svc.ListGlobalByOrgID(r.Context(), orgID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rules)
+}
+
+func (h *RuleHandler) SeedGlobal(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	rules, err := h.svc.SeedGlobalDefaultRules(r.Context(), orgID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rules)
+}
+
 func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
 	var input models.UpdateRuleInput
@@ -74,4 +109,14 @@ func (h *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *RuleHandler) Seed(w http.ResponseWriter, r *http.Request) {
+	projectID := chi.URLParam(r, "projectID")
+	rules, err := h.svc.SeedDefaultRules(r.Context(), projectID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rules)
 }

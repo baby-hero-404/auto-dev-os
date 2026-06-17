@@ -4,15 +4,15 @@ server:
   cors_allowed_origins: ""
 
 llm:
-  provider: "openai"
+  provider: "gateway"
   model: ""
-  fast_model: "gpt-4o-mini"
-  balanced_model: "gpt-4o"
-  powerful_model: "gpt-4o"
-  anthropic_balanced_model: "claude-sonnet-4-20250514"
-  anthropic_powerful_model: "claude-opus-4-20250514"
-  gemini_fast_model: "gemini-2.5-flash"
-  gemini_balanced_model: "gemini-2.5-pro"
+  fast_model: "gpt-5.4-nano"
+  balanced_model: "gpt-5.4"
+  powerful_model: "gpt-5.5"
+  anthropic_balanced_model: "claude-sonnet-4-6"
+  anthropic_powerful_model: "claude-opus-4-8"
+  gemini_fast_model: "gemini-3.1-flash-lite"
+  gemini_balanced_model: "gemini-3.5-flash"
   circuit_max_tokens: 120000
   circuit_max_cost_usd: 2.50
   default_output_tokens: 2048
@@ -35,9 +35,10 @@ auth:
   jwt_secret: ""
 
 sandbox:
-  runtime: "stub"
+  runtime: "docker"
   image: "auto-code-os-sandbox:latest"
   workspace_root: "/tmp/auto-code-os/workspaces"
+  skills_root: "/home/ubuntu/my_projects/skills"
   workspace_retention_hours: 72
   workspace_cleanup_interval_minutes: 60
   memory_mb: 1024

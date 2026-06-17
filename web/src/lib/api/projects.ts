@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog } from "../types";
+import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -50,6 +50,27 @@ export const repositories = {
   clone(repoID: string, token: string) {
     return request<Repository>(`/repositories/${repoID}/clone`, { method: "POST", token });
   },
+  update(
+    repoID: string,
+    token: string,
+    input: { url?: string; provider?: string; branch?: string; token?: string; git_account_id?: string },
+  ) {
+    return request<Repository>(`/repositories/${repoID}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  getBranches(
+    token: string,
+    input: { url: string; token?: string; git_account_id?: string },
+  ) {
+    return request<{ branches: string[] }>(`/repositories/branches`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
 };
 
 export const tasks = {
@@ -62,7 +83,7 @@ export const tasks = {
   create(
     projectID: string,
     token: string,
-    input: { title: string; description: string; complexity: string; priority: number; labels: string[] },
+    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string },
   ) {
     return request<Task>(`/projects/${projectID}/tasks`, {
       method: "POST",
@@ -105,11 +126,30 @@ export const tasks = {
       body: JSON.stringify({ feedback }),
     });
   },
+  artifacts(jobID: string, token: string) {
+    return request<WorkflowArtifact[]>(`/workflows/${jobID}/artifacts`, { token });
+  },
 };
 
 export const rules = {
+  listGlobal(orgID: string, token: string) {
+    return request<Rule[]>(`/organizations/${orgID}/rules`, { token });
+  },
+  createGlobal(orgID: string, token: string, input: { content: string; enforcement: string }) {
+    return request<Rule>(`/organizations/${orgID}/rules`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  seedGlobal(orgID: string, token: string) {
+    return request<Rule[]>(`/organizations/${orgID}/rules/seed`, { method: "POST", token });
+  },
   list(projectID: string, token: string) {
     return request<Rule[]>(`/projects/${projectID}/rules`, { token });
+  },
+  seed(projectID: string, token: string) {
+    return request<Rule[]>(`/projects/${projectID}/rules/seed`, { method: "POST", token });
   },
   create(projectID: string, token: string, input: { scope: string; content: string; enforcement: string }) {
     return request<Rule>(`/projects/${projectID}/rules`, {
@@ -117,6 +157,16 @@ export const rules = {
       token,
       body: JSON.stringify(input),
     });
+  },
+  update(ruleID: string, token: string, input: { content?: string; enforcement?: string }) {
+    return request<Rule>(`/rules/${ruleID}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  remove(ruleID: string, token: string) {
+    return request<void>(`/rules/${ruleID}`, { method: "DELETE", token });
   },
 };
 

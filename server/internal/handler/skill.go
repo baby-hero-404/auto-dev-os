@@ -46,32 +46,6 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, skills)
 }
 
-func (h *SkillHandler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentID")
-	skills, err := h.svc.ListByAgentID(r.Context(), agentID)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, skills)
-}
-
-func (h *SkillHandler) AssignToAgent(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentID")
-	var input struct {
-		SkillID string `json:"skill_id"`
-	}
-	if err := decodeJSON(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if err := h.svc.AssignToAgent(r.Context(), agentID, input.SkillID); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, envelope{"status": "assigned"})
-}
-
 func (h *SkillHandler) Test(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "skillID")
 	var input map[string]any
@@ -109,4 +83,13 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *SkillHandler) Seed(w http.ResponseWriter, r *http.Request) {
+	skills, err := h.svc.SeedDefaultSkills(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, skills)
 }

@@ -100,3 +100,21 @@ func (h *RepositoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *RepositoryHandler) GetBranches(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URL          string  `json:"url"`
+		Token        string  `json:"token"`
+		GitAccountID *string `json:"git_account_id"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	branches, err := h.svc.GetRemoteBranches(r.Context(), input.URL, input.Token, input.GitAccountID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{"branches": branches})
+}

@@ -17,6 +17,7 @@ const (
 // Rule represents a behavioral constraint for agents.
 type Rule struct {
 	ID          string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	OrgID       *string   `json:"org_id,omitempty" gorm:"type:uuid"`
 	ProjectID   *string   `json:"project_id,omitempty" gorm:"type:uuid"`
 	Scope       string    `json:"scope" gorm:"default:'project'"`
 	Content     string    `json:"content" gorm:"not null"`

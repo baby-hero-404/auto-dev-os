@@ -57,3 +57,25 @@ func TestValidateTaskTransition(t *testing.T) {
 		})
 	}
 }
+
+func TestComplexityWorkflowDefinitions(t *testing.T) {
+	runners := map[string]StepFunc{}
+	easy := EasyWorkflow(runners)
+	if len(easy.Steps) != 4 {
+		t.Fatalf("expected easy workflow to have 4 steps, got %d", len(easy.Steps))
+	}
+	if easy.Steps[1].ID != StepCodeBackend || easy.Steps[1].DependsOn[0] != StepAnalyze {
+		t.Fatalf("unexpected easy workflow code step: %#v", easy.Steps[1])
+	}
+
+	hard := HardWorkflow(runners)
+	if len(hard.Steps) != 9 {
+		t.Fatalf("expected hard workflow to have 9 steps, got %d", len(hard.Steps))
+	}
+	if hard.Steps[2].ID != StepCodeBackend || hard.Steps[3].ID != StepCodeFrontend {
+		t.Fatalf("expected hard workflow backend/frontend fan-out, got %#v", hard.Steps)
+	}
+	if len(hard.Steps[4].DependsOn) != 2 {
+		t.Fatalf("expected merge to depend on both code steps, got %#v", hard.Steps[4].DependsOn)
+	}
+}

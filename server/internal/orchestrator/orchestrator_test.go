@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,10 @@ func (m *mockAgentAssigner) Assign(ctx context.Context, task *models.Task) (*mod
 	return m.agent, nil
 }
 
+func (m *mockAgentAssigner) AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	return m.agent, nil
+}
+
 func (m *mockAgentAssigner) MarkRunning(ctx context.Context, agentID string) error {
 	return nil
 }
@@ -188,6 +193,10 @@ func (m *mockGitOpsClient) CreatePullRequest(ctx context.Context, repoURL, branc
 	return "https://github.com/mock/pr/1", nil
 }
 
+func (m *mockGitOpsClient) MergePullRequest(ctx context.Context, repoURL, prURL string) error {
+	return nil
+}
+
 type mockArtifactRepo struct {
 	artifacts []models.WorkflowArtifact
 }
@@ -225,7 +234,7 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 		ProjectID:   "proj-123",
 		Title:       "Test Task",
 		Description: "Write tests for the server package.",
-		Complexity:  models.TaskComplexityEasy,
+		Complexity:  models.TaskComplexityMedium,
 		SpecStatus:  models.TaskSpecStatusApproved,
 	}
 
@@ -286,10 +295,10 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	appliedPatch := false
 	capturedDiff := false
 	for _, cmd := range sandboxRuntime.commands {
-		if cmd == "git apply patch.diff" {
+		if cmd == "git apply patch.diff" || cmd == "git apply --recount --whitespace=nowarn patch.diff" {
 			appliedPatch = true
 		}
-		if cmd == "git diff" {
+		if cmd == "git diff" || strings.Contains(cmd, "git diff") {
 			capturedDiff = true
 		}
 	}

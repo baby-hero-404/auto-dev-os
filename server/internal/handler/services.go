@@ -143,13 +143,7 @@ type ProviderCredentialService interface {
 	TestConnectionInput(context.Context, models.TestProviderCredentialInput) error
 }
 
-type VirtualKeyService interface {
-	Create(context.Context, string, models.CreateVirtualKeyInput) (*models.CreatedVirtualKeyResponse, error)
-	ListByOrg(context.Context, string) ([]models.VirtualKeyResponse, error)
-	GetByID(context.Context, string) (*models.VirtualKeyResponse, error)
-	Update(context.Context, string, models.UpdateVirtualKeyInput) (*models.VirtualKeyResponse, error)
-	Revoke(context.Context, string) error
-}
+
 
 type ModelRouteService interface {
 	Create(context.Context, string, models.CreateModelRouteInput) (*models.ModelRoute, error)

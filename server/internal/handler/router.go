@@ -31,7 +31,7 @@ type Deps struct {
 	LearningSvc        LearningService
 	GitAccountSvc      GitAccountService
 	ProviderCredSvc    ProviderCredentialService
-	VirtualKeySvc      VirtualKeyService
+
 	ModelRouteSvc      ModelRouteService
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
@@ -96,7 +96,7 @@ func NewRouter(d Deps) http.Handler {
 	learningH := NewLearningHandler(d.LearningSvc)
 	gitAccH := NewGitAccountHandler(d.GitAccountSvc)
 	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
-	virtualKeyH := NewVirtualKeyHandler(d.VirtualKeySvc)
+
 	modelRouteH := NewModelRouteHandler(d.ModelRouteSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -153,13 +153,7 @@ func NewRouter(d Deps) http.Handler {
 						r.Post("/{credentialID}/test", providerCredH.Test)
 					})
 
-					r.Route("/virtual-keys", func(r chi.Router) {
-						r.Post("/", virtualKeyH.Create)
-						r.Get("/", virtualKeyH.List)
-						r.Get("/{virtualKeyID}", virtualKeyH.GetByID)
-						r.Put("/{virtualKeyID}", virtualKeyH.Update)
-						r.Delete("/{virtualKeyID}", virtualKeyH.Revoke)
-					})
+
 
 					r.Route("/model-routes", func(r chi.Router) {
 						r.Post("/", modelRouteH.Create)

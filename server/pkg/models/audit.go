@@ -34,10 +34,7 @@ const (
 	AuditActionProviderCredentialUsed        = "provider_credential.used"
 	AuditActionProviderCredentialRateLimited = "provider_credential.rate_limited"
 	AuditActionProviderCredentialRecovered   = "provider_credential.recovered"
-	AuditActionVirtualKeyCreated             = "virtual_key.created"
-	AuditActionVirtualKeyUpdated             = "virtual_key.updated"
-	AuditActionVirtualKeyUsed                = "virtual_key.used"
-	AuditActionVirtualKeyRevoked             = "virtual_key.revoked"
+
 )
 
 // AuditLog represents an immutable record of a critical system action.

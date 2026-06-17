@@ -64,11 +64,9 @@ auto_code_os/
 │
 ├── docs/                   # Documentation
 │   ├── ARCHITECTURE.md     # This file
-│   ├── PLAN-phase1.md      # Phase 1 implementation plan
-│   ├── PLAN-phase2.md      # Phase 2 implementation plan
-│   ├── manual/
-│   │   └── Roadmap.md      # Full product roadmap (Vietnamese)
-│   └── implementation/     # Running implementation notes
+│   ├── ROADMAP.md          # Full product roadmap
+│   ├── features/           # Feature-specific documentation (§5.1-§5.10)
+│   └── references/         # Learning reports & external project analysis
 │
 ├── resources/              # Open-source reference projects (git cloned)
 │
@@ -154,14 +152,14 @@ auto_code_os/
 | **Repository** | Git repository linked to a project             | `id`, `project_id`, `url`, `provider`, `token`, `git_account_id` |
 | **Task**    | Unit of work for an agent (supports sub-tasks)     | `id`, `project_id`, `title`, `status`, `complexity`, `analysis`, `spec_status` |
 | **User**    | Developer / reviewer account                       | `id`, `email`, `password_hash`, `org_id`, `role`    |
-| **Agent**   | AI worker (supports self-improving loop & subagents)| `id`, `project_id`, `role`, `provider`, `model`, `tier` |
+| **Agent**   | AI worker (supports self-improving loop & subagents)| `id`, `org_id`, `name`, `role`, `goal`, `model_route`, `autonomy_level`, `context_config` |
 | **Rule**    | Behavioral constraints & Sandbox directives          | `id`, `scope` (global/project), `content`, `enforcement` |
 | **Skill**   | Reusable action an agent can perform               | `id`, `name`, `description`, `schema`               |
 | **Memory**  | Episodic memory, semantic search, user modeling    | `id`, `agent_id`, `content`, `embedding` (vector)   |
 
 ## 4.1 Task Lifecycle — Complexity-based Branching
 
-> Aligns with the SDLC workflow in `docs/manual/Roadmap.md` §2.
+> Aligns with the SDLC workflow in `docs/ROADMAP.md` §2.
 
 ```
                     ┌─────────────────────┐
@@ -271,7 +269,7 @@ auto_code_os/
 | Phase 2 | Auth + Git Integration + Web UI + Project System         | ✅ Done   |
 | Phase 3a| Sandbox + Agent Manager + Orchestrator Core               | ✅ Done   |
 | Phase 3b| Workflow Engine (DAG) + Prompt Assembly + Execution UI   | ✅ Done   |
-| Phase 4 | AI Gateway (Tier Routing) + Skill System + Evals         | 📋 Plan   |
+| Phase 4 | AI Gateway (Tier Routing) + Skill System + Evals         | ⏳ In Progress |
 | Phase 5 | Dashboard + Analytics + PR & Human Review                | ✅ Done   |
 | Phase 6 | Remote Chatbots + Episodic Memory + Self-improving Agents| 📋 Plan   |
 
@@ -285,14 +283,19 @@ auto_code_os/
 | `000002` | Phase 2 | users, api_keys | `000002_users_auth.up.sql` |
 | `000003` | Phase 2 | repositories (clone metadata) | `000003_repository_git_metadata.up.sql` |
 | `000004` | Phase 2 | tasks (analysis, spec_status, parent_task_id) | `000004_task_analysis.up.sql` |
-| `000005` | Phase 3a | secrets (AES-GCM encrypted) | `000005_secrets.up.sql` |
+| `000005` | Phase 3a | secrets (AES-GCM encrypted) | `000005_secrets_and_agents.up.sql` |
 | `000006` | Phase 4 | token_usage | `000006_token_usage.up.sql` |
 | `000007` | Phase 5 | audit_logs | `000007_audit_logs.up.sql` |
 | `000008` | Phase 6 | episodic_memory (enhance memories) | `000008_episodic_memory.up.sql` |
+| `000009` | Phase 3b | workflow_artifacts | `000009_workflow_artifacts.up.sql` |
+| `000010` | Phase 2 | git_accounts | `000010_git_accounts.up.sql` |
+| `000011` | Phase 4 | provider_credentials, model_routes, credential_usage_logs | `000011_unified_ai_gateway.up.sql` |
+| `000012` | Phase 3a | agents (role, autonomy, context) | `000012_role_based_agents.up.sql` |
+| `000013` | Phase 3a | org_global_rules | `000013_org_global_rules.up.sql` |
 
 ## 8. Reference Projects
 
-> See `resources/` directory and `docs/manual/Roadmap.md` for full details.
+> See `resources/` directory and `docs/ROADMAP.md` for full details.
 
 | Layer                | Reference Projects                           |
 | :------------------- | :------------------------------------------- |

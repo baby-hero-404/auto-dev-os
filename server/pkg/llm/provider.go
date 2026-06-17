@@ -56,7 +56,7 @@ type RouteOptions struct {
 	ProjectID       string  `json:"project_id,omitempty"`
 	AgentID         string  `json:"agent_id,omitempty"`
 	TaskID          string  `json:"task_id,omitempty"`
-	VirtualKey      string  `json:"virtual_key,omitempty"`
+
 	RouteName       string  `json:"route_name,omitempty"`
 	MaxInputTokens  int     `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`

@@ -186,7 +186,7 @@ Chi tiết các tính năng cốt lõi của hệ thống đã được tách ra
 | :--- | :-------------- | :---------------- |
 | Unified AI Gateway | Frontend/API contract for provider credentials must stabilize before UI rebuild. | Follow §5.1 for gateway architecture; use `provider_credentials` as source of truth and `.env` only as fallback. |
 | Role-Based Agents | Migration to Model Level Group (Fast/Balanced/Powerful) + deprecated task statuses backfill (`assigned`, `planning`, `in_progress`, `completed`). | Follow §5.3 for agent schema; §5.6 for task status migration. |
-| Rule contract | No dedicated rule manual exists yet, so hard links to one are invalid. | Use §5.6 as canonical rule contract until a dedicated manual is created. |
+| Rule contract | No dedicated rule manual exists yet, so hard links to one are invalid. | Use §5.2a as canonical rule contract until a dedicated manual is created. |
 | Multi-agent orchestration | Fan-out, cross-harness review, handoff and group chat can increase merge conflicts and review complexity. | Start with sequential + fan-out + cross-harness only; keep handoff/group chat later. |
 | Repository intelligence | Semantic search, dependency graph and historical failure memory need storage/indexing decisions. | Keep as later roadmap after gateway and agent migration. |
 | Security & Governance | RBAC, audit logs, policy engine and sandbox isolation must be complete before enterprise deployment. | Expand audit coverage through gateway/credential lifecycle first. |

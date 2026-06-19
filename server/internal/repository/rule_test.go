@@ -91,6 +91,23 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("GetByIDAndOrg", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
+			AddRow(ruleID, &orgID, nil, models.RuleScopeGlobal, "Never expose secrets.", models.RuleEnforcementStrict)
+
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE id = $1 AND (org_id = $2 OR project_id IN (SELECT id FROM projects WHERE org_id = $3))`)).
+			WithArgs(ruleID, orgID, orgID, 1).
+			WillReturnRows(rows)
+
+		rule, err := repo.GetByIDAndOrg(ctx, ruleID, orgID)
+		if err != nil {
+			t.Fatalf("get by id and org failed: %v", err)
+		}
+		if rule.Content != "Never expose secrets." {
+			t.Errorf("unexpected content: %s", rule.Content)
+		}
+	})
+
 	// 3. ListByProjectID Test
 	t.Run("ListByProjectID", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
@@ -128,9 +145,9 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 
 	// 4. Update Test
 	t.Run("Update", func(t *testing.T) {
-		// Mock GetByID inside Update
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE id = $1`)).
-			WithArgs(ruleID, 1).
+		// Mock GetByIDAndOrg inside Update
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "rules" WHERE id = $1 AND (org_id = $2 OR project_id IN (SELECT id FROM projects WHERE org_id = $3))`)).
+			WithArgs(ruleID, orgID, orgID, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "org_id", "project_id", "scope", "content", "enforcement"}).
 				AddRow(ruleID, nil, &projectID, models.RuleScopeProject, "Must write tests.", models.RuleEnforcementStrict))
 
@@ -142,7 +159,7 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 		mock.ExpectCommit()
 
 		newContent := "Must write comprehensive tests."
-		rule, err := repo.Update(ctx, ruleID, models.UpdateRuleInput{
+		rule, err := repo.Update(ctx, ruleID, orgID, models.UpdateRuleInput{
 			Content: &newContent,
 		})
 		if err != nil {
@@ -156,12 +173,12 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 	// 5. Delete Test
 	t.Run("Delete", func(t *testing.T) {
 		mock.ExpectBegin()
-		mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "rules" WHERE id = $1`)).
-			WithArgs(ruleID).
+		mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "rules" WHERE id = $1 AND (org_id = $2 OR project_id IN (SELECT id FROM projects WHERE org_id = $3))`)).
+			WithArgs(ruleID, orgID, orgID).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 
-		err := repo.Delete(ctx, ruleID)
+		err := repo.Delete(ctx, ruleID, orgID)
 		if err != nil {
 			t.Fatalf("delete failed: %v", err)
 		}
@@ -170,12 +187,12 @@ func TestRuleRepo_Lifecycle(t *testing.T) {
 	// 6. Delete NotFound Test
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		mock.ExpectBegin()
-		mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "rules" WHERE id = $1`)).
-			WithArgs("non-existent").
+		mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "rules" WHERE id = $1 AND (org_id = $2 OR project_id IN (SELECT id FROM projects WHERE org_id = $3))`)).
+			WithArgs("non-existent", orgID, orgID).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectCommit()
 
-		err := repo.Delete(ctx, "non-existent")
+		err := repo.Delete(ctx, "non-existent", orgID)
 		if err == nil {
 			t.Error("expected error deleting non-existent rule, got nil")
 		}

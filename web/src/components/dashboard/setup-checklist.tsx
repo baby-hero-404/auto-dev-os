@@ -101,12 +101,12 @@ export function SetupChecklist() {
 
   // ─── Check computation ────────────────────────────────────
   const checks: CheckItem[] = useMemo(() => {
-    const hasProvider = credentials.length > 0;
-    const hasGit = gitAccounts.length > 0;
-    const hasProject = projects.length > 0;
-    const hasAgent = orgAgents.length > 0;
-    const hasGlobalRules = globalRules.length > 0;
-    const hasSkills = skills.length > 0;
+    const hasProvider = (credentials?.length ?? 0) > 0;
+    const hasGit = (gitAccounts?.length ?? 0) > 0;
+    const hasProject = (projects?.length ?? 0) > 0;
+    const hasAgent = (orgAgents?.length ?? 0) > 0;
+    const hasGlobalRules = (globalRules?.length ?? 0) > 0;
+    const hasSkills = (skills?.length ?? 0) > 0;
     const hasTask = (overview?.total_tasks ?? 0) > 0;
 
     return [

@@ -1,13 +1,13 @@
 package llm
 
-// FallbackChain stores ordered provider candidates for a tier.
+// FallbackChain stores ordered provider candidates for a level group.
 type FallbackChain struct {
-	Tier      string
-	Providers []Provider
+	LevelGroup string
+	Providers  []Provider
 }
 
-func newFallbackChain(tier string, providers []Provider) FallbackChain {
+func newFallbackChain(levelGroup string, providers []Provider) FallbackChain {
 	cp := make([]Provider, 0, len(providers))
 	cp = append(cp, providers...)
-	return FallbackChain{Tier: tier, Providers: cp}
+	return FallbackChain{LevelGroup: levelGroup, Providers: cp}
 }

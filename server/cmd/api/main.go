@@ -77,6 +77,7 @@ func run() error {
 	taskRepo := repository.NewTaskRepo(db)
 	ruleRepo := repository.NewRuleRepo(db)
 	skillRepo := repository.NewSkillRepo(db)
+	skillSourceRepo := repository.NewSkillSourceRepo(db)
 	authRepo := repository.NewAuthRepo(db)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowRepo.SetLogFileRoot(cfg.Logging.FileRoot)
@@ -89,8 +90,7 @@ func run() error {
 	suggestionRepo := repository.NewLearningSuggestionRepo(db)
 	gitAccountRepo := repository.NewGitAccountRepo(db)
 	providerCredentialRepo := repository.NewProviderCredentialRepo(db)
-	virtualKeyRepo := repository.NewVirtualKeyRepo(db)
-	modelRouteRepo := repository.NewModelRouteRepo(db)
+	providerModelRepo := repository.NewProviderModelRepo(db)
 
 	secretCipher, err := service.NewSecretCipher(cfg.Auth.JWTSecret)
 	if err != nil {
@@ -100,9 +100,8 @@ func run() error {
 		return err
 	}
 	auditSvc := service.NewAuditService(auditRepo)
-	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc)
-	virtualKeySvc := service.NewVirtualKeyService(virtualKeyRepo).WithAudit(auditSvc)
-	modelRouteSvc := service.NewModelRouteService(modelRouteRepo)
+	providerModelSvc := service.NewProviderModelService(providerModelRepo)
+	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc).WithProviderModelSeeder(providerModelSvc)
 	sandboxRuntime, err := buildSandboxRuntime(cfg)
 	if err != nil {
 		return err
@@ -120,29 +119,28 @@ func run() error {
 			slog.Info("sandbox pre-warming completed successfully")
 		}
 	}()
+	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, cfg.Sandbox.SkillsRoot)
 	agentManager := orchestrator.NewAgentManager(agentRepo)
 	promptAssembler := orchestrator.NewPromptAssemblerWithRules(
 		retrieval.NewSimpleFileRetriever("."),
 		ruleRepo,
 		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
-	).WithSkillLister(orchestrator.NewFallbackSkillLister(
-		skillRepo,
-		orchestrator.NewFilesystemSkillLister(cfg.Sandbox.SkillsRoot),
-	))
+	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentManager, sandboxRuntime, promptAssembler)
 	artifactRepo := repository.NewArtifactRepo(db)
 	orch.SetArtifactRepository(artifactRepo)
 	gitProvider := gitops.NewGitHubProvider("")
-	gitOpsAdapter := gitops.NewGitOpsAdapter(gitProvider, repoRepo, cfg.Sandbox.WorkspaceRoot)
+	gitOpsAdapter := gitops.NewGitOpsAdapter(gitProvider, repoRepo, cfg.Sandbox.WorkspaceRoot, secretCipher)
 	gitOpsAdapter.SetGitAccountLookup(gitAccountRepo)
 	orch.SetGitOpsClient(gitOpsAdapter)
 	orch.SetRepositoryRepository(repoRepo)
+	orch.SetProjectRepository(projRepo)
 	orch.SetWorkspaceRoot(cfg.Sandbox.WorkspaceRoot)
 	orch.SetWorkspaceRetention(
 		time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
 		time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
 	)
-	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, virtualKeySvc, modelRouteSvc); err != nil {
+	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {
 		slog.Warn("llm provider disabled", "error", err)
 	} else if provider != nil {
 		orch.SetLLMProvider(provider)
@@ -156,7 +154,7 @@ func run() error {
 		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured")
 	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
-	learningSvc.SetSkillRepo(skillRepo)
+	learningSvc.SetSkillService(skillSvc)
 	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "resources", "prompt_base")))
 	memoryHooks := orchestrator.NewMemoryHooks(memorySvc)
 	learningEngine := orchestrator.NewLearningEngine(memorySvc, learningSvc, taskRepo)
@@ -164,28 +162,27 @@ func run() error {
 	orch.SetMemoryHooks(memoryHooks)
 	orch.SetLearningEngine(learningEngine)
 
-	repoSvc := service.NewRepositoryService(repoRepo)
+	repoSvc := service.NewRepositoryService(repoRepo, secretCipher)
 	repoSvc.SetProjectRepo(projRepo)
 	repoSvc.SetGitAccountRepo(gitAccountRepo)
 
 	deps := handler.Deps{
 		OrgSvc:             service.NewOrganizationService(orgRepo),
-		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo, cfg.Sandbox.SkillsRoot)),
+		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo, cfg.Sandbox.SkillsRoot), cfg.AutoCodeOS.DataRoot),
 		RepoSvc:            repoSvc,
 		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo),
-		TaskSvc:            service.NewTaskService(taskRepo),
+		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo),
 		RuleSvc:            service.NewRuleService(ruleRepo),
-		SkillSvc:           service.NewSkillService(skillRepo, cfg.Sandbox.SkillsRoot),
+		SkillSvc:           skillSvc,
 		AnalyticsSvc:       service.NewAnalyticsService(analyticsRepo),
 		DashboardSvc:       service.NewAnalyticsDashboardService(dashboardRepo),
 		AuditSvc:           auditSvc,
 		AuthSvc:            service.NewAuthService(authRepo, cfg.Auth.JWTSecret),
 		MemorySvc:          memorySvc,
 		LearningSvc:        learningSvc,
-		GitAccountSvc:      service.NewGitAccountService(gitAccountRepo),
+		GitAccountSvc:      service.NewGitAccountService(gitAccountRepo, secretCipher),
 		ProviderCredSvc:    credentialPoolSvc,
-		VirtualKeySvc:      virtualKeySvc,
-		ModelRouteSvc:      modelRouteSvc,
+		ProviderModelSvc:   providerModelSvc,
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,
@@ -205,6 +202,7 @@ func run() error {
 	// Start server in goroutine
 	errCh := make(chan error, 1)
 	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
 	var wg sync.WaitGroup
 	if cfg.Worker.Enabled {
 		wg.Add(1)
@@ -264,7 +262,7 @@ func run() error {
 	return srv.Shutdown(ctx)
 }
 
-func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPoolService, virtualKeys *service.VirtualKeyService, routes *service.ModelRouteService) (llm.Provider, error) {
+func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPoolService, providerModels *service.ProviderModelService, recorder llm.UsageRecorder) (llm.Provider, error) {
 	var fallback llm.Provider
 	var err error
 
@@ -286,11 +284,11 @@ func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPool
 
 	if credentialPool != nil {
 		return aigateway.NewAIGateway(aigateway.Options{
-			FallbackProvider:  fallback,
-			CredentialPool:    credentialPool,
-			VirtualKeyService: virtualKeys,
-			ModelRouteService: routes,
-			Config:            cfg,
+			FallbackProvider:      fallback,
+			CredentialPool:        credentialPool,
+			ProviderModelResolver: providerModels,
+			Config:                cfg,
+			Recorder:              recorder,
 		}), nil
 	}
 

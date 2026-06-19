@@ -79,7 +79,12 @@ func (m *mockGitAccountLookup) GetByID(ctx context.Context, id string) (*models.
 	}
 	return nil, errors.New("not found")
 }
-
+func (m *mockGitAccountLookup) GetDefaultByProjectAndProvider(ctx context.Context, projectID string, provider string) (*models.GitAccount, error) {
+	if m.account != nil {
+		return m.account, nil
+	}
+	return nil, errors.New("not found")
+}
 func TestGitOpsAdapter(t *testing.T) {
 	provider := &mockGitProvider{}
 	repoDb := &mockRepoLookup{
@@ -97,13 +102,13 @@ func TestGitOpsAdapter(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir)
+	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir, nil)
 
 	ctx := context.Background()
 	ctx = observability.WithTaskID(ctx, "task-456")
 
 	// Test CreateBranch
-	err = adapter.CreateBranch(ctx, "https://github.com/test-owner/test-repo.git", "feature-branch")
+	err = adapter.CreateBranch(ctx, "", "https://github.com/test-owner/test-repo.git", "feature-branch")
 	if err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
@@ -115,7 +120,7 @@ func TestGitOpsAdapter(t *testing.T) {
 	files := map[string]string{
 		"file1.txt": "hello world",
 	}
-	err = adapter.CommitAndPush(ctx, "https://github.com/test-owner/test-repo.git", "feature-branch", "commit msg", files, "backend")
+	err = adapter.CommitAndPush(ctx, "", "https://github.com/test-owner/test-repo.git", "feature-branch", "commit msg", files, "backend")
 	if err != nil {
 		t.Fatalf("CommitAndPush: %v", err)
 	}
@@ -147,7 +152,7 @@ func TestGitOpsAdapter(t *testing.T) {
 
 func TestGitOpsAdapter_ProviderAndTokenForRepo_UsesLinkedAccountCredentials(t *testing.T) {
 	accountID := "git-account-1"
-	adapter := NewGitOpsAdapter(&mockGitProvider{}, &mockRepoLookup{}, "")
+	adapter := NewGitOpsAdapter(&mockGitProvider{}, &mockRepoLookup{}, "", nil)
 	adapter.SetGitAccountLookup(&mockGitAccountLookup{
 		account: &models.GitAccount{
 			ID:      accountID,
@@ -156,9 +161,12 @@ func TestGitOpsAdapter_ProviderAndTokenForRepo_UsesLinkedAccountCredentials(t *t
 		},
 	})
 
-	provider, token := adapter.providerAndTokenForRepo(context.Background(), &models.Repository{
+	provider, token, err := adapter.providerAndTokenForRepo(context.Background(), &models.Repository{
 		GitAccountID: &accountID,
 	})
+	if err != nil {
+		t.Fatalf("providerAndTokenForRepo: %v", err)
+	}
 
 	ghProvider, ok := provider.(*GitHubProvider)
 	if !ok {
@@ -185,7 +193,7 @@ func TestGitOpsAdapter_CommitAndPush_UsesLinkedAccountToken(t *testing.T) {
 		},
 	}
 	tmpDir := t.TempDir()
-	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir)
+	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir, nil)
 	adapter.SetGitAccountLookup(&mockGitAccountLookup{
 		account: &models.GitAccount{
 			ID:    accountID,
@@ -194,7 +202,7 @@ func TestGitOpsAdapter_CommitAndPush_UsesLinkedAccountToken(t *testing.T) {
 	})
 	ctx := observability.WithTaskID(context.Background(), "task-456")
 
-	if err := adapter.CommitAndPush(ctx, "https://github.com/test-owner/test-repo.git", "feature", "commit msg", nil, "backend"); err != nil {
+	if err := adapter.CommitAndPush(ctx, "", "https://github.com/test-owner/test-repo.git", "feature", "commit msg", nil, "backend"); err != nil {
 		t.Fatalf("CommitAndPush: %v", err)
 	}
 	if provider.pushToken != "account-token" {
@@ -213,10 +221,10 @@ func TestGitOpsAdapter_CommitAndPush_RejectsEscapingFilePath(t *testing.T) {
 			URL: "https://github.com/test-owner/test-repo.git",
 		},
 	}
-	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir(), nil)
 
-	err := adapter.CommitAndPush(context.Background(), "https://github.com/test-owner/test-repo.git", "feature", "commit msg", map[string]string{
-		"../outside.txt": "escape",
+	err := adapter.CommitAndPush(context.Background(), "", "https://github.com/test-owner/test-repo.git", "feature", "commit msg", map[string]string{
+		"../escaping.txt": "evil",
 	}, "backend")
 	if err == nil {
 		t.Fatal("expected path escape error")
@@ -235,9 +243,9 @@ func TestGitOpsAdapter_LookupRepository_FallsBackToOriginalURL(t *testing.T) {
 			URL: sshURL,
 		},
 	}
-	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir(), nil)
 
-	if err := adapter.CreateBranch(context.Background(), sshURL, "feature"); err != nil {
+	if err := adapter.CreateBranch(context.Background(), "", sshURL, "feature"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 	if provider.createdBranch != "feature" {
@@ -253,7 +261,7 @@ func TestGitOpsAdapter_CreatePullRequest_UsesMainWhenRepoBranchEmpty(t *testing.
 			URL: "https://github.com/test-owner/test-repo.git",
 		},
 	}
-	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir(), nil)
 
 	_, err := adapter.CreatePullRequest(context.Background(), "https://github.com/test-owner/test-repo.git", "feature", "title", "body")
 	if err != nil {
@@ -274,7 +282,7 @@ func TestGitOpsAdapter_CreatePullRequest_ParsesOriginalSSHURL(t *testing.T) {
 			Branch: "main",
 		},
 	}
-	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir())
+	adapter := NewGitOpsAdapter(provider, repoDb, t.TempDir(), nil)
 
 	prURL, err := adapter.CreatePullRequest(context.Background(), sshURL, "feature", "title", "body")
 	if err != nil {

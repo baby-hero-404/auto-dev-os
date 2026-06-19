@@ -15,25 +15,25 @@ import (
 )
 
 type AIGateway struct {
-	fallback          llm.Provider
-	credentialPool    credentialPool
-	virtualKeyService virtualKeyService
-	routeService      routeService
-	cfg               *config.Config
-	strategy          service.CredentialStrategy
-	cooldown          time.Duration
-	providerFactory   providerFactory
+	fallback              llm.Provider
+	credentialPool        credentialPool
+	providerModelResolver ProviderModelResolver
+	cfg                   *config.Config
+	strategy              service.CredentialStrategy
+	cooldown              time.Duration
+	providerFactory       providerFactory
+	recorder              llm.UsageRecorder
 }
 
 type Options struct {
-	FallbackProvider   llm.Provider
-	CredentialPool     credentialPool
-	VirtualKeyService  virtualKeyService
-	ModelRouteService  routeService
-	Config             *config.Config
-	CredentialStrategy service.CredentialStrategy
-	Cooldown           time.Duration
-	ProviderFactory    providerFactory
+	FallbackProvider      llm.Provider
+	CredentialPool        credentialPool
+	ProviderModelResolver ProviderModelResolver
+	Config                *config.Config
+	CredentialStrategy    service.CredentialStrategy
+	Cooldown              time.Duration
+	ProviderFactory       providerFactory
+	Recorder              llm.UsageRecorder
 }
 
 type credentialPool interface {
@@ -41,13 +41,8 @@ type credentialPool interface {
 	SetCooldown(context.Context, string, time.Time) error
 }
 
-type virtualKeyService interface {
-	Validate(context.Context, string, float64) (*models.VirtualKey, error)
-	RecordUsage(context.Context, string, float64) error
-}
-
-type routeService interface {
-	ResolveRoute(context.Context, string, string, string) (*service.ResolvedRoute, error)
+type ProviderModelResolver interface {
+	ResolveModels(ctx context.Context, orgID string, levelGroup string) ([]models.ProviderModel, error)
 }
 
 type providerFactory func(*service.DecryptedCredential, string) (llm.Provider, error)
@@ -90,45 +85,124 @@ func NewAIGateway(opts Options) *AIGateway {
 		providerFactory = providerFromCredential
 	}
 	return &AIGateway{
-		fallback:          opts.FallbackProvider,
-		credentialPool:    opts.CredentialPool,
-		virtualKeyService: opts.VirtualKeyService,
-		routeService:      opts.ModelRouteService,
-		cfg:               opts.Config,
-		strategy:          strategy,
-		cooldown:          cooldown,
-		providerFactory:   providerFactory,
+		fallback:              opts.FallbackProvider,
+		credentialPool:        opts.CredentialPool,
+		providerModelResolver: opts.ProviderModelResolver,
+		cfg:                   opts.Config,
+		strategy:              strategy,
+		cooldown:              cooldown,
+		providerFactory:       providerFactory,
+		recorder:              opts.Recorder,
 	}
 }
 
 func (g *AIGateway) Name() string { return "ai_gateway" }
 
-func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm.Response, err error) {
+	startTime := time.Now()
 	opts, _ := llm.RouteOptionsFromContext(ctx)
-	if opts.OrgID == "" || g.credentialPool == nil {
-		return g.chatFallback(ctx, messages)
-	}
+	var lastEntry *models.ComboEntry
+	var lastCred *service.DecryptedCredential
 
-	entries := g.routeEntries(ctx, opts)
-	if len(entries) == 0 {
-		return g.chatFallback(ctx, messages)
-	}
-
-	var virtualKey *models.VirtualKey
-	if opts.VirtualKey != "" && g.virtualKeyService != nil {
-		estimated := estimateCost(messages, opts, entries[0])
-		key, err := g.virtualKeyService.Validate(ctx, opts.VirtualKey, estimated)
-		if err != nil {
-			return nil, err
+	defer func() {
+		if opts.OrgID == "" || g.recorder == nil {
+			return
 		}
-		virtualKey = key
+
+		record := llm.UsageRecord{
+			ProjectID: opts.ProjectID,
+			AgentID:   opts.AgentID,
+			TaskID:    opts.TaskID,
+			OrgID:     opts.OrgID,
+			LatencyMS: time.Since(startTime).Milliseconds(),
+		}
+
+		var provider, model, levelGroup string
+		if lastEntry != nil {
+			provider = lastEntry.Provider
+			model = lastEntry.Model
+			levelGroup = lastEntry.LevelGroup
+		} else if g.fallback != nil {
+			if metaProv, ok := g.fallback.(llm.MetadataProvider); ok {
+				meta := metaProv.Metadata()
+				provider = meta.Provider
+				model = meta.Model
+				levelGroup = meta.LevelGroup
+			} else {
+				provider = g.fallback.Name()
+				if g.cfg != nil {
+					model = g.cfg.LLM.Model
+				}
+			}
+		}
+
+		if provider == "" {
+			provider = "gateway"
+		}
+		if model == "" {
+			model = "unknown"
+		}
+		if levelGroup == "" {
+			levelGroup = "balanced"
+		}
+
+		record.Provider = provider
+		record.Model = model
+		record.LevelGroup = levelGroup
+
+		if lastCred != nil {
+			record.CredentialID = lastCred.ID
+		}
+
+		if err != nil {
+			record.Status = "failed"
+			record.Error = err.Error()
+		} else if resp != nil {
+			record.Status = "ok"
+			if resp.Model != "" {
+				record.Model = resp.Model
+				model = resp.Model
+			}
+			record.PromptTokens = resp.PromptTokens
+			record.OutputTokens = resp.OutputTokens
+
+			meta := llm.MetadataForModel(provider, model)
+			record.CostUSD = llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, meta)
+		}
+
+		ctxCopy := context.WithoutCancel(ctx)
+		bgCtx, cancel := context.WithTimeout(ctxCopy, 2*time.Second)
+
+		go func() {
+			defer cancel()
+			if recErr := g.recorder.RecordLLMUsage(bgCtx, record); recErr != nil {
+				log.Printf("[AIGateway] Telemetry record failed: %v", recErr)
+			}
+		}()
+	}()
+
+	if opts.OrgID == "" || g.credentialPool == nil {
+		resp, err = g.chatFallback(ctx, messages)
+		return resp, err
+	}
+
+	entries, err := g.routeEntries(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		err = fmt.Errorf("no active models configured for organization %s and level %s", opts.OrgID, getLevelGroup(opts))
+		return nil, err
 	}
 
 	var failures []string
 	for _, entry := range entries {
+		currentEntry := entry
+		lastEntry = &currentEntry
 		excluded := map[string]bool{}
 		for {
-			cred, err := g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, g.strategy, excluded)
+			var cred *service.DecryptedCredential
+			cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, g.strategy, excluded)
 			if errors.Is(err, service.ErrNoCredentialsAvailable) {
 				failures = append(failures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
 				break
@@ -137,13 +211,14 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (*llm.Resp
 				failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
 				break
 			}
+			lastCred = cred
 
-			provider, err := g.providerFactory(cred, entry.Model)
+			var provider llm.Provider
+			provider, err = g.providerFactory(cred, entry.Model)
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
 				break
 			}
-			var resp *llm.Response
 			attempts := 4
 			for attempt := 0; attempt < attempts; attempt++ {
 				resp, err = provider.Chat(ctx, messages)
@@ -157,7 +232,8 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (*llm.Resp
 					select {
 					case <-ctx.Done():
 						timer.Stop()
-						return nil, ctx.Err()
+						err = ctx.Err()
+						return nil, err
 					case <-timer.C:
 					}
 					continue
@@ -176,23 +252,12 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (*llm.Resp
 			if resp.Model == "" {
 				resp.Model = entry.Model
 			}
-			if virtualKey != nil && g.virtualKeyService != nil {
-				meta := llm.MetadataForModel(entry.Provider, resp.Model)
-				cost := llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, meta)
-				if err := g.virtualKeyService.RecordUsage(ctx, virtualKey.ID, cost); err != nil {
-					return nil, err
-				}
-			}
 			return resp, nil
 		}
 	}
 
-	if opts.VirtualKey == "" {
-		if resp, err := g.chatFallback(ctx, messages); err == nil {
-			return resp, nil
-		}
-	}
-	return nil, fmt.Errorf("ai gateway exhausted routes: %s", strings.Join(failures, "; "))
+	err = fmt.Errorf("ai gateway exhausted routes: %s", strings.Join(failures, "; "))
+	return nil, err
 }
 
 func (g *AIGateway) chatFallback(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
@@ -202,44 +267,33 @@ func (g *AIGateway) chatFallback(ctx context.Context, messages []llm.Message) (*
 	return g.fallback.Chat(ctx, messages)
 }
 
-func (g *AIGateway) routeEntries(ctx context.Context, opts llm.RouteOptions) []models.ComboEntry {
-	if g.routeService != nil {
-		route, err := g.routeService.ResolveRoute(ctx, opts.OrgID, opts.RouteName, opts.Complexity)
-		if err == nil && route != nil && len(route.Entries) > 0 {
-			return route.Entries
-		}
+func (g *AIGateway) routeEntries(ctx context.Context, opts llm.RouteOptions) ([]models.ComboEntry, error) {
+	if g.providerModelResolver == nil {
+		return nil, fmt.Errorf("provider model resolver is not configured")
 	}
-	return defaultEntries(g.cfg, opts.Complexity)
+	level := getLevelGroup(opts)
+	providerModels, err := g.providerModelResolver.ResolveModels(ctx, opts.OrgID, level)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]models.ComboEntry, 0, len(providerModels))
+	for _, pm := range providerModels {
+		entries = append(entries, models.ComboEntry{
+			Provider:   pm.Provider,
+			Model:      pm.ModelName,
+			Priority:   pm.Priority,
+			LevelGroup: pm.LevelGroup,
+		})
+	}
+	return entries, nil
 }
 
-func defaultEntries(cfg *config.Config, complexity string) []models.ComboEntry {
-	if cfg == nil {
-		return nil
+func getLevelGroup(opts llm.RouteOptions) string {
+	name := strings.ToLower(strings.TrimSpace(opts.RouteName))
+	if name == models.ModelLevelFast || name == models.ModelLevelBalanced || name == models.ModelLevelPowerful {
+		return name
 	}
-	tier := tierForComplexity(complexity)
-	entries := []models.ComboEntry{}
-	add := func(provider, model string, priority int) {
-		if model != "" {
-			entries = append(entries, models.ComboEntry{Provider: provider, Model: model, Priority: priority, Tier: tier})
-		}
-	}
-	switch tier {
-	case llm.TierFast:
-		add("openai", cfg.LLM.FastModel, 0)
-		add("gemini", cfg.LLM.GeminiFastModel, 1)
-	case llm.TierPowerful:
-		add("openai", cfg.LLM.PowerfulModel, 0)
-		add("anthropic", cfg.LLM.AnthropicPowerfulModel, 1)
-		add("gemini", cfg.LLM.GeminiBalancedModel, 2)
-	default:
-		add("openai", cfg.LLM.BalancedModel, 0)
-		add("anthropic", cfg.LLM.AnthropicBalancedModel, 1)
-		add("gemini", cfg.LLM.GeminiBalancedModel, 2)
-	}
-	if len(entries) == 0 && cfg.LLM.Provider != "gateway" && cfg.LLM.Model != "" {
-		entries = append(entries, models.ComboEntry{Provider: cfg.LLM.Provider, Model: cfg.LLM.Model})
-	}
-	return entries
+	return levelGroupForComplexity(opts.Complexity)
 }
 
 func providerFromCredential(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
@@ -257,15 +311,6 @@ func providerFromCredential(cred *service.DecryptedCredential, model string) (ll
 	}
 }
 
-func estimateCost(messages []llm.Message, opts llm.RouteOptions, entry models.ComboEntry) float64 {
-	outputTokens := opts.MaxOutputTokens
-	if outputTokens == 0 {
-		outputTokens = 2048
-	}
-	meta := llm.MetadataForModel(entry.Provider, entry.Model)
-	return llm.EstimateCost(llm.EstimateMessageTokens(messages), outputTokens, meta)
-}
-
 func isTransientError(err error) bool {
 	var statusErr interface{ HTTPStatusCode() int }
 	if errors.As(err, &statusErr) {
@@ -280,13 +325,13 @@ func isTransientError(err error) bool {
 		strings.Contains(msg, "temporarily unavailable") || strings.Contains(msg, "high demand")
 }
 
-func tierForComplexity(complexity string) string {
+func levelGroupForComplexity(complexity string) string {
 	switch strings.ToLower(complexity) {
 	case models.TaskComplexityEasy:
-		return llm.TierFast
+		return llm.LevelFast
 	case models.TaskComplexityHard:
-		return llm.TierPowerful
+		return llm.LevelPowerful
 	default:
-		return llm.TierBalanced
+		return llm.LevelBalanced
 	}
 }

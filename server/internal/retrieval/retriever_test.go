@@ -7,32 +7,74 @@ import (
 	"testing"
 )
 
-func TestSimpleFileRetrieverRetrieveContext(t *testing.T) {
+func TestSimpleFileRetrieverRetrieveContextBySemanticTerms(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "server", "main.go")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(path, []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeTestFile(t, root, "server/internal/service/user.go", `package service
+
+func ValidateUserProfileAvatar(input string) error {
+	return nil
+}
+`)
+	writeTestFile(t, root, "web/src/app/page.tsx", `export default function Home() {
+	return <main>Dashboard</main>;
+}
+`)
 
 	retriever := NewSimpleFileRetriever(root)
-	snippets, err := retriever.RetrieveContext(context.Background(), "inspect server/main.go and missing.go", 5)
+	snippets, err := retriever.RetrieveContext(context.Background(), "Fix avatar validation in user profile service", 8)
 	if err != nil {
 		t.Fatalf("RetrieveContext returned error: %v", err)
 	}
-	if len(snippets) != 1 {
-		t.Fatalf("expected 1 snippet, got %d", len(snippets))
+	if len(snippets) == 0 {
+		t.Fatal("expected snippets")
 	}
-	if snippets[0].Path != "server/main.go" {
-		t.Fatalf("unexpected path %q", snippets[0].Path)
+	if snippets[0].Path != "server/internal/service/user.go" {
+		t.Fatalf("expected user service first, got %q", snippets[0].Path)
+	}
+	if snippets[0].Retriever != "semantic_file" {
+		t.Fatalf("unexpected retriever %q", snippets[0].Retriever)
 	}
 }
 
-func TestSimpleFileRetrieverRejectsTraversal(t *testing.T) {
-	retriever := NewSimpleFileRetriever(t.TempDir())
-	if _, err := retriever.readSnippet("../secret.txt"); err == nil {
-		t.Fatal("expected traversal error")
+func TestSimpleFileRetrieverPrioritizesExplicitPath(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "server/main.go", "package main\nfunc main() {}\n")
+	writeTestFile(t, root, "server/internal/service/main_service.go", "package service\nfunc StartMainService() {}\n")
+
+	retriever := NewSimpleFileRetriever(root)
+	snippets, err := retriever.RetrieveContext(context.Background(), "inspect server/main.go and startup behavior", 8)
+	if err != nil {
+		t.Fatalf("RetrieveContext returned error: %v", err)
+	}
+	if len(snippets) == 0 {
+		t.Fatal("expected snippets")
+	}
+	if snippets[0].Path != "server/main.go" {
+		t.Fatalf("expected explicit path first, got %q", snippets[0].Path)
+	}
+}
+
+func TestSimpleFileRetrieverIgnoresTraversalPaths(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "server/main.go", "package main\nfunc main() {}\n")
+
+	retriever := NewSimpleFileRetriever(root)
+	snippets, err := retriever.RetrieveContext(context.Background(), "inspect ../secret.txt", 8)
+	if err != nil {
+		t.Fatalf("RetrieveContext returned error: %v", err)
+	}
+	if len(snippets) != 0 {
+		t.Fatalf("expected no snippets for traversal-only query, got %d", len(snippets))
+	}
+}
+
+func writeTestFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 }

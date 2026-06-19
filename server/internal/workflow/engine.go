@@ -8,6 +8,7 @@ import (
 )
 
 var ErrPaused = errors.New("workflow paused")
+var ErrReviewFixLoop = errors.New("review fix loop back")
 
 type PauseError struct {
 	Step   string
@@ -58,6 +59,10 @@ type Event struct {
 type Engine struct {
 	MaxParallel int
 	OnEvent     func(context.Context, Event) error
+	// CompletedSteps allows resuming a workflow from checkpoint.
+	// Pre-populate this map with step IDs that already succeeded;
+	// the engine will mark them as success and skip execution.
+	CompletedSteps map[string]map[string]any
 }
 
 type Result struct {
@@ -79,6 +84,14 @@ func (e *Engine) Run(ctx context.Context, def Definition, initial map[string]any
 	for _, step := range def.Steps {
 		steps[step.ID] = step
 		result.Status[step.ID] = StepStatusPending
+	}
+
+	// Seed completed steps from checkpoint data for resume support.
+	for stepID, output := range e.CompletedSteps {
+		if _, exists := steps[stepID]; exists {
+			result.Status[stepID] = StepStatusSuccess
+			result.Outputs[stepID] = output
+		}
 	}
 
 	for {

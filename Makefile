@@ -1,19 +1,22 @@
 -include .env
 export
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
+LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
+
 .PHONY: build run clean test api web dev dev-be dev-fe db-up db-down migrate db-clean clone-resource
 
 # ── Build ────────────────────────────────────────────────
 build:
-	cd server && go build -o ../bin/auto-code-os ./cmd/cli
+	cd server && go build $(LDFLAGS) -o ../bin/auto-code-os ./cmd/cli
 
 # ── Run (PoC) ────────────────────────────────────────────
 run:
-	cd server && go run ./cmd/cli $(ARGS)
+	cd server && go run $(LDFLAGS) ./cmd/cli $(ARGS)
 
 # ── API Server ───────────────────────────────────────────
 api:
-	cd server && go run ./cmd/api
+	cd server && go run $(LDFLAGS) ./cmd/api
 
 # ── Web UI ───────────────────────────────────────────────
 web:
@@ -70,8 +73,10 @@ test:
 	cd web && npx playwright test
 
 # ── Clean ────────────────────────────────────────────────
-clean:
+clean: db-clean
 	rm -rf bin/
+	rm -rf .data/
+	rm -rf server/.data/
 
 # ── Resources ────────────────────────────────────────────
 clone-resource:
@@ -91,5 +96,5 @@ help:
 	@echo "  make db-up                    Start PostgreSQL container"
 	@echo "  make db-down                  Stop and remove containers"
 	@echo "  make test                     Run all tests"
-	@echo "  make clean                    Remove build artifacts"
+	@echo "  make clean                    Remove build artifacts, database volumes, and on-disk data"
 	@echo "  make clone-resource           Clone external repositories into resources directory"

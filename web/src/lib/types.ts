@@ -20,6 +20,11 @@ export type Project = {
   org_id: string;
   name: string;
   description: string;
+  default_model_level?: string;
+  default_autonomy?: string;
+  auto_review_policy?: string;
+  max_retries?: number;
+  default_branch?: string;
   repositories_count?: number;
   agents_count?: number;
   tasks_done_count?: number;
@@ -46,12 +51,15 @@ export type Task = {
   project_id: string;
   agent_id?: string;
   parent_task_id?: string;
+  repository_id?: string;
   title: string;
   description: string;
   status: string;
   complexity: "easy" | "medium" | "hard";
   priority: number;
   labels: string[];
+  pr_urls?: string[];
+  pr_metadata?: any;
   analysis?: TaskAnalysis;
   spec_status: string;
   created_at: string;
@@ -128,10 +136,14 @@ export type Skill = {
 
 export type TokenUsageSummary = {
   project_id?: string;
+  credential_id?: string;
+  key_label?: string;
   provider: string;
   model: string;
-  tier: string;
+  level_group: string;
   requests: number;
+  success_requests: number;
+  failed_requests: number;
   prompt_tokens: number;
   output_tokens: number;
   total_tokens: number;
@@ -148,7 +160,7 @@ export type Agent = {
   goal: string;
   autonomy_level: "autonomous" | "supervised" | "approval_required";
   context_config: Record<string, unknown>;
-  model_route: string;
+  model_level_group: string;
   status: string;
   assignment_strategy?: string;
   created_at: string;
@@ -202,7 +214,7 @@ export type AgentStats = {
   agent_id: string;
   agent_name: string;
   role: string;
-  model_route: string;
+  model_level_group: string;
   status: string;
   task_count: number;
   success_count: number;
@@ -244,6 +256,16 @@ export type WorkflowAnalytics = {
   completion_rate: number;
   avg_duration_ms: number;
   step_stats: WorkflowStepStats[];
+};
+
+export type RecentFailure = {
+  task_id: string;
+  project_id: string;
+  project_name: string;
+  title: string;
+  failure_reason: string;
+  workflow_step: string;
+  failed_at: string;
 };
 
 export type AuditLog = {
@@ -360,68 +382,39 @@ export type UpdateProviderCredentialInput = {
   status?: ProviderCredential["status"];
   priority?: number;
 };
-
-export type VirtualKey = {
-  id: string;
-  name: string;
-  key_prefix: string;
-  project_id?: string;
-  agent_id?: string;
-  budget_limit_usd?: number;
-  budget_used_usd: number;
-  rpm_limit?: number;
-  tpm_limit?: number;
-  status: "active" | "exhausted" | "revoked";
-  expires_at?: string;
-  created_at: string;
-};
-
-export type CreatedVirtualKey = VirtualKey & {
-  key: string;
-};
-
-export type CreateVirtualKeyInput = {
-  name: string;
-  project_id?: string;
-  agent_id?: string;
-  budget_limit_usd?: number;
-  rpm_limit?: number;
-  tpm_limit?: number;
-  expires_at?: string;
-};
-
-export type UpdateVirtualKeyInput = {
-  name?: string;
-  budget_limit_usd?: number;
-  rpm_limit?: number;
-  tpm_limit?: number;
-  status?: VirtualKey["status"];
-  expires_at?: string;
-};
-
 export type ComboEntry = {
   provider: string;
   model: string;
   priority: number;
-  tier?: string;
+  level_group?: string;
 };
 
-export type ModelRoute = {
+export type ProviderModel = {
   id: string;
   org_id: string;
-  name: string;
-  route_type: "tier" | "combo";
-  config: ComboEntry[];
-  is_default: boolean;
+  provider: string;
+  level_group: "fast" | "balanced" | "powerful";
+  model_name: string;
+  priority: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 };
 
-export type CreateModelRouteInput = {
-  name: string;
-  route_type: "tier" | "combo";
-  config: ComboEntry[];
-  is_default?: boolean;
+export type CreateProviderModelInput = {
+  provider: string;
+  level_group: "fast" | "balanced" | "powerful";
+  model_name: string;
+  priority: number;
+  is_active?: boolean;
 };
 
-export type UpdateModelRouteInput = Partial<CreateModelRouteInput>;
+export type UpdateProviderModelInput = Partial<CreateProviderModelInput>;
+
+export type SkillSource = {
+  id: string;
+  url: string;
+  status: string;
+  error?: string;
+  last_synced_at?: string;
+};

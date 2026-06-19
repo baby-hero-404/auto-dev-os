@@ -50,6 +50,17 @@ func (r *RuleRepo) GetByID(ctx context.Context, id string) (*models.Rule, error)
 	return rule, nil
 }
 
+func (r *RuleRepo) GetByIDAndOrg(ctx context.Context, id string, orgID string) (*models.Rule, error) {
+	rule := &models.Rule{}
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND (org_id = ? OR project_id IN (SELECT id FROM projects WHERE org_id = ?))", id, orgID, orgID).
+		First(rule).Error
+	if err != nil {
+		return nil, fmt.Errorf("get rule by id and org: %w", mapError(err))
+	}
+	return rule, nil
+}
+
 func (r *RuleRepo) ListByProjectID(ctx context.Context, projectID string) ([]models.Rule, error) {
 	var rules []models.Rule
 	if err := r.db.WithContext(ctx).
@@ -72,8 +83,8 @@ func (r *RuleRepo) ListGlobalByOrgID(ctx context.Context, orgID string) ([]model
 	return rules, nil
 }
 
-func (r *RuleRepo) Update(ctx context.Context, id string, input models.UpdateRuleInput) (*models.Rule, error) {
-	rule, err := r.GetByID(ctx, id)
+func (r *RuleRepo) Update(ctx context.Context, id string, orgID string, input models.UpdateRuleInput) (*models.Rule, error) {
+	rule, err := r.GetByIDAndOrg(ctx, id, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +101,10 @@ func (r *RuleRepo) Update(ctx context.Context, id string, input models.UpdateRul
 	return rule, nil
 }
 
-func (r *RuleRepo) Delete(ctx context.Context, id string) error {
-	result := r.db.WithContext(ctx).Delete(&models.Rule{}, "id = ?", id)
+func (r *RuleRepo) Delete(ctx context.Context, id string, orgID string) error {
+	result := r.db.WithContext(ctx).
+		Where("id = ? AND (org_id = ? OR project_id IN (SELECT id FROM projects WHERE org_id = ?))", id, orgID, orgID).
+		Delete(&models.Rule{})
 	if result.Error != nil {
 		return fmt.Errorf("delete rule: %w", mapError(result.Error))
 	}

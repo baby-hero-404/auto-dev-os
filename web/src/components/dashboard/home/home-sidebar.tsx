@@ -10,7 +10,6 @@ import {
   TrendingUp,
   ShieldCheck,
   Cpu,
-  KeyRound,
   GitBranch,
   BarChart3,
 } from "lucide-react";
@@ -38,7 +37,6 @@ const navSections: NavSection[] = [
     items: [
       { label: "AI Providers", href: "/ai-providers", icon: Cpu },
       { label: "Gateway", href: "/gateway", icon: BarChart3 },
-      { label: "Virtual Keys", href: "/settings/virtual-keys", icon: KeyRound },
       { label: "Git Accounts", href: "/git-accounts", icon: GitBranch },
     ],
   },

@@ -44,3 +44,5 @@ temp/
 
 # External cloned resources
 resources/
+
+.data/

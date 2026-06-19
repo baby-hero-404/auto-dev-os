@@ -19,6 +19,11 @@ type RepositoryLookup interface {
 
 type GitAccountLookup interface {
 	GetByID(ctx context.Context, id string) (*models.GitAccount, error)
+	GetDefaultByProjectAndProvider(ctx context.Context, projectID string, provider string) (*models.GitAccount, error)
+}
+
+type Decryptor interface {
+	Decrypt(encoded string) (string, error)
 }
 
 type GitOpsAdapter struct {
@@ -26,9 +31,10 @@ type GitOpsAdapter struct {
 	repoDb       RepositoryLookup
 	gitAccountDb GitAccountLookup
 	rootPath     string
+	cipher       Decryptor
 }
 
-func NewGitOpsAdapter(provider GitProvider, repoDb RepositoryLookup, rootPath string) *GitOpsAdapter {
+func NewGitOpsAdapter(provider GitProvider, repoDb RepositoryLookup, rootPath string, cipher Decryptor) *GitOpsAdapter {
 	if rootPath == "" {
 		rootPath = "/tmp/auto-code-os/workspaces"
 	}
@@ -36,6 +42,7 @@ func NewGitOpsAdapter(provider GitProvider, repoDb RepositoryLookup, rootPath st
 		provider: provider,
 		repoDb:   repoDb,
 		rootPath: rootPath,
+		cipher:   cipher,
 	}
 }
 
@@ -62,29 +69,41 @@ func (a *GitOpsAdapter) CloneForTask(ctx context.Context, repoURL, branch, local
 	if err != nil {
 		return "", fmt.Errorf("lookup repo %s: %w", repoURL, err)
 	}
-	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	provider, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return "", err
+	}
 	return provider.CloneRepo(ctx, repoURL, token, branch, localPath)
 }
 
-func (a *GitOpsAdapter) CreateBranch(ctx context.Context, repoURL, branchName string) error {
+func (a *GitOpsAdapter) CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error {
 	_, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return err
 	}
-	path := a.localPath(ctx, repo.ID)
-	return a.provider.CreateBranch(ctx, path, branchName)
+	if localPath == "" {
+		localPath = a.localPath(ctx, repo.ID)
+	}
+
+	provider, _, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
+	return provider.CreateBranch(ctx, localPath, branchName)
 }
 
-func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error {
+func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error {
 	_, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {
 		return err
 	}
-	path := a.localPath(ctx, repo.ID)
+	if localPath == "" {
+		localPath = a.localPath(ctx, repo.ID)
+	}
 
 	// If files are explicitly provided (which is optional but supported), write them to local path.
 	for file, content := range files {
-		fullPath, err := safeRepoPath(path, file)
+		fullPath, err := safeRepoPath(localPath, file)
 		if err != nil {
 			return err
 		}
@@ -96,26 +115,65 @@ func (a *GitOpsAdapter) CommitAndPush(ctx context.Context, repoURL, branchName, 
 		}
 	}
 
-	provider, token := a.providerAndTokenForRepo(ctx, repo)
-	return provider.CommitAndPush(ctx, path, message, token, agentRole)
+	provider, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
+	return provider.CommitAndPush(ctx, localPath, message, token, agentRole)
 }
 
-func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *models.Repository) (GitProvider, string) {
+func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *models.Repository) (GitProvider, string, error) {
 	token := repo.Token
-	if repo.GitAccountID == nil || *repo.GitAccountID == "" || a.gitAccountDb == nil {
-		return a.provider, token
+
+	// Check linked GitAccount
+	if repo.GitAccountID != nil && *repo.GitAccountID != "" && a.gitAccountDb != nil {
+		acc, err := a.gitAccountDb.GetByID(ctx, *repo.GitAccountID)
+		if err == nil {
+			if token == "" {
+				token = acc.Token
+			}
+			if token != "" && a.cipher != nil {
+				if dec, err := a.cipher.Decrypt(token); err == nil {
+					token = dec
+				} else {
+					return nil, "", fmt.Errorf("decrypt token: %w", err)
+				}
+			}
+			if acc.BaseURL != "" {
+				return NewGitHubProvider(acc.BaseURL), token, nil
+			}
+			return a.provider, token, nil
+		}
 	}
-	acc, err := a.gitAccountDb.GetByID(ctx, *repo.GitAccountID)
-	if err != nil {
-		return a.provider, token
+
+	// Check org fallback
+	if token == "" && a.gitAccountDb != nil {
+		acc, err := a.gitAccountDb.GetDefaultByProjectAndProvider(ctx, repo.ProjectID, repo.Provider)
+		if err == nil {
+			token = acc.Token
+			if token != "" && a.cipher != nil {
+				if dec, err := a.cipher.Decrypt(token); err == nil {
+					token = dec
+				} else {
+					return nil, "", fmt.Errorf("decrypt token: %w", err)
+				}
+			}
+			if acc.BaseURL != "" {
+				return NewGitHubProvider(acc.BaseURL), token, nil
+			}
+		}
 	}
-	if token == "" {
-		token = acc.Token
+
+	// Direct repo token
+	if token != "" && a.cipher != nil {
+		if dec, err := a.cipher.Decrypt(token); err == nil {
+			token = dec
+		} else {
+			return nil, "", fmt.Errorf("decrypt token: %w", err)
+		}
 	}
-	if acc.BaseURL == "" {
-		return a.provider, token
-	}
-	return NewGitHubProvider(acc.BaseURL), token
+
+	return a.provider, token, nil
 }
 
 func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error) {
@@ -157,7 +215,10 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 
 	// Call underlying provider to create PR
 	// head is branchName, base is the default branch from the repository model
-	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	provider, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return "", err
+	}
 	prURL, err := provider.CreatePR(ctx, owner, repoName, title, branchName, baseBranch, body, token)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no commits between") {
@@ -181,7 +242,10 @@ func (a *GitOpsAdapter) MergePullRequest(ctx context.Context, repoURL, prURL str
 		return err
 	}
 
-	provider, token := a.providerAndTokenForRepo(ctx, repo)
+	provider, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return err
+	}
 	if provider == nil {
 		return fmt.Errorf("no provider available for repo %s", repoURL)
 	}

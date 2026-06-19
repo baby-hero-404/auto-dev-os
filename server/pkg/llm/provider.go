@@ -12,11 +12,11 @@ type contextKey string
 
 const routeOptionsKey contextKey = "llm_route_options"
 
-// Model tiers used by the gateway router.
+// Model level groups used by the gateway router.
 const (
-	TierFast     = "fast"
-	TierBalanced = "balanced"
-	TierPowerful = "powerful"
+	LevelFast     = "fast"
+	LevelBalanced = "balanced"
+	LevelPowerful = "powerful"
 )
 
 // Message represents a single message in a conversation.
@@ -37,7 +37,7 @@ type Response struct {
 type ProviderMetadata struct {
 	Provider          string  `json:"provider"`
 	Model             string  `json:"model"`
-	Tier              string  `json:"tier"`
+	LevelGroup        string  `json:"level_group"`
 	InputCostPer1K    float64 `json:"input_cost_per_1k"`
 	OutputCostPer1K   float64 `json:"output_cost_per_1k"`
 	MaxContextTokens  int     `json:"max_context_tokens"`
@@ -51,11 +51,11 @@ type MetadataProvider interface {
 
 // RouteOptions carries per-request gateway routing and budget hints.
 type RouteOptions struct {
-	Complexity      string  `json:"complexity,omitempty"`
-	OrgID           string  `json:"org_id,omitempty"`
-	ProjectID       string  `json:"project_id,omitempty"`
-	AgentID         string  `json:"agent_id,omitempty"`
-	TaskID          string  `json:"task_id,omitempty"`
+	Complexity string `json:"complexity,omitempty"`
+	OrgID      string `json:"org_id,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+	AgentID    string `json:"agent_id,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
 
 	RouteName       string  `json:"route_name,omitempty"`
 	MaxInputTokens  int     `json:"max_input_tokens,omitempty"`

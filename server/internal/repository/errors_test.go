@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -32,6 +33,16 @@ func TestMapError(t *testing.T) {
 			name:     "other gorm error",
 			input:    gorm.ErrInvalidDB,
 			expected: gorm.ErrInvalidDB,
+		},
+		{
+			name:     "pg unique constraint violation",
+			input:    &pgconn.PgError{Code: "23505"},
+			expected: ErrConflict,
+		},
+		{
+			name:     "pg invalid syntax uuid",
+			input:    &pgconn.PgError{Code: "22P02"},
+			expected: ErrNotFound,
 		},
 		{
 			name:     "random error",

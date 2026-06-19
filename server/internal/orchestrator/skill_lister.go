@@ -64,7 +64,11 @@ func (l *FilesystemSkillLister) List(context.Context) ([]models.Skill, error) {
 		return nil, nil
 	}
 
-	raw, err := os.ReadFile(filepath.Join(root, "registry.min.json"))
+	registryPath := filepath.Join(root, "registry.json")
+	if _, err := os.Stat(registryPath); os.IsNotExist(err) {
+		registryPath = filepath.Join(root, "registry.min.json")
+	}
+	raw, err := os.ReadFile(registryPath)
 	if err != nil {
 		return nil, fmt.Errorf("read skills registry: %w", err)
 	}

@@ -1,13 +1,12 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { ArrowLeft, Bot, ChevronDown, Loader2, Plus, X, Zap, Scale, Gem } from "lucide-react";
+import { ArrowLeft, ChevronDown, Loader2, Plus, X, Zap, Scale, Gem } from "lucide-react";
 import {
   AGENT_ROLES,
   ASSIGNMENT_STRATEGIES,
   AUTONOMY_LEVELS,
-  MODEL_OPTIONS_BY_PROVIDER,
-  PROVIDERS,
+  MODEL_LEVEL_GROUPS,
 } from "@/lib/model-options";
 import type { RoleTemplate } from "@/lib/types";
 
@@ -16,18 +15,20 @@ export type HireAgentPayload = {
   role: string;
   goal: string;
   autonomy_level: string;
-  model_route: string;
+  model_level_group: string;
   assignment_strategy: string;
 };
 
-type TierID = "fast" | "balanced" | "powerful" | "custom";
+type TierID = (typeof MODEL_LEVEL_GROUPS)[number];
 
 const ROLE_TIER_HINT: Record<string, TierID> = {
-  planner: "fast",
+  planner: "powerful",
   backend: "balanced",
   frontend: "balanced",
-  reviewer: "powerful",
+  reviewer: "fast",
   qa: "balanced",
+  "security-auditor": "powerful",
+  "db-architect": "powerful",
 };
 
 const TIER_OPTIONS: Array<{
@@ -36,10 +37,9 @@ const TIER_OPTIONS: Array<{
   detail: string;
   icon: typeof Zap;
 }> = [
-  { id: "fast", title: "Fastest & Cheapest", detail: "gateway / fast - best for planner, QA", icon: Zap },
+  { id: "fast", title: "Fastest & Cheapest", detail: "gateway / fast - best for review loops", icon: Zap },
   { id: "balanced", title: "Smart & Balanced", detail: "gateway / balanced", icon: Scale },
-  { id: "powerful", title: "Most Capable", detail: "gateway / powerful - best for reviewer, hard tasks", icon: Gem },
-  { id: "custom", title: "Custom", detail: "Choose provider and model manually", icon: Bot },
+  { id: "powerful", title: "Most Capable", detail: "gateway / powerful - best for planning and audits", icon: Gem },
 ];
 
 export function HireAgentWizard({
@@ -62,8 +62,6 @@ export function HireAgentWizard({
   const [strategy, setStrategy] = useState<string>(ASSIGNMENT_STRATEGIES[0]);
   const [autonomy, setAutonomy] = useState<string>(AUTONOMY_LEVELS[1]);
   const [tier, setTier] = useState<TierID>(ROLE_TIER_HINT.backend);
-  const [customProvider, setCustomProvider] = useState("openai");
-  const [customModel, setCustomModel] = useState(MODEL_OPTIONS_BY_PROVIDER.openai[0]);
   const [localError, setLocalError] = useState("");
 
   const template = useMemo(() => roleTemplates.find((item) => item.role === role), [role, roleTemplates]);
@@ -71,8 +69,6 @@ export function HireAgentWizard({
     () => [...new Set([...AGENT_ROLES, ...roleTemplates.map((item) => item.role)])],
     [roleTemplates],
   );
-  const providerOptions = PROVIDERS.filter((provider) => provider !== "gateway");
-  const modelOptions = MODEL_OPTIONS_BY_PROVIDER[customProvider] || [];
 
   function applyRole(nextRole: string) {
     setRole(nextRole);
@@ -99,13 +95,12 @@ export function HireAgentWizard({
 
   function submitCapability(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const modelRoute = tier === "custom" ? `${customProvider}/${customModel}` : tier;
     onSubmit({
       name: name.trim(),
       role,
       goal: goal.trim(),
       autonomy_level: autonomy,
-      model_route: modelRoute,
+      model_level_group: tier,
       assignment_strategy: strategy,
     });
   }
@@ -177,46 +172,18 @@ export function HireAgentWizard({
           </form>
         ) : (
           <form onSubmit={submitCapability} className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              {TIER_OPTIONS.map((option) => {
-                const Icon = option.icon;
-                const selected = tier === option.id;
-                const hinted = ROLE_TIER_HINT[role] === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setTier(option.id)}
-                    className={`rounded-lg border p-3 text-left transition ${selected ? "border-brand-primary bg-brand-primary-muted" : "border-stroke bg-background hover:bg-surface"}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon size={17} className={selected ? "text-brand-primary" : "text-content-muted"} />
-                      <span className="font-semibold text-foreground">{option.title}</span>
-                      {hinted && <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-semibold text-content-muted">hint</span>}
-                    </div>
-                    <p className="mt-1 text-xs text-content-muted">{option.detail}</p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {tier === "custom" && (
-              <div className="grid gap-4 rounded-lg border border-stroke bg-background p-3 md:grid-cols-2">
-                <Field label="Provider">
-                  <Select
-                    value={customProvider}
-                    onChange={(nextProvider) => {
-                      setCustomProvider(nextProvider);
-                      setCustomModel(MODEL_OPTIONS_BY_PROVIDER[nextProvider]?.[0] || "");
-                    }}
-                    options={providerOptions}
-                  />
-                </Field>
-                <Field label="Model">
-                  <Select value={customModel} onChange={setCustomModel} options={modelOptions} />
-                </Field>
-              </div>
-            )}
+            <Field label="Model Intelligence Level">
+              <Select
+                value={tier}
+                onChange={(val) => setTier(val as TierID)}
+                options={["fast", "balanced", "powerful"]}
+              />
+              <p className="text-xs text-content-muted mt-1.5 font-medium">
+                {tier === "fast" && "⚡ Fastest & Cheapest - best for review loops"}
+                {tier === "balanced" && "⚖️ Smart & Balanced - best for code modifications"}
+                {tier === "powerful" && "🚀 Most Capable - best for planning, audits, and complex tasks"}
+              </p>
+            </Field>
 
             <Field label="Autonomy">
               <Select value={autonomy} onChange={setAutonomy} options={[...AUTONOMY_LEVELS]} />

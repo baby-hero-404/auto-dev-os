@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useMemo } from "react";
 import {
   AreaChart,
   Area,
@@ -7,6 +9,7 @@ import {
   Bar,
   CartesianGrid,
   Cell,
+  Legend,
   PieChart,
   Pie,
   ResponsiveContainer,
@@ -16,11 +19,14 @@ import {
 } from "recharts";
 import {
   Activity,
+  AlertTriangle,
   Bot,
   CheckCircle2,
+  Clock,
   Coins,
   FolderKanban,
   GitPullRequest,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
@@ -37,6 +43,10 @@ function formatCost(value: number) {
 function formatDuration(ms: number) {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
   return `${Math.round(ms / 60_000)}m`;
+}
+function formatLatency(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -76,6 +86,55 @@ export default function AnalyticsPage() {
     orgID ? ["analytics-workflows", orgID] : null,
     (token) => api.analyticsWorkflows(token, orgID),
   );
+  const { data: recentFailures = [] } = useAuthedSWR(
+    orgID ? ["analytics-failures", orgID] : null,
+    (token) => api.analyticsFailures(token, orgID, undefined, 5),
+  );
+  const { data: tokenUsageList = [] } = useAuthedSWR(
+    orgID ? ["analytics-token-usage", orgID] : null,
+    (token) => api.tokenUsage(token, orgID),
+  );
+
+  const avgLatencyMs = useMemo(() => {
+    const totals = tokenUsageList.reduce(
+      (acc, item) => {
+        acc.requests += item.requests || 0;
+        acc.latency += (item.avg_latency_ms || 0) * (item.requests || 0);
+        return acc;
+      },
+      { requests: 0, latency: 0 },
+    );
+    return totals.requests > 0 ? totals.latency / totals.requests : 0;
+  }, [tokenUsageList]);
+
+  const keyLabelUsage = useMemo(() => {
+    const groups: Record<string, {
+      key_label: string;
+      success: number;
+      failed: number;
+      total_tokens: number;
+      cost_usd: number;
+    }> = {};
+
+    tokenUsageList.forEach((item) => {
+      const label = item.key_label || "No Label (Gateway)";
+      if (!groups[label]) {
+        groups[label] = {
+          key_label: label,
+          success: 0,
+          failed: 0,
+          total_tokens: 0,
+          cost_usd: 0,
+        };
+      }
+      groups[label].success += item.success_requests || 0;
+      groups[label].failed += item.failed_requests || 0;
+      groups[label].total_tokens += item.total_tokens || 0;
+      groups[label].cost_usd += item.cost_usd || 0;
+    });
+
+    return Object.values(groups).sort((a, b) => b.cost_usd - a.cost_usd);
+  }, [tokenUsageList]);
 
   return (
     <DashboardLayout>
@@ -92,12 +151,14 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Overview stat cards */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <StatCard icon={FolderKanban} label="Projects" value={compactNumber(overview?.total_projects ?? 0)} />
         <StatCard icon={Activity} label="Active Tasks" value={compactNumber(overview?.active_tasks ?? 0)} accent />
         <StatCard icon={CheckCircle2} label="Success Rate" value={`${Math.round(overview?.success_rate ?? 0)}%`} />
         <StatCard icon={Bot} label="Running Agents" value={`${overview?.running_agents ?? 0} / ${overview?.total_agents ?? 0}`} />
         <StatCard icon={GitPullRequest} label="Open PRs" value={compactNumber(overview?.open_prs ?? 0)} />
+        <StatCard icon={Timer} label="Avg Cycle" value={formatDuration(overview?.avg_completion_ms ?? 0)} />
+        <StatCard icon={Clock} label="Avg Latency" value={formatLatency(avgLatencyMs)} />
         <StatCard icon={Coins} label="Token Cost" value={formatCost(overview?.total_token_cost ?? 0)} />
       </div>
 
@@ -225,6 +286,133 @@ export default function AnalyticsPage() {
         </div>
       </section>
 
+      {/* Virtual Key Analytics */}
+      <div className="mb-6 grid gap-5 lg:grid-cols-5">
+        {/* Virtual Key Report */}
+        <section className="lg:col-span-3 overflow-hidden rounded-lg border border-stroke bg-panel flex flex-col">
+          <div className="border-b border-stroke p-5">
+            <h3 className="font-mono font-semibold">Virtual Key Usage & Spend</h3>
+            <p className="text-sm text-content-muted">Spend, token counts, and API call volumes by key label.</p>
+          </div>
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted">
+                <tr>
+                  <th className="px-4 py-3">Key Label</th>
+                  <th className="px-4 py-3">Requests</th>
+                  <th className="px-4 py-3">Tokens</th>
+                  <th className="px-4 py-3">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keyLabelUsage.map((key) => (
+                  <tr key={key.key_label} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+                    <td className="px-4 py-3">
+                      <div className="font-medium font-mono text-xs flex items-center gap-1.5 text-white">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-primary" />
+                        {key.key_label}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-content-muted">
+                      {compactNumber(key.success + key.failed)}
+                      <span className="ml-1.5 text-[10px] text-emerald-400 font-semibold">
+                        ({key.success + key.failed > 0 ? Math.round((key.success / (key.success + key.failed)) * 100) : 0}% success)
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-content-muted">{compactNumber(key.total_tokens)}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-white font-semibold">{formatCost(key.cost_usd)}</td>
+                  </tr>
+                ))}
+                {keyLabelUsage.length === 0 && (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-content-muted" colSpan={4}>
+                      No virtual key usage recorded.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Success vs Failure Stacked Bar Chart */}
+        <section className="lg:col-span-2 rounded-lg border border-stroke bg-panel p-5 flex flex-col">
+          <h3 className="mb-1 font-mono font-semibold">API Request Success Rate</h3>
+          <p className="mb-4 text-sm text-content-muted">Successful vs failed API calls by Key Label.</p>
+          <div className="h-64 flex-1">
+            {keyLabelUsage.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-content-muted">
+                No chart data available.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={keyLabelUsage} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(148, 163, 184, 0.1)" vertical={false} />
+                  <XAxis dataKey="key_label" stroke="#94a3b8" fontSize={11} tickFormatter={(v) => v.slice(0, 10) + (v.length > 10 ? "…" : "")} />
+                  <YAxis stroke="#94a3b8" fontSize={11} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#0f172a", border: "1px solid rgba(148,163,184,0.22)", borderRadius: 8, fontSize: 12 }}
+                  />
+                  <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
+                  <Bar dataKey="success" name="Success" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="failed" name="Failed" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Recent Failures */}
+      <section className="mb-6 overflow-hidden rounded-lg border border-stroke bg-panel">
+        <div className="border-b border-stroke p-5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={17} className="text-red-400" />
+            <h3 className="font-mono font-semibold">Recent Failures</h3>
+          </div>
+          <p className="mt-1 text-sm text-content-muted">Latest failed tasks and the last workflow error recorded for each one.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted">
+              <tr>
+                <th className="px-4 py-3">Task</th>
+                <th className="px-4 py-3">Project</th>
+                <th className="px-4 py-3">Step</th>
+                <th className="px-4 py-3">Reason</th>
+                <th className="px-4 py-3">Failed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentFailures.map((failure) => (
+                <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+                  <td className="px-4 py-3">
+                    <Link href={`/tasks/${failure.task_id}`} className="font-medium text-white hover:text-brand-primary">
+                      {failure.title}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-content-muted">{failure.project_name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-content-muted">{failure.workflow_step || "unknown"}</td>
+                  <td className="max-w-xl px-4 py-3 text-content-muted">
+                    <span className="line-clamp-2">{failure.failure_reason || "No workflow error recorded."}</span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-content-muted">
+                    {new Date(failure.failed_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+              {recentFailures.length === 0 && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-content-muted" colSpan={5}>
+                    No failed tasks recorded.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Agent Performance Table */}
       <section className="overflow-hidden rounded-lg border border-stroke bg-panel">
         <div className="border-b border-stroke p-5">
@@ -250,7 +438,20 @@ export default function AnalyticsPage() {
                 <tr key={agent.agent_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                   <td className="px-4 py-3">
                     <div className="font-medium">{agent.agent_name}</div>
-                    <div className="text-xs text-content-muted">{agent.model_route}</div>
+                    <div className="mt-1">
+                      <span className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[9px] font-bold uppercase ${
+                        agent.model_level_group === "fast"
+                          ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                          : agent.model_level_group === "powerful"
+                          ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
+                          : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                      }`}>
+                        {agent.model_level_group === "fast" && "⚡ "}
+                        {agent.model_level_group === "balanced" && "⚖️ "}
+                        {agent.model_level_group === "powerful" && "🚀 "}
+                        {agent.model_level_group}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 capitalize">{agent.role}</td>
                   <td className="px-4 py-3">

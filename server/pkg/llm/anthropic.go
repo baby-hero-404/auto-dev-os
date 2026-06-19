@@ -33,7 +33,7 @@ func (a *Anthropic) Metadata() ProviderMetadata {
 	return ProviderMetadata{
 		Provider:          a.Name(),
 		Model:             a.model,
-		Tier:              tierForModel(a.model),
+		LevelGroup:        levelGroupForModel(a.model),
 		InputCostPer1K:    inputCostPer1K(a.model),
 		OutputCostPer1K:   outputCostPer1K(a.model),
 		MaxContextTokens:  200000,

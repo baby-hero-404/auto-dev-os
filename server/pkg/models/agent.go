@@ -47,7 +47,7 @@ type Agent struct {
 	Goal               string          `json:"goal" gorm:"not null"`
 	AutonomyLevel      string          `json:"autonomy_level" gorm:"default:'supervised';not null"`
 	ContextConfig      json.RawMessage `json:"context_config" gorm:"type:jsonb;default:'{}';not null"`
-	ModelRoute         string          `json:"model_route" gorm:"default:'balanced';not null"`
+	ModelLevelGroup    string          `json:"model_level_group" gorm:"default:'balanced';not null"`
 	Status             string          `json:"status" gorm:"default:'idle'"`
 	AssignmentStrategy string          `json:"assignment_strategy" gorm:"default:'manual'"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -61,7 +61,7 @@ type CreateAgentInput struct {
 	Goal               string          `json:"goal"`
 	AutonomyLevel      string          `json:"autonomy_level"`
 	ContextConfig      json.RawMessage `json:"context_config,omitempty"`
-	ModelRoute         string          `json:"model_route"`
+	ModelLevelGroup    string          `json:"model_level_group"`
 	AssignmentStrategy string          `json:"assignment_strategy"`
 	AgentID            string          `json:"agent_id,omitempty"`
 }
@@ -73,7 +73,7 @@ type UpdateAgentInput struct {
 	Goal               *string          `json:"goal,omitempty"`
 	AutonomyLevel      *string          `json:"autonomy_level,omitempty"`
 	ContextConfig      *json.RawMessage `json:"context_config,omitempty"`
-	ModelRoute         *string          `json:"model_route,omitempty"`
+	ModelLevelGroup    *string          `json:"model_level_group,omitempty"`
 	Status             *string          `json:"status,omitempty"`
 	AssignmentStrategy *string          `json:"assignment_strategy,omitempty"`
 }

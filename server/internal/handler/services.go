@@ -40,12 +40,12 @@ type RepositoryService interface {
 type AgentService interface {
 	AssignToProject(context.Context, string, models.CreateAgentInput) (*models.Agent, error)
 	Hire(context.Context, string, models.CreateAgentInput) (*models.Agent, error)
-	GetByID(context.Context, string) (*models.Agent, error)
+	GetByID(context.Context, string, string) (*models.Agent, error)
 	ListByProjectID(context.Context, string) ([]models.Agent, error)
 	ListByOrgID(context.Context, string) ([]models.Agent, error)
 	ListRoleTemplates(context.Context) ([]models.RoleTemplate, error)
-	Update(context.Context, string, models.UpdateAgentInput) (*models.Agent, error)
-	Delete(context.Context, string) error
+	Update(context.Context, string, string, models.UpdateAgentInput) (*models.Agent, error)
+	Delete(context.Context, string, string) error
 }
 
 type TaskService interface {
@@ -67,34 +67,38 @@ type TaskService interface {
 type RuleService interface {
 	Create(context.Context, *string, models.CreateRuleInput) (*models.Rule, error)
 	CreateGlobal(context.Context, string, models.CreateRuleInput) (*models.Rule, error)
-	GetByID(context.Context, string) (*models.Rule, error)
+	GetByID(context.Context, string, string) (*models.Rule, error)
 	ListByProjectID(context.Context, string) ([]models.Rule, error)
 	ListGlobalByOrgID(context.Context, string) ([]models.Rule, error)
-	Update(context.Context, string, models.UpdateRuleInput) (*models.Rule, error)
-	Delete(context.Context, string) error
+	Update(ctx context.Context, id string, orgID string, userRole string, input models.UpdateRuleInput) (*models.Rule, error)
+	Delete(context.Context, string, string) error
 	SeedDefaultRules(context.Context, string) ([]models.Rule, error)
 	SeedGlobalDefaultRules(context.Context, string) ([]models.Rule, error)
 }
 
 type SkillService interface {
-	Create(context.Context, models.CreateSkillInput) (*models.Skill, error)
 	GetByID(context.Context, string) (*models.Skill, error)
 	List(context.Context) ([]models.Skill, error)
 	Test(context.Context, string, map[string]any) (map[string]any, error)
-	Update(context.Context, string, models.UpdateSkillInput) (*models.Skill, error)
-	Delete(context.Context, string) error
 	SeedDefaultSkills(context.Context) ([]models.Skill, error)
+	ListSources(context.Context) ([]models.SkillSource, error)
+	AddSource(context.Context, models.CreateSkillSourceInput) (*models.SkillSource, error)
+	DeleteSource(context.Context, string) error
+	SyncSource(context.Context, string) (*models.SkillSource, error)
+	ListFiles(ctx context.Context, sourceID string, relativePath string) ([]models.FileItem, error)
+	GetFileContent(ctx context.Context, sourceID string, relativePath string) (*models.FileContent, error)
 }
 
 type AnalyticsService interface {
-	TokenUsage(context.Context, string, time.Time) ([]models.TokenUsageSummary, error)
+	TokenUsage(context.Context, string, string, time.Time) ([]models.TokenUsageSummary, error)
 }
 
 type AnalyticsDashboardService interface {
 	Overview(context.Context, string) (*models.OverviewStats, error)
-	AgentPerformance(context.Context, string) ([]models.AgentStats, error)
-	TaskAnalytics(context.Context, string, int) (*models.TaskAnalytics, error)
-	WorkflowAnalytics(context.Context, string) (*models.WorkflowAnalytics, error)
+	AgentPerformance(context.Context, string, string) ([]models.AgentStats, error)
+	TaskAnalytics(context.Context, string, string, int) (*models.TaskAnalytics, error)
+	WorkflowAnalytics(context.Context, string, string) (*models.WorkflowAnalytics, error)
+	RecentFailures(context.Context, string, string, int) ([]models.RecentFailure, error)
 }
 
 type AuditService interface {
@@ -137,17 +141,15 @@ type GitAccountService interface {
 type ProviderCredentialService interface {
 	Create(context.Context, string, models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
 	ListByOrg(context.Context, string) ([]models.ProviderCredentialResponse, error)
-	Update(context.Context, string, models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
-	Delete(context.Context, string) error
-	TestConnection(context.Context, string) error
-	TestConnectionInput(context.Context, models.TestProviderCredentialInput) error
+	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
+	Delete(ctx context.Context, orgID string, id string) error
+	TestConnection(ctx context.Context, orgID string, id string) error
+	TestConnectionInput(ctx context.Context, input models.TestProviderCredentialInput) error
 }
 
-
-
-type ModelRouteService interface {
-	Create(context.Context, string, models.CreateModelRouteInput) (*models.ModelRoute, error)
-	ListByOrg(context.Context, string) ([]models.ModelRoute, error)
-	Update(context.Context, string, models.UpdateModelRouteInput) (*models.ModelRoute, error)
-	Delete(context.Context, string) error
+type ProviderModelService interface {
+	Create(ctx context.Context, orgID string, input models.CreateProviderModelInput) (*models.ProviderModel, error)
+	ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error)
+	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderModelInput) (*models.ProviderModel, error)
+	Delete(ctx context.Context, orgID string, id string) error
 }

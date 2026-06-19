@@ -104,6 +104,13 @@ func (r *WorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) ([]mo
 	return checkpoints, nil
 }
 
+func (r *WorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
+	if err := r.db.WithContext(ctx).Where("task_id = ? AND step IN ?", taskID, steps).Delete(&models.WorkflowCheckpoint{}).Error; err != nil {
+		return fmt.Errorf("delete workflow checkpoints: %w", err)
+	}
+	return nil
+}
+
 func (r *WorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
 	if r.fileRoot == "" {
 		if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {

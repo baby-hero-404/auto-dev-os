@@ -79,7 +79,7 @@ func TestValidateTransition_Valid(t *testing.T) {
 	}{
 		{models.TaskStatusTodo, models.TaskStatusAnalyzing},
 		{models.TaskStatusAnalyzing, models.TaskStatusSpecReview},
-		{models.TaskStatusSpecReview, models.TaskStatusPlanning},
+		{models.TaskStatusSpecReview, models.TaskStatusCoding},
 		{models.TaskStatusCoding, models.TaskStatusReviewing},
 		{models.TaskStatusHumanReview, models.TaskStatusMerged},
 	}

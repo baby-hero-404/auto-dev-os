@@ -176,7 +176,7 @@ export function RulesView({
                 <div className="rounded-lg border border-dashed border-stroke bg-card p-6 text-center">
                   <p className="font-sans text-sm font-semibold text-foreground">No project-specific rules yet.</p>
                   <p className="mt-1 text-xs text-content-muted">
-                    Project rules override global guidelines and fine-tune AI behavior local to this workspace.
+                    Project rules supplement global guidelines and fine-tune AI behavior local to this workspace.
                   </p>
                 </div>
               ) : (

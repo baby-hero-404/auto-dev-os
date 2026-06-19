@@ -46,7 +46,7 @@ func (r *AgentRepo) CreateForOrg(ctx context.Context, orgID string, input models
 		Goal:               input.Goal,
 		AutonomyLevel:      input.AutonomyLevel,
 		ContextConfig:      contextConfig,
-		ModelRoute:         input.ModelRoute,
+		ModelLevelGroup:    input.ModelLevelGroup,
 		Status:             models.AgentStatusIdle,
 		AssignmentStrategy: strategy,
 	}
@@ -60,6 +60,14 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*models.Agent, erro
 	a := &models.Agent{}
 	if err := r.db.WithContext(ctx).First(a, "id = ?", id).Error; err != nil {
 		return nil, fmt.Errorf("get agent: %w", mapError(err))
+	}
+	return a, nil
+}
+
+func (r *AgentRepo) GetByIDAndOrg(ctx context.Context, id string, orgID string) (*models.Agent, error) {
+	a := &models.Agent{}
+	if err := r.db.WithContext(ctx).First(a, "id = ? AND org_id = ?", id, orgID).Error; err != nil {
+		return nil, fmt.Errorf("get agent by org: %w", mapError(err))
 	}
 	return a, nil
 }
@@ -114,8 +122,8 @@ func (r *AgentRepo) AssignToProject(ctx context.Context, projectID, agentID stri
 	return nil
 }
 
-func (r *AgentRepo) Update(ctx context.Context, id string, input models.UpdateAgentInput) (*models.Agent, error) {
-	a, err := r.GetByID(ctx, id)
+func (r *AgentRepo) Update(ctx context.Context, id string, orgID string, input models.UpdateAgentInput) (*models.Agent, error) {
+	a, err := r.GetByIDAndOrg(ctx, id, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +143,8 @@ func (r *AgentRepo) Update(ctx context.Context, id string, input models.UpdateAg
 	if input.ContextConfig != nil {
 		updates["context_config"] = *input.ContextConfig
 	}
-	if input.ModelRoute != nil {
-		updates["model_route"] = *input.ModelRoute
+	if input.ModelLevelGroup != nil {
+		updates["model_level_group"] = *input.ModelLevelGroup
 	}
 	if input.Status != nil {
 		updates["status"] = *input.Status
@@ -150,7 +158,14 @@ func (r *AgentRepo) Update(ctx context.Context, id string, input models.UpdateAg
 	if err := r.db.WithContext(ctx).Model(a).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update agent: %w", mapError(err))
 	}
-	return r.GetByID(ctx, id)
+	return r.GetByIDAndOrg(ctx, id, orgID)
+}
+
+func (r *AgentRepo) UpdateStatus(ctx context.Context, id string, status string) error {
+	if err := r.db.WithContext(ctx).Model(&models.Agent{}).Where("id = ?", id).Update("status", status).Error; err != nil {
+		return fmt.Errorf("update agent status: %w", mapError(err))
+	}
+	return nil
 }
 
 func (r *AgentRepo) FindAvailableByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
@@ -186,8 +201,8 @@ func (r *AgentRepo) FindAnyAvailable(ctx context.Context, projectID string) (*mo
 	return &agent, nil
 }
 
-func (r *AgentRepo) Delete(ctx context.Context, id string) error {
-	result := r.db.WithContext(ctx).Delete(&models.Agent{}, "id = ?", id)
+func (r *AgentRepo) Delete(ctx context.Context, id string, orgID string) error {
+	result := r.db.WithContext(ctx).Delete(&models.Agent{}, "id = ? AND org_id = ?", id, orgID)
 	if result.Error != nil {
 		return fmt.Errorf("delete agent: %w", mapError(result.Error))
 	}

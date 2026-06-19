@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type AnalyticsHandler struct {
@@ -15,6 +17,14 @@ func NewAnalyticsHandler(svc AnalyticsService) *AnalyticsHandler {
 }
 
 func (h *AnalyticsHandler) TokenUsage(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID == "" {
+		writeError(w, http.StatusBadRequest, "org_id is required")
+		return
+	}
 	projectID := r.URL.Query().Get("project_id")
 	since := time.Time{}
 	if daysRaw := r.URL.Query().Get("days"); daysRaw != "" {
@@ -25,7 +35,7 @@ func (h *AnalyticsHandler) TokenUsage(w http.ResponseWriter, r *http.Request) {
 		}
 		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	}
-	usage, err := h.svc.TokenUsage(r.Context(), projectID, since)
+	usage, err := h.svc.TokenUsage(r.Context(), orgID, projectID, since)
 	if err != nil {
 		writeServiceError(w, err)
 		return

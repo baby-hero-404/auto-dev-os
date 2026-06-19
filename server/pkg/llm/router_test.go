@@ -33,24 +33,24 @@ func (p *fakeProvider) Metadata() ProviderMetadata {
 func TestGateway_RoutesByComplexityAndFallsBack(t *testing.T) {
 	primary := &fakeProvider{
 		name: "primary",
-		meta: ProviderMetadata{Provider: "primary", Model: "fast-a", Tier: TierFast},
+		meta: ProviderMetadata{Provider: "primary", Model: "fast-a", LevelGroup: LevelFast},
 		err:  errors.New("temporary outage"),
 	}
 	fallback := &fakeProvider{
 		name: "fallback",
-		meta: ProviderMetadata{Provider: "fallback", Model: "fast-b", Tier: TierFast},
+		meta: ProviderMetadata{Provider: "fallback", Model: "fast-b", LevelGroup: LevelFast},
 		resp: &Response{Content: "ok", Model: "fast-b", PromptTokens: 10, OutputTokens: 5},
 	}
 	powerful := &fakeProvider{
 		name: "powerful",
-		meta: ProviderMetadata{Provider: "powerful", Model: "powerful-a", Tier: TierPowerful},
+		meta: ProviderMetadata{Provider: "powerful", Model: "powerful-a", LevelGroup: LevelPowerful},
 		resp: &Response{Content: "hard", Model: "powerful-a", PromptTokens: 10, OutputTokens: 5},
 	}
 
 	gateway, err := NewGateway([]FallbackChain{
-		newFallbackChain(TierFast, []Provider{primary, fallback}),
-		newFallbackChain(TierPowerful, []Provider{powerful}),
-	}, GatewayOptions{DefaultTier: TierFast})
+		newFallbackChain(LevelFast, []Provider{primary, fallback}),
+		newFallbackChain(LevelPowerful, []Provider{powerful}),
+	}, GatewayOptions{DefaultLevelGroup: LevelFast})
 	if err != nil {
 		t.Fatalf("NewGateway returned error: %v", err)
 	}
@@ -71,12 +71,12 @@ func TestGateway_RoutesByComplexityAndFallsBack(t *testing.T) {
 func TestGateway_CircuitBreakerBlocksLargePrompt(t *testing.T) {
 	provider := &fakeProvider{
 		name: "provider",
-		meta: ProviderMetadata{Provider: "provider", Model: "m", Tier: TierBalanced},
+		meta: ProviderMetadata{Provider: "provider", Model: "m", LevelGroup: LevelBalanced},
 		resp: &Response{Content: "ok"},
 	}
 	gateway, err := NewGateway([]FallbackChain{
-		newFallbackChain(TierBalanced, []Provider{provider}),
-	}, GatewayOptions{DefaultTier: TierBalanced, MaxTokensPerCall: 1})
+		newFallbackChain(LevelBalanced, []Provider{provider}),
+	}, GatewayOptions{DefaultLevelGroup: LevelBalanced, MaxTokensPerCall: 1})
 	if err != nil {
 		t.Fatalf("NewGateway returned error: %v", err)
 	}

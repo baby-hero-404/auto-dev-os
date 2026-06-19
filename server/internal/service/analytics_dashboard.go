@@ -22,16 +22,21 @@ func (s *AnalyticsDashboardService) Overview(ctx context.Context, orgID string) 
 }
 
 // AgentPerformance returns per-agent performance metrics.
-func (s *AnalyticsDashboardService) AgentPerformance(ctx context.Context, projectID string) ([]models.AgentStats, error) {
-	return s.repo.AgentPerformance(ctx, projectID)
+func (s *AnalyticsDashboardService) AgentPerformance(ctx context.Context, orgID string, projectID string) ([]models.AgentStats, error) {
+	return s.repo.AgentPerformance(ctx, orgID, projectID)
 }
 
 // TaskAnalytics returns task status distribution and time-series throughput.
-func (s *AnalyticsDashboardService) TaskAnalytics(ctx context.Context, projectID string, days int) (*models.TaskAnalytics, error) {
-	return s.repo.TaskAnalytics(ctx, projectID, days)
+func (s *AnalyticsDashboardService) TaskAnalytics(ctx context.Context, orgID string, projectID string, days int) (*models.TaskAnalytics, error) {
+	return s.repo.TaskAnalytics(ctx, orgID, projectID, days)
 }
 
 // WorkflowAnalytics returns workflow completion rates and average step durations.
-func (s *AnalyticsDashboardService) WorkflowAnalytics(ctx context.Context, projectID string) (*models.WorkflowAnalytics, error) {
-	return s.repo.WorkflowAnalytics(ctx, projectID)
+func (s *AnalyticsDashboardService) WorkflowAnalytics(ctx context.Context, orgID string, projectID string) (*models.WorkflowAnalytics, error) {
+	return s.repo.WorkflowAnalytics(ctx, orgID, projectID)
+}
+
+// RecentFailures returns the latest failed tasks with workflow error context.
+func (s *AnalyticsDashboardService) RecentFailures(ctx context.Context, orgID string, projectID string, limit int) ([]models.RecentFailure, error) {
+	return s.repo.RecentFailures(ctx, orgID, projectID, limit)
 }

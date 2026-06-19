@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -37,11 +38,17 @@ type DecryptedCredential struct {
 	BaseURL  string
 }
 
+type providerModelSeeder interface {
+	ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error)
+	Create(ctx context.Context, orgID string, input models.CreateProviderModelInput) (*models.ProviderModel, error)
+}
+
 type CredentialPoolService struct {
 	repo             *repository.ProviderCredentialRepo
 	cipher           *SecretCipher
 	audit            *AuditService
 	connectionTester credentialConnectionTester
+	seeder           providerModelSeeder
 	mu               sync.Mutex
 	rrCounters       map[string]int
 }
@@ -55,6 +62,11 @@ func NewCredentialPoolService(repo *repository.ProviderCredentialRepo, cipher *S
 		connectionTester: testProviderConnection,
 		rrCounters:       map[string]int{},
 	}
+}
+
+func (s *CredentialPoolService) WithProviderModelSeeder(seeder providerModelSeeder) *CredentialPoolService {
+	s.seeder = seeder
+	return s
 }
 
 func (s *CredentialPoolService) WithAudit(audit *AuditService) *CredentialPoolService {
@@ -90,8 +102,66 @@ func (s *CredentialPoolService) Create(ctx context.Context, orgID string, input 
 		"label":    cred.Label,
 		"priority": cred.Priority,
 	})
+	if s.seeder != nil {
+		s.seedDefaultModels(ctx, orgID, cred.Provider)
+	}
 	resp := cred.ToResponse(suffix)
 	return &resp, nil
+}
+
+func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID string, provider string) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	filter := models.ProviderModelFilter{
+		Provider: &provider,
+	}
+	existing, err := s.seeder.ListByOrg(ctx, orgID, filter)
+	if err != nil {
+		slog.Error("failed to list existing provider models during seeding", "org_id", orgID, "provider", provider, "error", err)
+		return
+	}
+	if len(existing) > 0 {
+		return
+	}
+
+	var defaults []models.CreateProviderModelInput
+	switch provider {
+	case "openai":
+		defaults = []models.CreateProviderModelInput{
+			{Provider: "openai", LevelGroup: "fast", ModelName: "gpt-5.4-nano", Priority: 0},
+			{Provider: "openai", LevelGroup: "fast", ModelName: "gpt-5.4-mini", Priority: 1},
+			{Provider: "openai", LevelGroup: "balanced", ModelName: "gpt-5-mini", Priority: 0},
+			{Provider: "openai", LevelGroup: "balanced", ModelName: "gpt-5.4", Priority: 1},
+			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.4-pro", Priority: 0},
+			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.5", Priority: 1},
+			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.5-pro", Priority: 2},
+		}
+	case "anthropic":
+		defaults = []models.CreateProviderModelInput{
+			{Provider: "anthropic", LevelGroup: "fast", ModelName: "claude-haiku-4.5", Priority: 0},
+			{Provider: "anthropic", LevelGroup: "balanced", ModelName: "claude-sonnet-4.6", Priority: 0},
+			{Provider: "anthropic", LevelGroup: "powerful", ModelName: "claude-opus-4.6", Priority: 0},
+			{Provider: "anthropic", LevelGroup: "powerful", ModelName: "claude-opus-4.8", Priority: 1},
+		}
+	case "gemini":
+		defaults = []models.CreateProviderModelInput{
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 0},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 1},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 0},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.1-flash", Priority: 1},
+			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 0},
+			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-3.1-pro", Priority: 1},
+		}
+	}
+
+	for _, d := range defaults {
+		if _, err := s.seeder.Create(ctx, orgID, d); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				slog.Debug("default model seed skipped: unique constraint violation", "org_id", orgID, "provider", provider, "model", d.ModelName)
+			} else {
+				slog.Error("failed to seed default model", "org_id", orgID, "provider", provider, "model", d.ModelName, "error", err)
+			}
+		}
+	}
 }
 
 func (s *CredentialPoolService) GetByID(ctx context.Context, id string) (*models.ProviderCredentialResponse, error) {
@@ -115,7 +185,7 @@ func (s *CredentialPoolService) ListByOrg(ctx context.Context, orgID string) ([]
 	return out, nil
 }
 
-func (s *CredentialPoolService) Update(ctx context.Context, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
+func (s *CredentialPoolService) Update(ctx context.Context, orgID string, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
 	if input.APIKey != nil {
 		encrypted, err := s.cipher.Encrypt(*input.APIKey)
 		if err != nil {
@@ -126,7 +196,7 @@ func (s *CredentialPoolService) Update(ctx context.Context, id string, input mod
 	if input.Status != nil && !isAllowedCredentialStatus(*input.Status) {
 		return nil, ErrValidation("unsupported credential status")
 	}
-	cred, err := s.repo.Update(ctx, id, input)
+	cred, err := s.repo.Update(ctx, orgID, id, input)
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +210,12 @@ func (s *CredentialPoolService) Update(ctx context.Context, id string, input mod
 	return &resp, nil
 }
 
-func (s *CredentialPoolService) Delete(ctx context.Context, id string) error {
-	cred, err := s.repo.GetByID(ctx, id)
+func (s *CredentialPoolService) Delete(ctx context.Context, orgID string, id string) error {
+	cred, err := s.repo.GetByIDAndOrg(ctx, orgID, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Delete(ctx, id); err != nil {
+	if err := s.repo.Delete(ctx, orgID, id); err != nil {
 		return err
 	}
 	s.recordAudit(ctx, models.AuditActionProviderCredentialDeleted, cred, map[string]any{
@@ -155,8 +225,8 @@ func (s *CredentialPoolService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *CredentialPoolService) TestConnection(ctx context.Context, id string) error {
-	cred, err := s.repo.GetByID(ctx, id)
+func (s *CredentialPoolService) TestConnection(ctx context.Context, orgID string, id string) error {
+	cred, err := s.repo.GetByIDAndOrg(ctx, orgID, id)
 	if err != nil {
 		return err
 	}

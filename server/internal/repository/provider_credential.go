@@ -46,6 +46,14 @@ func (r *ProviderCredentialRepo) GetByID(ctx context.Context, id string) (*model
 	return cred, nil
 }
 
+func (r *ProviderCredentialRepo) GetByIDAndOrg(ctx context.Context, orgID string, id string) (*models.ProviderCredential, error) {
+	cred := &models.ProviderCredential{}
+	if err := r.db.WithContext(ctx).First(cred, "id = ? AND org_id = ?", id, orgID).Error; err != nil {
+		return nil, fmt.Errorf("get provider credential: %w", mapError(err))
+	}
+	return cred, nil
+}
+
 func (r *ProviderCredentialRepo) ListByOrg(ctx context.Context, orgID string) ([]models.ProviderCredential, error) {
 	var creds []models.ProviderCredential
 	if err := r.db.WithContext(ctx).Where("org_id = ?", orgID).Order("provider ASC, priority ASC, created_at ASC").Find(&creds).Error; err != nil {
@@ -67,8 +75,8 @@ func (r *ProviderCredentialRepo) ListActiveByOrgAndProvider(ctx context.Context,
 	return creds, nil
 }
 
-func (r *ProviderCredentialRepo) Update(ctx context.Context, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredential, error) {
-	cred, err := r.GetByID(ctx, id)
+func (r *ProviderCredentialRepo) Update(ctx context.Context, orgID string, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredential, error) {
+	cred, err := r.GetByIDAndOrg(ctx, orgID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +102,7 @@ func (r *ProviderCredentialRepo) Update(ctx context.Context, id string, input mo
 	if err := r.db.WithContext(ctx).Model(cred).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update provider credential: %w", err)
 	}
-	return r.GetByID(ctx, id)
+	return r.GetByIDAndOrg(ctx, orgID, id)
 }
 
 func (r *ProviderCredentialRepo) SetCooldown(ctx context.Context, id string, until time.Time) error {
@@ -128,8 +136,8 @@ func (r *ProviderCredentialRepo) ClearExpiredCooldowns(ctx context.Context) (int
 	return result.RowsAffected, nil
 }
 
-func (r *ProviderCredentialRepo) Delete(ctx context.Context, id string) error {
-	result := r.db.WithContext(ctx).Delete(&models.ProviderCredential{}, "id = ?", id)
+func (r *ProviderCredentialRepo) Delete(ctx context.Context, orgID string, id string) error {
+	result := r.db.WithContext(ctx).Where("org_id = ?", orgID).Delete(&models.ProviderCredential{}, "id = ?", id)
 	if result.Error != nil {
 		return fmt.Errorf("delete provider credential: %w", mapError(result.Error))
 	}

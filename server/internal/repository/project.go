@@ -16,6 +16,21 @@ func NewProjectRepo(db *gorm.DB) *ProjectRepo {
 
 func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.CreateProjectInput) (*models.Project, error) {
 	p := &models.Project{OrgID: orgID, Name: input.Name, Description: input.Description}
+	if input.DefaultModelLevel != nil {
+		p.DefaultModelLevel = *input.DefaultModelLevel
+	}
+	if input.DefaultAutonomy != nil {
+		p.DefaultAutonomy = *input.DefaultAutonomy
+	}
+	if input.AutoReviewPolicy != nil {
+		p.AutoReviewPolicy = *input.AutoReviewPolicy
+	}
+	if input.MaxRetries != nil {
+		p.MaxRetries = *input.MaxRetries
+	}
+	if input.DefaultBranch != nil {
+		p.DefaultBranch = *input.DefaultBranch
+	}
 	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
@@ -60,6 +75,21 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	}
 	if input.Description != nil {
 		updates["description"] = *input.Description
+	}
+	if input.DefaultModelLevel != nil {
+		updates["default_model_level"] = *input.DefaultModelLevel
+	}
+	if input.DefaultAutonomy != nil {
+		updates["default_autonomy"] = *input.DefaultAutonomy
+	}
+	if input.AutoReviewPolicy != nil {
+		updates["auto_review_policy"] = *input.AutoReviewPolicy
+	}
+	if input.MaxRetries != nil {
+		updates["max_retries"] = *input.MaxRetries
+	}
+	if input.DefaultBranch != nil {
+		updates["default_branch"] = *input.DefaultBranch
 	}
 	if err := r.db.WithContext(ctx).Model(p).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update project: %w", err)

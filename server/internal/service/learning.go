@@ -18,7 +18,7 @@ import (
 type LearningService struct {
 	suggestions *repository.LearningSuggestionRepo
 	rules       *repository.RuleRepo
-	skills      *repository.SkillRepo
+	skills      *SkillService
 	promptRoot  string
 }
 
@@ -26,7 +26,7 @@ func NewLearningService(suggestions *repository.LearningSuggestionRepo, rules *r
 	return &LearningService{suggestions: suggestions, rules: rules}
 }
 
-func (s *LearningService) SetSkillRepo(skills *repository.SkillRepo) {
+func (s *LearningService) SetSkillService(skills *SkillService) {
 	s.skills = skills
 }
 
@@ -188,20 +188,7 @@ func (s *LearningService) applyRuleSuggestion(ctx context.Context, suggestion *m
 }
 
 func (s *LearningService) applySkillSuggestion(ctx context.Context, suggestion *models.LearningSuggestion) error {
-	if s.skills == nil {
-		return fmt.Errorf("skill repository not configured")
-	}
-
-	input := skillInputFromSuggestion(suggestion)
-	skill, err := s.skills.Create(ctx, input)
-	if err != nil {
-		return fmt.Errorf("apply skill suggestion: %w", err)
-	}
-
-	return s.markApplied(ctx, suggestion.ID, map[string]any{
-		"applied_skill_id": skill.ID,
-		"applied_at":       time.Now(),
-	})
+	return fmt.Errorf("skill creation is no longer supported on the UI; please commit the skill to your Git repository registry instead")
 }
 
 func (s *LearningService) applyPromptPatchSuggestion(ctx context.Context, suggestion *models.LearningSuggestion) error {

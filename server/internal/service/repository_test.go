@@ -8,7 +8,7 @@ import (
 )
 
 func TestRepositoryService_Create_EmptyURL(t *testing.T) {
-	svc := NewRepositoryService(nil)
+	svc := NewRepositoryService(nil, nil)
 
 	_, err := svc.Create(context.Background(), "proj-1", models.CreateRepositoryInput{URL: ""})
 	if err == nil {
@@ -20,7 +20,7 @@ func TestRepositoryService_Create_EmptyURL(t *testing.T) {
 }
 
 func TestRepositoryService_ListRemoteRepos_EmptyToken(t *testing.T) {
-	svc := NewRepositoryService(nil)
+	svc := NewRepositoryService(nil, nil)
 
 	_, err := svc.ListRemoteRepos(context.Background(), "")
 	if err == nil {
@@ -32,7 +32,7 @@ func TestRepositoryService_ListRemoteRepos_EmptyToken(t *testing.T) {
 }
 
 func TestRepositoryService_Constructor(t *testing.T) {
-	svc := NewRepositoryService(nil)
+	svc := NewRepositoryService(nil, nil)
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}

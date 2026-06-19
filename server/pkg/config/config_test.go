@@ -74,8 +74,41 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.Logging.LocalRetentionDays != 14 {
 		t.Fatalf("expected default local retention days 14, got %d", cfg.Logging.LocalRetentionDays)
 	}
-	if cfg.Logging.FileRoot != "/tmp/auto-code-os/logs" {
-		t.Fatalf("expected default log file root /tmp/auto-code-os/logs, got %q", cfg.Logging.FileRoot)
+	if cfg.AutoCodeOS.DataRoot != "./.data" {
+		t.Fatalf("expected default data_root ./.data, got %q", cfg.AutoCodeOS.DataRoot)
+	}
+	if cfg.Logging.FileRoot != ".data/logs" {
+		t.Fatalf("expected default log file root .data/logs, got %q", cfg.Logging.FileRoot)
+	}
+	if cfg.Sandbox.WorkspaceRoot != ".data/workspaces" {
+		t.Fatalf("expected default workspace root .data/workspaces, got %q", cfg.Sandbox.WorkspaceRoot)
+	}
+	if cfg.Sandbox.SkillsRoot != ".data/skills" {
+		t.Fatalf("expected default skills root .data/skills, got %q", cfg.Sandbox.SkillsRoot)
+	}
+}
+
+func TestLoadDataRootOverride(t *testing.T) {
+	resetConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("AUTO_CODE_OS_DATA_ROOT", "/tmp/custom-root")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.AutoCodeOS.DataRoot != "/tmp/custom-root" {
+		t.Fatalf("expected overridden data_root /tmp/custom-root, got %q", cfg.AutoCodeOS.DataRoot)
+	}
+	if cfg.Logging.FileRoot != "/tmp/custom-root/logs" {
+		t.Fatalf("expected overridden log root /tmp/custom-root/logs, got %q", cfg.Logging.FileRoot)
+	}
+	if cfg.Sandbox.WorkspaceRoot != "/tmp/custom-root/workspaces" {
+		t.Fatalf("expected overridden workspace root, got %q", cfg.Sandbox.WorkspaceRoot)
+	}
+	if cfg.Sandbox.SkillsRoot != "/tmp/custom-root/skills" {
+		t.Fatalf("expected overridden skills root, got %q", cfg.Sandbox.SkillsRoot)
 	}
 }
 

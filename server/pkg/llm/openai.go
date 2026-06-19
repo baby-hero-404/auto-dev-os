@@ -33,7 +33,7 @@ func (o *OpenAI) Metadata() ProviderMetadata {
 	return ProviderMetadata{
 		Provider:          o.Name(),
 		Model:             o.model,
-		Tier:              tierForModel(o.model),
+		LevelGroup:        levelGroupForModel(o.model),
 		InputCostPer1K:    inputCostPer1K(o.model),
 		OutputCostPer1K:   outputCostPer1K(o.model),
 		MaxContextTokens:  128000,

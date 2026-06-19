@@ -21,8 +21,13 @@ func mapError(err error) error {
 		return ErrNotFound
 	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ErrConflict
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23505" {
+			return ErrConflict
+		}
+		if pgErr.Code == "22P02" {
+			return ErrNotFound
+		}
 	}
 	return err
 }

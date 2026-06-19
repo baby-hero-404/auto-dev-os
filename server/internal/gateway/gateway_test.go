@@ -33,39 +33,16 @@ func (p *fakePool) SetCooldown(_ context.Context, id string, _ time.Time) error 
 	return nil
 }
 
-type fakeVirtualKeys struct {
-	key         *models.VirtualKey
-	validateIn  string
-	recordedID  string
-	recorded    float64
-	validateErr error
-	recordErr   error
+type fakeResolver struct {
+	models []models.ProviderModel
+	err    error
 }
 
-func (v *fakeVirtualKeys) Validate(_ context.Context, rawKey string, estimatedCost float64) (*models.VirtualKey, error) {
-	v.validateIn = rawKey
-	if v.validateErr != nil {
-		return nil, v.validateErr
-	}
-	return v.key, nil
-}
-
-func (v *fakeVirtualKeys) RecordUsage(_ context.Context, id string, costUSD float64) error {
-	v.recordedID = id
-	v.recorded = costUSD
-	return v.recordErr
-}
-
-type fakeRoutes struct {
-	entries []models.ComboEntry
-	err     error
-}
-
-func (r *fakeRoutes) ResolveRoute(_ context.Context, orgID, routeName, complexity string) (*service.ResolvedRoute, error) {
+func (r *fakeResolver) ResolveModels(_ context.Context, orgID, levelGroup string) ([]models.ProviderModel, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return &service.ResolvedRoute{Entries: r.entries}, nil
+	return r.models, nil
 }
 
 type fakeProvider struct {
@@ -98,46 +75,17 @@ func TestAIGatewayChatFallsBackWithoutOrg(t *testing.T) {
 	}
 }
 
-func TestAIGatewayChatRecordsVirtualKeyUsage(t *testing.T) {
-	pool := &fakePool{credentials: []*service.DecryptedCredential{{ID: "cred-1", Provider: "openai", APIKey: "sk-test"}}}
-	virtualKeys := &fakeVirtualKeys{key: &models.VirtualKey{ID: "vk-1"}}
-	routes := &fakeRoutes{entries: []models.ComboEntry{{Provider: "openai", Model: "gpt-4o", Priority: 0}}}
-	g := NewAIGateway(Options{
-		CredentialPool:    pool,
-		VirtualKeyService: virtualKeys,
-		ModelRouteService: routes,
-		ProviderFactory: func(*service.DecryptedCredential, string) (llm.Provider, error) {
-			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", PromptTokens: 100, OutputTokens: 20}}, nil
-		},
-	})
-	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1", VirtualKey: "sk-aco-test"})
-
-	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
-	if err != nil {
-		t.Fatalf("Chat returned error: %v", err)
-	}
-	if resp.Model != "gpt-4o" {
-		t.Fatalf("expected gateway to fill response model, got %q", resp.Model)
-	}
-	if virtualKeys.validateIn != "sk-aco-test" {
-		t.Fatalf("virtual key was not validated")
-	}
-	if virtualKeys.recordedID != "vk-1" || virtualKeys.recorded <= 0 {
-		t.Fatalf("usage not recorded: id=%q cost=%f", virtualKeys.recordedID, virtualKeys.recorded)
-	}
-}
-
 func TestAIGatewayChatRotatesCredentialOnRateLimit(t *testing.T) {
 	pool := &fakePool{credentials: []*service.DecryptedCredential{
 		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
 		{ID: "cred-2", Provider: "openai", APIKey: "sk-2"},
 	}}
-	routes := &fakeRoutes{entries: []models.ComboEntry{{Provider: "openai", Model: "gpt-4o", Priority: 0}}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
 	attempts := 0
 	g := NewAIGateway(Options{
-		CredentialPool:    pool,
-		ModelRouteService: routes,
-		Cooldown:          time.Second,
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Cooldown:              time.Second,
 		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
 			attempts++
 			if cred.ID == "cred-1" {
@@ -163,16 +111,49 @@ func TestAIGatewayChatRotatesCredentialOnRateLimit(t *testing.T) {
 	}
 }
 
-func TestAIGatewayChatReturnsExhaustedRoutesWithVirtualKey(t *testing.T) {
-	pool := &fakePool{}
-	virtualKeys := &fakeVirtualKeys{key: &models.VirtualKey{ID: "vk-1"}}
-	routes := &fakeRoutes{entries: []models.ComboEntry{{Provider: "openai", Model: "gpt-4o", Priority: 0}}}
-	g := NewAIGateway(Options{CredentialPool: pool, VirtualKeyService: virtualKeys, ModelRouteService: routes})
-	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1", VirtualKey: "sk-aco-test"})
+func TestAIGatewayChatFallsBackToNextModel(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-openai", Provider: "openai", APIKey: "sk-openai"},
+		{ID: "cred-anthropic", Provider: "anthropic", APIKey: "sk-anthropic"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{
+		{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true},
+		{Provider: "anthropic", ModelName: "claude-3-5-sonnet", Priority: 1, LevelGroup: "balanced", IsActive: true},
+	}}
 
-	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
-	if err == nil || !strings.Contains(err.Error(), "no credentials") {
-		t.Fatalf("expected no credentials error, got %v", err)
+	calledGPT4o := false
+	calledClaude := false
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			if model == "gpt-4o" {
+				calledGPT4o = true
+				return &fakeProvider{name: "openai", err: errors.New("openai API down")}, nil
+			}
+			if model == "claude-3-5-sonnet" {
+				calledClaude = true
+				return &fakeProvider{name: "anthropic", resp: &llm.Response{Content: "anthropic ok", Model: "claude-3-5-sonnet"}}, nil
+			}
+			return nil, errors.New("unexpected model")
+		},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	if !calledGPT4o {
+		t.Error("expected gpt-4o to be tried first")
+	}
+	if !calledClaude {
+		t.Error("expected fallback to claude-3-5-sonnet")
+	}
+	if resp.Content != "anthropic ok" || resp.Model != "claude-3-5-sonnet" {
+		t.Fatalf("expected response from fallback model, got: %+v", resp)
 	}
 }
 
@@ -185,5 +166,214 @@ func TestIsRateLimitErrorSupportsTypedStatusAndStringFallback(t *testing.T) {
 	}
 	if isTransientError(errors.New("connection refused")) {
 		t.Fatalf("did not expect generic connection error to be rate limit")
+	}
+}
+
+type fakeUsageRecorder struct {
+	ch      chan llm.UsageRecord
+	records []llm.UsageRecord
+}
+
+func (f *fakeUsageRecorder) RecordLLMUsage(ctx context.Context, record llm.UsageRecord) error {
+	f.records = append(f.records, record)
+	if f.ch != nil {
+		f.ch <- record
+	}
+	return nil
+}
+
+func TestAIGatewayChatTelemetry(t *testing.T) {
+	// 1. Success case with org ID
+	recorder := &fakeUsageRecorder{ch: make(chan llm.UsageRecord, 1)}
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Recorder:              recorder,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{
+				Content:      "ok",
+				Model:        "gpt-4o",
+				PromptTokens: 10,
+				OutputTokens: 20,
+			}}, nil
+		},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{
+		OrgID:     "org-1",
+		ProjectID: "project-1",
+		AgentID:   "agent-1",
+		TaskID:    "task-1",
+	})
+
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	select {
+	case rec := <-recorder.ch:
+		if rec.OrgID != "org-1" || rec.ProjectID != "project-1" || rec.AgentID != "agent-1" || rec.TaskID != "task-1" {
+			t.Errorf("incorrect metadata: %+v", rec)
+		}
+		if rec.Status != "ok" {
+			t.Errorf("expected status ok, got %s", rec.Status)
+		}
+		if rec.PromptTokens != 10 || rec.OutputTokens != 20 {
+			t.Errorf("incorrect tokens: prompt=%d output=%d", rec.PromptTokens, rec.OutputTokens)
+		}
+		if rec.CredentialID != "cred-1" {
+			t.Errorf("expected credential-1, got %s", rec.CredentialID)
+		}
+		if rec.LevelGroup != "balanced" {
+			t.Errorf("expected level group balanced, got %s", rec.LevelGroup)
+		}
+		if rec.Model != "gpt-4o" {
+			t.Errorf("expected model gpt-4o, got %s", rec.Model)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for telemetry record")
+	}
+
+	// 2. Failure case with org ID
+	recorder = &fakeUsageRecorder{ch: make(chan llm.UsageRecord, 1)}
+	g = NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Recorder:              recorder,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", err: errors.New("anthropic API error")}, nil
+		},
+	})
+
+	_, err = g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err == nil {
+		t.Fatal("expected error from Chat, got nil")
+	}
+
+	select {
+	case rec := <-recorder.ch:
+		if rec.Status != "failed" {
+			t.Errorf("expected status failed, got %s", rec.Status)
+		}
+		if rec.Error == "" {
+			t.Error("expected non-empty error field")
+		}
+		if rec.CredentialID != "cred-1" {
+			t.Errorf("expected credential-1, got %s", rec.CredentialID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for telemetry record")
+	}
+
+	// 3. Without org ID
+	recorder = &fakeUsageRecorder{ch: make(chan llm.UsageRecord, 1)}
+	fallback := &fakeProvider{name: "fallback", resp: &llm.Response{Content: "ok", Model: "fallback-model"}}
+	g = NewAIGateway(Options{
+		FallbackProvider: fallback,
+		Recorder:         recorder,
+	})
+
+	_, err = g.Chat(context.Background(), []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	select {
+	case <-recorder.ch:
+		t.Error("telemetry recorded when org ID was empty")
+	case <-time.After(100 * time.Millisecond):
+		// Success: no telemetry sent
+	}
+}
+
+func TestAIGatewayRouteEntriesUsesResolverOnly(t *testing.T) {
+	pool := &fakePool{}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+	})
+
+	entries, err := g.routeEntries(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+	if err != nil {
+		t.Fatalf("routeEntries returned error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if len(pool.selected) != 0 {
+		t.Fatalf("expected routeEntries to avoid credential selection, got %v", pool.selected)
+	}
+}
+
+func TestAIGatewayChatEmptyResolverReturnsError(t *testing.T) {
+	pool := &fakePool{}
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: &fakeResolver{models: nil},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err == nil {
+		t.Fatal("expected error when no active models are configured")
+	}
+	if !strings.Contains(err.Error(), "no active models configured") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAIGatewayChatTelemetry_ContextTimeout(t *testing.T) {
+	recorder := &fakeUsageRecorder{ch: make(chan llm.UsageRecord, 1)}
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Recorder:              recorder,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{
+				Content:      "ok",
+				Model:        "gpt-4o",
+				PromptTokens: 5,
+				OutputTokens: 5,
+			}}, nil
+		},
+	})
+
+	mainCtx, cancelMain := context.WithCancel(context.Background())
+	ctx := llm.WithRouteOptions(mainCtx, llm.RouteOptions{
+		OrgID:     "org-1",
+		ProjectID: "project-1",
+	})
+
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	// Cancel the parent context immediately
+	cancelMain()
+
+	// Telemetry should still succeed and write to recorder because it uses context.WithoutCancel
+	select {
+	case rec := <-recorder.ch:
+		if rec.OrgID != "org-1" {
+			t.Errorf("expected org-1, got %s", rec.OrgID)
+		}
+		if rec.Status != "ok" {
+			t.Errorf("expected status ok, got %s", rec.Status)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for telemetry record despite parent context cancel")
 	}
 }

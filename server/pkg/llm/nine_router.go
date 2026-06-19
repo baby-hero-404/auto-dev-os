@@ -38,7 +38,7 @@ func (n *NineRouter) Metadata() ProviderMetadata {
 	return ProviderMetadata{
 		Provider:          n.Name(),
 		Model:             n.model,
-		Tier:              TierBalanced,
+		LevelGroup:        LevelBalanced,
 		InputCostPer1K:    0.0015,
 		OutputCostPer1K:   0.002,
 		MaxContextTokens:  128000,

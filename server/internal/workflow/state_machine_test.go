@@ -42,8 +42,8 @@ func TestValidateTaskTransition(t *testing.T) {
 	}{
 		{"same status", models.TaskStatusTodo, models.TaskStatusTodo, false},
 		{"todo to analyzing", models.TaskStatusTodo, models.TaskStatusAnalyzing, false},
-		{"todo to completed", models.TaskStatusTodo, models.TaskStatusCompleted, true},
-		{"completed to todo", models.TaskStatusCompleted, models.TaskStatusTodo, true},
+		{"todo to merged", models.TaskStatusTodo, models.TaskStatusMerged, true},
+		{"merged to todo", models.TaskStatusMerged, models.TaskStatusTodo, true},
 		{"failed to todo", models.TaskStatusFailed, models.TaskStatusTodo, false},
 		{"unknown status", "unknown", models.TaskStatusTodo, true},
 	}

@@ -17,7 +17,7 @@ const DEFAULT_FLEET = [
     name: "AI Planner",
     role: "planner",
     goal: "Break requirements into execution plans, milestones, and task dependencies.",
-    model_route: "fast",
+    model_level_group: "fast",
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
   },
@@ -25,7 +25,7 @@ const DEFAULT_FLEET = [
     name: "AI Backend Developer",
     role: "backend",
     goal: "Implement server-side features, persistence, APIs, and integration logic.",
-    model_route: "balanced",
+    model_level_group: "balanced",
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
   },
@@ -33,7 +33,7 @@ const DEFAULT_FLEET = [
     name: "AI Frontend Developer",
     role: "frontend",
     goal: "Build user-facing flows, application state, and responsive interface behavior.",
-    model_route: "balanced",
+    model_level_group: "balanced",
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
   },
@@ -41,7 +41,7 @@ const DEFAULT_FLEET = [
     name: "AI Reviewer",
     role: "reviewer",
     goal: "Review changes for correctness, regressions, security issues, and missing tests.",
-    model_route: "powerful",
+    model_level_group: "powerful",
     autonomy_level: "approval_required",
     assignment_strategy: "auto_join",
   },
@@ -49,7 +49,7 @@ const DEFAULT_FLEET = [
     name: "AI QA Tester",
     role: "qa",
     goal: "Design and run verification checks for functional and regression coverage.",
-    model_route: "balanced",
+    model_level_group: "balanced",
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
   },
@@ -167,7 +167,7 @@ export function MembersPanel() {
         role: agent.role,
         goal: agent.goal,
         autonomy_level: agent.autonomy_level,
-        model_route: agent.model_route,
+        model_level_group: agent.model_level_group,
         assignment_strategy: agent.assignment_strategy,
       });
       setAssigningMap((prev) => {
@@ -279,9 +279,22 @@ export function MembersPanel() {
                       </div>
                       <div className="min-w-0">
                         <h3 className="truncate font-semibold text-foreground">{agent.name}</h3>
-                        <p className="truncate text-xs text-content-muted">
-                          {agent.role} · {agent.model_route}
-                        </p>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <span className="text-xs text-content-muted capitalize">{agent.role}</span>
+                          <span className="text-xs text-content-muted/60">·</span>
+                          <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.2 text-[10px] font-bold uppercase ${
+                            agent.model_level_group === "fast"
+                              ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                              : agent.model_level_group === "powerful"
+                              ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
+                              : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                          }`}>
+                            {agent.model_level_group === "fast" && "⚡ "}
+                            {agent.model_level_group === "balanced" && "⚖️ "}
+                            {agent.model_level_group === "powerful" && "🚀 "}
+                            {agent.model_level_group}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     <button
@@ -424,8 +437,8 @@ function AgentCardsSkeleton() {
 
 function providerSummary(agents: Agent[]) {
   const counts = agents.reduce<Record<string, number>>((acc, agent) => {
-    const route = agent.model_route || "";
-    const provider = route.includes("/") ? route.split("/")[0] : "gateway";
+    const levelGroup = agent.model_level_group || "";
+    const provider = levelGroup.includes("/") ? levelGroup.split("/")[0] : "gateway";
     acc[provider] = (acc[provider] || 0) + 1;
     return acc;
   }, {});

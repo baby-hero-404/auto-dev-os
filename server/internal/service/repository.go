@@ -21,6 +21,7 @@ type RepositoryService struct {
 	gitAccountRepo *repository.GitAccountRepo
 	gitProvider    gitops.GitProvider
 	workspaceDir   string
+	cipher         *SecretCipher
 }
 
 type gitCredentials struct {
@@ -28,11 +29,12 @@ type gitCredentials struct {
 	baseURL string
 }
 
-func NewRepositoryService(repo *repository.RepositoryRepo) *RepositoryService {
+func NewRepositoryService(repo *repository.RepositoryRepo, cipher *SecretCipher) *RepositoryService {
 	return &RepositoryService{
 		repo:         repo,
 		gitProvider:  gitops.NewGitHubProvider(""),
 		workspaceDir: filepath.Join(os.TempDir(), "autocodeos", "repositories"),
+		cipher:       cipher,
 	}
 }
 
@@ -54,7 +56,15 @@ func (s *RepositoryService) resolveCredentials(ctx context.Context, repo *models
 	if repo.GitAccountID != nil && *repo.GitAccountID != "" && s.gitAccountRepo != nil {
 		acc, err := s.gitAccountRepo.GetByID(ctx, *repo.GitAccountID)
 		if err == nil && acc.Token != "" {
-			return gitCredentials{token: acc.Token, baseURL: acc.BaseURL}, nil
+			token := acc.Token
+			if s.cipher != nil {
+				if dec, err := s.cipher.Decrypt(token); err == nil {
+					token = dec
+				} else {
+					return gitCredentials{}, fmt.Errorf("decrypt token: %w", err)
+				}
+			}
+			return gitCredentials{token: token, baseURL: acc.BaseURL}, nil
 		}
 	}
 
@@ -66,7 +76,15 @@ func (s *RepositoryService) resolveCredentials(ctx context.Context, repo *models
 			if err == nil {
 				for _, acc := range accounts {
 					if acc.Provider == repo.Provider && acc.Token != "" {
-						return gitCredentials{token: acc.Token, baseURL: acc.BaseURL}, nil
+						token := acc.Token
+						if s.cipher != nil {
+							if dec, err := s.cipher.Decrypt(token); err == nil {
+								token = dec
+							} else {
+								return gitCredentials{}, fmt.Errorf("decrypt token: %w", err)
+							}
+						}
+						return gitCredentials{token: token, baseURL: acc.BaseURL}, nil
 					}
 				}
 			}
@@ -85,15 +103,50 @@ func (s *RepositoryService) Create(ctx context.Context, projectID string, input 
 		return nil, ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
 	}
 	input.URL = normalized
-	return s.repo.Create(ctx, projectID, input)
+	if input.Token != "" && s.cipher != nil {
+		enc, err := s.cipher.Encrypt(input.Token)
+		if err != nil {
+			return nil, err
+		}
+		input.Token = enc
+	}
+	repo, err := s.repo.Create(ctx, projectID, input)
+	if err == nil && repo.Token != "" && s.cipher != nil {
+		if dec, decErr := s.cipher.Decrypt(repo.Token); decErr == nil {
+			repo.Token = dec
+		} else {
+			return nil, fmt.Errorf("decrypt token: %w", decErr)
+		}
+	}
+	return repo, err
 }
 
 func (s *RepositoryService) GetByID(ctx context.Context, id string) (*models.Repository, error) {
-	return s.repo.GetByID(ctx, id)
+	repo, err := s.repo.GetByID(ctx, id)
+	if err == nil && repo.Token != "" && s.cipher != nil {
+		if dec, decErr := s.cipher.Decrypt(repo.Token); decErr == nil {
+			repo.Token = dec
+		} else {
+			return nil, fmt.Errorf("decrypt token: %w", decErr)
+		}
+	}
+	return repo, err
 }
 
 func (s *RepositoryService) ListByProjectID(ctx context.Context, projectID string) ([]models.Repository, error) {
-	return s.repo.ListByProjectID(ctx, projectID)
+	repos, err := s.repo.ListByProjectID(ctx, projectID)
+	if err == nil && s.cipher != nil {
+		for i := range repos {
+			if repos[i].Token != "" {
+				if dec, decErr := s.cipher.Decrypt(repos[i].Token); decErr == nil {
+					repos[i].Token = dec
+				} else {
+					return nil, fmt.Errorf("decrypt token: %w", decErr)
+				}
+			}
+		}
+	}
+	return repos, err
 }
 
 func (s *RepositoryService) Update(ctx context.Context, id string, input models.UpdateRepositoryInput) (*models.Repository, error) {
@@ -104,7 +157,22 @@ func (s *RepositoryService) Update(ctx context.Context, id string, input models.
 		}
 		input.URL = &normalized
 	}
-	return s.repo.Update(ctx, id, input)
+	if input.Token != nil && *input.Token != "" && s.cipher != nil {
+		enc, err := s.cipher.Encrypt(*input.Token)
+		if err != nil {
+			return nil, err
+		}
+		input.Token = &enc
+	}
+	repo, err := s.repo.Update(ctx, id, input)
+	if err == nil && repo.Token != "" && s.cipher != nil {
+		if dec, decErr := s.cipher.Decrypt(repo.Token); decErr == nil {
+			repo.Token = dec
+		} else {
+			return nil, fmt.Errorf("decrypt token: %w", decErr)
+		}
+	}
+	return repo, err
 }
 
 func (s *RepositoryService) Delete(ctx context.Context, id string) error {
@@ -112,7 +180,7 @@ func (s *RepositoryService) Delete(ctx context.Context, id string) error {
 }
 
 func (s *RepositoryService) ValidateToken(ctx context.Context, id string) error {
-	repo, err := s.repo.GetByID(ctx, id)
+	repo, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -141,7 +209,7 @@ func (s *RepositoryService) ListRemoteRepos(ctx context.Context, token string) (
 }
 
 func (s *RepositoryService) Clone(ctx context.Context, id string) (*models.Repository, error) {
-	repo, err := s.repo.GetByID(ctx, id)
+	repo, err := s.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +230,11 @@ func (s *RepositoryService) Clone(ctx context.Context, id string) (*models.Repos
 		_, _ = s.repo.Update(context.Background(), id, models.UpdateRepositoryInput{CloneStatus: &failed})
 		return nil, err
 	}
-	actualBranch, err := s.gitProvider.CloneRepo(ctx, repo.URL, creds.token, repo.Branch, clonePath)
+	provider := s.gitProvider
+	if creds.baseURL != "" {
+		provider = gitops.NewGitHubProvider(creds.baseURL)
+	}
+	actualBranch, err := provider.CloneRepo(ctx, repo.URL, creds.token, repo.Branch, clonePath)
 	if err != nil {
 		failed := "failed"
 		_, _ = s.repo.Update(context.Background(), id, models.UpdateRepositoryInput{CloneStatus: &failed})
@@ -186,6 +258,13 @@ func (s *RepositoryService) GetRemoteBranches(ctx context.Context, repoURL strin
 		acc, err := s.gitAccountRepo.GetByID(ctx, *gitAccountID)
 		if err == nil && acc.Token != "" {
 			actualToken = acc.Token
+			if s.cipher != nil {
+				if dec, err := s.cipher.Decrypt(actualToken); err == nil {
+					actualToken = dec
+				} else {
+					return nil, fmt.Errorf("decrypt token: %w", err)
+				}
+			}
 		}
 	}
 

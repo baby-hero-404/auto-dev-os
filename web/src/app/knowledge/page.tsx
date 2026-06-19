@@ -165,9 +165,20 @@ export default function KnowledgePage() {
                 Agent Config
               </h4>
               <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-content-muted">Route:</span>
-                  <span className="font-mono text-slate-200">{selectedAgent.model_route}</span>
+                  <span className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold uppercase ${
+                    selectedAgent.model_level_group === "fast"
+                      ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                      : selectedAgent.model_level_group === "powerful"
+                      ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
+                      : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                  }`}>
+                    {selectedAgent.model_level_group === "fast" && "⚡ "}
+                    {selectedAgent.model_level_group === "balanced" && "⚖️ "}
+                    {selectedAgent.model_level_group === "powerful" && "🚀 "}
+                    {selectedAgent.model_level_group}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-content-muted">Autonomy:</span>

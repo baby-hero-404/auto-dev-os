@@ -44,9 +44,9 @@ test.describe("Git accounts credentials management", () => {
     await page.getByRole("link", { name: /Projects/i }).click();
     await page.getByRole("link", { name: /Website Refactor/i }).click();
 
-    await expect(page.getByRole("combobox").filter({ hasText: "Manual token / no account" })).toContainText(
-      "Enterprise GitHub",
-    );
+    await page.getByRole("button", { name: "Repositories" }).click();
+
+    await expect(page.getByLabel("Git Account")).toContainText("Enterprise GitHub");
 
     await page.goto("/git-accounts");
 

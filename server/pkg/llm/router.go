@@ -18,9 +18,11 @@ type UsageRecord struct {
 	ProjectID    string
 	AgentID      string
 	TaskID       string
+	OrgID        string
+	CredentialID string
 	Provider     string
 	Model        string
-	Tier         string
+	LevelGroup   string
 	PromptTokens int
 	OutputTokens int
 	CostUSD      float64
@@ -34,7 +36,7 @@ type UsageRecorder interface {
 }
 
 type GatewayOptions struct {
-	DefaultTier        string
+	DefaultLevelGroup  string
 	MaxTokensPerCall   int
 	MaxCostUSDPerCall  float64
 	DefaultOutputLimit int
@@ -44,7 +46,7 @@ type GatewayOptions struct {
 
 type Gateway struct {
 	chains             map[string]FallbackChain
-	defaultTier        string
+	defaultLevelGroup  string
 	maxTokensPerCall   int
 	maxCostUSDPerCall  float64
 	defaultOutputLimit int
@@ -58,27 +60,27 @@ func NewGateway(chains []FallbackChain, opts GatewayOptions) (*Gateway, error) {
 	}
 	g := &Gateway{
 		chains:             map[string]FallbackChain{},
-		defaultTier:        opts.DefaultTier,
+		defaultLevelGroup:  opts.DefaultLevelGroup,
 		maxTokensPerCall:   opts.MaxTokensPerCall,
 		maxCostUSDPerCall:  opts.MaxCostUSDPerCall,
 		defaultOutputLimit: opts.DefaultOutputLimit,
 		maxRetries:         opts.MaxRetries,
 		recorder:           opts.Recorder,
 	}
-	if g.defaultTier == "" {
-		g.defaultTier = TierBalanced
+	if g.defaultLevelGroup == "" {
+		g.defaultLevelGroup = LevelBalanced
 	}
 	if g.defaultOutputLimit == 0 {
 		g.defaultOutputLimit = 2048
 	}
 	for _, chain := range chains {
-		if chain.Tier == "" {
-			return nil, fmt.Errorf("fallback chain tier is required")
+		if chain.LevelGroup == "" {
+			return nil, fmt.Errorf("fallback chain level group is required")
 		}
 		if len(chain.Providers) == 0 {
-			return nil, fmt.Errorf("fallback chain %q has no providers", chain.Tier)
+			return nil, fmt.Errorf("fallback chain %q has no providers", chain.LevelGroup)
 		}
-		g.chains[chain.Tier] = chain
+		g.chains[chain.LevelGroup] = chain
 	}
 	return g, nil
 }
@@ -91,21 +93,21 @@ func NewGatewayFromConfigWithRecorder(cfg *config.Config, recorder UsageRecorder
 	chains := []FallbackChain{}
 	if cfg.LLM.OpenAIAPIKey != "" {
 		chains = append(chains,
-			newFallbackChain(TierFast, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.FastModel)}),
-			newFallbackChain(TierBalanced, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.BalancedModel)}),
-			newFallbackChain(TierPowerful, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.PowerfulModel)}),
+			newFallbackChain(LevelFast, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.FastModel)}),
+			newFallbackChain(LevelBalanced, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.BalancedModel)}),
+			newFallbackChain(LevelPowerful, []Provider{NewOpenAI(cfg.LLM.OpenAIAPIKey, cfg.LLM.PowerfulModel)}),
 		)
 	}
 	if cfg.LLM.AnthropicAPIKey != "" {
-		appendProvider(&chains, TierBalanced, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicBalancedModel))
-		appendProvider(&chains, TierPowerful, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicPowerfulModel))
+		appendProvider(&chains, LevelBalanced, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicBalancedModel))
+		appendProvider(&chains, LevelPowerful, NewAnthropic(cfg.LLM.AnthropicAPIKey, cfg.LLM.AnthropicPowerfulModel))
 	}
 	if cfg.LLM.GeminiAPIKey != "" {
-		appendProvider(&chains, TierFast, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiFastModel))
-		appendProvider(&chains, TierBalanced, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiBalancedModel))
+		appendProvider(&chains, LevelFast, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiFastModel))
+		appendProvider(&chains, LevelBalanced, NewGemini(cfg.LLM.GeminiAPIKey, cfg.LLM.GeminiBalancedModel))
 	}
 	return NewGateway(chains, GatewayOptions{
-		DefaultTier:        TierBalanced,
+		DefaultLevelGroup:  LevelBalanced,
 		MaxTokensPerCall:   cfg.LLM.CircuitMaxTokens,
 		MaxCostUSDPerCall:  cfg.LLM.CircuitMaxCostUSD,
 		DefaultOutputLimit: cfg.LLM.DefaultOutputTokens,
@@ -114,14 +116,14 @@ func NewGatewayFromConfigWithRecorder(cfg *config.Config, recorder UsageRecorder
 	})
 }
 
-func appendProvider(chains *[]FallbackChain, tier string, provider Provider) {
+func appendProvider(chains *[]FallbackChain, levelGroup string, provider Provider) {
 	for i := range *chains {
-		if (*chains)[i].Tier == tier {
+		if (*chains)[i].LevelGroup == levelGroup {
 			(*chains)[i].Providers = append((*chains)[i].Providers, provider)
 			return
 		}
 	}
-	*chains = append(*chains, newFallbackChain(tier, []Provider{provider}))
+	*chains = append(*chains, newFallbackChain(levelGroup, []Provider{provider}))
 }
 
 func (g *Gateway) Name() string { return "gateway" }
@@ -130,13 +132,13 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 	ctx, span := otel.Tracer("auto-code-os/llm").Start(ctx, "llm.gateway.chat")
 	defer span.End()
 	opts, _ := RouteOptionsFromContext(ctx)
-	tier := g.tierForComplexity(opts.Complexity)
-	chain, ok := g.chains[tier]
+	levelGroup := g.levelGroupForComplexity(opts.Complexity)
+	chain, ok := g.chains[levelGroup]
 	if !ok {
-		chain = g.chains[g.defaultTier]
+		chain = g.chains[g.defaultLevelGroup]
 	}
 	if len(chain.Providers) == 0 {
-		return nil, fmt.Errorf("no providers configured for tier %q", tier)
+		return nil, fmt.Errorf("no providers configured for level group %q", levelGroup)
 	}
 
 	inputTokens := estimateMessageTokens(messages)
@@ -169,7 +171,7 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("llm gateway exhausted fallbacks for tier %q: %s", tier, strings.Join(failures, "; "))
+	return nil, fmt.Errorf("llm gateway exhausted fallbacks for level group %q: %s", levelGroup, strings.Join(failures, "; "))
 }
 
 func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages []Message) (*Response, int64, error) {
@@ -200,16 +202,16 @@ func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages
 	return nil, time.Since(start).Milliseconds(), lastErr
 }
 
-func (g *Gateway) tierForComplexity(complexity string) string {
+func (g *Gateway) levelGroupForComplexity(complexity string) string {
 	switch strings.ToLower(complexity) {
 	case models.TaskComplexityEasy:
-		return TierFast
+		return LevelFast
 	case models.TaskComplexityHard:
-		return TierPowerful
+		return LevelPowerful
 	case models.TaskComplexityMedium:
-		return TierBalanced
+		return LevelBalanced
 	default:
-		return g.defaultTier
+		return g.defaultLevelGroup
 	}
 }
 
@@ -260,15 +262,15 @@ func (g *Gateway) record(ctx context.Context, opts RouteOptions, meta ProviderMe
 		return
 	}
 	usage := UsageRecord{
-		ProjectID: opts.ProjectID,
-		AgentID:   opts.AgentID,
-		TaskID:    opts.TaskID,
-		Provider:  meta.Provider,
-		Model:     meta.Model,
-		Tier:      meta.Tier,
-		LatencyMS: latency,
-		Status:    status,
-		Error:     msg,
+		ProjectID:  opts.ProjectID,
+		AgentID:    opts.AgentID,
+		TaskID:     opts.TaskID,
+		Provider:   meta.Provider,
+		Model:      meta.Model,
+		LevelGroup: meta.LevelGroup,
+		LatencyMS:  latency,
+		Status:     status,
+		Error:      msg,
 	}
 	if resp != nil {
 		usage.PromptTokens = resp.PromptTokens
@@ -285,7 +287,7 @@ func metadataForProvider(provider Provider) ProviderMetadata {
 	return ProviderMetadata{
 		Provider:          provider.Name(),
 		Model:             provider.Name(),
-		Tier:              TierBalanced,
+		LevelGroup:        LevelBalanced,
 		InputCostPer1K:    0.005,
 		OutputCostPer1K:   0.015,
 		MaxResponseTokens: 4096,

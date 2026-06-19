@@ -177,10 +177,36 @@ export default function ProjectTaskDetailPage({
 
   const affectedFiles = analysisData.affected_files || [];
   
+  const prSummaries = useMemo(() => {
+    if (!task?.pr_metadata) return [];
+    try {
+      const metadata = typeof task.pr_metadata === "string" ? JSON.parse(task.pr_metadata) : task.pr_metadata;
+      if (Array.isArray(metadata)) {
+        return metadata;
+      }
+    } catch {}
+    return [];
+  }, [task?.pr_metadata]);
+
   // Prefer actual parsed diff files from git, fallback to analysis estimation
-  const displayFiles = parsedDiffFiles.length > 0 ? parsedDiffFiles : affectedFiles;
+  const displayFiles = useMemo<string[]>(() => {
+    if (prSummaries.length > 0 && prSummaries[0].changed_files) {
+      return prSummaries[0].changed_files as string[];
+    }
+    return parsedDiffFiles.length > 0 ? parsedDiffFiles : affectedFiles;
+  }, [prSummaries, parsedDiffFiles, affectedFiles]);
+
   const selectedFile = rawSelectedFile || displayFiles[0] || null;
-  const riskAssessment = getRiskAssessment(task?.complexity ?? "easy", displayFiles);
+
+  const riskAssessment = useMemo(() => {
+    if (prSummaries.length > 0 && prSummaries[0].risk_level) {
+      return {
+        level: prSummaries[0].risk_level,
+        reason: prSummaries[0].risk_reason || "",
+      };
+    }
+    return getRiskAssessment(task?.complexity ?? "easy", displayFiles);
+  }, [prSummaries, task?.complexity, displayFiles]);
 
   const activeFileDiff = useMemo(() => {
     return parsedDiffs.find((d) => d.filename === selectedFile);
@@ -232,6 +258,18 @@ export default function ProjectTaskDetailPage({
         </div>
       )}
 
+      {workflow?.job?.status === "failed" && workflow?.job?.last_error && (
+        <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-300 flex flex-col gap-1.5" role="alert">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertCircle size={16} className="shrink-0 text-rose-500" />
+            Task Execution Failed
+          </div>
+          <p className="text-xs font-mono bg-black/40 border border-stroke/50 rounded-lg p-3 break-all whitespace-pre-wrap">
+            {workflow.job.last_error}
+          </p>
+        </div>
+      )}
+
       <SpecReviewSection
         specStatus={task?.spec_status}
         onRequestChanges={requestSpecChanges}
@@ -250,7 +288,7 @@ export default function ProjectTaskDetailPage({
               <div>
                 <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">Pull Request Details</div>
                 <h2 className="font-sans font-bold text-base text-foreground mt-0.5">
-                  [Auto Code OS] {task?.title}
+                  {prSummaries[0]?.title || `AutoCodeOS: ${task?.title}`}
                 </h2>
               </div>
             </div>
@@ -272,10 +310,16 @@ export default function ProjectTaskDetailPage({
                 <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2 flex items-center gap-1">
                   <Sparkles size={12} className="text-brand-primary" /> AI PR Summary
                 </h3>
-                <p className="text-xs leading-relaxed text-content-muted">
-                  Automated changes generated for this execution run. The agent completed the code-backend,
-                  code-frontend, and successfully compiled all builds.
-                </p>
+                {prSummaries.length > 0 && prSummaries[0].body ? (
+                  <div className="text-xs leading-relaxed text-content-muted prose dark:prose-invert max-h-60 overflow-y-auto pr-1">
+                    <Markdown content={prSummaries[0].body} />
+                  </div>
+                ) : (
+                  <p className="text-xs leading-relaxed text-content-muted">
+                    Automated changes generated for this execution run. The agent completed the code-backend,
+                    code-frontend, and successfully compiled all builds.
+                  </p>
+                )}
               </div>
 
               <div>

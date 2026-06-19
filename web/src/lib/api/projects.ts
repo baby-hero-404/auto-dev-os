@@ -17,7 +17,15 @@ export function get(projectID: string, token: string) {
   return request<Project>(`/projects/${projectID}`, { token });
 }
 
-export function update(projectID: string, token: string, input: { name?: string; description?: string }) {
+export function update(projectID: string, token: string, input: {
+  name?: string;
+  description?: string;
+  default_model_level?: string;
+  default_autonomy?: string;
+  auto_review_policy?: string;
+  max_retries?: number;
+  default_branch?: string;
+}) {
   return request<Project>(`/projects/${projectID}`, {
     method: "PATCH",
     token,
@@ -83,7 +91,7 @@ export const tasks = {
   create(
     projectID: string,
     token: string,
-    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string },
+    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string },
   ) {
     return request<Task>(`/projects/${projectID}/tasks`, {
       method: "POST",

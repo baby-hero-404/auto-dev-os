@@ -67,6 +67,18 @@ func (h *WorkflowHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 
+// Restart re-enqueues a failed task, resuming from the last successful checkpoint.
+// POST /api/v1/tasks/:taskID/restart
+func (h *WorkflowHandler) Restart(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	job, err := h.orch.RestartFromLastStep(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
 func (h *WorkflowHandler) Artifacts(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "jobID")
 	artifacts, err := h.orch.ListArtifacts(r.Context(), jobID)

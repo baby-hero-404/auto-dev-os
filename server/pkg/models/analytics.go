@@ -4,12 +4,14 @@ import "time"
 
 type TokenUsage struct {
 	ID           string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	OrgID        *string   `json:"org_id,omitempty" gorm:"type:uuid"`
+	CredentialID *string   `json:"credential_id,omitempty" gorm:"type:uuid"`
 	ProjectID    *string   `json:"project_id,omitempty" gorm:"type:uuid"`
 	AgentID      *string   `json:"agent_id,omitempty" gorm:"type:uuid"`
 	TaskID       *string   `json:"task_id,omitempty" gorm:"type:uuid"`
 	Provider     string    `json:"provider"`
 	Model        string    `json:"model"`
-	Tier         string    `json:"tier"`
+	LevelGroup   string    `json:"level_group"`
 	PromptTokens int       `json:"prompt_tokens"`
 	OutputTokens int       `json:"output_tokens"`
 	CostUSD      float64   `json:"cost_usd"`
@@ -24,16 +26,20 @@ func (TokenUsage) TableName() string {
 }
 
 type TokenUsageSummary struct {
-	ProjectID    *string `json:"project_id,omitempty"`
-	Provider     string  `json:"provider"`
-	Model        string  `json:"model"`
-	Tier         string  `json:"tier"`
-	Requests     int64   `json:"requests"`
-	PromptTokens int64   `json:"prompt_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	ProjectID       *string `json:"project_id,omitempty"`
+	CredentialID    *string `json:"credential_id,omitempty"`
+	KeyLabel        string  `json:"key_label,omitempty"`
+	Provider        string  `json:"provider"`
+	Model           string  `json:"model"`
+	LevelGroup      string  `json:"level_group"`
+	Requests        int64   `json:"requests"`
+	SuccessRequests int64   `json:"success_requests"`
+	FailedRequests  int64   `json:"failed_requests"`
+	PromptTokens    int64   `json:"prompt_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+	AvgLatencyMS    float64 `json:"avg_latency_ms"`
 }
 
 // OverviewStats provides a high-level platform summary.
@@ -54,18 +60,18 @@ type OverviewStats struct {
 
 // AgentStats provides per-agent performance metrics.
 type AgentStats struct {
-	AgentID      string  `json:"agent_id"`
-	AgentName    string  `json:"agent_name"`
-	Role         string  `json:"role"`
-	ModelRoute   string  `json:"model_route"`
-	Status       string  `json:"status"`
-	TaskCount    int64   `json:"task_count"`
-	SuccessCount int64   `json:"success_count"`
-	FailCount    int64   `json:"fail_count"`
-	SuccessRate  float64 `json:"success_rate"`
-	RetryCount   int64   `json:"retry_count"`
-	TotalTokens  int64   `json:"total_tokens"`
-	TotalCostUSD float64 `json:"total_cost_usd"`
+	AgentID         string  `json:"agent_id"`
+	AgentName       string  `json:"agent_name"`
+	Role            string  `json:"role"`
+	ModelLevelGroup string  `json:"model_level_group"`
+	Status          string  `json:"status"`
+	TaskCount       int64   `json:"task_count"`
+	SuccessCount    int64   `json:"success_count"`
+	FailCount       int64   `json:"fail_count"`
+	SuccessRate     float64 `json:"success_rate"`
+	RetryCount      int64   `json:"retry_count"`
+	TotalTokens     int64   `json:"total_tokens"`
+	TotalCostUSD    float64 `json:"total_cost_usd"`
 }
 
 // TaskTimeSeries represents time-bucketed task counts for trend charts.
@@ -104,4 +110,15 @@ type WorkflowAnalytics struct {
 	CompletionRate float64             `json:"completion_rate"`
 	AvgDurationMs  float64             `json:"avg_duration_ms"`
 	StepStats      []WorkflowStepStats `json:"step_stats"`
+}
+
+// RecentFailure captures a failed task and the most useful workflow error attached to it.
+type RecentFailure struct {
+	TaskID        string    `json:"task_id"`
+	ProjectID     string    `json:"project_id"`
+	ProjectName   string    `json:"project_name"`
+	Title         string    `json:"title"`
+	FailureReason string    `json:"failure_reason"`
+	WorkflowStep  string    `json:"workflow_step"`
+	FailedAt      time.Time `json:"failed_at"`
 }

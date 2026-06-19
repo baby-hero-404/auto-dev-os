@@ -16,6 +16,6 @@ func NewAnalyticsService(repo *repository.AnalyticsRepo) *AnalyticsService {
 	return &AnalyticsService{repo: repo}
 }
 
-func (s *AnalyticsService) TokenUsage(ctx context.Context, projectID string, since time.Time) ([]models.TokenUsageSummary, error) {
-	return s.repo.TokenUsage(ctx, projectID, since)
+func (s *AnalyticsService) TokenUsage(ctx context.Context, orgID string, projectID string, since time.Time) ([]models.TokenUsageSummary, error) {
+	return s.repo.TokenUsage(ctx, orgID, projectID, since)
 }

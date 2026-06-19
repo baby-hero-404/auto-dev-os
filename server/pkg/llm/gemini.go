@@ -33,7 +33,7 @@ func (g *Gemini) Metadata() ProviderMetadata {
 	return ProviderMetadata{
 		Provider:          g.Name(),
 		Model:             g.model,
-		Tier:              tierForModel(g.model),
+		LevelGroup:        levelGroupForModel(g.model),
 		InputCostPer1K:    inputCostPer1K(g.model),
 		OutputCostPer1K:   outputCostPer1K(g.model),
 		MaxContextTokens:  1000000,

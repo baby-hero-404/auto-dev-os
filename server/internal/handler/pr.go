@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
@@ -12,10 +13,11 @@ import (
 type PRHandler struct {
 	taskSvc  TaskService
 	auditSvc AuditService
+	orch     *orchestrator.Orchestrator
 }
 
-func NewPRHandler(taskSvc TaskService, auditSvc AuditService) *PRHandler {
-	return &PRHandler{taskSvc: taskSvc, auditSvc: auditSvc}
+func NewPRHandler(taskSvc TaskService, auditSvc AuditService, orch *orchestrator.Orchestrator) *PRHandler {
+	return &PRHandler{taskSvc: taskSvc, auditSvc: auditSvc, orch: orch}
 }
 
 // Approve approves a PR and transitions the task to merged status.
@@ -35,12 +37,21 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Transition to merged.
-	merged := models.TaskStatusMerged
-	updated, err := h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &merged})
-	if err != nil {
-		writeServiceError(w, err)
-		return
+	// Transition to merged and execute merge in GitHub
+	var updated *models.Task
+	if h.orch != nil {
+		updated, err = h.orch.ApproveMerge(r.Context(), taskID)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	} else {
+		merged := models.TaskStatusMerged
+		updated, err = h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &merged})
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
 	}
 
 	// Record audit log.
@@ -91,6 +102,21 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		service.WithTaskID(taskID),
 		service.WithDetails(map[string]string{"feedback": input.Feedback}),
 	)
+
+	if h.orch != nil {
+		if err := h.orch.SavePRRejectionFeedback(r.Context(), taskID, input.Feedback); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		if err := h.orch.ClearCheckpointsForRepair(r.Context(), taskID); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		if _, err := h.orch.Execute(r.Context(), taskID); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, updated)
 }

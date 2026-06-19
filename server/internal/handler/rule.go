@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -34,7 +35,12 @@ func (h *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
-	rule, err := h.svc.GetByID(r.Context(), id)
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	rule, err := h.svc.GetByID(r.Context(), id, claims.OrgID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -89,12 +95,17 @@ func (h *RuleHandler) SeedGlobal(w http.ResponseWriter, r *http.Request) {
 
 func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	var input models.UpdateRuleInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	rule, err := h.svc.Update(r.Context(), id, input)
+	rule, err := h.svc.Update(r.Context(), id, claims.OrgID, claims.Role, input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -104,7 +115,12 @@ func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "ruleID")
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if err := h.svc.Delete(r.Context(), id, claims.OrgID); err != nil {
 		writeServiceError(w, err)
 		return
 	}

@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { Agent, RoleTemplate, Skill } from "../types";
+import type { Agent, RoleTemplate, Skill, SkillSource } from "../types";
 
 type AgentInput = {
   name: string;
@@ -7,7 +7,7 @@ type AgentInput = {
   goal: string;
   autonomy_level: string;
   context_config?: Record<string, unknown>;
-  model_route: string;
+  model_level_group: string;
   assignment_strategy?: string;
   agent_id?: string;
 };
@@ -61,21 +61,26 @@ export const skills = {
   seed(token: string) {
     return request<Skill[]>("/skills/seed", { method: "POST", token });
   },
-  create(token: string, input: { name: string; description: string; schema: Record<string, unknown> }) {
-    return request<Skill>("/skills", {
+  listSources(token: string) {
+    return request<SkillSource[]>("/skills/sources", { token });
+  },
+  addSource(token: string, input: { url: string }) {
+    return request<SkillSource>("/skills/sources", {
       method: "POST",
       token,
       body: JSON.stringify(input),
     });
   },
-  update(skillID: string, token: string, input: { name?: string; description?: string; schema?: Record<string, unknown> }) {
-    return request<Skill>(`/skills/${skillID}`, {
-      method: "PATCH",
-      token,
-      body: JSON.stringify(input),
-    });
+  deleteSource(sourceID: string, token: string) {
+    return request<void>(`/skills/sources/${sourceID}`, { method: "DELETE", token });
   },
-  remove(skillID: string, token: string) {
-    return request<void>(`/skills/${skillID}`, { method: "DELETE", token });
+  syncSource(sourceID: string, token: string) {
+    return request<SkillSource>(`/skills/sources/${sourceID}/sync`, { method: "POST", token });
+  },
+  listSourceFiles(sourceID: string, path: string, token: string) {
+    return request<Array<{ name: string; path: string; is_dir: boolean; size: number }>>(`/skills/sources/${sourceID}/files?path=${encodeURIComponent(path)}`, { token });
+  },
+  getSourceFileContent(sourceID: string, path: string, token: string) {
+    return request<{ content: string; path: string }>(`/skills/sources/${sourceID}/file-content?path=${encodeURIComponent(path)}`, { token });
   },
 };

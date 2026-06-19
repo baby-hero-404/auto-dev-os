@@ -207,7 +207,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 	// Simulate the health handler inline (same as router.go).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, envelope{"status": "ok", "version": "0.2.0"})
+		writeJSON(w, http.StatusOK, envelope{"status": "ok", "version": Version})
 	})
 	handler.ServeHTTP(rr, req)
 
@@ -221,7 +221,7 @@ func TestHealthEndpoint(t *testing.T) {
 	if resp["status"] != "ok" {
 		t.Errorf("expected status ok, got %v", resp["status"])
 	}
-	if resp["version"] != "0.2.0" {
-		t.Errorf("expected version 0.2.0, got %v", resp["version"])
+	if resp["version"] != Version {
+		t.Errorf("expected version %s, got %v", Version, resp["version"])
 	}
 }

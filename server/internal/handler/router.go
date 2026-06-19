@@ -14,25 +14,29 @@ import (
 	"github.com/go-chi/cors"
 )
 
+// Version is the build version of the application.
+// Default "dev" is overridden by config.yaml at startup, or by -ldflags at build time.
+var Version = "dev"
+
 // Deps holds all service dependencies for the router.
 type Deps struct {
-	OrgSvc             OrganizationService
-	ProjSvc            ProjectService
-	RepoSvc            RepositoryService
-	AgentSvc           AgentService
-	TaskSvc            TaskService
-	RuleSvc            RuleService
-	SkillSvc           SkillService
-	AnalyticsSvc       AnalyticsService
-	DashboardSvc       AnalyticsDashboardService
-	AuditSvc           AuditService
-	AuthSvc            AuthService
-	MemorySvc          MemoryService
-	LearningSvc        LearningService
-	GitAccountSvc      GitAccountService
-	ProviderCredSvc    ProviderCredentialService
+	OrgSvc          OrganizationService
+	ProjSvc         ProjectService
+	RepoSvc         RepositoryService
+	AgentSvc        AgentService
+	TaskSvc         TaskService
+	RuleSvc         RuleService
+	SkillSvc        SkillService
+	AnalyticsSvc    AnalyticsService
+	DashboardSvc    AnalyticsDashboardService
+	AuditSvc        AuditService
+	AuthSvc         AuthService
+	MemorySvc       MemoryService
+	LearningSvc     LearningService
+	GitAccountSvc   GitAccountService
+	ProviderCredSvc ProviderCredentialService
 
-	ModelRouteSvc      ModelRouteService
+	ProviderModelSvc   ProviderModelService
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
@@ -74,7 +78,7 @@ func NewRouter(d Deps) http.Handler {
 
 	// Health check
 	r.Get("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, envelope{"status": "ok", "version": "0.2.0"})
+		writeJSON(w, http.StatusOK, envelope{"status": "ok", "version": Version})
 	})
 
 	// Handlers
@@ -82,13 +86,13 @@ func NewRouter(d Deps) http.Handler {
 	projH := NewProjectHandler(d.ProjSvc)
 	repoH := NewRepositoryHandler(d.RepoSvc)
 	agentH := NewAgentHandler(d.AgentSvc)
-	taskH := NewTaskHandler(d.TaskSvc)
+	taskH := NewTaskHandler(d.TaskSvc, d.Orch)
 	ruleH := NewRuleHandler(d.RuleSvc)
 	skillH := NewSkillHandler(d.SkillSvc)
 	analyticsH := NewAnalyticsHandler(d.AnalyticsSvc)
 	dashboardH := NewAnalyticsDashboardHandler(d.DashboardSvc)
 	auditH := NewAuditHandler(d.AuditSvc)
-	prH := NewPRHandler(d.TaskSvc, d.AuditSvc)
+	prH := NewPRHandler(d.TaskSvc, d.AuditSvc, d.Orch)
 	authH := NewAuthHandler(d.AuthSvc)
 	webhookH := NewWebhookHandler(d.TaskSvc)
 	workflowH := NewWorkflowHandler(d.Orch)
@@ -97,7 +101,7 @@ func NewRouter(d Deps) http.Handler {
 	gitAccH := NewGitAccountHandler(d.GitAccountSvc)
 	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
 
-	modelRouteH := NewModelRouteHandler(d.ModelRouteSvc)
+	providerModelH := NewProviderModelHandler(d.ProviderModelSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -145,21 +149,25 @@ func NewRouter(d Deps) http.Handler {
 					})
 
 					r.Route("/provider-credentials", func(r chi.Router) {
-						r.Post("/", providerCredH.Create)
 						r.Get("/", providerCredH.List)
-						r.Post("/test", providerCredH.TestInput)
-						r.Put("/{credentialID}", providerCredH.Update)
-						r.Delete("/{credentialID}", providerCredH.Delete)
-						r.Post("/{credentialID}/test", providerCredH.Test)
+						r.Group(func(r chi.Router) {
+							r.Use(mw.RequireRole(models.UserRoleAdmin))
+							r.Post("/", providerCredH.Create)
+							r.Post("/test", providerCredH.TestInput)
+							r.Put("/{credentialID}", providerCredH.Update)
+							r.Delete("/{credentialID}", providerCredH.Delete)
+							r.Post("/{credentialID}/test", providerCredH.Test)
+						})
 					})
 
-
-
-					r.Route("/model-routes", func(r chi.Router) {
-						r.Post("/", modelRouteH.Create)
-						r.Get("/", modelRouteH.List)
-						r.Put("/{routeID}", modelRouteH.Update)
-						r.Delete("/{routeID}", modelRouteH.Delete)
+					r.Route("/provider-models", func(r chi.Router) {
+						r.Get("/", providerModelH.List)
+						r.Group(func(r chi.Router) {
+							r.Use(mw.RequireRole(models.UserRoleAdmin))
+							r.Post("/", providerModelH.Create)
+							r.Put("/{modelID}", providerModelH.Update)
+							r.Delete("/{modelID}", providerModelH.Delete)
+						})
 					})
 				})
 			})
@@ -231,6 +239,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/tasks/{taskID}/logs", workflowH.Logs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
+			r.Post("/tasks/{taskID}/restart", workflowH.Restart)
 			r.Get("/workflows/{jobID}/artifacts", workflowH.Artifacts)
 
 			r.Get("/rules/{ruleID}", ruleH.GetByID)
@@ -242,6 +251,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/analytics/agents", dashboardH.AgentPerformance)
 			r.Get("/analytics/tasks", dashboardH.TaskAnalytics)
 			r.Get("/analytics/workflows", dashboardH.WorkflowAnalytics)
+			r.Get("/analytics/failures", dashboardH.RecentFailures)
 
 			// Audit logs
 			r.Get("/audit/logs", auditH.List)
@@ -262,13 +272,16 @@ func NewRouter(d Deps) http.Handler {
 
 			// Skills (global, not project-scoped)
 			r.Route("/skills", func(r chi.Router) {
-				r.Post("/", skillH.Create)
 				r.Get("/", skillH.List)
 				r.Post("/seed", skillH.Seed)
+				r.Get("/sources", skillH.ListSources)
+				r.Post("/sources", skillH.AddSource)
+				r.Delete("/sources/{sourceID}", skillH.DeleteSource)
+				r.Post("/sources/{sourceID}/sync", skillH.SyncSource)
+				r.Get("/sources/{sourceID}/files", skillH.ListFiles)
+				r.Get("/sources/{sourceID}/file-content", skillH.GetFileContent)
 				r.Get("/{skillID}", skillH.GetByID)
-				r.Patch("/{skillID}", skillH.Update)
 				r.Post("/{skillID}/test", skillH.Test)
-				r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/{skillID}", skillH.Delete)
 			})
 		})
 	})

@@ -1,7 +1,12 @@
+auto_code_os:
+  data_root: "./.data"
+
 server:
   port: "32080"
   web_port: "32300"
   cors_allowed_origins: ""
+  version: "0.2.0"
+
 
 llm:
   provider: "gateway"

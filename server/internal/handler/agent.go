@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -45,7 +46,12 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 
 func (h *AgentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
-	a, err := h.svc.GetByID(r.Context(), id)
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	a, err := h.svc.GetByID(r.Context(), id, claims.OrgID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -84,12 +90,17 @@ func (h *AgentHandler) ListRoleTemplates(w http.ResponseWriter, r *http.Request)
 
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	var input models.UpdateAgentInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	a, err := h.svc.Update(r.Context(), id, input)
+	a, err := h.svc.Update(r.Context(), id, claims.OrgID, input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -99,7 +110,12 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "agentID")
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	claims, _ := r.Context().Value(authClaimsKey).(*service.TokenClaims)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if err := h.svc.Delete(r.Context(), id, claims.OrgID); err != nil {
 		writeServiceError(w, err)
 		return
 	}

@@ -4,14 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
 
-type TaskHandler struct{ svc TaskService }
+type TaskHandler struct {
+	svc  TaskService
+	orch *orchestrator.Orchestrator
+}
 
-func NewTaskHandler(svc TaskService) *TaskHandler {
-	return &TaskHandler{svc: svc}
+func NewTaskHandler(svc TaskService, orch *orchestrator.Orchestrator) *TaskHandler {
+	return &TaskHandler{svc: svc, orch: orch}
 }
 
 func (h *TaskHandler) Analyze(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +59,12 @@ func (h *TaskHandler) ApproveAnalysis(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeServiceError(w, err)
 		return
+	}
+	if h.orch != nil {
+		if _, err := h.orch.Execute(r.Context(), id); err != nil {
+			writeServiceError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, t)
 }

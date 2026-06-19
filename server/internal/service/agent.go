@@ -48,8 +48,8 @@ func (s *AgentService) AssignToProject(ctx context.Context, projectID string, in
 	return s.Create(ctx, projectID, input)
 }
 
-func (s *AgentService) GetByID(ctx context.Context, id string) (*models.Agent, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *AgentService) GetByID(ctx context.Context, id string, orgID string) (*models.Agent, error) {
+	return s.repo.GetByIDAndOrg(ctx, id, orgID)
 }
 
 func (s *AgentService) ListByProjectID(ctx context.Context, projectID string) ([]models.Agent, error) {
@@ -67,7 +67,7 @@ func (s *AgentService) ListRoleTemplates(ctx context.Context) ([]models.RoleTemp
 	return s.roleTemplates.ListAll(ctx)
 }
 
-func (s *AgentService) Update(ctx context.Context, id string, input models.UpdateAgentInput) (*models.Agent, error) {
+func (s *AgentService) Update(ctx context.Context, id string, orgID string, input models.UpdateAgentInput) (*models.Agent, error) {
 	if input.AutonomyLevel != nil {
 		if err := validateAgentAutonomyLevel(*input.AutonomyLevel); err != nil {
 			return nil, err
@@ -78,28 +78,48 @@ func (s *AgentService) Update(ctx context.Context, id string, input models.Updat
 			return nil, err
 		}
 	}
-	if input.Role != nil && strings.TrimSpace(*input.Role) == "" {
-		return nil, ErrValidation("role is required")
+	if input.Role != nil {
+		if err := validateAgentRole(*input.Role); err != nil {
+			return nil, err
+		}
 	}
 	if input.Goal != nil && strings.TrimSpace(*input.Goal) == "" {
 		return nil, ErrValidation("goal is required")
 	}
-	if input.ModelRoute != nil && strings.TrimSpace(*input.ModelRoute) == "" {
-		defaultRoute := "balanced"
-		input.ModelRoute = &defaultRoute
+	if input.ModelLevelGroup != nil {
+		trimmed := strings.TrimSpace(*input.ModelLevelGroup)
+		if trimmed == "" {
+			role := ""
+			if input.Role != nil && strings.TrimSpace(*input.Role) != "" {
+				role = strings.TrimSpace(*input.Role)
+			} else {
+				currentAgent, err := s.repo.GetByIDAndOrg(ctx, id, orgID)
+				if err != nil {
+					return nil, err
+				}
+				role = currentAgent.Role
+			}
+			defaultLevelGroup := getDefaultModelLevelGroupForRole(role)
+			input.ModelLevelGroup = &defaultLevelGroup
+		} else {
+			*input.ModelLevelGroup = trimmed
+		}
+		if err := validateAgentModelLevelGroup(*input.ModelLevelGroup); err != nil {
+			return nil, err
+		}
 	}
-	return s.repo.Update(ctx, id, input)
+	return s.repo.Update(ctx, id, orgID, input)
 }
 
-func (s *AgentService) Delete(ctx context.Context, id string) error {
-	return s.repo.Delete(ctx, id)
+func (s *AgentService) Delete(ctx context.Context, id string, orgID string) error {
+	return s.repo.Delete(ctx, id, orgID)
 }
 
 func (s *AgentService) prepareCreateInput(ctx context.Context, input models.CreateAgentInput) (models.CreateAgentInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Role = strings.TrimSpace(input.Role)
 	input.Goal = strings.TrimSpace(input.Goal)
-	input.ModelRoute = strings.TrimSpace(input.ModelRoute)
+	input.ModelLevelGroup = strings.TrimSpace(input.ModelLevelGroup)
 	input.AutonomyLevel = strings.TrimSpace(input.AutonomyLevel)
 
 	if input.Name == "" {
@@ -108,8 +128,14 @@ func (s *AgentService) prepareCreateInput(ctx context.Context, input models.Crea
 	if input.Role == "" {
 		return input, ErrValidation("role is required")
 	}
-	if input.ModelRoute == "" {
-		input.ModelRoute = "balanced"
+	if err := validateAgentRole(input.Role); err != nil {
+		return input, err
+	}
+	if input.ModelLevelGroup == "" {
+		input.ModelLevelGroup = getDefaultModelLevelGroupForRole(input.Role)
+	}
+	if err := validateAgentModelLevelGroup(input.ModelLevelGroup); err != nil {
+		return input, err
 	}
 	if input.AutonomyLevel == "" {
 		input.AutonomyLevel = models.AgentAutonomySupervised
@@ -137,6 +163,21 @@ func (s *AgentService) prepareCreateInput(ctx context.Context, input models.Crea
 	return input, nil
 }
 
+func validateAgentRole(role string) error {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case models.AgentRolePlanner,
+		models.AgentRoleBackend,
+		models.AgentRoleFrontend,
+		models.AgentRoleReviewer,
+		models.AgentRoleQA,
+		models.AgentRoleSecurityAuditor,
+		models.AgentRoleDBArchitect:
+		return nil
+	default:
+		return ErrValidation("role must be planner, backend, frontend, reviewer, qa, security-auditor, or db-architect")
+	}
+}
+
 func validateAgentAssignmentStrategy(strategy string) error {
 	switch strategy {
 	case "", models.AgentAssignmentManual, models.AgentAssignmentAutoJoin:
@@ -152,5 +193,31 @@ func validateAgentAutonomyLevel(level string) error {
 		return nil
 	default:
 		return ErrValidation("autonomy_level must be autonomous, supervised, or approval_required")
+	}
+}
+
+func validateAgentModelLevelGroup(levelGroup string) error {
+	switch levelGroup {
+	case models.ModelLevelFast, models.ModelLevelBalanced, models.ModelLevelPowerful, "auto":
+		return nil
+	default:
+		return ErrValidation("model_level_group must be fast, balanced, powerful, or auto")
+	}
+}
+
+func getDefaultModelLevelGroupForRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case models.AgentRolePlanner, models.AgentRoleDBArchitect:
+		return models.ModelLevelPowerful
+	case models.AgentRoleBackend, models.AgentRoleFrontend:
+		return models.ModelLevelBalanced
+	case models.AgentRoleReviewer:
+		return models.ModelLevelFast
+	case models.AgentRoleQA:
+		return models.ModelLevelBalanced
+	case models.AgentRoleSecurityAuditor:
+		return models.ModelLevelPowerful
+	default:
+		return models.ModelLevelBalanced
 	}
 }

@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS skill_sources (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    url TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT DEFAULT '',
+    last_synced_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);

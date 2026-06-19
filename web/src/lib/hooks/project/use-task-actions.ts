@@ -16,6 +16,7 @@ export function useTaskActions(projectID: string, token: string, mutateTasks: ()
       await api.createTask(projectID, token, {
         title: payload.title, description: payload.description, complexity: payload.complexity,
         priority: payload.priority, labels: payload.labels, agent_id: payload.agent_id,
+        repository_id: payload.repository_id,
       });
       mutateTasks();
       return true;

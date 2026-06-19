@@ -2,11 +2,21 @@ package service
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+var conflictPattern = regexp.MustCompile(`(?i)\b(ignore|override|disable|bypass)\b.*\b(global|strict|security|rule)`)
+
+func checkRuleConflict(content string) error {
+	if conflictPattern.MatchString(content) {
+		return ErrValidation("rule conflicts with global governance rules")
+	}
+	return nil
+}
 
 type RuleService struct{ repo *repository.RuleRepo }
 
@@ -20,6 +30,9 @@ func (s *RuleService) Create(ctx context.Context, projectID *string, input model
 	}
 	if projectID == nil || strings.TrimSpace(*projectID) == "" {
 		return nil, ErrValidation("project id is required")
+	}
+	if err := checkRuleConflict(input.Content); err != nil {
+		return nil, err
 	}
 	input.Scope = models.RuleScopeProject
 	if input.Enforcement == "" {
@@ -42,8 +55,8 @@ func (s *RuleService) CreateGlobal(ctx context.Context, orgID string, input mode
 	return s.repo.CreateGlobal(ctx, orgID, input)
 }
 
-func (s *RuleService) GetByID(ctx context.Context, id string) (*models.Rule, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *RuleService) GetByID(ctx context.Context, id string, orgID string) (*models.Rule, error) {
+	return s.repo.GetByIDAndOrg(ctx, id, orgID)
 }
 
 func (s *RuleService) ListByProjectID(ctx context.Context, projectID string) ([]models.Rule, error) {
@@ -54,12 +67,33 @@ func (s *RuleService) ListGlobalByOrgID(ctx context.Context, orgID string) ([]mo
 	return s.repo.ListGlobalByOrgID(ctx, orgID)
 }
 
-func (s *RuleService) Update(ctx context.Context, id string, input models.UpdateRuleInput) (*models.Rule, error) {
-	return s.repo.Update(ctx, id, input)
+func (s *RuleService) Update(ctx context.Context, id string, orgID string, userRole string, input models.UpdateRuleInput) (*models.Rule, error) {
+	rule, err := s.repo.GetByIDAndOrg(ctx, id, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	if rule.Scope == models.RuleScopeGlobal && userRole != models.UserRoleAdmin {
+		return nil, ErrAuthorizationf("only administrators can modify global rules")
+	}
+
+	if input.Content != nil {
+		content := strings.TrimSpace(*input.Content)
+		if content == "" {
+			return nil, ErrValidation("content cannot be empty")
+		}
+		if rule.Scope != models.RuleScopeGlobal {
+			if err := checkRuleConflict(content); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return s.repo.Update(ctx, id, orgID, input)
 }
 
-func (s *RuleService) Delete(ctx context.Context, id string) error {
-	return s.repo.Delete(ctx, id)
+func (s *RuleService) Delete(ctx context.Context, id string, orgID string) error {
+	return s.repo.Delete(ctx, id, orgID)
 }
 
 func defaultRuleInputs(scope string) []models.CreateRuleInput {

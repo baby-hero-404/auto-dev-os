@@ -10,7 +10,7 @@ type Repository struct {
 	URL             string     `json:"url" gorm:"not null"`
 	Provider        string     `json:"provider" gorm:"default:'github'"`
 	Branch          string     `json:"branch" gorm:"default:'main'"`
-	Token           string     `json:"-" gorm:"default:''"` // never expose in JSON
+	Token           string     `json:"-" gorm:"column:encrypted_token;default:''"` // never expose in JSON
 	ClonePath       string     `json:"clone_path" gorm:"default:''"`
 	CloneStatus     string     `json:"clone_status" gorm:"default:'not_cloned'"`
 	LastValidatedAt *time.Time `json:"last_validated_at,omitempty"`

@@ -27,10 +27,11 @@ func (h *AnalyticsDashboardHandler) Overview(w http.ResponseWriter, r *http.Requ
 }
 
 // AgentPerformance returns per-agent performance metrics.
-// GET /api/v1/analytics/agents?project_id=...
+// GET /api/v1/analytics/agents?org_id=...&project_id=...
 func (h *AnalyticsDashboardHandler) AgentPerformance(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
 	projectID := r.URL.Query().Get("project_id")
-	stats, err := h.svc.AgentPerformance(r.Context(), projectID)
+	stats, err := h.svc.AgentPerformance(r.Context(), orgID, projectID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -39,8 +40,9 @@ func (h *AnalyticsDashboardHandler) AgentPerformance(w http.ResponseWriter, r *h
 }
 
 // TaskAnalytics returns task throughput over time and status distribution.
-// GET /api/v1/analytics/tasks?project_id=...&days=30
+// GET /api/v1/analytics/tasks?org_id=...&project_id=...&days=30
 func (h *AnalyticsDashboardHandler) TaskAnalytics(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
 	projectID := r.URL.Query().Get("project_id")
 	days := 30
 	if daysRaw := r.URL.Query().Get("days"); daysRaw != "" {
@@ -48,7 +50,7 @@ func (h *AnalyticsDashboardHandler) TaskAnalytics(w http.ResponseWriter, r *http
 			days = d
 		}
 	}
-	analytics, err := h.svc.TaskAnalytics(r.Context(), projectID, days)
+	analytics, err := h.svc.TaskAnalytics(r.Context(), orgID, projectID, days)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -57,13 +59,33 @@ func (h *AnalyticsDashboardHandler) TaskAnalytics(w http.ResponseWriter, r *http
 }
 
 // WorkflowAnalytics returns workflow completion rates and step durations.
-// GET /api/v1/analytics/workflows?project_id=...
+// GET /api/v1/analytics/workflows?org_id=...&project_id=...
 func (h *AnalyticsDashboardHandler) WorkflowAnalytics(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
 	projectID := r.URL.Query().Get("project_id")
-	analytics, err := h.svc.WorkflowAnalytics(r.Context(), projectID)
+	analytics, err := h.svc.WorkflowAnalytics(r.Context(), orgID, projectID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, analytics)
+}
+
+// RecentFailures returns latest failed tasks with workflow error context.
+// GET /api/v1/analytics/failures?org_id=...&project_id=...&limit=5
+func (h *AnalyticsDashboardHandler) RecentFailures(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
+	projectID := r.URL.Query().Get("project_id")
+	limit := 5
+	if limitRaw := r.URL.Query().Get("limit"); limitRaw != "" {
+		if parsed, err := strconv.Atoi(limitRaw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	failures, err := h.svc.RecentFailures(r.Context(), orgID, projectID, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, failures)
 }

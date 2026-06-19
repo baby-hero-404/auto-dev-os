@@ -20,13 +20,19 @@ func (r *AnalyticsRepo) RecordLLMUsage(ctx context.Context, usage llm.UsageRecor
 	record := models.TokenUsage{
 		Provider:     usage.Provider,
 		Model:        usage.Model,
-		Tier:         usage.Tier,
+		LevelGroup:   usage.LevelGroup,
 		PromptTokens: usage.PromptTokens,
 		OutputTokens: usage.OutputTokens,
 		CostUSD:      usage.CostUSD,
 		LatencyMS:    usage.LatencyMS,
 		Status:       usage.Status,
 		Error:        usage.Error,
+	}
+	if usage.OrgID != "" {
+		record.OrgID = &usage.OrgID
+	}
+	if usage.CredentialID != "" {
+		record.CredentialID = &usage.CredentialID
 	}
 	if usage.ProjectID != "" {
 		record.ProjectID = &usage.ProjectID
@@ -43,24 +49,30 @@ func (r *AnalyticsRepo) RecordLLMUsage(ctx context.Context, usage llm.UsageRecor
 	return nil
 }
 
-func (r *AnalyticsRepo) TokenUsage(ctx context.Context, projectID string, since time.Time) ([]models.TokenUsageSummary, error) {
+func (r *AnalyticsRepo) TokenUsage(ctx context.Context, orgID string, projectID string, since time.Time) ([]models.TokenUsageSummary, error) {
 	query := r.db.WithContext(ctx).
 		Table("token_usage").
-		Select(`project_id, provider, model, tier,
+		Select(`token_usage.project_id, token_usage.credential_id, COALESCE(pc.label, '') AS key_label, token_usage.provider, token_usage.model, token_usage.level_group,
 			COUNT(*) AS requests,
-			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-			COALESCE(SUM(output_tokens), 0) AS output_tokens,
-			COALESCE(SUM(prompt_tokens + output_tokens), 0) AS total_tokens,
-			COALESCE(SUM(cost_usd), 0) AS cost_usd,
-			COALESCE(AVG(latency_ms), 0) AS avg_latency_ms`).
-		Group("project_id, provider, model, tier").
+			COUNT(CASE WHEN token_usage.status = 'ok' THEN 1 END) AS success_requests,
+			COUNT(CASE WHEN token_usage.status != 'ok' THEN 1 END) AS failed_requests,
+			COALESCE(SUM(token_usage.prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(token_usage.output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(token_usage.prompt_tokens + token_usage.output_tokens), 0) AS total_tokens,
+			COALESCE(SUM(token_usage.cost_usd), 0) AS cost_usd,
+			COALESCE(AVG(token_usage.latency_ms), 0) AS avg_latency_ms`).
+		Joins("LEFT JOIN provider_credentials pc ON token_usage.credential_id = pc.id").
+		Group("token_usage.project_id, token_usage.credential_id, pc.label, token_usage.provider, token_usage.model, token_usage.level_group").
 		Order("cost_usd DESC")
 
+	if orgID != "" {
+		query = query.Where("token_usage.org_id = ?", orgID)
+	}
 	if projectID != "" {
-		query = query.Where("project_id = ?", projectID)
+		query = query.Where("token_usage.project_id = ?", projectID)
 	}
 	if !since.IsZero() {
-		query = query.Where("created_at >= ?", since)
+		query = query.Where("token_usage.created_at >= ?", since)
 	}
 
 	var summaries []models.TokenUsageSummary

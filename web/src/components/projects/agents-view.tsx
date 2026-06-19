@@ -200,7 +200,20 @@ function AgentCard({
           </div>
           <div className="min-w-0">
             <h4 className="truncate font-sans font-semibold text-foreground">{agent.name}</h4>
-            <p className="truncate text-[10px] text-content-muted mt-0.5 font-mono">{agent.model_route}</p>
+            <div className="mt-1 flex items-center gap-1">
+              <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                agent.model_level_group === "fast"
+                  ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                  : agent.model_level_group === "powerful"
+                  ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
+                  : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+              }`}>
+                {agent.model_level_group === "fast" && "⚡ "}
+                {agent.model_level_group === "balanced" && "⚖️ "}
+                {agent.model_level_group === "powerful" && "🚀 "}
+                {agent.model_level_group}
+              </span>
+            </div>
           </div>
         </div>
         <span className="rounded border border-stroke bg-card px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-content-muted shrink-0">

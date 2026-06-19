@@ -31,7 +31,7 @@ func (m *AgentManager) Assign(ctx context.Context, task *models.Task) (*models.A
 		}
 	}
 	status := models.AgentStatusAssigned
-	if _, err := m.repo.Update(ctx, agent.ID, models.UpdateAgentInput{Status: &status}); err != nil {
+	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
 		return nil, err
 	}
 	agent.Status = status
@@ -47,7 +47,39 @@ func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*
 		}
 	}
 	status := models.AgentStatusAssigned
-	if _, err := m.repo.Update(ctx, agent.ID, models.UpdateAgentInput{Status: &status}); err != nil {
+	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
+		return nil, err
+	}
+	agent.Status = status
+	return agent, nil
+}
+
+func (m *AgentManager) AssignBackendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleBackend)
+	if err != nil {
+		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	status := models.AgentStatusAssigned
+	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
+		return nil, err
+	}
+	agent.Status = status
+	return agent, nil
+}
+
+func (m *AgentManager) AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleFrontend)
+	if err != nil {
+		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	status := models.AgentStatusAssigned
+	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
 		return nil, err
 	}
 	agent.Status = status
@@ -55,9 +87,7 @@ func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*
 }
 
 func (m *AgentManager) MarkRunning(ctx context.Context, agentID string) error {
-	status := models.AgentStatusRunning
-	_, err := m.repo.Update(ctx, agentID, models.UpdateAgentInput{Status: &status})
-	return err
+	return m.repo.UpdateStatus(ctx, agentID, models.AgentStatusRunning)
 }
 
 func rolesForTask(task *models.Task) []string {
@@ -72,7 +102,5 @@ func rolesForTask(task *models.Task) []string {
 }
 
 func (m *AgentManager) Release(ctx context.Context, agentID string) error {
-	status := models.AgentStatusIdle
-	_, err := m.repo.Update(ctx, agentID, models.UpdateAgentInput{Status: &status})
-	return err
+	return m.repo.UpdateStatus(ctx, agentID, models.AgentStatusIdle)
 }

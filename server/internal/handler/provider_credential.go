@@ -41,13 +41,14 @@ func (h *ProviderCredentialHandler) List(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *ProviderCredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
 	id := chi.URLParam(r, "credentialID")
 	var input models.UpdateProviderCredentialInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	cred, err := h.svc.Update(r.Context(), id, input)
+	cred, err := h.svc.Update(r.Context(), orgID, id, input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -56,8 +57,9 @@ func (h *ProviderCredentialHandler) Update(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ProviderCredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
 	id := chi.URLParam(r, "credentialID")
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	if err := h.svc.Delete(r.Context(), orgID, id); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -65,8 +67,9 @@ func (h *ProviderCredentialHandler) Delete(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ProviderCredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
+	orgID := chi.URLParam(r, "orgID")
 	id := chi.URLParam(r, "credentialID")
-	if err := h.svc.TestConnection(r.Context(), id); err != nil {
+	if err := h.svc.TestConnection(r.Context(), orgID, id); err != nil {
 		writeServiceError(w, err)
 		return
 	}

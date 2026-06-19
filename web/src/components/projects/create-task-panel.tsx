@@ -2,7 +2,7 @@
 
 import { FormEvent, useState, useEffect, useRef } from "react";
 import { Bot, Loader2, Plus, X } from "lucide-react";
-import type { Agent } from "@/lib/types";
+import type { Agent, Repository } from "@/lib/types";
 
 type TaskComplexity = "easy" | "medium" | "hard";
 
@@ -13,10 +13,12 @@ export type CreateTaskPayload = {
   priority: number;
   labels: string[];
   agent_id?: string;
+  repository_id?: string;
 };
 
 export function CreateTaskPanel({
   agents,
+  repositories,
   isOpen,
   isSubmitting,
   error,
@@ -24,6 +26,7 @@ export function CreateTaskPanel({
   onSubmit,
 }: {
   agents: Agent[];
+  repositories: Repository[];
   isOpen: boolean;
   isSubmitting: boolean;
   error: string;
@@ -37,6 +40,7 @@ export function CreateTaskPanel({
   const [labels, setLabels] = useState<string[]>([]);
   const [labelInput, setLabelInput] = useState("");
   const [agentID, setAgentID] = useState("");
+  const [repositoryID, setRepositoryID] = useState("");
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +117,7 @@ export function CreateTaskPanel({
       priority,
       labels: finalLabels,
       agent_id: agentID || undefined,
+      repository_id: repositoryID || undefined,
     });
     if (!created) return;
 
@@ -123,6 +128,7 @@ export function CreateTaskPanel({
     setLabels([]);
     setLabelInput("");
     setAgentID("");
+    setRepositoryID("");
   }
 
   if (!isOpen) return null;
@@ -252,6 +258,22 @@ export function CreateTaskPanel({
             </Field>
           </div>
 
+          <Field label="Repository Context">
+            <select
+              value={repositoryID}
+              onChange={(e) => setRepositoryID(e.target.value)}
+              className="w-full rounded-md border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
+              disabled={isSubmitting}
+            >
+              <option value="">No specific repository</option>
+              {repositories.map(repo => (
+                <option key={repo.id} value={repo.id}>
+                  {repo.url.split("/").pop()?.replace(".git", "")} ({repo.branch})
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <Field label="Labels">
             <div className="space-y-2">
               <div className="flex gap-2">
@@ -348,7 +370,7 @@ export function CreateTaskPanel({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-semibold text-foreground">{agent.name}</div>
-                      <div className="truncate text-[10px] text-content-muted">Role: {agent.role} • {agent.model_route || "Default Route"}</div>
+                      <div className="truncate text-[10px] text-content-muted">Role: {agent.role} • {agent.model_level_group || "Default Route"}</div>
                     </div>
                   </button>
                 );

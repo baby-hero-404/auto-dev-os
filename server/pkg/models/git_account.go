@@ -9,7 +9,7 @@ type GitAccount struct {
 	Provider    string    `json:"provider" gorm:"not null"` // 'github', 'gitlab', 'bitbucket'
 	DisplayName string    `json:"display_name" gorm:"not null"`
 	BaseURL     string    `json:"base_url" gorm:"default:''"`
-	Token       string    `json:"-" gorm:"default:''"` // never expose in JSON
+	Token       string    `json:"-" gorm:"column:encrypted_token;default:''"` // never expose in JSON
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

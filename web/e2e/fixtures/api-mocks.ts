@@ -282,8 +282,49 @@ export async function installApiMocks(page: Page, state = createMockState()) {
       open_prs: 0,
       success_rate: 0,
       avg_completion_ms: 0,
-      total_token_cost: 0,
-      total_tokens_used: 0,
+      total_token_cost: 0.125,
+      total_tokens_used: 1000,
+    });
+  });
+
+  await page.route("**/api/v1/analytics/token-usage**", async (route) => {
+    await json(route, [
+      {
+        project_id: "proj-1",
+        credential_id: "cred-1",
+        key_label: "OpenAI-Prod-Key1",
+        provider: "openai",
+        model: "gpt-4o",
+        tier: "balanced",
+        requests: 10,
+        success_requests: 8,
+        failed_requests: 2,
+        prompt_tokens: 500,
+        output_tokens: 500,
+        total_tokens: 1000,
+        cost_usd: 0.125,
+        avg_latency_ms: 150,
+      },
+    ]);
+  });
+
+  await page.route("**/api/v1/analytics/agents**", async (route) => {
+    await json(route, []);
+  });
+
+  await page.route("**/api/v1/analytics/tasks**", async (route) => {
+    await json(route, {
+      by_status: { todo: 1, spec_review: 0, coding: 0, testing: 0, success: 0, failed: 0 },
+      throughput: [],
+    });
+  });
+
+  await page.route("**/api/v1/analytics/workflows**", async (route) => {
+    await json(route, {
+      completion_rate: 100,
+      avg_duration_ms: 5000,
+      total_workflows: 1,
+      step_stats: [],
     });
   });
 

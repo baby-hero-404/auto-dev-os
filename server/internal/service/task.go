@@ -11,15 +11,28 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-type TaskService struct{ repo *repository.TaskRepo }
+type TaskService struct {
+	repo        *repository.TaskRepo
+	projectRepo *repository.ProjectRepo
+	repoRepo    *repository.RepositoryRepo
+}
 
-func NewTaskService(repo *repository.TaskRepo) *TaskService {
-	return &TaskService{repo: repo}
+func NewTaskService(repo *repository.TaskRepo, projectRepo *repository.ProjectRepo, repoRepo *repository.RepositoryRepo) *TaskService {
+	return &TaskService{repo: repo, projectRepo: projectRepo, repoRepo: repoRepo}
 }
 
 func (s *TaskService) Create(ctx context.Context, projectID string, input models.CreateTaskInput) (*models.Task, error) {
 	if input.Title == "" {
 		return nil, ErrValidation("title is required")
+	}
+	if input.RepositoryID != nil && *input.RepositoryID != "" {
+		repo, err := s.repoRepo.GetByID(ctx, *input.RepositoryID)
+		if err != nil {
+			return nil, ErrValidation("invalid repository_id")
+		}
+		if repo.ProjectID != projectID {
+			return nil, ErrValidation("repository does not belong to the project")
+		}
 	}
 	return s.repo.Create(ctx, projectID, input)
 }
@@ -61,14 +74,22 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		return nil, fmt.Errorf("marshal analysis: %w", err)
 	}
 
+	project, err := s.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+
 	status := models.TaskStatusAnalyzing
 	specStatus := models.TaskSpecStatusDraft
 	if len(analysis.ClarificationQuestions) > 0 {
 		specStatus = models.TaskSpecStatusChangesRequested
 		status = models.TaskStatusSpecReview
-	} else if analysis.Complexity == models.TaskComplexityEasy {
+	} else if project.AutoReviewPolicy == "always_review" {
+		specStatus = models.TaskSpecStatusPendingReview
+		status = models.TaskStatusSpecReview
+	} else if analysis.Complexity == models.TaskComplexityEasy || project.AutoReviewPolicy == "auto_merge" {
 		specStatus = models.TaskSpecStatusAutoApproved
-		status = models.TaskStatusPlanning
+		status = models.TaskStatusCoding
 	} else {
 		specStatus = models.TaskSpecStatusPendingReview
 		status = models.TaskStatusSpecReview
@@ -76,8 +97,6 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 	if task.Status != models.TaskStatusTodo &&
 		task.Status != models.TaskStatusAnalyzing &&
 		task.Status != models.TaskStatusSpecReview &&
-		task.Status != models.TaskStatusAssigned &&
-		task.Status != models.TaskStatusPlanning &&
 		task.Status != models.TaskStatusFailed &&
 		task.Status != "" {
 		return nil, ErrValidation(fmt.Sprintf("invalid task transition from %q to %q during analysis", task.Status, status))
@@ -120,7 +139,7 @@ func (s *TaskService) ApproveAnalysis(ctx context.Context, id string) (*models.T
 		return nil, err
 	}
 	specStatus := models.TaskSpecStatusApproved
-	status := models.TaskStatusPlanning
+	status := models.TaskStatusCoding
 	if err := workflow.ValidateTaskTransition(task.Status, status); err != nil {
 		return nil, ErrValidation(err.Error())
 	}
@@ -207,6 +226,7 @@ func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
 			"Run automated tests before PR creation.",
 		},
 		ClarificationQuestions: questions,
+		TaskRules:              []string{},
 		ProposalMD:             fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description),
 		SpecsMD:                fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description),
 		DesignMD:               "## Design\n\nImplementation design placeholder.\n",

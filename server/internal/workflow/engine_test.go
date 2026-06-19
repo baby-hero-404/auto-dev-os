@@ -92,3 +92,49 @@ func TestValidateDAG_Cycle(t *testing.T) {
 		t.Fatal("expected cycle detection error")
 	}
 }
+
+func TestEngine_ResumeFromCheckpoint(t *testing.T) {
+	var mu sync.Mutex
+	executed := []string{}
+	run := func(id string) StepFunc {
+		return func(context.Context, StepContext) (map[string]any, error) {
+			mu.Lock()
+			executed = append(executed, id)
+			mu.Unlock()
+			return map[string]any{"status": "ok"}, nil
+		}
+	}
+
+	def := Definition{Steps: []StepDefinition{
+		{ID: "analyze", Run: run("analyze")},
+		{ID: "code", DependsOn: []string{"analyze"}, Run: run("code")},
+		{ID: "test", DependsOn: []string{"code"}, Run: run("test")},
+		{ID: "pr", DependsOn: []string{"test"}, Run: run("pr")},
+	}}
+
+	// Simulate: "analyze" already succeeded in a previous run.
+	engine := &Engine{
+		MaxParallel: 1,
+		CompletedSteps: map[string]map[string]any{
+			"analyze": {"status": "ok"},
+		},
+	}
+
+	result, err := engine.Run(context.Background(), def, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if result.Status["pr"] != StepStatusSuccess {
+		t.Fatalf("expected pr step success, got %q", result.Status["pr"])
+	}
+	// "analyze" should NOT have been re-executed
+	for _, id := range executed {
+		if id == "analyze" {
+			t.Fatal("analyze step should have been skipped (was in CompletedSteps)")
+		}
+	}
+	// code, test, pr should have run
+	if len(executed) != 3 {
+		t.Fatalf("expected 3 steps executed (code, test, pr), got %d: %v", len(executed), executed)
+	}
+}

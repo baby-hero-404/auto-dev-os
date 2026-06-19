@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -14,6 +15,7 @@ type ServerConfig struct {
 	Port        string `mapstructure:"port"`
 	WebPort     string `mapstructure:"web_port"`
 	CORSOrigins string `mapstructure:"cors_allowed_origins"`
+	Version     string `mapstructure:"version"`
 }
 
 type DatabaseConfig struct {
@@ -77,9 +79,14 @@ type LoggingConfig struct {
 	FileRoot           string `mapstructure:"file_root"`
 }
 
+type AutoCodeOSConfig struct {
+	DataRoot string `mapstructure:"data_root"`
+}
+
 // Config holds all configuration for the application.
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
+	AutoCodeOS AutoCodeOSConfig `mapstructure:"auto_code_os"`
+	Server     ServerConfig     `mapstructure:"server"`
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Auth      AuthConfig      `mapstructure:"auth"`
 	LLM       LLMConfig       `mapstructure:"llm"`
@@ -119,10 +126,13 @@ func Load() (*Config, error) {
 func configure(v *viper.Viper) error {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	v.BindEnv("auto_code_os.data_root", "AUTO_CODE_OS_DATA_ROOT")
+
 	// Bind legacy environment variables to new nested structure
 	v.BindEnv("server.port", "SERVER_PORT")
 	v.BindEnv("server.web_port", "WEB_PORT")
 	v.BindEnv("server.cors_allowed_origins", "CORS_ALLOWED_ORIGINS")
+	v.BindEnv("server.version", "SERVER_VERSION")
 	v.BindEnv("llm.openai_api_key", "OPENAI_API_KEY")
 	v.BindEnv("llm.anthropic_api_key", "ANTHROPIC_API_KEY")
 	v.BindEnv("llm.gemini_api_key", "GEMINI_API_KEY")
@@ -170,6 +180,12 @@ func readConfigFile(v *viper.Viper) {
 func normalize(cfg *Config) error {
 	cfg.LLM.Provider = strings.ToLower(cfg.LLM.Provider)
 	cfg.Sandbox.Runtime = strings.ToLower(cfg.Sandbox.Runtime)
+
+	if cfg.AutoCodeOS.DataRoot != "" {
+		cfg.Sandbox.WorkspaceRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "workspaces")
+		cfg.Sandbox.SkillsRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "skills")
+		cfg.Logging.FileRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "logs")
+	}
 
 	if err := configureLLM(&cfg.LLM); err != nil {
 		return err

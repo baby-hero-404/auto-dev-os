@@ -1,16 +1,12 @@
 import { request } from "./client";
 import type {
-  CreateModelRouteInput,
+  CreateProviderModelInput,
   CreateProviderCredentialInput,
-  CreateVirtualKeyInput,
-  ModelRoute,
+  ProviderModel,
   ProviderCredential,
   TestProviderCredentialInput,
-  UpdateModelRouteInput,
+  UpdateProviderModelInput,
   UpdateProviderCredentialInput,
-  UpdateVirtualKeyInput,
-  CreatedVirtualKey,
-  VirtualKey,
 } from "../types";
 
 export const providerCredentials = {
@@ -52,55 +48,27 @@ export const providerCredentials = {
   },
 };
 
-export const virtualKeys = {
-  list(orgID: string, token: string) {
-    return request<VirtualKey[]>(`/organizations/${orgID}/virtual-keys`, { token });
-  },
-  create(orgID: string, token: string, input: CreateVirtualKeyInput) {
-    return request<CreatedVirtualKey>(`/organizations/${orgID}/virtual-keys`, {
-      method: "POST",
-      token,
-      body: JSON.stringify(input),
-    });
-  },
-  get(orgID: string, virtualKeyID: string, token: string) {
-    return request<VirtualKey>(`/organizations/${orgID}/virtual-keys/${virtualKeyID}`, { token });
-  },
-  update(orgID: string, virtualKeyID: string, token: string, input: UpdateVirtualKeyInput) {
-    return request<VirtualKey>(`/organizations/${orgID}/virtual-keys/${virtualKeyID}`, {
-      method: "PUT",
-      token,
-      body: JSON.stringify(input),
-    });
-  },
-  revoke(orgID: string, virtualKeyID: string, token: string) {
-    return request<void>(`/organizations/${orgID}/virtual-keys/${virtualKeyID}`, {
-      method: "DELETE",
-      token,
-    });
-  },
-};
 
-export const modelRoutes = {
+export const providerModels = {
   list(orgID: string, token: string) {
-    return request<ModelRoute[]>(`/organizations/${orgID}/model-routes`, { token });
+    return request<ProviderModel[]>(`/organizations/${orgID}/provider-models`, { token });
   },
-  create(orgID: string, token: string, input: CreateModelRouteInput) {
-    return request<ModelRoute>(`/organizations/${orgID}/model-routes`, {
+  create(orgID: string, token: string, input: CreateProviderModelInput) {
+    return request<ProviderModel>(`/organizations/${orgID}/provider-models`, {
       method: "POST",
       token,
       body: JSON.stringify(input),
     });
   },
-  update(orgID: string, routeID: string, token: string, input: UpdateModelRouteInput) {
-    return request<ModelRoute>(`/organizations/${orgID}/model-routes/${routeID}`, {
+  update(orgID: string, modelID: string, token: string, input: UpdateProviderModelInput) {
+    return request<ProviderModel>(`/organizations/${orgID}/provider-models/${modelID}`, {
       method: "PUT",
       token,
       body: JSON.stringify(input),
     });
   },
-  remove(orgID: string, routeID: string, token: string) {
-    return request<void>(`/organizations/${orgID}/model-routes/${routeID}`, {
+  remove(orgID: string, modelID: string, token: string) {
+    return request<void>(`/organizations/${orgID}/provider-models/${modelID}`, {
       method: "DELETE",
       token,
     });

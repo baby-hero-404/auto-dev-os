@@ -17,10 +17,11 @@ function compactNumber(value: number) {
 }
 
 export default function GatewayPage() {
-  useSession();
+  const session = useSession();
+  const orgID = session?.user.org_id ?? "";
   const { data: usage } = useAuthedSWR(
-    ["token-usage"],
-    (token) => api.tokenUsage(token, 30),
+    orgID ? ["token-usage", orgID] : null,
+    (token) => api.tokenUsage(token, orgID, 30),
   );
 
   const safeUsage = usage || [];
@@ -36,7 +37,7 @@ export default function GatewayPage() {
   );
   const avgLatency = totals.requests > 0 ? totals.latencyWeighted / totals.requests : 0;
   const chartData = safeUsage.map((item: TokenUsageSummary) => ({
-    name: `${item.provider}/${item.tier}`,
+    name: `${item.provider}/${item.level_group}`,
     tokens: item.total_tokens,
     cost: item.cost_usd,
   }));
@@ -65,7 +66,7 @@ export default function GatewayPage() {
       <section className="mb-5 rounded-lg border border-stroke bg-panel p-5">
         <div className="mb-4">
           <h3 className="font-mono font-semibold">Token Usage By Route</h3>
-          <p className="text-sm text-content-muted">Grouped by provider and routing tier.</p>
+          <p className="text-sm text-content-muted">Grouped by provider and routing level group.</p>
         </div>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -98,8 +99,8 @@ export default function GatewayPage() {
           </thead>
           <tbody>
             {safeUsage.map((item) => (
-              <tr key={`${item.provider}-${item.model}-${item.tier}`} className="border-b border-stroke/60">
-                <td className="px-4 py-3 font-mono text-brand-primary">{item.provider}/{item.tier}</td>
+              <tr key={`${item.provider}-${item.model}-${item.level_group}`} className="border-b border-stroke/60">
+                <td className="px-4 py-3 font-mono text-brand-primary">{item.provider}/{item.level_group}</td>
                 <td className="px-4 py-3">{item.model}</td>
                 <td className="px-4 py-3">{compactNumber(item.requests)}</td>
                 <td className="px-4 py-3">{compactNumber(item.total_tokens)}</td>

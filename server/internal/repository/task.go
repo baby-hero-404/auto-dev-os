@@ -20,7 +20,7 @@ func (r *TaskRepo) Create(ctx context.Context, projectID string, input models.Cr
 		ProjectID: projectID, Title: input.Title, Description: input.Description,
 		Complexity: input.Complexity, Priority: input.Priority,
 		Labels: pq.StringArray(input.Labels), ParentTaskID: input.ParentTaskID,
-		AgentID: input.AgentID, SpecStatus: models.TaskSpecStatusNone,
+		AgentID: input.AgentID, RepositoryID: input.RepositoryID, SpecStatus: models.TaskSpecStatusNone,
 	}
 	if err := r.db.WithContext(ctx).Create(t).Error; err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
@@ -79,6 +79,9 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 	if input.ParentTaskID != nil {
 		updates["parent_task_id"] = *input.ParentTaskID
 	}
+	if input.RepositoryID != nil {
+		updates["repository_id"] = *input.RepositoryID
+	}
 	if input.Labels != nil {
 		updates["labels"] = pq.StringArray(input.Labels)
 	}
@@ -87,6 +90,12 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 	}
 	if input.SpecStatus != nil {
 		updates["spec_status"] = *input.SpecStatus
+	}
+	if input.PRURLs != nil {
+		updates["pr_urls"] = *input.PRURLs
+	}
+	if input.PRMetadata != nil {
+		updates["pr_metadata"] = input.PRMetadata
 	}
 	if err := r.db.WithContext(ctx).Model(t).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update task: %w", err)

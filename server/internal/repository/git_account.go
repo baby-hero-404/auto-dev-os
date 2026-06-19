@@ -47,6 +47,24 @@ func (r *GitAccountRepo) ListByOrgID(ctx context.Context, orgID string) ([]model
 	return accounts, nil
 }
 
+func (r *GitAccountRepo) GetDefaultByProjectAndProvider(ctx context.Context, projectID string, provider string) (*models.GitAccount, error) {
+	acc := &models.GitAccount{}
+	query := `
+		SELECT ga.* FROM git_accounts ga
+		JOIN projects p ON p.org_id = ga.org_id
+		WHERE p.id = ? AND ga.provider = ?
+		ORDER BY ga.created_at ASC
+		LIMIT 1
+	`
+	if err := r.db.WithContext(ctx).Raw(query, projectID, provider).Scan(acc).Error; err != nil {
+		return nil, fmt.Errorf("get default git account: %w", mapError(err))
+	}
+	if acc.ID == "" {
+		return nil, ErrNotFound
+	}
+	return acc, nil
+}
+
 func (r *GitAccountRepo) Update(ctx context.Context, id string, input models.UpdateGitAccountInput) (*models.GitAccount, error) {
 	acc, err := r.GetByID(ctx, id)
 	if err != nil {

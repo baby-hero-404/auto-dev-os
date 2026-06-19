@@ -52,7 +52,38 @@ test.describe("Auto Code OS E2E flows", () => {
     await page.getByRole("link", { name: /Website Refactor/i }).click();
 
     await expect(page.getByRole("heading", { name: "Website Refactor" })).toBeVisible();
+    await page.getByRole("button", { name: "Repositories" }).click();
     await expect(page.getByText("github.com/test/repo.git")).toBeVisible();
-    await expect(page.getByText("Add API Authentication")).toBeVisible();
+  });
+
+  test("shows only the three agent model levels in the hire wizard", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel(/email/i).fill("test@autocodeos.com");
+    await page.getByLabel(/password/i).fill("supersecretpassword");
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await page.getByRole("link", { name: "Agents", exact: true }).click();
+    await page.getByRole("button", { name: "Hire Agent" }).click();
+    await page.getByLabel(/name/i).fill("Quality Lead");
+    await page.getByLabel(/goal/i).fill("Validate the available model levels.");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    const modelLevel = page.getByRole("combobox", { name: "Model Intelligence Level" });
+    await expect(modelLevel).toBeVisible();
+    await expect(modelLevel.locator("option")).toHaveCount(3);
+    await expect(modelLevel.locator("option")).toHaveText(["fast", "balanced", "powerful"]);
+  });
+
+  test("displays key level analytics report on the dashboard", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel(/email/i).fill("test@autocodeos.com");
+    await page.getByLabel(/password/i).fill("supersecretpassword");
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await page.getByRole("link", { name: "Analytics", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Virtual Key Usage & Spend" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "API Request Success Rate" })).toBeVisible();
+    await expect(page.getByText("OpenAI-Prod-Key1")).toBeVisible();
   });
 });

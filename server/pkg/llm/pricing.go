@@ -2,15 +2,15 @@ package llm
 
 import "strings"
 
-func tierForModel(model string) string {
+func levelGroupForModel(model string) string {
 	m := strings.ToLower(model)
 	switch {
 	case strings.Contains(m, "haiku"), strings.Contains(m, "flash"), strings.Contains(m, "mini"), strings.Contains(m, "nano"):
-		return TierFast
+		return LevelFast
 	case strings.Contains(m, "opus"), strings.Contains(m, "pro"), strings.Contains(m, "4o"):
-		return TierPowerful
+		return LevelPowerful
 	default:
-		return TierBalanced
+		return LevelBalanced
 	}
 }
 
@@ -59,7 +59,7 @@ func MetadataForModel(provider, model string) ProviderMetadata {
 	return ProviderMetadata{
 		Provider:        provider,
 		Model:           model,
-		Tier:            tierForModel(model),
+		LevelGroup:      levelGroupForModel(model),
 		InputCostPer1K:  inputCostPer1K(model),
 		OutputCostPer1K: outputCostPer1K(model),
 	}

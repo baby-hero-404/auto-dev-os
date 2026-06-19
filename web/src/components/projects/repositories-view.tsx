@@ -17,6 +17,7 @@ export type LinkRepositoryPayload = {
 
 interface RepositoriesViewProps {
   projectID: string;
+  project: { default_branch?: string };
   token: string;
   orgID: string;
   repositories: Repository[];
@@ -31,6 +32,7 @@ interface RepositoriesViewProps {
 
 export function RepositoriesView({
   projectID,
+  project,
   token,
   orgID,
   repositories,
@@ -43,7 +45,7 @@ export function RepositoriesView({
   onRefresh,
 }: RepositoriesViewProps) {
   const [url, setURL] = useState("");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState(project.default_branch || "main");
   const [tokenOverride, setTokenOverride] = useState("");
   const [gitAccountID, setGitAccountID] = useState("");
 
@@ -136,7 +138,7 @@ export function RepositoriesView({
     const linked = await onLinkRepository({
       url: trimmedURL,
       provider,
-      branch: branch.trim() || "main",
+      branch: branch.trim() || project?.default_branch || "main",
       token: tokenOverride.trim(),
       git_account_id: gitAccountID || undefined,
     });
@@ -305,22 +307,24 @@ export function RepositoriesView({
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
-              <label className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
-                Git Account
+              <label className="flex flex-col gap-1.5">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
+                  Git Account
+                </span>
+                <select
+                  value={gitAccountID}
+                  onChange={(event) => setGitAccountID(event.target.value)}
+                  className="w-full rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none cursor-pointer"
+                  disabled={isLinking}
+                >
+                  <option value="">Manual token / no account</option>
+                  {gitAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.display_name}
+                    </option>
+                  ))}
+                </select>
               </label>
-              <select
-                value={gitAccountID}
-                onChange={(event) => setGitAccountID(event.target.value)}
-                className="w-full rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none cursor-pointer"
-                disabled={isLinking}
-              >
-                <option value="">Manual token / no account</option>
-                {gitAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.display_name}
-                  </option>
-                ))}
-              </select>
             </div>
           )}
 
@@ -355,10 +359,10 @@ export function RepositoriesView({
 
           {fetchBranchesError && <p className="text-xs text-red-400">{fetchBranchesError}</p>}
 
-          <div className="flex flex-col gap-1.5">
-            <label className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
+          <label className="flex flex-col gap-1.5">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
               Target Branch
-            </label>
+            </span>
             {fetchedBranches.length > 0 ? (
               <select
                 value={branch}
@@ -381,7 +385,7 @@ export function RepositoriesView({
                 disabled={isLinking}
               />
             )}
-          </div>
+          </label>
 
           {error && (
             <p className="rounded border border-red-400/30 bg-red-950/40 p-2 text-xs text-red-200">{error}</p>

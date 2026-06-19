@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -84,6 +85,11 @@ func (m *mockWorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) (
 	return []models.WorkflowCheckpoint{}, nil
 }
 
+func (m *mockWorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
+	m.checkpoint = nil
+	return nil
+}
+
 func (m *mockWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
 	return nil
 }
@@ -104,6 +110,14 @@ func (m *mockAgentAssigner) AssignReviewer(ctx context.Context, task *models.Tas
 	return m.agent, nil
 }
 
+func (m *mockAgentAssigner) AssignBackendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	return m.agent, nil
+}
+
+func (m *mockAgentAssigner) AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	return m.agent, nil
+}
+
 func (m *mockAgentAssigner) MarkRunning(ctx context.Context, agentID string) error {
 	return nil
 }
@@ -119,8 +133,10 @@ type mockSandboxRuntime struct {
 func (m *mockSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
 	m.commands = append(m.commands, req.Command...)
 	stdout := ""
-	if len(req.Command) >= 3 && req.Command[2] == "git diff" {
+	if len(req.Command) >= 3 && strings.Contains(req.Command[2], "git diff") {
 		stdout = "diff --git a/file.go b/file.go\n+new line"
+	} else if len(req.Command) >= 3 && strings.Contains(req.Command[2], "git status --porcelain") {
+		stdout = " M file.go\n"
 	}
 	return &sandbox.CommandResult{
 		ExitCode: 0,
@@ -148,7 +164,7 @@ func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*ll
 	lastMsg := messages[len(messages)-1].Content
 	content := `{"patch": "diff --git a/main.go b/main.go\n"}`
 	for k, v := range m.responses {
-		if len(lastMsg) > 0 && (lastMsg == k || lastMsg[len(lastMsg)-1] == k[len(k)-1]) {
+		if strings.Contains(lastMsg, k) {
 			content = v
 			break
 		}
@@ -165,6 +181,7 @@ type mockGitOpsClient struct {
 	clonedRepo    string
 	createdBranch string
 	committedMsg  string
+	committedFiles int
 	prTitle       string
 }
 
@@ -178,13 +195,13 @@ func (m *mockGitOpsClient) CloneForTask(ctx context.Context, repoURL, branch, lo
 	return branch, nil
 }
 
-func (m *mockGitOpsClient) CreateBranch(ctx context.Context, repoURL, branchName string) error {
+func (m *mockGitOpsClient) CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error {
 	m.createdBranch = branchName
 	return nil
 }
 
-func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, repoURL, branchName, message string, files map[string]string, agentRole string) error {
-	m.committedMsg = message
+func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error {
+	m.committedFiles = len(files)
 	return nil
 }
 
@@ -295,7 +312,7 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	appliedPatch := false
 	capturedDiff := false
 	for _, cmd := range sandboxRuntime.commands {
-		if cmd == "git apply patch.diff" || cmd == "git apply --recount --whitespace=nowarn patch.diff" {
+		if strings.Contains(cmd, "patch.diff") {
 			appliedPatch = true
 		}
 		if cmd == "git diff" || strings.Contains(cmd, "git diff") {
@@ -314,7 +331,7 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 		t.Errorf("expected branch autocode/task-task-123, got %s", gitOps.createdBranch)
 	}
 	if gitOps.prTitle != "AutoCodeOS: Test Task" {
-		t.Errorf("expected PR title, got %s", gitOps.prTitle)
+		t.Errorf("expected PR title AutoCodeOS: Test Task, got %s", gitOps.prTitle)
 	}
 
 	// 4. Verify artifacts were saved in DB
@@ -474,3 +491,328 @@ func TestOrchestrator_PruneLogsHonorsRetention(t *testing.T) {
 		t.Fatalf("expected new log file retained: %v", err)
 	}
 }
+
+func TestMatchAffectedFile(t *testing.T) {
+	tests := []struct {
+		pattern  string
+		file     string
+		expected bool
+	}{
+		// Exact Match
+		{"internal/app/backend/handlers.go", "internal/app/backend/handlers.go", true},
+		{"internal/app/backend/handlers.go", "internal/app/backend/other.go", false},
+
+		// Glob Match
+		{"*.go", "main.go", true},
+		{"internal/**/*.go", "internal/app/backend/handlers.go", false}, // filepath.Match doesn't support ** recursive glob
+
+		// Extension / Description Matches
+		{"New GoLang source files (.go)", "internal/app/backend/handlers.go", true},
+		{"New GoLang source files (.go)", "go.mod", false},
+		{"Documentation files (if applicable)", "README.md", true},
+
+		// Catch-all
+		{"All relevant source files of the original project (language unknown)", "internal/app/backend/handlers.go", true},
+		{"All relevant source files", "package.json", true},
+
+		// Filename Inclusion
+		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "go.mod", true},
+		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "Dockerfile", true},
+		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "main.go", false},
+	}
+
+	for i, tc := range tests {
+		actual := matchAffectedFile(tc.pattern, tc.file)
+		if actual != tc.expected {
+			t.Errorf("Test %d failed: matchAffectedFile(%q, %q) expected %v, got %v", i, tc.pattern, tc.file, tc.expected, actual)
+		}
+	}
+}
+
+func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-1",
+		ProjectID:   "proj-1",
+		Title:       "Test Task",
+		Description: "Simple test description",
+		Complexity:  models.TaskComplexityMedium,
+		SpecStatus:  models.TaskSpecStatusDraft,
+	}
+
+	agent := &models.Agent{
+		ID:            "agent-1",
+		Name:          "Agent 1",
+		AutonomyLevel: models.AgentAutonomyAutonomous,
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-1"}}
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	llmResponses := map[string]any{
+		"complexity":              "medium",
+		"spec_status":             "approved",
+		"clarification_questions": []string{},
+		"affected_files":          []string{},
+		"execution_plan":          []string{},
+		"system_prompt":           "mock",
+	}
+	rawBytes, _ := json.Marshal(llmResponses)
+	mockLLM := &mockLLMProvider{responses: map[string]string{
+		"Analyze": string(rawBytes),
+	}}
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-1")
+	analyzeRunner := runners[workflow.StepAnalyze]
+
+	res, err := analyzeRunner(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error for autonomous agent: %v", err)
+	}
+
+	if task.SpecStatus != models.TaskSpecStatusAutoApproved {
+		t.Errorf("expected spec status AutoApproved, got %s", task.SpecStatus)
+	}
+	if task.Status != models.TaskStatusCoding {
+		t.Errorf("expected task status Coding, got %s", task.Status)
+	}
+	if res["spec_status"] != models.TaskSpecStatusAutoApproved {
+		t.Errorf("expected output spec_status AutoApproved, got %v", res["spec_status"])
+	}
+}
+
+func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-loop",
+		ProjectID:   "proj-loop",
+		Title:       "Test Loop Task",
+		Complexity:  models.TaskComplexityMedium,
+		Status:      models.TaskStatusCoding,
+	}
+
+	agent := &models.Agent{
+		ID:   "agent-loop",
+		Role: models.AgentRoleBackend,
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	job := &models.WorkflowJob{ID: "job-loop"}
+	workflowRepo := &mockWorkflowRepo{job: job}
+
+	llmResponses := map[string]string{
+		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true}`,
+	}
+	mockLLM := &mockLLMProvider{responses: llmResponses}
+	sandboxRuntime := &mockSandboxRuntime{}
+
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-loop")
+	fixRunner := runners[workflow.StepFix]
+
+	// 1. Run without cycle limit reached
+	ctx := context.Background()
+	stepCtx := workflow.StepContext{
+		Inputs: map[string]map[string]any{
+			workflow.StepReview: {
+				"cycle_limit_reached": false,
+				"parsed": map[string]any{
+					"findings": []any{"finding 1"},
+				},
+			},
+		},
+	}
+	res, err := fixRunner(ctx, stepCtx)
+	if !errors.Is(err, workflow.ErrReviewFixLoop) {
+		t.Errorf("expected ErrReviewFixLoop, got err=%v, res=%v", err, res)
+	}
+
+	// 2. Run with cycle limit reached
+	stepCtxLimit := workflow.StepContext{
+		Inputs: map[string]map[string]any{
+			workflow.StepReview: {
+				"cycle_limit_reached": true,
+				"parsed": map[string]any{
+					"findings": []any{"finding 1"},
+				},
+			},
+		},
+	}
+	resLimit, errLimit := fixRunner(ctx, stepCtxLimit)
+	if errLimit != nil {
+		t.Errorf("expected no error when limit is reached, got err=%v", errLimit)
+	}
+	if resLimit["status"] != "skipped" {
+		t.Errorf("expected status skipped, got %v", resLimit["status"])
+	}
+}
+
+func TestOrchestrator_Resume_DoesNotLoseCode(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "orch-resume-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:        "task-resume-123",
+		ProjectID: "proj-resume-123",
+	}
+	agent := &models.Agent{
+		ID:   "agent-123",
+		Name: "Test Agent",
+	}
+
+	repo := models.Repository{
+		ID:        "repo-123",
+		ProjectID: "proj-resume-123",
+		URL:       "https://github.com/test/repo.git",
+		Branch:    "main",
+	}
+
+	// Mock workspace state with .git so it looks existing
+	localPath := sandbox.WorkspacePath(tmpDir, task.ID)
+	gitDir := filepath.Join(localPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("failed to setup mock git dir: %v", err)
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+	sandboxRuntime := &mockSandboxRuntime{}
+	gitOps := &mockGitOpsClient{}
+	reposRepo := &mockRepositoriesRepo{repo: repo}
+
+	// Set up workflow repo with a successful checkpoint for code_backend
+	workflowRepo := &mockWorkflowRepo{
+		job: &models.WorkflowJob{
+			ID:     "job-123",
+			TaskID: task.ID,
+			Status: models.WorkflowJobStatusQueued,
+		},
+		checkpoint: &models.WorkflowCheckpoint{
+			TaskID: task.ID,
+			Step:   workflow.StepCodeBackend,
+			State:  []byte(`{"status": "success"}`),
+		},
+	}
+
+	orch := NewOrchestrator(taskRepo, workflowRepo, agentAssigner, sandboxRuntime)
+	orch.SetGitOpsClient(gitOps)
+	orch.SetRepositoryRepository(reposRepo)
+	orch.SetWorkspaceRoot(tmpDir)
+
+	// Since hasSuccessfulCodeStep is true and local git directory exists,
+	// ensureWorkspaceCloned must NOT call resetExistingWorkspace (so gitOps must not be queried or clean git commands run).
+	err = orch.ensureWorkspaceCloned(context.Background(), task, agent)
+	if err != nil {
+		t.Errorf("expected no error in ensureWorkspaceCloned, got %v", err)
+	}
+}
+
+func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-fix-123",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusCoding,
+	}
+	agent := &models.Agent{
+		ID: "agent-123",
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{
+		job: &models.WorkflowJob{
+			ID:     "job-123",
+			TaskID: task.ID,
+		},
+		// Return pr_rejection feedback in checkpoints
+		checkpoint: &models.WorkflowCheckpoint{
+			TaskID: task.ID,
+			Step:   "pr_rejection",
+			State:  []byte(`{"feedback": "please fix database naming"}`),
+		},
+	}
+
+	llmResponses := map[string]string{
+		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true}`,
+	}
+	mockLLM := &mockLLMProvider{responses: llmResponses}
+	sandboxRuntime := &mockSandboxRuntime{}
+
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-loop")
+	fixRunner := runners[workflow.StepFix]
+
+	ctx := context.Background()
+	stepCtx := workflow.StepContext{
+		Inputs: map[string]map[string]any{
+			workflow.StepReview: {
+				"cycle_limit_reached": false,
+				"parsed": map[string]any{
+					// Zero findings from AI review
+					"findings": []any{},
+				},
+			},
+		},
+	}
+
+	// Since we have pr_rejection feedback in checkpoints, the fix runner must NOT skip
+	// the fix step (which it normally would because of findings = 0), and must instead return ErrReviewFixLoop
+	res, err := fixRunner(ctx, stepCtx)
+	if !errors.Is(err, workflow.ErrReviewFixLoop) {
+		t.Errorf("expected ErrReviewFixLoop even with 0 review findings due to human feedback, got err=%v, res=%v", err, res)
+	}
+}
+
+func TestOrchestrator_ApproveMerge(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-merge-123",
+		ProjectID:  "proj-merge-123",
+		Status:     models.TaskStatusHumanReview,
+		PRURLs:     []string{"https://github.com/test/repo/pull/1"},
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{}
+	gitOps := &mockGitOpsClient{}
+
+	// Case 1: No matching repository found (should return error)
+	reposRepoNoMatch := &mockRepositoriesRepo{
+		repo: models.Repository{
+			URL: "https://github.com/different/repo.git",
+		},
+	}
+	orchNoMatch := NewOrchestrator(taskRepo, workflowRepo, nil, nil)
+	orchNoMatch.SetGitOpsClient(gitOps)
+	orchNoMatch.SetRepositoryRepository(reposRepoNoMatch)
+
+	_, err := orchNoMatch.ApproveMerge(context.Background(), task.ID)
+	if err == nil || !strings.Contains(err.Error(), "no matching repository found for PR URL") {
+		t.Errorf("expected unmatched repository error, got: %v", err)
+	}
+
+	// Case 2: Matching repository found (should succeed)
+	reposRepoMatch := &mockRepositoriesRepo{
+		repo: models.Repository{
+			URL: "https://github.com/test/repo.git",
+		},
+	}
+	orchMatch := NewOrchestrator(taskRepo, workflowRepo, nil, nil)
+	orchMatch.SetGitOpsClient(gitOps)
+	orchMatch.SetRepositoryRepository(reposRepoMatch)
+
+	updated, err := orchMatch.ApproveMerge(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("expected successful merge, got error: %v", err)
+	}
+	if updated.Status != models.TaskStatusMerged {
+		t.Errorf("expected task status to transition to merged, got: %s", updated.Status)
+	}
+}
+
+
+

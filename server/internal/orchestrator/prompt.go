@@ -21,6 +21,7 @@ type PromptAssembler struct {
 	rules     *repository.RuleRepo
 	skills    SkillLister
 	root      string
+	dataRoot  string
 }
 
 type SkillLister interface {
@@ -43,6 +44,11 @@ func (a *PromptAssembler) WithSkillLister(skills SkillLister) *PromptAssembler {
 	return a
 }
 
+func (a *PromptAssembler) WithDataRoot(dataRoot string) *PromptAssembler {
+	a.dataRoot = dataRoot
+	return a
+}
+
 func (a *PromptAssembler) Assemble(ctx context.Context, task models.Task) ([]llm.Message, []ToolDefinition, error) {
 	return a.AssembleForAgent(ctx, task, nil, nil)
 }
@@ -53,7 +59,7 @@ const memoriesCtxKey contextKey = "retrieved_memories"
 
 func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []ToolDefinition, error) {
 	var contextBlock string
-	if a != nil && a.retriever != nil {
+	if a != nil && a.retriever != nil && shouldAttachCodeContext(agent) {
 		snippets, err := a.retriever.RetrieveContext(ctx, task.Title+"\n"+task.Description, 8)
 		if err != nil {
 			return nil, nil, err
@@ -61,16 +67,25 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		contextBlock = formatContextSnippets(snippets)
 	}
 
-	system, projectRules, err := a.systemPrompt(ctx, task, agent)
+	// Inject Project Knowledge Base Docs (Planned 5.5)
+	if a != nil && a.dataRoot != "" && shouldAttachCodeContext(agent) {
+		kbContent := a.loadProjectKnowledgeBaseDocs(task.ProjectID, task.Title+"\n"+task.Description)
+		if kbContent != "" {
+			if contextBlock != "" {
+				contextBlock = kbContent + "\n\n" + contextBlock
+			} else {
+				contextBlock = kbContent
+			}
+		}
+	}
+
+	system, _, err := a.systemPrompt(ctx, task, agent)
 	if err != nil {
 		return nil, nil, err
 	}
 	user := "Task: " + task.Title + "\n\n" + task.Description
-	if len(projectRules) > 0 {
-		user += "\n\nProject Rules:\n" + formatRules(projectRules)
-	}
 	if contextBlock != "" {
-		user += "\n\nContext:\n" + contextBlock
+		user += "\n\nSemantic Code Retrieval Context:\n" + contextBlock
 	}
 	if memories, ok := ctx.Value(memoriesCtxKey).([]models.EpisodicMemory); ok && len(memories) > 0 {
 		user += "\n\nRetrieved Memories:\n" + formatMemories(memories)
@@ -80,21 +95,46 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-	tools, err := a.toolDefinitionsForAgent(ctx, agent)
+	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return messages, tools, nil
 }
 
-func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent) ([]ToolDefinition, error) {
-	if agent == nil || a == nil || a.skills == nil {
+func shouldAttachCodeContext(agent *models.Agent) bool {
+	return agent == nil || strings.EqualFold(agent.Role, models.AgentRolePlanner)
+}
+
+func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string) ([]ToolDefinition, error) {
+	if agent == nil || a == nil {
 		return BuiltinToolDefinitions(), nil
 	}
-	allSkills, err := a.skills.List(ctx)
-	if err != nil {
-		return nil, err
+	var allSkills []models.Skill
+	if a.skills != nil {
+		var err error
+		allSkills, err = a.skills.List(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
+
+	// Merge with project-specific disk skills
+	diskSkills, err := a.loadProjectDiskSkills(projectID)
+	if err == nil && len(diskSkills) > 0 {
+		skillMap := make(map[string]models.Skill)
+		for _, s := range allSkills {
+			skillMap[strings.ToLower(s.Name)] = s
+		}
+		for _, s := range diskSkills {
+			skillMap[strings.ToLower(s.Name)] = s
+		}
+		allSkills = make([]models.Skill, 0, len(skillMap))
+		for _, s := range skillMap {
+			allSkills = append(allSkills, s)
+		}
+	}
+
 	skills := make([]models.Skill, 0, len(allSkills))
 	for _, skill := range allSkills {
 		if isSkillMatchingRole(skill.Name, agent.Role) {
@@ -292,7 +332,8 @@ func formatMemories(memories []models.EpisodicMemory) string {
 
 func formatContextSnippets(snippets []models.ContextSnippet) string {
 	var b strings.Builder
-	for _, snippet := range snippets {
+	for i, snippet := range snippets {
+		b.WriteString(fmt.Sprintf("### Snippet %d: %s:%d-%d (score %.2f, %s)\n", i+1, snippet.Path, snippet.StartLine, snippet.EndLine, snippet.Relevance, snippet.Retriever))
 		b.WriteString("```")
 		b.WriteString(snippet.Path)
 		b.WriteString("\n")
@@ -314,22 +355,55 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 	if content, err := readOptional(filepath.Join(root, "core", "system_prompt.md")); err == nil && strings.TrimSpace(content) != "" {
 		parts = append(parts, "# Base System Prompt\n"+content)
 	}
-	if agent != nil {
-		if content, err := readOptional(filepath.Join(root, "antigravity", "agents", personaFile(agent.Role))); err == nil && strings.TrimSpace(content) != "" {
-			parts = append(parts, "# Agent Persona\n"+content)
-		}
-	}
 
 	globalRules, projectRules, err := a.loadRules(ctx, task.ProjectID)
 	if err != nil {
 		return "", nil, err
 	}
-	if err := DetectRuleConflicts(globalRules, projectRules); err != nil {
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	localRules := append([]models.Rule{}, projectRules...)
+	for i, tr := range analysis.TaskRules {
+		localRules = append(localRules, models.Rule{
+			ID:          fmt.Sprintf("task-rule-%d", i),
+			Scope:       "task",
+			Content:     tr,
+			Enforcement: models.RuleEnforcementStrict,
+		})
+	}
+	if err := DetectRuleConflicts(globalRules, localRules); err != nil {
 		return "", nil, err
 	}
+
+	// 1. Global Rules
 	if len(globalRules) > 0 {
 		parts = append(parts, "# Global Rules [IMMUTABLE - DO NOT OVERRIDE]\n"+formatRules(globalRules))
 	}
+
+	// 2. Agent Role Constraints
+	if agent != nil {
+		if content, err := readOptional(filepath.Join(root, "antigravity", "agents", personaFile(agent.Role))); err == nil && strings.TrimSpace(content) != "" {
+			parts = append(parts, "# Agent Role Constraints\n"+content)
+		}
+	}
+
+	// 3. Project Rules
+	if len(projectRules) > 0 {
+		parts = append(parts, "# Project Rules\n"+formatRules(projectRules))
+	}
+
+	// 4. Task Rules
+	if len(analysis.TaskRules) > 0 {
+		var b strings.Builder
+		b.WriteString("# Task-specific Rules:\n")
+		for _, tr := range analysis.TaskRules {
+			b.WriteString(fmt.Sprintf("- [task/strict] %s\n", strings.TrimSpace(tr)))
+		}
+		parts = append(parts, b.String())
+	}
+
 	parts = append(parts, `# Execution Rules
 - Prefer apply_patch for source edits instead of rewriting full files.
 - Run tests through run_tests when a change is executable.
@@ -338,34 +412,61 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 }
 
 func (a *PromptAssembler) loadRules(ctx context.Context, projectID string) ([]models.Rule, []models.Rule, error) {
-	if a == nil || a.rules == nil {
-		return nil, nil, nil
-	}
-	rules, err := a.rules.ListByProjectID(ctx, projectID)
-	if err != nil {
-		return nil, nil, err
-	}
 	globalRules := []models.Rule{}
 	projectRules := []models.Rule{}
-	for _, rule := range rules {
-		switch rule.Scope {
-		case models.RuleScopeGlobal:
-			globalRules = append(globalRules, rule)
-		default:
-			projectRules = append(projectRules, rule)
+
+	if a != nil && a.rules != nil {
+		rules, err := a.rules.ListByProjectID(ctx, projectID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, rule := range rules {
+			switch rule.Scope {
+			case models.RuleScopeGlobal:
+				globalRules = append(globalRules, rule)
+			default:
+				projectRules = append(projectRules, rule)
+			}
 		}
 	}
+
+	// Load project rules from disk (Planned 5.5)
+	if a != nil && a.dataRoot != "" && projectID != "" {
+		diskRulesDir := filepath.Join(a.dataRoot, "projects", projectID, "rules")
+		if entries, err := os.ReadDir(diskRulesDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				contentBytes, err := os.ReadFile(filepath.Join(diskRulesDir, entry.Name()))
+				if err != nil || len(contentBytes) == 0 {
+					continue
+				}
+				projectRules = append(projectRules, models.Rule{
+					ID:          fmt.Sprintf("disk-%s", entry.Name()),
+					Scope:       models.RuleScopeProject,
+					Content:     string(contentBytes),
+					Enforcement: models.RuleEnforcementStrict,
+				})
+			}
+		}
+	}
+
 	return globalRules, projectRules, nil
 }
 
-func DetectRuleConflicts(globalRules, projectRules []models.Rule) error {
-	if len(globalRules) == 0 || len(projectRules) == 0 {
+func DetectRuleConflicts(globalRules, localRules []models.Rule) error {
+	if len(globalRules) == 0 || len(localRules) == 0 {
 		return nil
 	}
 	conflictPattern := regexp.MustCompile(`(?i)\b(ignore|override|disable|bypass)\b.*\b(global|strict|security|rule)`)
-	for _, rule := range projectRules {
+	for _, rule := range localRules {
 		if conflictPattern.MatchString(rule.Content) {
-			return fmt.Errorf("project rule %s conflicts with global governance rules", rule.ID)
+			scope := rule.Scope
+			if scope == "" {
+				scope = "project"
+			}
+			return fmt.Errorf("%s rule %s conflicts with global governance rules", scope, rule.ID)
 		}
 	}
 	return nil
@@ -437,3 +538,126 @@ func defaultPromptRoot() string {
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "resources", "prompt_base"))
 }
+
+func (a *PromptAssembler) loadProjectDiskSkills(projectID string) ([]models.Skill, error) {
+	if a.dataRoot == "" || projectID == "" {
+		return nil, nil
+	}
+	projSkillsDir := filepath.Join(a.dataRoot, "projects", projectID, "skills")
+	regPath := filepath.Join(projSkillsDir, "registry.json")
+	var diskSkills []models.Skill
+
+	// Try reading registry.json first
+	if raw, err := os.ReadFile(regPath); err == nil {
+		var reg struct {
+			Skills map[string][]struct {
+				ID          string          `json:"id"`
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				Path        string          `json:"path"`
+				Schema      json.RawMessage `json:"schema,omitempty"`
+			} `json:"skills"`
+		}
+		if err := json.Unmarshal(raw, &reg); err == nil {
+			for _, skills := range reg.Skills {
+				for _, sk := range skills {
+					var schemaMap map[string]any
+					if len(sk.Schema) > 0 {
+						_ = json.Unmarshal(sk.Schema, &schemaMap)
+					}
+					if schemaMap == nil {
+						schemaMap = make(map[string]any)
+					}
+					schemaMap["source"] = "project_disk"
+					schemaMap["category"] = "project"
+					schemaMap["registry"] = sk.ID
+					schemaMap["path"] = filepath.ToSlash(filepath.Join("projects", projectID, "skills", sk.Path))
+					
+					schemaRaw, _ := json.Marshal(schemaMap)
+					diskSkills = append(diskSkills, models.Skill{
+						ID:          sk.ID,
+						Name:        sk.Name,
+						Description: sk.Description,
+						Schema:      schemaRaw,
+					})
+				}
+			}
+			return diskSkills, nil
+		}
+	}
+
+	// Fallback/Direct scan of .md files in the skills directory
+	entries, err := os.ReadDir(projSkillsDir)
+	if err != nil {
+		return nil, nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		skillName := strings.TrimSuffix(entry.Name(), ".md")
+		schemaRaw, _ := json.Marshal(map[string]string{
+			"source": "project_disk",
+			"path":   filepath.ToSlash(filepath.Join("projects", projectID, "skills", entry.Name())),
+		})
+		diskSkills = append(diskSkills, models.Skill{
+			ID:          "project-" + skillName,
+			Name:        skillName,
+			Description: fmt.Sprintf("Project specific skill for %s", skillName),
+			Schema:      schemaRaw,
+		})
+	}
+
+	return diskSkills, nil
+}
+
+func (a *PromptAssembler) loadProjectKnowledgeBaseDocs(projectID string, query string) string {
+	if a.dataRoot == "" || projectID == "" {
+		return ""
+	}
+	docsDir := filepath.Join(a.dataRoot, "projects", projectID, "docs")
+	entries, err := os.ReadDir(docsDir)
+	if err != nil {
+		return ""
+	}
+
+	queryLower := strings.ToLower(query)
+	var sb strings.Builder
+
+	for _, entry := range entries {
+		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".md") && !strings.HasSuffix(entry.Name(), ".txt")) {
+			continue
+		}
+		docName := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".md"), ".txt")
+		docNameLower := strings.ToLower(docName)
+
+		contentBytes, err := os.ReadFile(filepath.Join(docsDir, entry.Name()))
+		if err != nil || len(contentBytes) == 0 {
+			continue
+		}
+
+		// Simple keyword-based relevance check
+		isRelevant := strings.Contains(queryLower, docNameLower)
+		if !isRelevant {
+			words := strings.FieldsFunc(queryLower, func(r rune) bool {
+				return r == ' ' || r == '\n' || r == '\t' || r == ',' || r == '.' || r == '?' || r == '!' || r == '/' || r == '\\' || r == '-' || r == '_'
+			})
+			for _, word := range words {
+				if len(word) > 4 && strings.Contains(docNameLower, word) {
+					isRelevant = true
+					break
+				}
+			}
+		}
+
+		if isRelevant {
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(fmt.Sprintf("--- Knowledge Base: %s ---\n%s", entry.Name(), string(contentBytes)))
+		}
+	}
+
+	return sb.String()
+}
+

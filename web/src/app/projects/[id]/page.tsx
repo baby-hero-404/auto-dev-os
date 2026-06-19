@@ -103,7 +103,7 @@ function ProjectDetailContent() {
       role: staff.role,
       goal: staff.goal,
       autonomy_level: staff.autonomy_level,
-      model_route: staff.model_route,
+      model_level_group: staff.model_level_group,
       assignment_strategy: staff.assignment_strategy,
       agent_id: staff.id,
     });
@@ -217,6 +217,7 @@ function ProjectDetailContent() {
               {activeView === "repositories" && (
                 <RepositoriesView
                   projectID={projectID}
+                  project={project!}
                   token={token}
                   orgID={orgID}
                   repositories={repositories}
@@ -243,8 +244,7 @@ function ProjectDetailContent() {
 
               {activeView === "settings" && (
                 <ProjectProfile
-                  initialName={project?.name ?? ""}
-                  initialDescription={project?.description ?? ""}
+                  project={project}
                   onUpdateProject={handleUpdateProject}
                 />
               )}
@@ -255,6 +255,7 @@ function ProjectDetailContent() {
 
       <CreateTaskPanel
         agents={projectAgents}
+        repositories={repositories}
         isOpen={isTaskPanelOpen}
         isSubmitting={taskActions.isCreatingTask}
         error={taskActions.taskError}

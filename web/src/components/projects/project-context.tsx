@@ -40,7 +40,7 @@ interface ProjectContextValue {
   repoActions: ReturnType<typeof useRepoActions>;
   
   // Generic Project Actions
-  handleUpdateProject: (name: string, description: string) => Promise<void>;
+  handleUpdateProject: (input: Parameters<typeof api.updateProject>[2]) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -71,9 +71,9 @@ export function ProjectProvider({ projectID, children }: { projectID: string; ch
   const taskActions = useTaskActions(projectID, token, mutateTasks);
   const repoActions = useRepoActions(projectID, token, mutateRepos);
 
-  async function handleUpdateProject(name: string, description: string) {
+  async function handleUpdateProject(input: Parameters<typeof api.updateProject>[2]) {
     if (!projectID || !token) return;
-    await api.updateProject(projectID, token, { name, description });
+    await api.updateProject(projectID, token, input);
     mutateProject();
   }
 

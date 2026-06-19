@@ -242,6 +242,16 @@ export type TaskAnalytics = {
   time_series: TaskTimeSeries[];
 };
 
+export type GatewayUsagePoint = {
+  bucket: string;
+  requests: number;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  avg_latency_ms: number;
+};
+
 export type WorkflowStepStats = {
   step: string;
   avg_ms: number;

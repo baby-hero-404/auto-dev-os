@@ -132,7 +132,10 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 	ctx, span := otel.Tracer("auto-code-os/llm").Start(ctx, "llm.gateway.chat")
 	defer span.End()
 	opts, _ := RouteOptionsFromContext(ctx)
-	levelGroup := g.levelGroupForComplexity(opts.Complexity)
+	levelGroup := opts.RouteName
+	if levelGroup == "" || levelGroup == "default" {
+		levelGroup = g.levelGroupForComplexity(opts.Complexity)
+	}
 	chain, ok := g.chains[levelGroup]
 	if !ok {
 		chain = g.chains[g.defaultLevelGroup]

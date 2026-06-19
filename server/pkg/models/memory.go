@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -58,7 +60,7 @@ type EpisodicMemory struct {
 	Summary     string          `json:"summary" gorm:"default:''"`
 	ContentHash string          `json:"content_hash" gorm:"default:''"`
 	Category    string          `json:"category" gorm:"default:'observation'"`
-	Tags        []string        `json:"tags" gorm:"type:text[];default:'{}'"`
+	Tags        pq.StringArray  `json:"tags" gorm:"type:text[];default:'{}'"`
 	Metadata    json.RawMessage `json:"metadata" gorm:"type:jsonb;default:'{}'"`
 	Embedding   Embedding       `json:"embedding,omitempty" gorm:"type:vector(1536)"`
 

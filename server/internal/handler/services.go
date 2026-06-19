@@ -97,6 +97,7 @@ type AnalyticsDashboardService interface {
 	Overview(context.Context, string) (*models.OverviewStats, error)
 	AgentPerformance(context.Context, string, string) ([]models.AgentStats, error)
 	TaskAnalytics(context.Context, string, string, int) (*models.TaskAnalytics, error)
+	GatewayUsage(context.Context, string, string, int) ([]models.GatewayUsagePoint, error)
 	WorkflowAnalytics(context.Context, string, string) (*models.WorkflowAnalytics, error)
 	RecentFailures(context.Context, string, string, int) ([]models.RecentFailure, error)
 }

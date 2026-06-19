@@ -94,6 +94,17 @@ type TaskAnalytics struct {
 	TimeSeries   []TaskTimeSeries         `json:"time_series"`
 }
 
+// GatewayUsagePoint represents daily LLM gateway usage.
+type GatewayUsagePoint struct {
+	Bucket       time.Time `json:"bucket"`
+	Requests     int64     `json:"requests"`
+	PromptTokens int64     `json:"prompt_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	TotalTokens  int64     `json:"total_tokens"`
+	CostUSD      float64   `json:"cost_usd"`
+	AvgLatencyMS float64   `json:"avg_latency_ms"`
+}
+
 // WorkflowStepStats represents average duration for a specific workflow step.
 type WorkflowStepStats struct {
 	Step      string  `json:"step"`

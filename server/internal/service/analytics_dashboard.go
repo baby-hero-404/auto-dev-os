@@ -31,6 +31,11 @@ func (s *AnalyticsDashboardService) TaskAnalytics(ctx context.Context, orgID str
 	return s.repo.TaskAnalytics(ctx, orgID, projectID, days)
 }
 
+// GatewayUsage returns daily gateway request, token, cost, and latency aggregates.
+func (s *AnalyticsDashboardService) GatewayUsage(ctx context.Context, orgID string, projectID string, days int) ([]models.GatewayUsagePoint, error) {
+	return s.repo.GatewayUsage(ctx, orgID, projectID, days)
+}
+
 // WorkflowAnalytics returns workflow completion rates and average step durations.
 func (s *AnalyticsDashboardService) WorkflowAnalytics(ctx context.Context, orgID string, projectID string) (*models.WorkflowAnalytics, error) {
 	return s.repo.WorkflowAnalytics(ctx, orgID, projectID)

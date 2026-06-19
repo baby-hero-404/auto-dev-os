@@ -58,6 +58,25 @@ func (h *AnalyticsDashboardHandler) TaskAnalytics(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, analytics)
 }
 
+// GatewayUsage returns daily gateway usage aggregates.
+// GET /api/v1/analytics/gateway-usage?org_id=...&project_id=...&days=30
+func (h *AnalyticsDashboardHandler) GatewayUsage(w http.ResponseWriter, r *http.Request) {
+	orgID := r.URL.Query().Get("org_id")
+	projectID := r.URL.Query().Get("project_id")
+	days := 30
+	if daysRaw := r.URL.Query().Get("days"); daysRaw != "" {
+		if d, err := strconv.Atoi(daysRaw); err == nil && d > 0 {
+			days = d
+		}
+	}
+	usage, err := h.svc.GatewayUsage(r.Context(), orgID, projectID, days)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, usage)
+}
+
 // WorkflowAnalytics returns workflow completion rates and step durations.
 // GET /api/v1/analytics/workflows?org_id=...&project_id=...
 func (h *AnalyticsDashboardHandler) WorkflowAnalytics(w http.ResponseWriter, r *http.Request) {

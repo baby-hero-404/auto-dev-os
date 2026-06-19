@@ -80,6 +80,7 @@ export const api = {
   analyticsOverview: analytics.overview,
   analyticsAgents: analytics.agents,
   analyticsTasks: analytics.tasks,
+  analyticsGatewayUsage: analytics.gatewayUsage,
   analyticsWorkflows: analytics.workflows,
   analyticsFailures: analytics.failures,
 

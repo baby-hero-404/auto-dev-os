@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -69,30 +69,40 @@ const STATUS_COLORS: Record<string, string> = {
 export default function AnalyticsPage() {
   const session = useSession();
   const orgID = session?.user.org_id ?? "";
+  const [selectedProjectID, setSelectedProjectID] = useState("");
+
+  const { data: projects = [] } = useAuthedSWR(
+    orgID ? ["analytics-projects", orgID] : null,
+    (token) => api.listProjects(orgID, token),
+  );
 
   const { data: overview } = useAuthedSWR(
     orgID ? ["analytics-overview", orgID] : null,
     (token) => api.analyticsOverview(token, orgID),
   );
   const { data: agentStats = [] } = useAuthedSWR(
-    orgID ? ["analytics-agents", orgID] : null,
-    (token) => api.analyticsAgents(token, orgID),
+    orgID ? ["analytics-agents", orgID, selectedProjectID] : null,
+    (token) => api.analyticsAgents(token, orgID, selectedProjectID || undefined),
   );
   const { data: taskAnalytics } = useAuthedSWR(
-    orgID ? ["analytics-tasks", orgID] : null,
-    (token) => api.analyticsTasks(token, orgID),
+    orgID ? ["analytics-tasks", orgID, selectedProjectID] : null,
+    (token) => api.analyticsTasks(token, orgID, selectedProjectID || undefined),
+  );
+  const { data: gatewayUsage = [] } = useAuthedSWR(
+    orgID ? ["analytics-gateway-usage", orgID, selectedProjectID] : null,
+    (token) => api.analyticsGatewayUsage(token, orgID, selectedProjectID || undefined),
   );
   const { data: workflowAnalytics } = useAuthedSWR(
-    orgID ? ["analytics-workflows", orgID] : null,
-    (token) => api.analyticsWorkflows(token, orgID),
+    orgID ? ["analytics-workflows", orgID, selectedProjectID] : null,
+    (token) => api.analyticsWorkflows(token, orgID, selectedProjectID || undefined),
   );
   const { data: recentFailures = [] } = useAuthedSWR(
-    orgID ? ["analytics-failures", orgID] : null,
-    (token) => api.analyticsFailures(token, orgID, undefined, 5),
+    orgID ? ["analytics-failures", orgID, selectedProjectID] : null,
+    (token) => api.analyticsFailures(token, orgID, selectedProjectID || undefined, 5),
   );
   const { data: tokenUsageList = [] } = useAuthedSWR(
-    orgID ? ["analytics-token-usage", orgID] : null,
-    (token) => api.tokenUsage(token, orgID),
+    orgID ? ["analytics-token-usage", orgID, selectedProjectID] : null,
+    (token) => api.tokenUsage(token, orgID, 30, selectedProjectID || undefined),
   );
 
   const avgLatencyMs = useMemo(() => {
@@ -136,6 +146,43 @@ export default function AnalyticsPage() {
     return Object.values(groups).sort((a, b) => b.cost_usd - a.cost_usd);
   }, [tokenUsageList]);
 
+  const providerUsage = useMemo(() => {
+    const groups: Record<string, {
+      provider: string;
+      model: string;
+      level_group: string;
+      requests: number;
+      total_tokens: number;
+      cost_usd: number;
+      avg_latency_ms: number;
+    }> = {};
+
+    tokenUsageList.forEach((item) => {
+      const key = `${item.provider}:${item.model}:${item.level_group}`;
+      if (!groups[key]) {
+        groups[key] = {
+          provider: item.provider,
+          model: item.model,
+          level_group: item.level_group,
+          requests: 0,
+          total_tokens: 0,
+          cost_usd: 0,
+          avg_latency_ms: 0,
+        };
+      }
+      const current = groups[key];
+      const nextRequests = current.requests + (item.requests || 0);
+      current.avg_latency_ms = nextRequests > 0
+        ? ((current.avg_latency_ms * current.requests) + ((item.avg_latency_ms || 0) * (item.requests || 0))) / nextRequests
+        : 0;
+      current.requests = nextRequests;
+      current.total_tokens += item.total_tokens || 0;
+      current.cost_usd += item.cost_usd || 0;
+    });
+
+    return Object.values(groups).sort((a, b) => b.cost_usd - a.cost_usd);
+  }, [tokenUsageList]);
+
   return (
     <DashboardLayout>
       <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
@@ -145,8 +192,20 @@ export default function AnalyticsPage() {
             Platform performance, agent metrics, and workflow health.
           </p>
         </div>
-        <div className="rounded-full border border-stroke bg-panel px-3 py-1 text-xs text-content-muted">
-          Phase 5 dashboard
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <select
+            value={selectedProjectID}
+            onChange={(event) => setSelectedProjectID(event.target.value)}
+            className="rounded-md border border-stroke bg-panel px-3 py-2 text-sm text-slate-200 focus:border-brand-primary focus:outline-none"
+          >
+            <option value="">All projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          <div className="rounded-full border border-stroke bg-panel px-3 py-1 text-xs text-content-muted">
+            Phase 5 dashboard
+          </div>
         </div>
       </div>
 
@@ -363,6 +422,91 @@ export default function AnalyticsPage() {
         </section>
       </div>
 
+      {/* Gateway Usage Trend */}
+      <section className="mb-6 rounded-lg border border-stroke bg-panel p-5">
+        <h3 className="mb-1 font-mono font-semibold">Gateway Usage Trend</h3>
+        <p className="mb-4 text-sm text-content-muted">Daily requests, token consumption, spend, and latency for the selected scope.</p>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={gatewayUsage}>
+              <defs>
+                <linearGradient id="gradGatewayRequests" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.32} />
+                  <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gradGatewayTokens" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.28} />
+                  <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(148, 163, 184, 0.1)" vertical={false} />
+              <XAxis
+                dataKey="bucket"
+                stroke="#94a3b8"
+                fontSize={11}
+                tickFormatter={(v) => new Date(v).toLocaleDateString("en", { month: "short", day: "numeric" })}
+              />
+              <YAxis yAxisId="requests" stroke="#94a3b8" fontSize={11} allowDecimals={false} />
+              <YAxis yAxisId="tokens" orientation="right" stroke="#94a3b8" fontSize={11} tickFormatter={compactNumber} />
+              <Tooltip
+                contentStyle={{ background: "#0f172a", border: "1px solid rgba(148,163,184,0.22)", borderRadius: 8, fontSize: 12 }}
+                labelFormatter={(v) => new Date(v).toLocaleDateString("en", { month: "long", day: "numeric" })}
+                formatter={(value, name) => {
+                  if (name === "cost_usd") return [formatCost(Number(value)), "Cost"];
+                  if (name === "avg_latency_ms") return [formatLatency(Number(value)), "Avg Latency"];
+                  return [compactNumber(Number(value)), name === "requests" ? "Requests" : "Tokens"];
+                }}
+              />
+              <Area yAxisId="requests" type="monotone" dataKey="requests" stroke="#38bdf8" fill="url(#gradGatewayRequests)" />
+              <Area yAxisId="tokens" type="monotone" dataKey="total_tokens" stroke="#a78bfa" fill="url(#gradGatewayTokens)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* Provider Analytics */}
+      <section className="mb-6 overflow-hidden rounded-lg border border-stroke bg-panel">
+        <div className="border-b border-stroke p-5">
+          <h3 className="font-mono font-semibold">Provider & Model Breakdown</h3>
+          <p className="text-sm text-content-muted">Requests, tokens, cost, and latency grouped by provider, model, and level.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted">
+              <tr>
+                <th className="px-4 py-3">Provider</th>
+                <th className="px-4 py-3">Model</th>
+                <th className="px-4 py-3">Level</th>
+                <th className="px-4 py-3">Requests</th>
+                <th className="px-4 py-3">Tokens</th>
+                <th className="px-4 py-3">Avg Latency</th>
+                <th className="px-4 py-3">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providerUsage.map((item) => (
+                <tr key={`${item.provider}:${item.model}:${item.level_group}`} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+                  <td className="px-4 py-3 font-medium capitalize">{item.provider}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-content-muted">{item.model}</td>
+                  <td className="px-4 py-3 text-content-muted">{item.level_group || "unknown"}</td>
+                  <td className="px-4 py-3 font-mono">{compactNumber(item.requests)}</td>
+                  <td className="px-4 py-3 font-mono">{compactNumber(item.total_tokens)}</td>
+                  <td className="px-4 py-3 font-mono">{formatLatency(item.avg_latency_ms)}</td>
+                  <td className="px-4 py-3 font-mono font-semibold">{formatCost(item.cost_usd)}</td>
+                </tr>
+              ))}
+              {providerUsage.length === 0 && (
+                <tr>
+                  <td className="px-4 py-8 text-center text-content-muted" colSpan={7}>
+                    No provider usage recorded.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Recent Failures */}
       <section className="mb-6 overflow-hidden rounded-lg border border-stroke bg-panel">
         <div className="border-b border-stroke p-5">
@@ -387,7 +531,7 @@ export default function AnalyticsPage() {
               {recentFailures.map((failure) => (
                 <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                   <td className="px-4 py-3">
-                    <Link href={`/tasks/${failure.task_id}`} className="font-medium text-white hover:text-brand-primary">
+                    <Link href={`/projects/${failure.project_id}/tasks/${failure.task_id}/monitor`} className="font-medium text-white hover:text-brand-primary">
                       {failure.title}
                     </Link>
                   </td>

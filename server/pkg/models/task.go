@@ -31,7 +31,7 @@ const (
 // ValidTaskTransitions defines allowed status transitions.
 var ValidTaskTransitions = map[string][]string{
 	TaskStatusTodo:        {TaskStatusAnalyzing, TaskStatusCoding},
-	TaskStatusAnalyzing:   {TaskStatusSpecReview, TaskStatusCoding, TaskStatusTesting, TaskStatusFailed},
+	TaskStatusAnalyzing:   {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed},
 	TaskStatusSpecReview:  {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
 	TaskStatusCoding:      {TaskStatusReviewing, TaskStatusFailed},
 	TaskStatusReviewing:   {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed},
@@ -110,6 +110,7 @@ type TaskAnalysis struct {
 	ExecutionPlan          []string `json:"execution_plan"`
 	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
 	TaskRules              []string `json:"task_rules,omitempty"`
+	RequiredSkills         []string `json:"required_skills,omitempty"`
 	ProposalMD             string   `json:"proposal_md,omitempty"`
 	SpecsMD                string   `json:"specs_md,omitempty"`
 	DesignMD               string   `json:"design_md,omitempty"`

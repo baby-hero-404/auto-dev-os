@@ -95,7 +95,11 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID)
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID, analysis.RequiredSkills)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,7 +110,7 @@ func shouldAttachCodeContext(agent *models.Agent) bool {
 	return agent == nil || strings.EqualFold(agent.Role, models.AgentRolePlanner)
 }
 
-func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string) ([]ToolDefinition, error) {
+func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string, requiredSkills []string) ([]ToolDefinition, error) {
 	if agent == nil || a == nil {
 		return BuiltinToolDefinitions(), nil
 	}
@@ -135,9 +139,14 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 		}
 	}
 
+	requiredMap := make(map[string]bool)
+	for _, req := range requiredSkills {
+		requiredMap[strings.ToLower(strings.TrimSpace(req))] = true
+	}
+
 	skills := make([]models.Skill, 0, len(allSkills))
 	for _, skill := range allSkills {
-		if isSkillMatchingRole(skill.Name, agent.Role) {
+		if isSkillMatchingRole(skill.Name, agent.Role) || requiredMap[strings.ToLower(skill.Name)] {
 			skills = append(skills, skill)
 		}
 	}

@@ -26,9 +26,12 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 		projQuery = projQuery.Where("org_id = ?", orgID)
 	}
 
-	taskQuery := db.Table("tasks")
-	if orgID != "" {
-		taskQuery = taskQuery.Where("project_id IN (SELECT id FROM projects WHERE org_id = ?)", orgID)
+	scopedTaskQuery := func() *gorm.DB {
+		query := db.Table("tasks")
+		if orgID != "" {
+			query = query.Where("project_id IN (SELECT id FROM projects WHERE org_id = ?)", orgID)
+		}
+		return query
 	}
 
 	agentQuery := db.Table("agents")
@@ -47,7 +50,7 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 	}
 
 	// Task counts.
-	if err := taskQuery.Count(&stats.TotalTasks).Error; err != nil {
+	if err := scopedTaskQuery().Count(&stats.TotalTasks).Error; err != nil {
 		return nil, fmt.Errorf("count tasks: %w", err)
 	}
 	activeStatuses := []string{
@@ -55,13 +58,13 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 		models.TaskStatusReviewing, models.TaskStatusFixing,
 		models.TaskStatusTesting, models.TaskStatusHumanReview,
 	}
-	if err := taskQuery.Where("status IN ?", activeStatuses).Count(&stats.ActiveTasks).Error; err != nil {
+	if err := scopedTaskQuery().Where("status IN ?", activeStatuses).Count(&stats.ActiveTasks).Error; err != nil {
 		return nil, fmt.Errorf("count active tasks: %w", err)
 	}
-	if err := taskQuery.Where("status = ?", models.TaskStatusMerged).Count(&stats.CompletedTasks).Error; err != nil {
+	if err := scopedTaskQuery().Where("status = ?", models.TaskStatusMerged).Count(&stats.CompletedTasks).Error; err != nil {
 		return nil, fmt.Errorf("count completed tasks: %w", err)
 	}
-	if err := taskQuery.Where("status = ?", models.TaskStatusFailed).Count(&stats.FailedTasks).Error; err != nil {
+	if err := scopedTaskQuery().Where("status = ?", models.TaskStatusFailed).Count(&stats.FailedTasks).Error; err != nil {
 		return nil, fmt.Errorf("count failed tasks: %w", err)
 	}
 
@@ -80,7 +83,7 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 	}
 
 	// Average completion time (from tasks that reached completed/merged status).
-	if err := taskQuery.
+	if err := scopedTaskQuery().
 		Select("COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000), 0)").
 		Where("status = ?", models.TaskStatusMerged).
 		Scan(&stats.AvgCompletionMs).Error; err != nil {
@@ -88,7 +91,7 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 	}
 
 	// Open PRs (tasks in human_review status).
-	if err := taskQuery.Where("status = ?", models.TaskStatusHumanReview).Count(&stats.OpenPRs).Error; err != nil {
+	if err := scopedTaskQuery().Where("status = ?", models.TaskStatusHumanReview).Count(&stats.OpenPRs).Error; err != nil {
 		return nil, fmt.Errorf("count open prs: %w", err)
 	}
 
@@ -231,6 +234,42 @@ func (r *AnalyticsDashboardRepo) TaskAnalytics(ctx context.Context, orgID string
 	}
 
 	return result, nil
+}
+
+// GatewayUsage returns daily gateway request, token, cost, and latency aggregates.
+func (r *AnalyticsDashboardRepo) GatewayUsage(ctx context.Context, orgID string, projectID string, days int) ([]models.GatewayUsagePoint, error) {
+	if days <= 0 {
+		days = 30
+	}
+	since := time.Now().AddDate(0, 0, -days)
+
+	query := r.db.WithContext(ctx).
+		Table("token_usage").
+		Select(`
+			DATE_TRUNC('day', created_at) AS bucket,
+			COUNT(*) AS requests,
+			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(prompt_tokens + output_tokens), 0) AS total_tokens,
+			COALESCE(SUM(cost_usd), 0) AS cost_usd,
+			COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
+		`).
+		Where("created_at >= ?", since).
+		Group("bucket").
+		Order("bucket ASC")
+
+	if orgID != "" {
+		query = query.Where("org_id = ?", orgID)
+	}
+	if projectID != "" {
+		query = query.Where("project_id = ?", projectID)
+	}
+
+	var points []models.GatewayUsagePoint
+	if err := query.Scan(&points).Error; err != nil {
+		return nil, fmt.Errorf("gateway usage: %w", err)
+	}
+	return points, nil
 }
 
 // WorkflowAnalytics returns workflow completion rates and step durations.

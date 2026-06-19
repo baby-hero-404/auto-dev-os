@@ -250,6 +250,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/analytics/overview", dashboardH.Overview)
 			r.Get("/analytics/agents", dashboardH.AgentPerformance)
 			r.Get("/analytics/tasks", dashboardH.TaskAnalytics)
+			r.Get("/analytics/gateway-usage", dashboardH.GatewayUsage)
 			r.Get("/analytics/workflows", dashboardH.WorkflowAnalytics)
 			r.Get("/analytics/failures", dashboardH.RecentFailures)
 

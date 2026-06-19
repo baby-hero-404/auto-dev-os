@@ -45,6 +45,7 @@ The JSON object MUST have the following structure:
   "risks": ["list", "of", "potential", "risks", "and", "challenges"],
   "execution_plan": ["step-by-step", "plan", "to", "implement", "this", "task"],
   "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
+  "required_skills": ["list", "of", "skill", "names", "required", "for", "this", "task", "(e.g., 'docker_expert', 'frontend_design')"],
   "proposal_md": "Markdown for proposal.md (use the template below)",
   "specs_md": "Markdown for specs.md (use the template below)",
   "design_md": "Markdown for design.md (use the template below)",
@@ -146,6 +147,13 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 							for _, item := range questions {
 								if s, ok := item.(string); ok {
 									analysis.ClarificationQuestions = append(analysis.ClarificationQuestions, s)
+								}
+							}
+						}
+						if skills, ok := parsed["required_skills"].([]any); ok {
+							for _, item := range skills {
+								if s, ok := item.(string); ok {
+									analysis.RequiredSkills = append(analysis.RequiredSkills, s)
 								}
 							}
 						}

@@ -127,7 +127,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 
 	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
-		if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusAnalyzing); err != nil {
+		if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusContextLoading); err != nil {
 			o.fail(ctx, job, err)
 			return
 		}

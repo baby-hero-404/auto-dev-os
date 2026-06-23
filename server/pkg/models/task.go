@@ -33,7 +33,7 @@ const (
 // ValidTaskTransitions defines allowed status transitions.
 var ValidTaskTransitions = map[string][]string{
 	TaskStatusTodo:           {TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusCoding},
-	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusFailed},
+	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusFailed},
 	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
 	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
 	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusFailed},

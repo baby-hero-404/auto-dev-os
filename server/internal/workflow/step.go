@@ -2,6 +2,7 @@ package workflow
 
 // Step ID constants — canonical names used across the workflow engine and orchestrator.
 const (
+	StepContextLoad  = "context_load"
 	StepAnalyze      = "analyze"
 	StepPlan         = "plan"
 	StepCode         = "code"
@@ -27,7 +28,7 @@ const (
 // StepNameOrder returns the canonical step names in execution order.
 func StepNameOrder() []string {
 	return []string{
-		StepAnalyze, StepPlan, StepCodeBackend, StepCodeFrontend, StepMerge, StepReview, StepFix, StepTest, StepPR,
+		StepContextLoad, StepAnalyze, StepPlan, StepCodeBackend, StepCodeFrontend, StepMerge, StepReview, StepFix, StepTest, StepPR,
 	}
 }
 
@@ -44,7 +45,8 @@ func EasyWorkflow(runners map[string]StepFunc) Definition {
 	}}
 
 	steps := []StepDefinition{
-		{ID: StepAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepAnalyze]},
+		{ID: StepContextLoad, Name: "Context", OutputSchema: statusSchema, Run: runners[StepContextLoad]},
+		{ID: StepAnalyze, Name: "Analyze", DependsOn: []string{StepContextLoad}, OutputSchema: statusSchema, Run: runners[StepAnalyze]},
 		{ID: StepCodeBackend, Name: "Code", DependsOn: []string{StepAnalyze}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]},
 		{ID: StepTest, Name: "Test", DependsOn: []string{StepCodeBackend}, OutputSchema: statusSchema, Run: runners[StepTest]},
 		{ID: StepPR, Name: "PR", DependsOn: []string{StepTest}, OutputSchema: statusSchema, Run: runners[StepPR]},
@@ -59,7 +61,8 @@ func MediumWorkflow(runners map[string]StepFunc) Definition {
 	}}
 
 	steps := []StepDefinition{
-		{ID: StepAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepAnalyze]},
+		{ID: StepContextLoad, Name: "Context", OutputSchema: statusSchema, Run: runners[StepContextLoad]},
+		{ID: StepAnalyze, Name: "Analyze", DependsOn: []string{StepContextLoad}, OutputSchema: statusSchema, Run: runners[StepAnalyze]},
 		{ID: StepPlan, Name: "Plan", DependsOn: []string{StepAnalyze}, OutputSchema: statusSchema, Run: runners[StepPlan]},
 		{ID: StepCodeBackend, Name: "Code Backend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]},
 		{ID: StepCodeFrontend, Name: "Code Frontend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeFrontend]},
@@ -82,14 +85,15 @@ func HardWorkflow(runners map[string]StepFunc) Definition {
 // DescribeStep returns a human-readable description for a step name.
 func DescribeStep(name string) string {
 	desc := map[string]string{
-		"analyze": "Analyze task complexity & scope",
-		"plan":    "Decompose into sub-tasks",
-		"code":    "Execute code changes in sandbox",
-		"merge":   "Merge parallel code & resolve conflicts",
-		"review":  "AI code review",
-		"fix":     "Fix review feedback",
-		"test":    "Run test suite",
-		"pr":      "Create pull request",
+		"context_load": "Load repository context and conventions",
+		"analyze":      "Analyze task complexity & scope",
+		"plan":         "Decompose into sub-tasks",
+		"code":         "Execute code changes in sandbox",
+		"merge":        "Merge parallel code & resolve conflicts",
+		"review":       "AI code review",
+		"fix":          "Fix review feedback",
+		"test":         "Run test suite",
+		"pr":           "Create pull request",
 	}
 	if d, ok := desc[name]; ok {
 		return d

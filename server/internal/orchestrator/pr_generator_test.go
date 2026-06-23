@@ -143,7 +143,7 @@ index 12345..67890 100644
 	if !strings.Contains(summary.Body, "auth.go | Modified | +2 / -1") {
 		t.Errorf("expected line change table in body, got: %s", summary.Body)
 	}
-	if !strings.Contains(summary.Body, "- ✅ Unit tests: passed") {
+	if !strings.Contains(summary.Body, "- ✅ Full test suite: passed") {
 		t.Errorf("expected test results in body, got: %s", summary.Body)
 	}
 }

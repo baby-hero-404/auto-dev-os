@@ -162,7 +162,7 @@ func (o *Orchestrator) ensureWorkspaceCloned(ctx context.Context, task *models.T
 						var patchText string
 						if json.Unmarshal(art.Payload, &patchText) == nil && patchText != "" {
 							o.log(ctx, task.ID, nil, "info", fmt.Sprintf("Restoring checkpoint patch for step %s...", art.Step))
-							if errApply := o.applyPatch(ctx, task, agent, art.Step+"_restore", patchText); errApply != nil {
+							if errApply := o.applyPatch(ctx, task, agent, art.Step+"_restore", patchText, ""); errApply != nil {
 								o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("Failed to restore patch for step %s: %v", art.Step, errApply))
 							}
 						}

@@ -205,6 +205,7 @@ func (m *mockGitOpsClient) CreateBranch(ctx context.Context, localPath, repoURL,
 }
 
 func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error {
+	m.createdBranch = branchName
 	m.committedFiles = len(files)
 	return nil
 }
@@ -331,8 +332,8 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	}
 
 	// 3. Verify GitOps PR was created
-	if gitOps.createdBranch != "autocode/task-task-123" {
-		t.Errorf("expected branch autocode/task-task-123, got %s", gitOps.createdBranch)
+	if gitOps.createdBranch != "feature/task-123" {
+		t.Errorf("expected branch feature/task-123, got %s", gitOps.createdBranch)
 	}
 	if gitOps.prTitle != "AutoCodeOS: Test Task" {
 		t.Errorf("expected PR title AutoCodeOS: Test Task, got %s", gitOps.prTitle)
@@ -815,6 +816,94 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 	}
 	if updated.Status != models.TaskStatusMerged {
 		t.Errorf("expected task status to transition to merged, got: %s", updated.Status)
+	}
+}
+
+func TestOrchestrator_WorktreeAndPatchHelpers(t *testing.T) {
+	// 1. Test splitPatchByRepo
+	patchText := `Some header info
+diff --git a/repo1/src/main.go b/repo1/src/main.go
+index 123456..789012 100644
+--- a/repo1/src/main.go
++++ b/repo1/src/main.go
+@@ -1,3 +1,4 @@
+ package main
++import "fmt"
+diff --git a/repo2/index.js b/repo2/index.js
+index abc..def 100644
+--- a/repo2/index.js
++++ b/repo2/index.js
+@@ -1,1 +1,2 @@
+ console.log("hello");
++console.log("world");
+`
+
+	splitPatches := splitPatchByRepo(patchText)
+	if len(splitPatches) != 2 {
+		t.Errorf("expected 2 split patches, got: %d", len(splitPatches))
+	}
+	if !strings.Contains(splitPatches["repo1"], "repo1/src/main.go") {
+		t.Errorf("expected repo1 patch to contain main.go, got: %s", splitPatches["repo1"])
+	}
+	if strings.Contains(splitPatches["repo1"], "repo2/index.js") {
+		t.Errorf("repo1 patch should not contain repo2 changes")
+	}
+	if !strings.Contains(splitPatches["repo2"], "repo2/index.js") {
+		t.Errorf("expected repo2 patch to contain index.js, got: %s", splitPatches["repo2"])
+	}
+
+	// 2. Test hostWorktreePath and containerPathForHostPath
+	orch := &Orchestrator{
+		workspaceRoot: "/tmp/workspaces",
+	}
+
+	// Single repo case
+	repoID := "single-repo-id"
+	singleTask := &models.Task{
+		ID:           "task-1",
+		RepositoryID: &repoID,
+	}
+
+	localPath := "/tmp/workspaces/task-1"
+	
+	// Suffix case
+	bePath := orch.hostWorktreePath(singleTask, localPath, "-be-worktree")
+	expectedBePath := filepath.Clean("/tmp/workspaces/task-1/be")
+	if filepath.Clean(bePath) != expectedBePath {
+		t.Errorf("expected single-repo bePath: %s, got: %s", expectedBePath, bePath)
+	}
+
+	containerBe := orch.containerPathForHostPath(singleTask, bePath, "-be-worktree")
+	if containerBe != "/workspace" {
+		t.Errorf("expected containerPath for worktree to be /workspace, got: %s", containerBe)
+	}
+
+	// Child in worktree case
+	containerBeFile := orch.containerPathForHostPath(singleTask, filepath.Join(bePath, "src/main.go"), "-be-worktree")
+	if containerBeFile != "/workspace/src/main.go" {
+		t.Errorf("expected container path /workspace/src/main.go, got: %s", containerBeFile)
+	}
+
+	// Multi repo case
+	multiTask := &models.Task{
+		ID:           "task-2",
+		RepositoryID: nil,
+	}
+
+	multiLocalPath := "/tmp/workspaces/task-2"
+	multiRepoPath := filepath.Join(multiLocalPath, "repo-a")
+
+	multiBePath := orch.hostWorktreePath(multiTask, multiRepoPath, "-be-worktree")
+	expectedMultiBePath := filepath.Clean("/tmp/workspaces/task-2/repo-a-be-worktree")
+	if filepath.Clean(multiBePath) != expectedMultiBePath {
+		t.Errorf("expected multi-repo bePath: %s, got: %s", expectedMultiBePath, multiBePath)
+	}
+
+	multiContainerBe := orch.containerPathForHostPath(multiTask, multiBePath, "-be-worktree")
+	// Since active step workspace root is multiLocalPath (mounted to /workspace):
+	// multiBePath relative to multiLocalPath is "repo-a-be-worktree"
+	if multiContainerBe != "/workspace/repo-a-be-worktree" {
+		t.Errorf("expected multi-repo container path: /workspace/repo-a-be-worktree, got: %s", multiContainerBe)
 	}
 }
 

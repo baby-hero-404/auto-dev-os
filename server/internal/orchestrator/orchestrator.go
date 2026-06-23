@@ -81,6 +81,8 @@ type Orchestrator struct {
 	workspaceRoot string
 	retention     WorkspaceRetention
 	wg            sync.WaitGroup
+	lockCancels   sync.Map
+	lockConns     sync.Map
 }
 
 type WorkspaceRetention struct {
@@ -108,6 +110,8 @@ type WorkflowRepository interface {
 	CreateLog(ctx context.Context, log models.TaskLog) error
 	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
 	ResetStuckJobs(ctx context.Context) error
+	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)
+	ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error
 }
 
 func NewOrchestrator(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime) *Orchestrator {

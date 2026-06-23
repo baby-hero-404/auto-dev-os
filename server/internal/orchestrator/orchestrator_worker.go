@@ -121,7 +121,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 	o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("assigned agent %s", agent.Name))
 
-	if err := o.ensureWorkspaceCloned(ctx, task, agent); err != nil {
+	if err := o.ensureWorkspaceCloned(ctx, task, agent, job.ID); err != nil {
 		o.fail(ctx, job, fmt.Errorf("workspace clone failed: %w", err))
 		return
 	}
@@ -340,6 +340,7 @@ func (o *Orchestrator) checkpoint(ctx context.Context, taskID string, jobID *str
 }
 
 func (o *Orchestrator) log(ctx context.Context, taskID string, jobID *string, level, message string) {
+	message = redactSecrets(message)
 	if err := o.workflows.CreateLog(ctx, models.TaskLog{TaskID: taskID, JobID: jobID, Level: level, Message: message}); err != nil {
 		slog.Warn("persist workflow log failed", observability.LogAttrs(ctx, "task_id", taskID, "job_id", jobID, "level", level, "error", err)...)
 	}

@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"database/sql"
+	"hash/fnv"
+
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -200,4 +203,59 @@ func (r *WorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]models.Ta
 	}
 
 	return logs, nil
+}
+
+func (r *WorkflowRepo) AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error) {
+	if r.db.Dialector.Name() != "postgres" {
+		return "mock-conn", true, nil
+	}
+
+	h := fnv.New64a()
+	h.Write([]byte(taskID))
+	key := int64(h.Sum64())
+
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get sql db: %w", err)
+	}
+
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to check out standard connection: %w", err)
+	}
+
+	var locked bool
+	row := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key)
+	if err := row.Scan(&locked); err != nil {
+		_ = conn.Close()
+		return nil, false, fmt.Errorf("failed to scan pg_try_advisory_lock: %w", err)
+	}
+
+	if !locked {
+		_ = conn.Close()
+		return nil, false, nil
+	}
+
+	return conn, true, nil
+}
+
+func (r *WorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error {
+	if lockConn == nil || lockConn == "mock-conn" {
+		return nil
+	}
+	conn, ok := lockConn.(*sql.Conn)
+	if !ok {
+		return fmt.Errorf("invalid lock connection type: %T", lockConn)
+	}
+	defer conn.Close()
+
+	h := fnv.New64a()
+	h.Write([]byte(taskID))
+	key := int64(h.Sum64())
+
+	var unlocked bool
+	row := conn.QueryRowContext(ctx, "SELECT pg_advisory_unlock($1)", key)
+	_ = row.Scan(&unlocked)
+
+	return nil
 }

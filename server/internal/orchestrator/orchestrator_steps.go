@@ -28,18 +28,30 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			}
 
 			localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-			repoPaths := []string{localPath}
-			if task.RepositoryID == nil {
-				if files, err := os.ReadDir(localPath); err == nil {
-					for _, f := range files {
-						if f.IsDir() && !strings.HasPrefix(f.Name(), ".") {
-							subPath := filepath.Join(localPath, f.Name())
-							if _, errGit := os.Stat(filepath.Join(subPath, ".git")); errGit == nil {
-								repoPaths = append(repoPaths, subPath)
-							} else if _, errMod := os.Stat(filepath.Join(subPath, "go.mod")); errMod == nil {
-								repoPaths = append(repoPaths, subPath)
-							} else if _, errPkg := os.Stat(filepath.Join(subPath, "package.json")); errPkg == nil {
-								repoPaths = append(repoPaths, subPath)
+			var repoPaths []string
+			ws, errWS := o.LoadTaskWorkspace(ctx, task)
+			if errWS == nil {
+				for _, rWS := range ws.Repos {
+					repoAbs := filepath.Join(ws.Root, rWS.Paths.Main)
+					if _, errStat := os.Stat(repoAbs); errStat == nil {
+						repoPaths = append(repoPaths, repoAbs)
+					}
+				}
+			}
+			if len(repoPaths) == 0 {
+				repoPaths = append(repoPaths, localPath)
+				if task.RepositoryID == nil {
+					if files, err := os.ReadDir(localPath); err == nil {
+						for _, f := range files {
+							if f.IsDir() && !strings.HasPrefix(f.Name(), ".") {
+								subPath := filepath.Join(localPath, f.Name())
+								if _, errGit := os.Stat(filepath.Join(subPath, ".git")); errGit == nil {
+									repoPaths = append(repoPaths, subPath)
+								} else if _, errMod := os.Stat(filepath.Join(subPath, "go.mod")); errMod == nil {
+									repoPaths = append(repoPaths, subPath)
+								} else if _, errPkg := os.Stat(filepath.Join(subPath, "package.json")); errPkg == nil {
+									repoPaths = append(repoPaths, subPath)
+								}
 							}
 						}
 					}
@@ -438,9 +450,18 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 				beBranch := fmt.Sprintf("feature/%s-be", task.ID)
 				feBranch := fmt.Sprintf("feature/%s-fe", task.ID)
 
+				ws, errWS := o.LoadTaskWorkspace(ctx, task)
+
 				for _, repo := range targetRepos {
 					localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-					if task.RepositoryID == nil {
+					if errWS == nil {
+						for i := range ws.Repos {
+							if ws.Repos[i].RepoID == repo.ID {
+								localPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+								break
+							}
+						}
+					} else if task.RepositoryID == nil {
 						parts := strings.Split(repo.URL, "/")
 						repoName := parts[len(parts)-1]
 						repoName = strings.TrimSuffix(repoName, ".git")
@@ -486,6 +507,7 @@ git -C %[1]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[1]s branch %
 			t, _ := o.tasks.GetByID(ctx, task.ID)
 			if t.Complexity != models.TaskComplexityEasy {
 				worktreeSuffix = "-be-worktree"
+				ws, errWS := o.LoadTaskWorkspace(ctx, task)
 				if repos, err := o.repositories.ListByProjectID(ctx, task.ProjectID); err == nil {
 					var targetRepos []models.Repository
 					if task.RepositoryID != nil {
@@ -500,7 +522,14 @@ git -C %[1]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[1]s branch %
 					}
 					for _, repo := range targetRepos {
 						localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-						if task.RepositoryID == nil {
+						if errWS == nil {
+							for i := range ws.Repos {
+								if ws.Repos[i].RepoID == repo.ID {
+									localPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+									break
+								}
+							}
+						} else if task.RepositoryID == nil {
 							parts := strings.Split(repo.URL, "/")
 							repoName := parts[len(parts)-1]
 							repoName = strings.TrimSuffix(repoName, ".git")
@@ -638,6 +667,7 @@ fi
 			worktreeSuffix := ""
 			if t != nil && t.Complexity != models.TaskComplexityEasy {
 				worktreeSuffix = "-fe-worktree"
+				ws, errWS := o.LoadTaskWorkspace(ctx, task)
 				if repos, err := o.repositories.ListByProjectID(ctx, task.ProjectID); err == nil {
 					var targetRepos []models.Repository
 					if task.RepositoryID != nil {
@@ -652,7 +682,14 @@ fi
 					}
 					for _, repo := range targetRepos {
 						localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-						if task.RepositoryID == nil {
+						if errWS == nil {
+							for i := range ws.Repos {
+								if ws.Repos[i].RepoID == repo.ID {
+									localPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+									break
+								}
+							}
+						} else if task.RepositoryID == nil {
 							parts := strings.Split(repo.URL, "/")
 							repoName := parts[len(parts)-1]
 							repoName = strings.TrimSuffix(repoName, ".git")
@@ -760,6 +797,12 @@ fi
 		workflow.StepMerge: func(ctx context.Context, _ workflow.StepContext) (map[string]any, error) {
 			t, err := o.tasks.GetByID(ctx, task.ID)
 			if err == nil && t.Complexity == models.TaskComplexityEasy {
+				if ws, errWS := o.LoadTaskWorkspace(ctx, task); errWS == nil {
+					for i := range ws.Repos {
+						ws.Repos[i].Status.MergeStatus = models.MergeStatusSkipped
+					}
+					_ = o.SaveTaskWorkspaceMetadata(task, ws)
+				}
 				return map[string]any{"status": "skipped", "info": "skipped merge step for easy task"}, nil
 			}
 
@@ -778,6 +821,8 @@ fi
 				}
 			}
 
+			ws, errWS := o.LoadTaskWorkspace(ctx, task)
+
 			integrationBranch := fmt.Sprintf("feature/%s", task.ID)
 			beBranch := fmt.Sprintf("feature/%s-be", task.ID)
 			feBranch := fmt.Sprintf("feature/%s-fe", task.ID)
@@ -787,16 +832,34 @@ fi
 
 			for _, repo := range targetRepos {
 				localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-				if task.RepositoryID == nil {
+				if errWS == nil {
+					for i := range ws.Repos {
+						if ws.Repos[i].RepoID == repo.ID {
+							localPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+							break
+						}
+					}
+				} else if task.RepositoryID == nil {
 					parts := strings.Split(repo.URL, "/")
 					repoName := parts[len(parts)-1]
 					repoName = strings.TrimSuffix(repoName, ".git")
 					localPath = filepath.Join(localPath, repoName)
 				}
 				containerLocalPath := o.containerPathForHostPath(task, localPath, "")
+				
+				repoMergeStatus := models.MergeStatusMerged
+
 				// 1. Checkout integration branch
 				_, errCheckout := o.runSandboxStep(ctx, task, agent, "checkout_integration", fmt.Sprintf("git -C %s checkout %s", quoteShellArg(containerLocalPath), quoteShellArg(integrationBranch)))
 				if errCheckout != nil {
+					if errWS == nil {
+						for i := range ws.Repos {
+							if ws.Repos[i].RepoID == repo.ID {
+								ws.Repos[i].Status.MergeStatus = models.MergeStatusFailed
+							}
+						}
+						_ = o.SaveTaskWorkspaceMetadata(task, ws)
+					}
 					return nil, fmt.Errorf("checkout integration branch failed for repo %s: %w", repo.URL, errCheckout)
 				}
 
@@ -812,11 +875,30 @@ fi
 						if errCC == nil {
 							if stdout, ok := conflictCheck["stdout"].(string); ok && stdout != "" {
 								hasConflicts = true
+								repoMergeStatus = models.MergeStatusConflict
 								conflictDetails = append(conflictDetails, fmt.Sprintf("Repo %s (backend): %s", repo.URL, stdout))
 							} else {
+								repoMergeStatus = models.MergeStatusFailed
+								if errWS == nil {
+									for i := range ws.Repos {
+										if ws.Repos[i].RepoID == repo.ID {
+											ws.Repos[i].Status.MergeStatus = repoMergeStatus
+										}
+									}
+									_ = o.SaveTaskWorkspaceMetadata(task, ws)
+								}
 								return nil, fmt.Errorf("merge backend branch failed for repo %s: %w", repo.URL, errMergeBe)
 							}
 						} else {
+							repoMergeStatus = models.MergeStatusFailed
+							if errWS == nil {
+								for i := range ws.Repos {
+									if ws.Repos[i].RepoID == repo.ID {
+										ws.Repos[i].Status.MergeStatus = repoMergeStatus
+									}
+								}
+								_ = o.SaveTaskWorkspaceMetadata(task, ws)
+							}
 							return nil, fmt.Errorf("merge backend branch failed for repo %s: %w", repo.URL, errMergeBe)
 						}
 					}
@@ -834,11 +916,30 @@ fi
 						if errCC == nil {
 							if stdout, ok := conflictCheck["stdout"].(string); ok && stdout != "" {
 								hasConflicts = true
+								repoMergeStatus = models.MergeStatusConflict
 								conflictDetails = append(conflictDetails, fmt.Sprintf("Repo %s (frontend): %s", repo.URL, stdout))
 							} else {
+								repoMergeStatus = models.MergeStatusFailed
+								if errWS == nil {
+									for i := range ws.Repos {
+										if ws.Repos[i].RepoID == repo.ID {
+											ws.Repos[i].Status.MergeStatus = repoMergeStatus
+										}
+									}
+									_ = o.SaveTaskWorkspaceMetadata(task, ws)
+								}
 								return nil, fmt.Errorf("merge frontend branch failed for repo %s: %w", repo.URL, errMergeFe)
 							}
 						} else {
+							repoMergeStatus = models.MergeStatusFailed
+							if errWS == nil {
+								for i := range ws.Repos {
+									if ws.Repos[i].RepoID == repo.ID {
+										ws.Repos[i].Status.MergeStatus = repoMergeStatus
+									}
+								}
+								_ = o.SaveTaskWorkspaceMetadata(task, ws)
+							}
 							return nil, fmt.Errorf("merge frontend branch failed for repo %s: %w", repo.URL, errMergeFe)
 						}
 					}
@@ -849,9 +950,29 @@ fi
 					commitMsg := "Merge role branches into integration"
 					script := fmt.Sprintf("if ! git -C %[1]s diff --cached --quiet; then git -C %[1]s commit -m %[2]s; fi", quoteShellArg(containerLocalPath), quoteShellArg(commitMsg))
 					if _, errCommit := o.runSandboxStep(ctx, task, agent, "commit_merge", script); errCommit != nil {
+						if errWS == nil {
+							for i := range ws.Repos {
+								if ws.Repos[i].RepoID == repo.ID {
+									ws.Repos[i].Status.MergeStatus = models.MergeStatusFailed
+								}
+							}
+							_ = o.SaveTaskWorkspaceMetadata(task, ws)
+						}
 						return nil, fmt.Errorf("failed to commit merge for repo %s: %w", repo.URL, errCommit)
 					}
 				}
+
+				if errWS == nil {
+					for i := range ws.Repos {
+						if ws.Repos[i].RepoID == repo.ID {
+							ws.Repos[i].Status.MergeStatus = repoMergeStatus
+						}
+					}
+				}
+			}
+
+			if errWS == nil {
+				_ = o.SaveTaskWorkspaceMetadata(task, ws)
 			}
 
 			if hasConflicts {
@@ -1080,20 +1201,43 @@ run_verification() {
 	fi
 }
 
-if [ -d .git ] || [ -f go.mod ] || [ -f package.json ]; then
-	run_verification "." || exit 1
-else
-	for d in */ ; do
-		d_clean="${d%/}"
-		if [ -d "$d_clean/.git" ] || [ -f "$d_clean/go.mod" ] || [ -f "$d_clean/package.json" ]; then
-			(run_verification "$d_clean") || exit 1
-		fi
-	done
+found_repos=0
+for d in code/repos/*/main ; do
+	if [ -d "$d" ]; then
+		(run_verification "$d") || exit 1
+		found_repos=1
+	fi
+done
+
+if [ $found_repos -eq 0 ]; then
+	if [ -d .git ] || [ -f go.mod ] || [ -f package.json ]; then
+		run_verification "." || exit 1
+	else
+		for d in */ ; do
+			d_clean="${d%/}"
+			if [ -d "$d_clean/.git" ] || [ -f "$d_clean/go.mod" ] || [ -f "$d_clean/package.json" ]; then
+				(run_verification "$d_clean") || exit 1
+			fi
+		done
+	fi
 fi
 `
 			out, err := o.runSandboxStep(ctx, task, agent, workflow.StepTest, script)
 			if err != nil {
+				if ws, errWS := o.LoadTaskWorkspace(ctx, task); errWS == nil {
+					for i := range ws.Repos {
+						ws.Repos[i].Status.TestStatus = models.TestStatusFailed
+					}
+					_ = o.SaveTaskWorkspaceMetadata(task, ws)
+				}
 				return nil, err
+			}
+			
+			if ws, errWS := o.LoadTaskWorkspace(ctx, task); errWS == nil {
+				for i := range ws.Repos {
+					ws.Repos[i].Status.TestStatus = models.TestStatusPassed
+				}
+				_ = o.SaveTaskWorkspaceMetadata(task, ws)
 			}
 			
 			stdout, _ := out["stdout"].(string)
@@ -1215,9 +1359,18 @@ fi
 			var allChangedFiles []string
 			var createdPRSummaries []models.PRSummary
 
+			ws, errWS := o.LoadTaskWorkspace(ctx, task)
+
 			for _, repo := range targetRepos {
 				localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-				if task.RepositoryID == nil {
+				if errWS == nil {
+					for i := range ws.Repos {
+						if ws.Repos[i].RepoID == repo.ID {
+							localPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+							break
+						}
+					}
+				} else if task.RepositoryID == nil {
 					parts := strings.Split(repo.URL, "/")
 					repoName := parts[len(parts)-1]
 					repoName = strings.TrimSuffix(repoName, ".git")
@@ -1539,6 +1692,8 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 
 	// Save llm_response artifact
 	_ = o.saveArtifact(ctx, jobID, task.ID, stepID, "llm_response", parsed)
+
+	o.writeLLMCallTrace(ctx, task, agent, stepID, messages, resp, parsed)
 
 	return map[string]any{
 		"status":        "llm_completed",
@@ -2097,8 +2252,8 @@ func (o *Orchestrator) runTargetedTests(ctx context.Context, task *models.Task, 
 func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	hostWorkspacePath := localPath
-	if worktreeSuffix != "" && task.RepositoryID != nil {
-		hostWorkspacePath = localPath + worktreeSuffix
+	if worktreeSuffix != "" {
+		hostWorkspacePath = o.hostWorktreePath(task, localPath, worktreeSuffix)
 	}
 
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
@@ -2131,11 +2286,7 @@ func (o *Orchestrator) containerPathForHostPath(task *models.Task, hostPath stri
 	activeWorkspaceHostPath := localPath
 	
 	if worktreeSuffix != "" {
-		if task.RepositoryID != nil {
-			activeWorkspaceHostPath = o.hostWorktreePath(task, localPath, worktreeSuffix)
-		} else {
-			activeWorkspaceHostPath = localPath
-		}
+		activeWorkspaceHostPath = o.hostWorktreePath(task, localPath, worktreeSuffix)
 	}
 
 	rel, err := filepath.Rel(activeWorkspaceHostPath, hostPath)
@@ -2247,11 +2398,32 @@ func (o *Orchestrator) getChangedFiles(ctx context.Context, task *models.Task, a
 		targetRepos = repos
 	}
 
+	ws, errWS := o.LoadTaskWorkspace(ctx, task)
+
 	var allChanged []string
 	for _, repo := range targetRepos {
 		localRepoPath := targetPath
 		prefix := ""
-		if task.RepositoryID == nil {
+		if errWS == nil {
+			for i := range ws.Repos {
+				if ws.Repos[i].RepoID == repo.ID {
+					if worktreeSuffix != "" {
+						role := getRoleFromSuffix(worktreeSuffix)
+						if relPath, exists := ws.Repos[i].Paths.Worktrees[role]; exists && relPath != "" {
+							localRepoPath = filepath.Join(ws.Root, relPath)
+						} else {
+							localRepoPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+						}
+					} else {
+						localRepoPath = filepath.Join(ws.Root, ws.Repos[i].Paths.Main)
+					}
+					if task.RepositoryID == nil {
+						prefix = ws.Repos[i].Name + "/"
+					}
+					break
+				}
+			}
+		} else if task.RepositoryID == nil {
 			parts := strings.Split(repo.URL, "/")
 			repoName := parts[len(parts)-1]
 			repoName = strings.TrimSuffix(repoName, ".git")
@@ -2279,17 +2451,51 @@ func (o *Orchestrator) hostWorktreePath(task *models.Task, repoPath string, work
 	if worktreeSuffix == "" {
 		return repoPath
 	}
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
-	if task.RepositoryID != nil {
+
+	ctx := context.Background()
+	rWS, err := o.FindRepoWorkspaceByPath(ctx, task, repoPath)
+	if err != nil {
 		clean := strings.TrimPrefix(worktreeSuffix, "-")
 		clean = strings.TrimSuffix(clean, "-worktree")
-		return filepath.Join(localPath, clean)
+		localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+		if task.RepositoryID != nil {
+			return filepath.Join(localPath, clean)
+		}
+		if repoPath == localPath {
+			return localPath
+		}
+		return repoPath + worktreeSuffix
 	}
-	// Multi-repo
-	if repoPath == localPath {
-		return localPath
+
+	role := getRoleFromSuffix(worktreeSuffix)
+	ws := o.GetTaskWorkspace(task)
+	
+	if rWS.Paths.Worktrees == nil {
+		rWS.Paths.Worktrees = make(map[string]string)
 	}
-	return repoPath + worktreeSuffix
+	if rWS.Branches.Role == nil {
+		rWS.Branches.Role = make(map[string]string)
+	}
+
+	if path, exists := rWS.Paths.Worktrees[role]; exists && path != "" {
+		return filepath.Join(ws.Root, path)
+	}
+
+	relPath := filepath.Join("code", "repos", rWS.Name, "worktrees", role)
+	rWS.Paths.Worktrees[role] = relPath
+	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, role)
+
+	if wsLoaded, errLoad := o.LoadTaskWorkspace(ctx, task); errLoad == nil {
+		for i := range wsLoaded.Repos {
+			if wsLoaded.Repos[i].RepoID == rWS.RepoID {
+				wsLoaded.Repos[i] = *rWS
+				break
+			}
+		}
+		_ = o.SaveTaskWorkspaceMetadata(task, wsLoaded)
+	}
+
+	return filepath.Join(ws.Root, relPath)
 }
 
 func splitPatchByRepo(patchText string) map[string]string {

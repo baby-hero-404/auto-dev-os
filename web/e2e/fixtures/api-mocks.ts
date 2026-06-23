@@ -230,6 +230,10 @@ export async function installApiMocks(page: Page, state = createMockState()) {
     ]);
   });
 
+  await page.route("**/api/v1/skills/sources", async (route) => {
+    await json(route, []);
+  });
+
   await page.route(`**/api/v1/organizations/${orgID}/agents`, async (route) => {
     await json(route, [defaultAgent()]);
   });
@@ -304,6 +308,34 @@ export async function installApiMocks(page: Page, state = createMockState()) {
         total_tokens: 1000,
         cost_usd: 0.125,
         avg_latency_ms: 150,
+      },
+    ]);
+  });
+
+  await page.route("**/api/v1/analytics/gateway-usage**", async (route) => {
+    await json(route, [
+      {
+        bucket: now,
+        requests: 10,
+        prompt_tokens: 500,
+        output_tokens: 500,
+        total_tokens: 1000,
+        cost_usd: 0.125,
+        avg_latency_ms: 150,
+      },
+    ]);
+  });
+
+  await page.route("**/api/v1/analytics/failures**", async (route) => {
+    await json(route, [
+      {
+        task_id: "task-1",
+        project_id: projectID,
+        project_name: "Website Refactor",
+        title: "Add API Authentication",
+        failure_reason: "Mocked failure for dashboard diagnostics",
+        workflow_step: "test",
+        failed_at: now,
       },
     ]);
   });

@@ -102,6 +102,14 @@ func (m *mockWorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]model
 	return []models.TaskLog{}, nil
 }
 
+func (m *mockWorkflowRepo) AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error) {
+	return "mock-conn", true, nil
+}
+
+func (m *mockWorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error {
+	return nil
+}
+
 type mockAgentAssigner struct {
 	agent *models.Agent
 }
@@ -710,7 +718,7 @@ func TestOrchestrator_Resume_DoesNotLoseCode(t *testing.T) {
 
 	// Since hasSuccessfulCodeStep is true and local git directory exists,
 	// ensureWorkspaceCloned must NOT call resetExistingWorkspace (so gitOps must not be queried or clean git commands run).
-	err = orch.ensureWorkspaceCloned(context.Background(), task, agent)
+	err = orch.ensureWorkspaceCloned(context.Background(), task, agent, "job-123")
 	if err != nil {
 		t.Errorf("expected no error in ensureWorkspaceCloned, got %v", err)
 	}

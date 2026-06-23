@@ -106,6 +106,14 @@ func (m *testWorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]model
 	return nil, nil
 }
 
+func (m *testWorkflowRepo) AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error) {
+	return "mock-conn", true, nil
+}
+
+func (m *testWorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error {
+	return nil
+}
+
 // Mock TaskService
 type mockTaskSvc struct {
 	TaskService

@@ -28,6 +28,9 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 	if input.MaxRetries != nil {
 		p.MaxRetries = *input.MaxRetries
 	}
+	if input.MaxReviewFixCycles != nil {
+		p.MaxReviewFixCycles = *input.MaxReviewFixCycles
+	}
 	if input.DefaultBranch != nil {
 		p.DefaultBranch = *input.DefaultBranch
 	}
@@ -87,6 +90,9 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	}
 	if input.MaxRetries != nil {
 		updates["max_retries"] = *input.MaxRetries
+	}
+	if input.MaxReviewFixCycles != nil {
+		updates["max_review_fix_cycles"] = *input.MaxReviewFixCycles
 	}
 	if input.DefaultBranch != nil {
 		updates["default_branch"] = *input.DefaultBranch

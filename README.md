@@ -1,194 +1,132 @@
 # Auto Code OS
 
-Auto Code OS is an AI-Native Software Development Life Cycle (SDLC) platform that orchestrates autonomous AI agents to analyze tasks, draft specifications, construct codebases (backend & frontend), perform local testing, generate Pull Requests, and execute human review loops in a secure sandboxed environment.
+Auto Code OS is an AI-assisted SDLC platform that coordinates agents to analyze tasks, draft specs, implement code, run tests, create pull requests, and wait for explicit human merge approval.
 
----
+## Current Scope
 
-## Features
+- Task workflow from context loading through analysis, coding, review, testing, and PR readiness.
+- Git integration for clone, commit, push, PR creation, and merge.
+- Project, rule, agent, analytics, gateway, and review management in the web UI.
+- Skills are being refactored toward Git-synced, read-only sources.
 
-### 1. Autonomous Execution Pipeline
-- **Orchestrator Core**: A robust task execution state machine supporting multi-step DAG workflows.
-- **Org-Scoped Agent Pools**: Manage special-purpose AI workers (planners, coders, testers, and reviewers) matching task profiles.
-- **Docker Sandbox Worktree**: Securely isolates execution scripts and file modifications with custom memory limits, CPU bounds, and network isolation policies.
-
-### 2. AI Gateway & Cost Circuit Breaker
-- **Tier-based Routing**: Automatically routes tasks to LLMs based on complexity (`easy` -> fast models, `hard` -> powerful reasoning models).
-- **Multi-Provider Fallback**: Transparently cascades requests between OpenAI, Anthropic, and Gemini in case of provider rate limits or downtime.
-- **Runaway Budget Protection**: Restricts agent costs using active tokens and USD circuit breakers.
-
-### 3. Developer Skill System
-- **Markdown-Based Portable Playbooks**: Portable skill definitions leveraging standard JSON Schema tool contracts.
-- **Search-and-Replace patches (`apply_patch`)**: Minimizes context tokens by applying precise search-and-replace block changes instead of full file rewrites.
-- **Judge-based Evals**: CI/CD integration with LLM-as-a-judge formatting to validate prompt quality and skill outputs against golden datasets.
-
-### 4. Human-in-the-Loop Decision Gate
-- **Interactive Review Card**: Direct interface to inspect AI-generated PR summaries, risk level badges, modified files list, and interactive mock code diff editors.
-- **Repair Loop Rejection**: Reject PRs with explicit feedback, automatically transitioning tasks back to a fixing execution status for autonomous repair.
-- **Compliant Audit Tracing**: Real-time compliance logging tracking user actions, secret accesses, agent status shifts, and policy edits.
-
----
+For feature-level status and implementation notes, see `docs/features/`.
 
 ## Tech Stack
 
-- **Backend Language**: Go 1.26+
-- **Backend Framework**: Chi Router v5 (3-layer design pattern: Handler -> Service -> Repository)
-- **Database**: PostgreSQL 17 + pgvector (Migrations handled via `golang-migrate`)
-- **Frontend Framework**: Next.js 16 (App Router, TypeScript, React 19)
-- **Frontend Styling & Visuals**: Tailwind CSS v4, Recharts, Lucide React
-- **Infrastructure**: Docker & Docker Compose
+- Backend: Go 1.26.1, Chi, GORM, PostgreSQL, Docker
+- Frontend: Next.js 16.2.6, React 19.2.4, TypeScript, Tailwind CSS v4, Radix UI, Lucide, Recharts
+- Testing: Go test suite and Playwright
 
----
-
-## Architecture Overview
-
-```mermaid
-graph TD
-    User([Platform Reviewer]) -->|Manages Tasks / Reviews PRs| WebUI[Next.js 16 Web Portal]
-    WebUI -->|API Requests| APIServer[Go Chi Monolith Server]
-    APIServer -->|Aggregates & Metrics| DB[(PostgreSQL 17 + pgvector)]
-    APIServer -->|Triggers Execution| Orchestrator[Workflow DAG Orchestrator]
-    Orchestrator -->|Queries Agent Pool| DB
-    Orchestrator -->|AES Decrypted Env Injection| SecretVault[Encrypted AES-GCM Vault]
-    Orchestrator -->|Mounts Workspace| Sandbox[Docker Sandbox Runtime]
-    Orchestrator -->|Optimized Tools| SkillSystem[Skill System Runtime]
-    Orchestrator -->|Tiered Model Routing & Budget Checks| LLMGateway[LLM Gateway Router]
-    LLMGateway -->|API Fallbacks| LLMProviders[OpenAI / Anthropic / Gemini]
-```
-
----
-
-## Project Structure
+## Repository Layout
 
 ```text
 /
-├── server/                    # Go backend monorepo
-│   ├── cmd/
-│   │   ├── api/               # API server bootstrap entry point
-│   │   ├── cli/               # Phase 0 CLI runner utility
-│   │   └── migrate/           # Database migration runner CLI
-│   ├── internal/
-│   │   ├── handler/           # HTTP Request handlers & routing
-│   │   ├── service/           # Core business logic services
-│   │   ├── repository/        # GORM PostgreSQL repositories
-│   │   ├── orchestrator/      # State machine pipeline & prompt builders
-│   │   ├── sandbox/           # Container isolation layer (Docker client)
-│   │   └── workflow/          # Compiled DAG Workflow Node Engine
-│   ├── pkg/
-│   │   ├── llm/               # Gateway routers, fallbacks, and token logs
-│   │   ├── models/            # Shared database GORM struct models
-│   │   └── config/            # Viper configuration manager
-│   └── migration/             # SQL up/down migration definitions
-├── web/                       # Next.js 16 React portal frontend
-│   ├── src/app/               # Application routes (App Router)
-│   │   ├── analytics/         # Observer dashboards
-│   │   ├── audit/             # Compliance logging page
-│   │   ├── gateway/           # Token gateway telemetry
-│   │   └── tasks/[id]/        # Interactive progress & PR review loop
-│   ├── src/components/        # Shared visual portal UI parts
-│   └── src/lib/               # Axios/Fetch client and TypeScript typings
-├── docs/                      # Implementation plans, roadmap & manual
-├── docker-compose.yml         # Dev environment container orchestrator
-└── Makefile                   # Tasks automation runner script
+├── server/                # Go backend
+│   ├── cmd/               # CLI, API, and migration entry points
+│   ├── internal/          # handlers, services, repository, orchestrator, sandbox, workflow
+│   └── pkg/               # shared models, config, and LLM types
+├── web/                   # Next.js web app
+│   ├── src/app/           # application routes
+│   ├── src/components/    # shared UI components
+│   └── src/lib/           # client helpers and API types
+├── docs/                  # feature docs and implementation notes
+├── docker-compose.yml     # local infrastructure
+└── Makefile               # common dev and test commands
 ```
-
----
 
 ## Prerequisites
 
-Ensure you have the following packages installed on your local OS:
-- **Go**: v1.26+
-- **Node.js**: v20+ (with npm)
-- **Docker & Docker Compose**: v20.10+ (to mount containers and sandbox workspaces)
+- Go 1.26+
+- Node.js 20+ with npm
+- Docker and Docker Compose
 
----
+## Setup
 
-## Installation
-
-### 1. Clone the repository
-```bash
-git clone <repository-url>
-cd auto-code-os
-```
-
-### 2. Configure variables
-Create your local environment file:
-```bash
-cp .env.example .env
-```
-Open `.env` and fill in your keys (see **Configuration** below).
-
-### 3. Run database migrations
-Ensure Docker daemon is running, start PostgreSQL, and run the SQL schema migrations:
-```bash
-make db-up
-make migrate
-```
-
----
+1. Clone the repository.
+2. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+3. Install frontend dependencies:
+   ```bash
+   cd web
+   npm install
+   cd ..
+   ```
 
 ## Configuration
 
-| Variable | Description | Default / Example |
-|----------|-------------|-------------------|
-| `SERVER_PORT` | The port the Go API backend listens on | `8080` |
-| `DATABASE_URL` | The PostgreSQL database connection string | `postgres://autocodeuser:autocodepass@localhost:5434/autocodeosdb?sslmode=disable` |
-| `LLM_PROVIDER` | Active LLM routing mode (`openai`, `anthropic`, `gemini`, `gateway`) | `gateway` |
-| `OPENAI_API_KEY` | API authentication key for OpenAI provider | `sk-proj-...` |
-| `ANTHROPIC_API_KEY` | API authentication key for Anthropic provider | `sk-ant-...` |
-| `GEMINI_API_KEY` | API authentication key for Google Gemini provider | `AIzaSy-...` |
-| `SANDBOX_RUNTIME` | Sandbox runtime driver (`stub` for testing, `docker` for real sandbox) | `stub` |
-| `SANDBOX_WORKSPACE_ROOT` | Workspace path where agent workspaces are stored | `/tmp/auto-code-os/workspaces` |
+See `.env.example` for the full list. Common variables:
 
----
+| Variable | Purpose |
+| --- | --- |
+| `SERVER_PORT` | Go API port |
+| `WEB_PORT` | Next.js dev server port |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `LLM_PROVIDER` | Active LLM routing mode |
+| `OPENAI_API_KEY` | OpenAI credential |
+| `ANTHROPIC_API_KEY` | Anthropic credential |
+| `GEMINI_API_KEY` | Google Gemini credential |
+| `SANDBOX_RUNTIME` | `stub` or `docker` sandbox driver |
+| `SANDBOX_WORKSPACE_ROOT` | Workspace root used by task execution |
 
-## Running the Project
+## Running Locally
 
-### Development Mode (Both Backend & Frontend)
-To run the database, run migrations, and launch both backend API and React Next.js dev server concurrently:
+Start the full stack:
+
 ```bash
 make dev
 ```
-- Go Backend API: http://localhost:8080
-- Next.js Web Portal: http://localhost:32300
 
-### API Backend Only
-To boot up the Go server API independently:
+Typical local URLs:
+
+- API: `http://localhost:8080`
+- Web UI: `http://localhost:32300`
+
+Other useful targets:
+
 ```bash
-make api
+make dev-be   # database, migrations, and API server
+make dev-fe   # Next.js frontend only
+make api      # Go API server
+make web      # Next.js dev server
+make migrate  # run database migrations
 ```
-
-### Frontend Next.js Only
-To start the Next.js development server independently:
-```bash
-make web
-```
-
----
 
 ## Testing
 
-### Run Backend Unit & Integration Tests
-To run all Go testing suites:
+Backend:
+
 ```bash
 make test
 ```
-To run frontend Playwright end-to-end user path tests:
+
+Frontend end-to-end:
+
 ```bash
-cd web && npx playwright test
+cd web
+npx playwright test
 ```
 
----
+## Useful Commands
 
-## Contributing
+```bash
+make build    # build the CLI binary
+make clean    # remove build artifacts and local data
+make db-up    # start PostgreSQL
+make db-down  # stop containers
+```
 
-1. Fork the repository.
-2. Create a clean feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'feat: Add amazing feature'`).
-4. Push your branch (`git push origin feature/amazing-feature`).
-5. Create a new Pull Request.
+## Feature References
 
----
-
-## License
-
-This project is licensed under the MIT License.
+- `docs/features/5.1-unified-ai-gateway.md`
+- `docs/features/5.2a-rule-system.md`
+- `docs/features/5.2b-skill-system.md`
+- `docs/features/5.3-agent-system.md`
+- `docs/features/5.4-git-integration.md`
+- `docs/features/5.5-project-system.md`
+- `docs/features/5.6-task-system.md`
+- `docs/features/5.7-workflow-engine.md`
+- `docs/features/5.8-pr-human-review.md`
+- `docs/features/5.9-dashboard-analytics.md`
+- `docs/features/5.10-multi-channel-interaction.md`

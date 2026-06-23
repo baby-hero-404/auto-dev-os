@@ -194,7 +194,9 @@ type mockGitOpsClient struct {
 	createdBranch string
 
 	committedFiles int
-	prTitle       string
+	prTitle        string
+	prURLSet       bool
+	prURL          string
 }
 
 func (m *mockGitOpsClient) CloneRepo(ctx context.Context, repoURL, token, branch, localPath string) (string, error) {
@@ -220,6 +222,9 @@ func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, localPath, repoURL
 
 func (m *mockGitOpsClient) CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error) {
 	m.prTitle = title
+	if m.prURLSet {
+		return m.prURL, nil
+	}
 	return "https://github.com/mock/pr/1", nil
 }
 
@@ -370,6 +375,63 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	for k, found := range expectedTypes {
 		if !found {
 			t.Errorf("expected artifact type %s to be saved, but was not found", k)
+		}
+	}
+}
+
+func TestOrchestrator_StepPR_NoChangesKeepsPrReady(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-no-change",
+		ProjectID:   "proj-no-change",
+		Title:       "No change task",
+		Description: "Nothing should be committed.",
+		Complexity:  models.TaskComplexityMedium,
+		Status:      models.TaskStatusTesting,
+	}
+	job := &models.WorkflowJob{ID: "job-no-change", TaskID: task.ID, Status: models.WorkflowJobStatusQueued}
+	agent := &models.Agent{ID: "agent-123", Name: "Test Agent", Role: models.AgentRoleBackend}
+	repo := models.Repository{ID: "repo-123", ProjectID: task.ProjectID, URL: "https://github.com/test/repo.git", Branch: "main", Token: "token-123"}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: job}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+	sandboxRuntime := &mockSandboxRuntime{}
+	gitOps := &mockGitOpsClient{prURLSet: true, prURL: ""}
+	artifactRepo := &mockArtifactRepo{}
+	reposRepo := &mockRepositoriesRepo{repo: repo}
+
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentAssigner, sandboxRuntime, nil)
+	orch.SetGitOpsClient(gitOps)
+	orch.SetArtifactRepository(artifactRepo)
+	orch.SetRepositoryRepository(reposRepo)
+
+	runners := orch.stepRunners(task, agent, job.ID)
+	runner := runners[workflow.StepPR]
+	if runner == nil {
+		t.Fatal("missing PR step runner")
+	}
+
+	out, err := runner(context.Background(), workflow.StepContext{Inputs: map[string]map[string]any{
+		workflow.StepTest: map[string]any{"status": "passed"},
+	}})
+	if err != nil {
+		t.Fatalf("PR step failed: %v", err)
+	}
+	if status, _ := out["status"].(string); status != "no_changes_detected" {
+		t.Fatalf("expected no_changes_detected status, got %v", out["status"])
+	}
+	if task.Status != models.TaskStatusPrReady {
+		t.Fatalf("expected task status pr_ready, got %s", task.Status)
+	}
+	if len(taskRepo.updated) == 0 {
+		t.Fatal("expected task updates to be recorded")
+	}
+	for _, update := range taskRepo.updated {
+		if update.PRURLs != nil {
+			t.Fatalf("expected no PR URL update when no changes are detected, got %v", []string(*update.PRURLs))
+		}
+		if update.Status != nil && *update.Status != models.TaskStatusPrReady {
+			t.Fatalf("expected only pr_ready status update, got %s", *update.Status)
 		}
 	}
 }
@@ -596,11 +658,11 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 
 func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	task := &models.Task{
-		ID:          "task-loop",
-		ProjectID:   "proj-loop",
-		Title:       "Test Loop Task",
-		Complexity:  models.TaskComplexityMedium,
-		Status:      models.TaskStatusCoding,
+		ID:         "task-loop",
+		ProjectID:  "proj-loop",
+		Title:      "Test Loop Task",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusCoding,
 	}
 
 	agent := &models.Agent{
@@ -783,10 +845,10 @@ func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
 
 func TestOrchestrator_ApproveMerge(t *testing.T) {
 	task := &models.Task{
-		ID:         "task-merge-123",
-		ProjectID:  "proj-merge-123",
-		Status:     models.TaskStatusHumanReview,
-		PRURLs:     []string{"https://github.com/test/repo/pull/1"},
+		ID:        "task-merge-123",
+		ProjectID: "proj-merge-123",
+		Status:    models.TaskStatusHumanReview,
+		PRURLs:    []string{"https://github.com/test/repo/pull/1"},
 	}
 
 	taskRepo := &mockTaskRepo{task: task}
@@ -873,7 +935,7 @@ index abc..def 100644
 	}
 
 	localPath := "/tmp/workspaces/task-1"
-	
+
 	// Suffix case
 	bePath := orch.hostWorktreePath(singleTask, localPath, "-be-worktree")
 	expectedBePath := filepath.Clean("/tmp/workspaces/task-1/be")
@@ -914,6 +976,3 @@ index abc..def 100644
 		t.Errorf("expected multi-repo container path: /workspace/repo-a-be-worktree, got: %s", multiContainerBe)
 	}
 }
-
-
-

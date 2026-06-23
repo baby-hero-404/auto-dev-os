@@ -194,7 +194,7 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 		if len(strings.TrimSpace(string(output))) == 0 {
 			observability.Info(ctx, "skipping PR creation because branch has no commits relative to base branch",
 				"branch", branchName, "base", baseBranch)
-			return fmt.Sprintf("no changes detected (branch %s has no commits relative to %s)", branchName, baseBranch), nil
+			return "", nil
 		}
 	} else {
 		// If baseBranch isn't main but master, try master.
@@ -203,7 +203,7 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 			if output, err2 := cmd.CombinedOutput(); err2 == nil && len(strings.TrimSpace(string(output))) == 0 {
 				observability.Info(ctx, "skipping PR creation because branch has no commits relative to master",
 					"branch", branchName)
-				return fmt.Sprintf("no changes detected (branch %s has no commits relative to master)", branchName), nil
+				return "", nil
 			}
 		}
 	}
@@ -224,7 +224,7 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 		if strings.Contains(strings.ToLower(err.Error()), "no commits between") {
 			observability.Info(ctx, "github API reported no commits between branches; returning friendly status",
 				"branch", branchName, "base", baseBranch)
-			return fmt.Sprintf("no changes detected (branch %s has no commits relative to %s)", branchName, baseBranch), nil
+			return "", nil
 		}
 		return "", err
 	}

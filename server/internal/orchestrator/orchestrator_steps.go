@@ -1197,6 +1197,10 @@ fi
 					o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
 					continue
 				}
+				if strings.TrimSpace(prURL) == "" {
+					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("create PR returned no URL for %s; skipping", repo.URL))
+					continue
+				}
 
 				createdPRs = append(createdPRs, prURL)
 				createdBranches = append(createdBranches, branchName)
@@ -1218,7 +1222,7 @@ fi
 
 			status := models.TaskStatusPrReady
 			if len(createdPRs) == 0 {
-				status = models.TaskStatusMerged
+				status = models.TaskStatusPrReady
 				noChangesSummaries := []models.PRSummary{{
 					Title:  "No changes detected",
 					Body:   "No code modifications were required.",

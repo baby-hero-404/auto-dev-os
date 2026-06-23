@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -291,4 +292,65 @@ func TestGitOpsAdapter_CreatePullRequest_ParsesOriginalSSHURL(t *testing.T) {
 	if prURL != "https://github.com/test-owner/test-repo/pull/1" {
 		t.Fatalf("expected PR URL from parsed SSH repo, got %q", prURL)
 	}
+}
+
+func TestGitOpsAdapter_CreatePullRequest_NoChangesReturnsEmptyURL(t *testing.T) {
+	provider := &mockGitProvider{}
+	repoDb := &mockRepoLookup{
+		repo: &models.Repository{
+			ID:     "repo-123",
+			URL:    "https://github.com/test-owner/test-repo.git",
+			Branch: "main",
+		},
+	}
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "repo-123")
+	if err := initGitRepoWithoutAheadCommits(repoPath); err != nil {
+		t.Fatalf("init test repo: %v", err)
+	}
+
+	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir, nil)
+	prURL, err := adapter.CreatePullRequest(context.Background(), "https://github.com/test-owner/test-repo.git", "feature-branch", "title", "body")
+	if err != nil {
+		t.Fatalf("CreatePullRequest: %v", err)
+	}
+	if prURL != "" {
+		t.Fatalf("expected empty PR URL for no-change branch, got %q", prURL)
+	}
+	if provider.prTitle != "" || provider.prHead != "" || provider.prBase != "" {
+		t.Fatalf("provider should not be called when no changes are detected")
+	}
+}
+
+func initGitRepoWithoutAheadCommits(repoPath string) error {
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		return err
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "init").CombinedOutput(); err != nil {
+		return errors.New(string(out))
+	}
+	for _, args := range [][]string{
+		{"git", "-C", repoPath, "config", "user.email", "test@example.com"},
+		{"git", "-C", repoPath, "config", "user.name", "Test User"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			return errors.New(string(out))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		return err
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "add", "README.md").CombinedOutput(); err != nil {
+		return errors.New(string(out))
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "commit", "-m", "initial").CombinedOutput(); err != nil {
+		return errors.New(string(out))
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "branch", "-M", "main").CombinedOutput(); err != nil {
+		return errors.New(string(out))
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "checkout", "-b", "feature-branch").CombinedOutput(); err != nil {
+		return errors.New(string(out))
+	}
+	return nil
 }

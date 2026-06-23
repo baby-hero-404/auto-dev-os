@@ -94,6 +94,10 @@ func (m *testWorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string,
 	return nil
 }
 
+func (m *testWorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	return nil
+}
+
 func (m *testWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
 	return nil
 }
@@ -211,3 +215,88 @@ func TestPRHandler_Reject_TriggersRepair(t *testing.T) {
 		t.Errorf("expected workflow job status queued, got %s", workflowRepo.job.Status)
 	}
 }
+
+func TestPRHandler_StartReview_And_Approve(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-456",
+		Status:     models.TaskStatusPrReady,
+		SpecStatus: models.TaskSpecStatusApproved,
+	}
+
+	taskRepo := &testTaskRepo{task: task}
+	workflowRepo := &testWorkflowRepo{}
+	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	taskSvc := &mockTaskSvc{task: task}
+	auditSvc := &mockAuditSvc{}
+
+	handler := NewPRHandler(taskSvc, auditSvc, orch)
+
+	r := chi.NewRouter()
+	r.Post("/api/v1/tasks/{taskID}/pr/start-review", handler.StartReview)
+	r.Post("/api/v1/tasks/{taskID}/pr/approve", handler.Approve)
+
+	// 1. Verify we can start review from pr_ready
+	rr1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest("POST", "/api/v1/tasks/task-456/pr/start-review", nil)
+	r.ServeHTTP(rr1, req1)
+
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", rr1.Code, rr1.Body.String())
+	}
+	if task.Status != models.TaskStatusHumanReview {
+		t.Errorf("expected status human_review after start-review, got %s", task.Status)
+	}
+
+	// 2. Verify we can approve from human_review
+	rr2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/api/v1/tasks/task-456/pr/approve", nil)
+	r.ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", rr2.Code, rr2.Body.String())
+	}
+	if task.Status != models.TaskStatusMerged {
+		t.Errorf("expected status merged after approve, got %s", task.Status)
+	}
+}
+
+func TestPRHandler_Reject_ExceedsReviewLoopLimit(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-789",
+		ProjectID:  "proj-123",
+		Status:     models.TaskStatusHumanReview,
+		SpecStatus: models.TaskSpecStatusApproved,
+	}
+
+	taskRepo := &testTaskRepo{task: task}
+	workflowRepo := &testWorkflowRepo{}
+	
+	// Seed 3 pr_rejection checkpoints to hit default limit of 3
+	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
+	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
+	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
+
+	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	taskSvc := &mockTaskSvc{task: task}
+	auditSvc := &mockAuditSvc{}
+
+	handler := NewPRHandler(taskSvc, auditSvc, orch)
+
+	r := chi.NewRouter()
+	r.Post("/api/v1/tasks/{taskID}/pr/reject", handler.Reject)
+
+	body := `{"feedback": "Please fix formatting."}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/tasks/task-789/pr/reject", strings.NewReader(body))
+	r.ServeHTTP(rr, req)
+
+	// Since limit is 3 and we have 3 rejection checkpoints, it should fail
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d. Body: %s", rr.Code, rr.Body.String())
+	}
+	if task.Status != models.TaskStatusFailed {
+		t.Errorf("expected task status to be updated to failed, got %s", task.Status)
+	}
+}
+
+

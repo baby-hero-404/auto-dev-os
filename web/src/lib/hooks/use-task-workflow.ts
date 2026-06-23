@@ -117,6 +117,20 @@ export function useTaskWorkflow(taskID: string) {
     }
   }
 
+  async function startReview() {
+    if (!token) return;
+    setError("");
+    setSubmittingPR(true);
+    try {
+      await api.startReview(taskID, token);
+      await mutateWorkflow();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to start review");
+    } finally {
+      setSubmittingPR(false);
+    }
+  }
+
   function requestSpecChanges() {
     setIsRequestingChanges(true);
   }
@@ -140,6 +154,7 @@ export function useTaskWorkflow(taskID: string) {
     submitSpecChanges,
     approvePR,
     rejectPR,
+    startReview,
     mutateWorkflow,
     mutateLogs,
   };

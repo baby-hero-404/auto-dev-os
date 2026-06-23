@@ -45,6 +45,13 @@ func TestValidateTaskTransition(t *testing.T) {
 		{"todo to merged", models.TaskStatusTodo, models.TaskStatusMerged, true},
 		{"merged to todo", models.TaskStatusMerged, models.TaskStatusTodo, true},
 		{"failed to todo", models.TaskStatusFailed, models.TaskStatusTodo, false},
+		{"todo to context_loading", models.TaskStatusTodo, models.TaskStatusContextLoading, false},
+		{"context_loading to analyzing", models.TaskStatusContextLoading, models.TaskStatusAnalyzing, false},
+		{"testing to pr_ready", models.TaskStatusTesting, models.TaskStatusPrReady, false},
+		{"pr_ready to human_review", models.TaskStatusPrReady, models.TaskStatusHumanReview, false},
+		{"pr_ready to merged", models.TaskStatusPrReady, models.TaskStatusMerged, false},
+		{"todo to pr_ready", models.TaskStatusTodo, models.TaskStatusPrReady, true},
+		{"coding to pr_ready", models.TaskStatusCoding, models.TaskStatusPrReady, true},
 		{"unknown status", "unknown", models.TaskStatusTodo, true},
 	}
 

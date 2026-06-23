@@ -261,6 +261,7 @@ func NewRouter(d Deps) http.Handler {
 			// PR approval/rejection
 			r.Post("/tasks/{taskID}/pr/approve", prH.Approve)
 			r.Post("/tasks/{taskID}/pr/reject", prH.Reject)
+			r.Post("/tasks/{taskID}/pr/start-review", prH.StartReview)
 
 			// Phase 6: Memory detail
 			r.Get("/memories/{memoryID}", memoryH.GetByID)

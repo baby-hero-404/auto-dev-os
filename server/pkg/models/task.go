@@ -9,16 +9,18 @@ import (
 
 // Task statuses — full lifecycle.
 const (
-	TaskStatusTodo        = "todo"
-	TaskStatusAnalyzing   = "analyzing"
-	TaskStatusSpecReview  = "spec_review"
-	TaskStatusCoding      = "coding"
-	TaskStatusReviewing   = "reviewing"
-	TaskStatusFixing      = "fixing"
-	TaskStatusTesting     = "testing"
-	TaskStatusHumanReview = "human_review"
-	TaskStatusMerged      = "merged"
-	TaskStatusFailed      = "failed"
+	TaskStatusTodo           = "todo"
+	TaskStatusContextLoading = "context_loading"
+	TaskStatusAnalyzing      = "analyzing"
+	TaskStatusSpecReview     = "spec_review"
+	TaskStatusCoding         = "coding"
+	TaskStatusReviewing      = "reviewing"
+	TaskStatusFixing         = "fixing"
+	TaskStatusTesting        = "testing"
+	TaskStatusPrReady        = "pr_ready"
+	TaskStatusHumanReview    = "human_review"
+	TaskStatusMerged         = "merged"
+	TaskStatusFailed         = "failed"
 )
 
 // Task complexity levels.
@@ -30,16 +32,18 @@ const (
 
 // ValidTaskTransitions defines allowed status transitions.
 var ValidTaskTransitions = map[string][]string{
-	TaskStatusTodo:        {TaskStatusAnalyzing, TaskStatusCoding},
-	TaskStatusAnalyzing:   {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed},
-	TaskStatusSpecReview:  {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
-	TaskStatusCoding:      {TaskStatusReviewing, TaskStatusFailed},
-	TaskStatusReviewing:   {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed},
-	TaskStatusFixing:      {TaskStatusReviewing, TaskStatusFailed},
-	TaskStatusTesting:     {TaskStatusHumanReview, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing},
-	TaskStatusHumanReview: {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
-	TaskStatusMerged:      {},
-	TaskStatusFailed:      {TaskStatusTodo, TaskStatusAnalyzing},
+	TaskStatusTodo:           {TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusCoding},
+	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusFailed},
+	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
+	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
+	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusFailed},
+	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed},
+	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusFailed},
+	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing},
+	TaskStatusPrReady:        {TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed, TaskStatusFixing},
+	TaskStatusHumanReview:    {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
+	TaskStatusMerged:         {},
+	TaskStatusFailed:         {TaskStatusTodo, TaskStatusAnalyzing},
 }
 
 const (
@@ -111,6 +115,7 @@ type TaskAnalysis struct {
 	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
 	TaskRules              []string `json:"task_rules,omitempty"`
 	RequiredSkills         []string `json:"required_skills,omitempty"`
+	RiskDomains            []string `json:"risk_domains,omitempty"`
 	ProposalMD             string   `json:"proposal_md,omitempty"`
 	SpecsMD                string   `json:"specs_md,omitempty"`
 	DesignMD               string   `json:"design_md,omitempty"`

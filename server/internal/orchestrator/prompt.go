@@ -581,7 +581,7 @@ func (a *PromptAssembler) loadProjectDiskSkills(projectID string) ([]models.Skil
 					schemaMap["category"] = "project"
 					schemaMap["registry"] = sk.ID
 					schemaMap["path"] = filepath.ToSlash(filepath.Join("projects", projectID, "skills", sk.Path))
-					
+
 					schemaRaw, _ := json.Marshal(schemaMap)
 					diskSkills = append(diskSkills, models.Skill{
 						ID:          sk.ID,
@@ -669,4 +669,3 @@ func (a *PromptAssembler) loadProjectKnowledgeBaseDocs(projectID string, query s
 
 	return sb.String()
 }
-

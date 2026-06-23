@@ -22,9 +22,10 @@ type PRSummary struct {
 	Body         string   `json:"body"`
 	PRURL        string   `json:"pr_url"`
 	ChangedFiles []string `json:"changed_files"`
-	RiskLevel    string   `json:"risk_level"`
-	RiskReason   string   `json:"risk_reason"`
-	Status       string   `json:"status"`
+	RiskLevel           string   `json:"risk_level"`
+	RiskReason          string   `json:"risk_reason"`
+	Status              string   `json:"status"`
+	ReviewLimitExceeded bool     `json:"review_limit_exceeded"`
 }
 
 // PRRejectInput is the payload for rejecting a PR.

@@ -249,7 +249,7 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 	if err != nil {
 		return nil, err
 	}
-	if task.Status != models.TaskStatusHumanReview {
+	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
 		return nil, fmt.Errorf("task is not waiting for human PR approval")
 	}
 	if len(task.PRURLs) > 0 && o.gitOps != nil {
@@ -283,4 +283,48 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 	}
 	o.log(ctx, taskID, nil, "info", "human approved workflow for merge")
 	return updated, nil
+}
+
+func (o *Orchestrator) StartReview(ctx context.Context, taskID string) (*models.Task, error) {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task.Status != models.TaskStatusPrReady {
+		return nil, fmt.Errorf("task is not in pr_ready state")
+	}
+	return o.updateTaskStatus(ctx, taskID, models.TaskStatusHumanReview)
+}
+
+func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) error {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	var maxReviewFixCycles int = 3 // default
+	if o.projects != nil {
+		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil && p.MaxReviewFixCycles > 0 {
+			maxReviewFixCycles = p.MaxReviewFixCycles
+		}
+	}
+	
+	checkpoints, err := o.workflows.ListCheckpoints(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	
+	rejectionCount := 0
+	for _, cp := range checkpoints {
+		if cp.Step == "pr_rejection" {
+			rejectionCount++
+		}
+	}
+	
+	if rejectionCount >= maxReviewFixCycles {
+		failed := models.TaskStatusFailed
+		_, _ = o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &failed})
+		o.log(ctx, taskID, nil, "error", fmt.Sprintf("review loop limit exceeded (limit: %d). task marked as failed.", maxReviewFixCycles))
+		return fmt.Errorf("review loop limit of %d exceeded. task has failed", maxReviewFixCycles)
+	}
+	return nil
 }

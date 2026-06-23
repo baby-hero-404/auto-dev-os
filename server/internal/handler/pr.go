@@ -32,7 +32,7 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate task is in a reviewable state.
-	if task.Status != models.TaskStatusHumanReview {
+	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
 		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
 		return
 	}
@@ -74,7 +74,7 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate task is in a reviewable state.
-	if task.Status != models.TaskStatusHumanReview {
+	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
 		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
 		return
 	}
@@ -87,6 +87,13 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if input.Feedback == "" {
 		writeError(w, http.StatusBadRequest, "feedback is required when rejecting a PR")
 		return
+	}
+
+	if h.orch != nil {
+		if err := h.orch.CheckReviewLoopLimit(r.Context(), taskID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	// Transition to fixing state to trigger the fix cycle.
@@ -117,6 +124,45 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// StartReview transitions a task from pr_ready to human_review.
+// POST /api/v1/tasks/:taskID/pr/start-review
+func (h *PRHandler) StartReview(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+
+	task, err := h.taskSvc.GetByID(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if task.Status != models.TaskStatusPrReady {
+		writeError(w, http.StatusBadRequest, "task is not in pr_ready state (status: "+task.Status+")")
+		return
+	}
+
+	var updated *models.Task
+	if h.orch != nil {
+		updated, err = h.orch.StartReview(r.Context(), taskID)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	} else {
+		hr := models.TaskStatusHumanReview
+		updated, err = h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &hr})
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	}
+
+	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRReviewStarted, "task", taskID,
+		service.WithTaskID(taskID),
+	)
 
 	writeJSON(w, http.StatusOK, updated)
 }

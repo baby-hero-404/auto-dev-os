@@ -11,6 +11,7 @@ import (
 
 	"regexp"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -43,6 +44,7 @@ The JSON object MUST have the following structure:
   "scope": "A clear, detailed description of the scope of the change",
   "affected_files": ["list", "of", "files", "expected", "to", "be", "modified"],
   "risks": ["list", "of", "potential", "risks", "and", "challenges"],
+  "risk_domains": ["list", "of", "risk", "domains", "touched", "(e.g., 'auth', 'payment', 'security', 'data_migration', 'infra', 'rbac', 'public_api')"],
   "execution_plan": ["step-by-step", "plan", "to", "implement", "this", "task"],
   "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
   "required_skills": ["list", "of", "skill", "names", "required", "for", "this", "task", "(e.g., 'docker_expert', 'frontend_design')"],
@@ -157,6 +159,13 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 								}
 							}
 						}
+						if domains, ok := parsed["risk_domains"].([]any); ok {
+							for _, item := range domains {
+								if s, ok := item.(string); ok {
+									analysis.RiskDomains = append(analysis.RiskDomains, s)
+								}
+							}
+						}
 						if proposal, ok := parsed["proposal_md"].(string); ok {
 							analysis.ProposalMD = proposal
 						}
@@ -227,34 +236,23 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 			if err != nil {
 				return nil, err
 			}
-			specStatus := models.TaskSpecStatusPendingReview
-			status := models.TaskStatusSpecReview
-			if len(analysis.ClarificationQuestions) > 0 {
-				specStatus = models.TaskSpecStatusChangesRequested
-			} else {
-				autonomy := agent.AutonomyLevel
-				if o.projects != nil {
-					if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil && p.DefaultAutonomy != "" && autonomy == "" {
-						autonomy = p.DefaultAutonomy
-					}
-				}
-				switch autonomy {
-				case models.AgentAutonomyAutonomous:
-					specStatus = models.TaskSpecStatusAutoApproved
-					status = models.TaskStatusCoding
-				case models.AgentAutonomyApprovalRequired:
-					specStatus = models.TaskSpecStatusPendingReview
-					status = models.TaskStatusSpecReview
-				default:
-					if analysis.Complexity == models.TaskComplexityEasy {
-						specStatus = models.TaskSpecStatusAutoApproved
-						status = models.TaskStatusCoding
-					} else {
-						specStatus = models.TaskSpecStatusPendingReview
-						status = models.TaskStatusSpecReview
-					}
+			var projectAutonomy string
+			var projectReviewPolicy string
+			if o.projects != nil {
+				if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil {
+					projectAutonomy = p.DefaultAutonomy
+					projectReviewPolicy = p.AutoReviewPolicy
 				}
 			}
+			specStatus, status := policy.ShouldAutoApproveSpec(
+				analysis.Complexity,
+				analysis.AffectedFiles,
+				analysis.RiskDomains,
+				agent.AutonomyLevel,
+				projectAutonomy,
+				projectReviewPolicy,
+				len(analysis.ClarificationQuestions) > 0,
+			)
 			if _, err := o.tasks.Update(ctx, task.ID, models.UpdateTaskInput{
 				Complexity: &analysis.Complexity,
 				Analysis:   raw,
@@ -656,6 +654,21 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 				prGen := NewPRGenerator()
 				summary := prGen.GenerateSummary(ctx, task, agent, repoChangedFiles, repoDiffText, testOut)
 
+				maxReviewFixCycles := 3
+				if o.projects != nil {
+					if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil && p.MaxReviewFixCycles > 0 {
+						maxReviewFixCycles = p.MaxReviewFixCycles
+					}
+				}
+				checkpoints, _ := o.workflows.ListCheckpoints(ctx, task.ID)
+				rejectionCount := 0
+				for _, cp := range checkpoints {
+					if cp.Step == "pr_rejection" {
+						rejectionCount++
+					}
+				}
+				summary.ReviewLimitExceeded = (rejectionCount >= maxReviewFixCycles - 1)
+
 				prURL, err := o.gitOps.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
 				if err != nil {
 					o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
@@ -680,9 +693,20 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 				}
 			}
 
-			status := models.TaskStatusHumanReview
+			status := models.TaskStatusPrReady
 			if len(createdPRs) == 0 {
 				status = models.TaskStatusMerged
+				noChangesSummaries := []models.PRSummary{{
+					Title:  "No changes detected",
+					Body:   "No code modifications were required.",
+					Status: "no_changes",
+				}}
+				noChangesMetadata, _ := json.Marshal(noChangesSummaries)
+				if _, err := o.tasks.Update(ctx, task.ID, models.UpdateTaskInput{
+					PRMetadata: noChangesMetadata,
+				}); err != nil {
+					o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata for no-changes: %v", err))
+				}
 			}
 			if _, err := o.updateTaskStatus(ctx, task.ID, status); err != nil {
 				return nil, err

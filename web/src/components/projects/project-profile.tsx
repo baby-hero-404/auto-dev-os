@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { FormEvent, useEffect, useState } from "react";
 import { Save, Settings, Bot } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -12,6 +13,7 @@ interface ProjectProfileProps {
     default_autonomy?: string;
     auto_review_policy?: string;
     max_retries?: number;
+    max_review_fix_cycles?: number;
     default_branch?: string;
   }) => Promise<void>;
 }
@@ -24,6 +26,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   const [defaultAutonomy, setDefaultAutonomy] = useState(project?.default_autonomy ?? "supervised");
   const [autoReviewPolicy, setAutoReviewPolicy] = useState(project?.auto_review_policy ?? "complexity_based");
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
+  const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
 
   const [isUpdating, setIsUpdating] = useState(false);
@@ -37,6 +40,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setDefaultAutonomy(project.default_autonomy ?? "supervised");
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
       setMaxRetries(project.max_retries ?? 3);
+      setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
     }
   }, [project]);
@@ -53,6 +57,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
         default_autonomy: defaultAutonomy,
         auto_review_policy: autoReviewPolicy,
         max_retries: maxRetries,
+        max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
       });
     } catch (err) {
@@ -159,6 +164,19 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
                 max={10}
                 value={maxRetries}
                 onChange={(e) => setMaxRetries(Number(e.target.value))}
+                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
+                required
+                disabled={isUpdating}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Max Review-Fix Cycles</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={maxReviewFixCycles}
+                onChange={(e) => setMaxReviewFixCycles(Number(e.target.value))}
                 className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 required
                 disabled={isUpdating}

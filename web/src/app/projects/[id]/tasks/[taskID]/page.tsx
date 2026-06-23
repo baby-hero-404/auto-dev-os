@@ -108,6 +108,7 @@ export default function ProjectTaskDetailPage({
     submitSpecChanges,
     approvePR,
     rejectPR,
+    startReview,
   } = useTaskWorkflow(taskID);
 
   // Fetch live workspace artifacts for the active workflow job
@@ -162,6 +163,7 @@ export default function ProjectTaskDetailPage({
       risks?: string[];
       execution_plan?: string[];
       clarification_questions?: string[];
+      risk_domains?: string[];
       proposal_md?: string;
       specs_md?: string;
       design_md?: string;
@@ -175,8 +177,6 @@ export default function ProjectTaskDetailPage({
     return data;
   }, [task]);
 
-  const affectedFiles = analysisData.affected_files || [];
-  
   const prSummaries = useMemo(() => {
     if (!task?.pr_metadata) return [];
     try {
@@ -193,8 +193,9 @@ export default function ProjectTaskDetailPage({
     if (prSummaries.length > 0 && prSummaries[0].changed_files) {
       return prSummaries[0].changed_files as string[];
     }
+    const affectedFiles = analysisData.affected_files || [];
     return parsedDiffFiles.length > 0 ? parsedDiffFiles : affectedFiles;
-  }, [prSummaries, parsedDiffFiles, affectedFiles]);
+  }, [prSummaries, parsedDiffFiles, analysisData.affected_files]);
 
   const selectedFile = rawSelectedFile || displayFiles[0] || null;
 
@@ -205,8 +206,8 @@ export default function ProjectTaskDetailPage({
         reason: prSummaries[0].risk_reason || "",
       };
     }
-    return getRiskAssessment(task?.complexity ?? "easy", displayFiles);
-  }, [prSummaries, task?.complexity, displayFiles]);
+    return getRiskAssessment(task?.complexity ?? "easy", displayFiles, analysisData.risk_domains);
+  }, [prSummaries, task?.complexity, displayFiles, analysisData.risk_domains]);
 
   const activeFileDiff = useMemo(() => {
     return parsedDiffs.find((d) => d.filename === selectedFile);
@@ -234,6 +235,17 @@ export default function ProjectTaskDetailPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {task && task.status === "pr_ready" && (
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-brand-primary bg-transparent px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/10 shadow-sm cursor-pointer"
+              onClick={startReview}
+              type="button"
+              disabled={submittingPR}
+            >
+              <Sparkles size={15} />
+              Start Review
+            </button>
+          )}
           {task &&
             (task.spec_status === "approved" ||
               task.spec_status === "auto_approved" ||
@@ -277,7 +289,7 @@ export default function ProjectTaskDetailPage({
       />
 
       {/* Pull Request & Review Center */}
-      {(isReviewWaiting || isPRMerged) && (
+      {(task?.status === "pr_ready" || isReviewWaiting || isPRMerged) && (
         <section className="rounded-xl border border-stroke bg-card overflow-hidden shadow-sm">
           {/* PR Header Banner */}
           <div className="border-b border-stroke bg-surface/40 p-5 flex flex-wrap items-center justify-between gap-4">
@@ -296,12 +308,21 @@ export default function ProjectTaskDetailPage({
               className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold font-sans uppercase border ${
                 isPRMerged
                   ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
-                  : "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25 animate-pulse"
+                  : task?.status === "pr_ready"
+                  ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25 animate-pulse"
+                  : "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/25 animate-pulse"
               }`}
             >
-              {isPRMerged ? "Merged" : "Awaiting Review"}
+              {isPRMerged ? "Merged" : task?.status === "pr_ready" ? "PR Ready" : "Awaiting Review"}
             </span>
           </div>
+
+          {prSummaries[0]?.review_limit_exceeded && (
+            <div className="border-b border-amber-500/25 bg-amber-500/5 px-5 py-3 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
+              <AlertCircle size={15} className="text-amber-500 shrink-0" />
+              <span>Review carefully before approving. This task has reached the maximum review-fix cycles limit. Next rejection will mark the task as failed.</span>
+            </div>
+          )}
 
           <div className="grid lg:grid-cols-[340px_1fr] border-b border-stroke min-h-[420px]">
             {/* PR Summary Sidebar */}
@@ -326,13 +347,18 @@ export default function ProjectTaskDetailPage({
                 <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                   Risk Assessment
                 </h3>
-                <div className={`rounded-lg border p-3.5 ${RISK_BADGES[riskAssessment.level]}`}>
+                <div className={`rounded-lg border p-3.5 ${RISK_BADGES[riskAssessment.level]} space-y-2`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-sans text-[10px] font-bold uppercase tracking-wider">
                       Level: {riskAssessment.level}
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed opacity-90">{riskAssessment.reason}</p>
+                  <div className="pt-1.5 border-t border-current/10">
+                    <span className="font-mono text-[9px] font-bold uppercase tracking-wider opacity-85">
+                      Risk Domains: {analysisData.risk_domains?.join(", ") || "none"}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -416,35 +442,50 @@ export default function ProjectTaskDetailPage({
           </div>
 
           {/* Action Footer */}
-          {isReviewWaiting && (
+          {(isReviewWaiting || task?.status === "pr_ready") && (
             <div className="p-5 bg-surface/40 flex flex-col gap-4">
-              <div className="flex items-start gap-3">
-                <MessageSquare size={16} className="text-content-muted mt-2.5 shrink-0" />
-                <textarea
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Leave rejection feedback to trigger a fix cycle..."
-                  className="flex-1 rounded-lg border border-stroke bg-surface p-3 text-sm text-foreground placeholder-content-muted/50 focus:border-brand-primary focus:outline-none min-h-[90px] transition-colors"
-                />
-              </div>
-              <div className="flex justify-end gap-2.5">
-                <button
-                  onClick={rejectPR}
-                  disabled={submittingPR || !feedback.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/20 bg-orange-500/5 px-4 py-2 text-sm font-semibold text-orange-600 hover:bg-orange-500/10 transition cursor-pointer disabled:opacity-50"
-                >
-                  <AlertCircle size={15} />
-                  Reject &amp; Request Fixes
-                </button>
-                <button
-                  onClick={approvePR}
-                  disabled={submittingPR}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
-                >
-                  <Check size={15} />
-                  Approve &amp; Merge
-                </button>
-              </div>
+              {task?.status === "pr_ready" ? (
+                <div className="flex justify-end">
+                  <button
+                    onClick={startReview}
+                    disabled={submittingPR}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-brand-primary bg-transparent px-4 py-2 text-sm font-semibold text-brand-primary hover:bg-brand-primary/10 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles size={15} />
+                    Start Review
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start gap-3">
+                    <MessageSquare size={16} className="text-content-muted mt-2.5 shrink-0" />
+                    <textarea
+                      value={feedback}
+                      onChange={(e) => setFeedback(e.target.value)}
+                      placeholder="Leave rejection feedback to trigger a fix cycle..."
+                      className="flex-1 rounded-lg border border-stroke bg-surface p-3 text-sm text-foreground placeholder-content-muted/50 focus:border-brand-primary focus:outline-none min-h-[90px] transition-colors"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2.5">
+                    <button
+                      onClick={rejectPR}
+                      disabled={submittingPR || !feedback.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/20 bg-orange-500/5 px-4 py-2 text-sm font-semibold text-orange-600 hover:bg-orange-500/10 transition cursor-pointer disabled:opacity-50"
+                    >
+                      <AlertCircle size={15} />
+                      Reject &amp; Request Fixes
+                    </button>
+                    <button
+                      onClick={approvePR}
+                      disabled={submittingPR}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
+                    >
+                      <Check size={15} />
+                      Approve &amp; Merge
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </section>
@@ -524,6 +565,24 @@ export default function ProjectTaskDetailPage({
                         Scope
                       </h3>
                       <p className="text-sm leading-relaxed text-foreground">{analysisData.scope}</p>
+                    </div>
+                  )}
+
+                  {analysisData.risk_domains && analysisData.risk_domains.length > 0 && (
+                    <div>
+                      <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
+                        Risk Domains
+                      </h3>
+                      <div className="flex flex-wrap gap-1.5">
+                        {analysisData.risk_domains.map((domain) => (
+                          <span
+                            key={domain}
+                            className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+                          >
+                            {domain}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
 

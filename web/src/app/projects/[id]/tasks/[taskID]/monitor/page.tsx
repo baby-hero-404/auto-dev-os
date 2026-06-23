@@ -14,10 +14,13 @@ import {
   Bot,
   Terminal,
   ShieldCheck,
+  Database,
+  Sparkles,
 } from "lucide-react";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 
 const STEPS = [
+  { id: "context_load", label: "Context", icon: Database },
   { id: "analyze", label: "Analyze", icon: Circle },
   { id: "plan", label: "Plan", icon: Circle },
   { id: "code_backend", label: "Backend", icon: Terminal },
@@ -75,6 +78,8 @@ export default function MonitorPage({
     logs,
     execute,
     approvePR,
+    startReview,
+    submittingPR,
   } = useTaskWorkflow(taskID);
 
   const job = workflow?.job;
@@ -121,9 +126,30 @@ export default function MonitorPage({
                   Execute
                 </button>
               )}
+            {task?.status === "pr_ready" && (
+              <>
+                <button
+                  disabled={submittingPR}
+                  className="inline-flex items-center gap-2 rounded-md border border-brand-primary bg-transparent px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/10 cursor-pointer disabled:opacity-50"
+                  onClick={startReview}
+                >
+                  <Sparkles size={16} />
+                  Start Review
+                </button>
+                <button
+                  disabled={submittingPR}
+                  className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer disabled:opacity-50"
+                  onClick={approvePR}
+                >
+                  <CheckCircle2 size={16} />
+                  Approve Merge
+                </button>
+              </>
+            )}
             {task?.status === "human_review" && (
               <button
-                className="inline-flex items-center gap-2 rounded-md border border-success/40 px-4 py-2 text-sm font-semibold text-success transition hover:bg-success/10 cursor-pointer"
+                disabled={submittingPR}
+                className="inline-flex items-center gap-2 rounded-md border border-success/40 px-4 py-2 text-sm font-semibold text-success transition hover:bg-success/10 cursor-pointer disabled:opacity-50"
                 onClick={approvePR}
               >
                 <CheckCircle2 size={16} />

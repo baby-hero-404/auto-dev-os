@@ -94,6 +94,10 @@ func (m *mockWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) er
 	return nil
 }
 
+func (m *mockWorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	return nil
+}
+
 func (m *mockWorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error) {
 	return []models.TaskLog{}, nil
 }

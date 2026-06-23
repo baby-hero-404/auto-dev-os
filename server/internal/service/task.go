@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -79,21 +80,15 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		return nil, fmt.Errorf("get project: %w", err)
 	}
 
-	status := models.TaskStatusAnalyzing
-	specStatus := models.TaskSpecStatusDraft
-	if len(analysis.ClarificationQuestions) > 0 {
-		specStatus = models.TaskSpecStatusChangesRequested
-		status = models.TaskStatusSpecReview
-	} else if project.AutoReviewPolicy == "always_review" {
-		specStatus = models.TaskSpecStatusPendingReview
-		status = models.TaskStatusSpecReview
-	} else if analysis.Complexity == models.TaskComplexityEasy || project.AutoReviewPolicy == "auto_merge" {
-		specStatus = models.TaskSpecStatusAutoApproved
-		status = models.TaskStatusCoding
-	} else {
-		specStatus = models.TaskSpecStatusPendingReview
-		status = models.TaskStatusSpecReview
-	}
+	specStatus, status := policy.ShouldAutoApproveSpec(
+		analysis.Complexity,
+		analysis.AffectedFiles,
+		analysis.RiskDomains,
+		"", // no agent autonomy in this path
+		project.DefaultAutonomy,
+		project.AutoReviewPolicy,
+		len(analysis.ClarificationQuestions) > 0,
+	)
 	if task.Status != models.TaskStatusTodo &&
 		task.Status != models.TaskStatusAnalyzing &&
 		task.Status != models.TaskStatusSpecReview &&

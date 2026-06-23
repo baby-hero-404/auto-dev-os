@@ -24,6 +24,7 @@ export function update(projectID: string, token: string, input: {
   default_autonomy?: string;
   auto_review_policy?: string;
   max_retries?: number;
+  max_review_fix_cycles?: number;
   default_branch?: string;
 }) {
   return request<Project>(`/projects/${projectID}`, {
@@ -126,6 +127,9 @@ export const tasks = {
   },
   approvePR(taskID: string, token: string) {
     return request<Task>(`/tasks/${taskID}/pr/approve`, { method: "POST", token });
+  },
+  startReview(taskID: string, token: string) {
+    return request<Task>(`/tasks/${taskID}/pr/start-review`, { method: "POST", token });
   },
   rejectPR(taskID: string, token: string, feedback: string) {
     return request<Task>(`/tasks/${taskID}/pr/reject`, {

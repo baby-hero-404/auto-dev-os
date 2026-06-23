@@ -24,6 +24,7 @@ export type Project = {
   default_autonomy?: string;
   auto_review_policy?: string;
   max_retries?: number;
+  max_review_fix_cycles?: number;
   default_branch?: string;
   repositories_count?: number;
   agents_count?: number;
@@ -73,6 +74,7 @@ export type TaskAnalysis = {
   risks: string[];
   execution_plan: string[];
   clarification_questions?: string[];
+  risk_domains?: string[];
   proposal_md?: string;
   specs_md?: string;
   design_md?: string;

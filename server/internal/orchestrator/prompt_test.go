@@ -109,7 +109,7 @@ func TestPromptAssembler_AttachesSemanticCodeContextForPlanner(t *testing.T) {
 	}
 }
 
-func TestPromptAssembler_DoesNotAttachSemanticCodeContextForBackend(t *testing.T) {
+func TestPromptAssembler_AttachesSemanticCodeContextForBackend(t *testing.T) {
 	retriever := &fakeContextRetriever{}
 	assembler := NewPromptAssembler(retriever)
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."}
@@ -119,11 +119,11 @@ func TestPromptAssembler_DoesNotAttachSemanticCodeContextForBackend(t *testing.T
 	if err != nil {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
-	if retriever.called {
-		t.Fatal("expected retriever not to be called for backend")
+	if !retriever.called {
+		t.Fatal("expected retriever to be called for backend")
 	}
-	if strings.Contains(messages[1].Content, "Semantic Code Retrieval Context:") {
-		t.Fatal("did not expect context section for backend")
+	if !strings.Contains(messages[1].Content, "Semantic Code Retrieval Context:") {
+		t.Fatal("expected context section for backend")
 	}
 }
 

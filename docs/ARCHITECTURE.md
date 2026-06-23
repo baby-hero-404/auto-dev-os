@@ -157,9 +157,9 @@ auto_code_os/
 | **Skill**   | Reusable action an agent can perform               | `id`, `name`, `description`, `schema`               |
 | **Memory**  | Episodic memory, semantic search, user modeling    | `id`, `agent_id`, `content`, `embedding` (vector)   |
 
-## 4.1 Task Lifecycle — Complexity-based Branching
+## 4.1 Task Lifecycle — Complexity & Risk-based Branching
 
-> Aligns with the SDLC workflow in `docs/ROADMAP.md` §2.
+> Aligns with the SDLC workflow in `docs/ROADMAP.md` §2 and `docs/features/5.7-workflow-engine.md`.
 
 ```
                     ┌─────────────────────┐
@@ -168,37 +168,50 @@ auto_code_os/
                     └──────────┬──────────┘
                                ▼
                     ┌─────────────────────┐
+                    │  Context Load:      │
+                    │  checkout repo,     │
+                    │  read conventions,  │
+                    │  CI config, docs    │
+                    └──────────┬──────────┘
+                               ▼
+                    ┌─────────────────────┐
                     │  AI Agent analyzes  │
                     │  & classifies task  │
                     │  (Easy/Medium/Hard) │
+                    │  + risk assessment  │
                     │                     │
                     │  ⟳ Asks questions   │
                     │  if info is missing │
                     └──────────┬──────────┘
                                │
-                  ┌────────────┴────────────┐
-                  ▼                         ▼
-         ┌────────────────┐      ┌────────────────────┐
-         │  🟢 EASY       │      │  🟠🔴 MEDIUM/HARD  │
-         │                │      │                    │
-         │  Auto-validate │      │  spec_status:      │
-         │  DoR → execute │      │  PENDING_REVIEW    │
-         │  immediately   │      │        │           │
-         └───────┬────────┘      │        ▼           │
-                 │               │  Human reviews     │
-                 │               │  & finalizes spec  │
-                 │               │  spec_status:      │
-                 │               │  APPROVED          │
-                 │               └────────┬───────────┘
-                 │                        │
-                 └────────────┬───────────┘
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+     ┌────────────────┐ ┌──────────────┐ ┌────────────────────┐
+     │  🟢 EASY       │ │ 🟡 EASY      │ │  🟠🔴 MEDIUM/HARD  │
+     │  + LOW-RISK    │ │ + HIGH-RISK  │ │                    │
+     │                │ │              │ │  spec_status:      │
+     │  Auto-approve  │ │ DỪNG chờ     │ │  PENDING_REVIEW    │
+     │  spec → code   │ │ human review │ │        │           │
+     └───────┬────────┘ └──────┬───────┘ │        ▼           │
+             │                │          │  Human reviews     │
+             │                │          │  spec + plan +     │
+             │                │          │  risks + files     │
+             │                │          │  spec_status:      │
+             │                │          │  APPROVED          │
+             │                │          └────────┬───────────┘
+             │                │                   │
+             └────────────────┴───────────────────┘
+                              │
                               ▼
-                    ┌─────────────────────┐
-                    │  CODING → REVIEWING │
-                    │  → FIXING → TESTING │
-                    │  → PR → HUMAN_REVIEW│
-                    │  → MERGED           │
-                    └─────────────────────┘
+                    ┌──────────────────────────┐
+                    │  PLAN → CODE (parallel   │
+                    │  ownership if needed)    │
+                    │  → MERGE → REVIEW →     │
+                    │  FIX (bounded: max N)    │
+                    │  → TEST + LINT + BUILD   │
+                    │  → PR (pr_ready)         │
+                    │  → HUMAN_REVIEW → MERGED │
+                    └──────────────────────────┘
 ```
 
 **Task `spec_status` values:**
@@ -206,10 +219,10 @@ auto_code_os/
 |-------|--------|
 | `NONE` | Task not yet analyzed |
 | `DRAFT` | AI has produced analysis, not yet reviewed |
-| `PENDING_REVIEW` | Medium/Hard task waiting for human review |
+| `PENDING_REVIEW` | Medium/Hard or Easy + high-risk task waiting for human review |
 | `CHANGES_REQUESTED` | Reviewer requested more info or changes |
 | `APPROVED` | Spec finalized, ready to execute |
-| `AUTO_APPROVED` | Easy task — auto-validated by agent |
+| `AUTO_APPROVED` | Easy + low-risk task — auto-validated by agent |
 
 ## 5. Rule Engine Architecture (Strict Layered Context)
 

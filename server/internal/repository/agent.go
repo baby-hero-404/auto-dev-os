@@ -212,6 +212,16 @@ func (r *AgentRepo) Delete(ctx context.Context, id string, orgID string) error {
 	return nil
 }
 
+func (r *AgentRepo) ResetAllStatuses(ctx context.Context) error {
+	err := r.db.WithContext(ctx).Model(&models.Agent{}).
+		Where("status IN ?", []string{models.AgentStatusAssigned, models.AgentStatusRunning}).
+		Update("status", models.AgentStatusIdle).Error
+	if err != nil {
+		return fmt.Errorf("reset all agent statuses: %w", mapError(err))
+	}
+	return nil
+}
+
 func (r *AgentRepo) orgIDForProject(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	if err := r.db.WithContext(ctx).Table("projects").Select("org_id").Where("id = ?", projectID).Scan(&orgID).Error; err != nil {

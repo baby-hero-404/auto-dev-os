@@ -54,36 +54,47 @@ Tài liệu này trình bày một lộ trình chi tiết và các dự án mã 
 Tóm tắt luồng:
 
   ┌──────────────────────────────────┐
+  │ 0. Context Load                  │
+  │ checkout repo, đọc conventions,  │
+  │ CI config, ARCHITECTURE.md       │
+  └────────┬─────────────────────────┘
+           ▼
+  ┌──────────────────────────────────┐
   │ 1. Tạo Task                      │
   │ → status: todo                   │
   └────────┬─────────────────────────┘
            ▼
   ┌────────────────────────────────────┐
   │ 2. Agent Planner                   │
-  │ phân tích, chia sub-tasks (nếu cần)│
+  │ phân tích, tạo spec + complexity   │
+  │ đánh giá risk domains              │
   │ chọn model level & skills (JIT)    │
   │ → status: analyzing               │
   └────────┬───────────────────────────┘
            │
-     ┌─────┴──────┐
-     ▼            ▼
-  [EASY]     [MEDIUM/HARD]
-     │            │
-     │    ┌──────────────────────────┐
-     │    │ 3. Human review & chốt   │
-     │    │ duyệt plan               │
-     │    │ → status: spec_review    │
-     │    └───────┬──────────────────┘
-     │            │
-     ▼            ▼
-  ┌──────────────────────────────────────┐
-  │ 4. AI viết mã nguồn  → coding       │
-  │ 5. AI review & test  → reviewing    │
-  │    ⟷ fixing → testing               │
-  │ 6. AI tạo PR         → testing (PR) │
-  │ 7. Con người review  → human_review │
-  │ 8. Merge             → merged       │
-  └──────────────────────────────────────┘
+     ┌─────┴──────────────┐
+     ▼                    ▼
+  [EASY + low-risk]  [EASY + high-risk /
+     │                MEDIUM / HARD]
+     │                    │
+     │           ┌────────────────────────┐
+     │           │ 3. Human review & chốt │
+     │           │ spec, plan, risks      │
+     │           │ → status: spec_review  │
+     │           └───────┬────────────────┘
+     │                   │
+     ▼                   ▼
+  ┌───────────────────────────────────────────┐
+  │ 4. Plan execution → Code (song song nếu  │
+  │    cần, branch riêng theo ownership)      │
+  │ 5. Merge integration branch               │
+  │ 6. Agent review chéo                      │
+  │ 7. Fix (bounded: max N vòng)              │
+  │ 8. Full test + lint + build               │
+  │ 9. Tạo PR            → pr_ready           │
+  │10. Human final review → human_review      │
+  │11. Merge              → merged            │
+  └───────────────────────────────────────────┘
 ```
 
 **Hệ thống hướng tới các đặc điểm cốt lõi sau:**

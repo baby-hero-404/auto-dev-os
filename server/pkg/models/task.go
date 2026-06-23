@@ -36,7 +36,7 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusCoding:      {TaskStatusReviewing, TaskStatusFailed},
 	TaskStatusReviewing:   {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed},
 	TaskStatusFixing:      {TaskStatusReviewing, TaskStatusFailed},
-	TaskStatusTesting:     {TaskStatusHumanReview, TaskStatusFixing, TaskStatusFailed},
+	TaskStatusTesting:     {TaskStatusHumanReview, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing},
 	TaskStatusHumanReview: {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
 	TaskStatusMerged:      {},
 	TaskStatusFailed:      {TaskStatusTodo, TaskStatusAnalyzing},

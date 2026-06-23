@@ -111,6 +111,16 @@ func (r *WorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, ste
 	return nil
 }
 
+func (r *WorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).
+		Where("status = ?", models.WorkflowJobStatusRunning).
+		Update("status", models.WorkflowJobStatusQueued).Error
+	if err != nil {
+		return fmt.Errorf("reset stuck jobs: %w", err)
+	}
+	return nil
+}
+
 func (r *WorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
 	if r.fileRoot == "" {
 		if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {

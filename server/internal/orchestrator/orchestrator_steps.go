@@ -509,6 +509,7 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 				if err != nil {
 					return nil, err
 				}
+				var patchApplied bool
 				if parsed, ok := out["parsed"].(map[string]any); ok {
 					patch := extractPatch(parsed)
 					if patch != "" {
@@ -516,17 +517,26 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 						if applyErr := o.applyPatch(ctx, task, agent, workflow.StepFix, patch); applyErr != nil {
 							return nil, fmt.Errorf("apply patch: %w", applyErr)
 						}
+						patchApplied = true
 					}
 				}
 				if diffText, diffErr := o.captureWorkspaceDiff(ctx, task, agent, workflow.StepFix); diffErr == nil && diffText != "" {
 					_ = o.saveArtifact(ctx, jobID, task.ID, workflow.StepFix, "diff", diffText)
 				}
-				if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing); err != nil {
-					return nil, err
+				
+				if patchApplied {
+					if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing); err != nil {
+						return nil, err
+					}
+					// We don't delete review & fix checkpoints here anymore; they are skipped when resuming
+					// using the job.Step filter in orchestrator_worker.go to preserve cycle counts in DB.
+					return nil, workflow.ErrReviewFixLoop
 				}
-				// We don't delete review & fix checkpoints here anymore; they are skipped when resuming
-				// using the job.Step filter in orchestrator_worker.go to preserve cycle counts in DB.
-				return nil, workflow.ErrReviewFixLoop
+				
+				return map[string]any{
+					"status": "success",
+					"info":   "no fixes applied",
+				}, nil
 			}
 			return nil, fmt.Errorf("llm provider is not configured")
 		},
@@ -816,6 +826,24 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		messages = []llm.Message{{Role: "user", Content: task.Title + "\n\n" + task.Description}}
 	}
 	fullInstruction := instruction
+	
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	if len(analysis.AffectedFiles) > 0 && (stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix || stepID == workflow.StepReview) {
+		var b strings.Builder
+		b.WriteString("\n\n### Workspace Affected Files ###\n")
+		localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+		for _, file := range analysis.AffectedFiles {
+			content, err := os.ReadFile(filepath.Join(localPath, file))
+			if err == nil {
+				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", file, string(content)))
+			}
+		}
+		fullInstruction += b.String()
+	}
+
 	if stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix || stepID == workflow.StepPlan || stepID == workflow.StepAnalyze {
 		fullInstruction += "\n\nCRITICAL REQUIREMENT: Do NOT output any tool calls, function calls, or markdown block thoughts. You do NOT have tool execution capabilities in this single-shot step. You MUST output ONLY a valid JSON object matching the requested format directly (or inside a ```json ``` block)."
 	}
@@ -1082,16 +1110,32 @@ func extractPatch(parsed map[string]any) string {
 	if parsed == nil {
 		return ""
 	}
-	if p, ok := parsed["patch"].(string); ok && p != "" {
-		return p
+	var p string
+	if v, ok := parsed["patch"].(string); ok && v != "" {
+		p = v
+	} else if v, ok := parsed["patch_text"].(string); ok && v != "" {
+		p = v
+	} else if v, ok := parsed["diff"].(string); ok && v != "" {
+		p = v
 	}
-	if p, ok := parsed["patch_text"].(string); ok && p != "" {
-		return p
+	if p == "" {
+		return ""
 	}
-	if p, ok := parsed["diff"].(string); ok && p != "" {
-		return p
+	p = strings.TrimSpace(p)
+	if strings.HasPrefix(p, "```") {
+		lines := strings.Split(p, "\n")
+		if len(lines) >= 2 {
+			endIdx := len(lines) - 1
+			for i := len(lines) - 1; i > 0; i-- {
+				if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
+					endIdx = i
+					break
+				}
+			}
+			p = strings.Join(lines[1:endIdx], "\n")
+		}
 	}
-	return ""
+	return strings.TrimSpace(p) + "\n"
 }
 
 func deriveChangeName(task *models.Task) string {

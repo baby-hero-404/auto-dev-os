@@ -107,6 +107,7 @@ type WorkflowRepository interface {
 	DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error
 	CreateLog(ctx context.Context, log models.TaskLog) error
 	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
+	ResetStuckJobs(ctx context.Context) error
 }
 
 func NewOrchestrator(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime) *Orchestrator {

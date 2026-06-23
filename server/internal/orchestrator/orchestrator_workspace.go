@@ -79,6 +79,7 @@ func (o *Orchestrator) ensureWorkspaceCloned(ctx context.Context, task *models.T
 		}
 	}
 
+	var workspaceRestored bool
 	var repo *models.Repository
 	if task.RepositoryID != nil {
 		for _, r := range repos {
@@ -93,27 +94,44 @@ func (o *Orchestrator) ensureWorkspaceCloned(ctx context.Context, task *models.T
 		
 		localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 		gitDir := filepath.Join(localPath, ".git")
-		if _, err := os.Stat(gitDir); err == nil {
+		
+		workspaceExists := false
+		if stat, err := os.Stat(gitDir); err == nil && stat.IsDir() {
+			workspaceExists = true
+		}
+
+		if workspaceExists {
 			if !hasSuccessfulCodeStep {
 				if err := resetExistingWorkspace(ctx, localPath); err != nil {
 					return fmt.Errorf("reset existing workspace: %w", err)
 				}
 			}
-			return nil
-		}
-
-		os.RemoveAll(localPath)
-		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
-			return fmt.Errorf("create workspace parent dir: %w", err)
-		}
-
-		if _, err := o.gitOps.CloneForTask(ctx, repo.URL, repo.Branch, localPath); err != nil {
-			return fmt.Errorf("clone repo: %w", err)
+		} else {
+			os.RemoveAll(localPath)
+			if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+				return fmt.Errorf("create workspace parent dir: %w", err)
+			}
+			if _, err := o.gitOps.CloneForTask(ctx, repo.URL, repo.Branch, localPath); err != nil {
+				return fmt.Errorf("clone repo: %w", err)
+			}
+			workspaceRestored = true
 		}
 	} else {
 		localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 		
-		if !hasSuccessfulCodeStep {
+		workspaceExists := true
+		for _, r := range repos {
+			parts := strings.Split(r.URL, "/")
+			repoName := parts[len(parts)-1]
+			repoName = strings.TrimSuffix(repoName, ".git")
+			subPath := filepath.Join(localPath, repoName)
+			if stat, err := os.Stat(subPath); err != nil || !stat.IsDir() {
+				workspaceExists = false
+				break
+			}
+		}
+
+		if !workspaceExists || !hasSuccessfulCodeStep {
 			os.RemoveAll(localPath)
 			if err := os.MkdirAll(localPath, 0o755); err != nil {
 				return fmt.Errorf("create multi-workspace parent dir: %w", err)
@@ -129,10 +147,11 @@ func (o *Orchestrator) ensureWorkspaceCloned(ctx context.Context, task *models.T
 					return fmt.Errorf("clone multi-repo %s: %w", repoName, err)
 				}
 			}
+			workspaceRestored = true
 		}
 	}
 
-	if hasSuccessfulCodeStep {
+	if hasSuccessfulCodeStep && workspaceRestored {
 		if o.artifacts != nil {
 			if arts, errArts := o.artifacts.ListByTaskID(ctx, task.ID); errArts == nil {
 				for _, art := range arts {

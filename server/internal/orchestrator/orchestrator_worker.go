@@ -23,6 +23,15 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 	if concurrency <= 0 {
 		concurrency = 1
 	}
+	
+	// Recover stuck agents and jobs from previous crashes
+	if o.agents != nil {
+		if mgr, ok := o.agents.(*AgentManager); ok && mgr.repo != nil {
+			_ = mgr.repo.ResetAllStatuses(ctx)
+		}
+	}
+	_ = o.workflows.ResetStuckJobs(ctx)
+
 	sem := make(chan struct{}, concurrency)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

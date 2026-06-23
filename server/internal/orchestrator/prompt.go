@@ -107,7 +107,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 }
 
 func shouldAttachCodeContext(agent *models.Agent) bool {
-	return agent == nil || strings.EqualFold(agent.Role, models.AgentRolePlanner)
+	return true
 }
 
 func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string, requiredSkills []string) ([]ToolDefinition, error) {

@@ -192,7 +192,7 @@ func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*ll
 type mockGitOpsClient struct {
 	clonedRepo    string
 	createdBranch string
-	committedMsg  string
+
 	committedFiles int
 	prTitle       string
 }

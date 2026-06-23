@@ -2,7 +2,7 @@
 
 import { useState, FormEvent } from "react";
 import useSWR from "swr";
-import { ShieldCheck, Plus, Edit3, Trash2, Loader2, Save, X, Check, Sparkles, Search, ShieldAlert, Info, AlertTriangle } from "lucide-react";
+import { ShieldCheck, Plus, Edit3, Trash2, Loader2, Save, X, Check, Sparkles, Search, ShieldAlert, Info } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout";
 import { useSession } from "@/lib/session";

@@ -38,26 +38,6 @@ func (s *SecretService) Upsert(ctx context.Context, projectID string, input mode
 	return s.repo.Upsert(ctx, projectID, input)
 }
 
-func (s *SecretService) RuntimeEnv(ctx context.Context, projectID string) (map[string]string, error) {
-	secrets, err := s.repo.ListByProjectID(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	env := make(map[string]string, len(secrets))
-	for _, secret := range secrets {
-		value, err := s.decrypt(secret.Value)
-		if err != nil {
-			return nil, err
-		}
-		env[secret.Name] = value
-	}
-	return env, nil
-}
-
 func (s *SecretService) encrypt(plain string) (string, error) {
 	return (&SecretCipher{aead: s.aead}).Encrypt(plain)
-}
-
-func (s *SecretService) decrypt(encoded string) (string, error) {
-	return (&SecretCipher{aead: s.aead}).Decrypt(encoded)
 }

@@ -31,7 +31,6 @@ interface RepositoriesViewProps {
 }
 
 export function RepositoriesView({
-  projectID,
   project,
   token,
   orgID,
@@ -90,8 +89,8 @@ export function RepositoriesView({
         const hasMaster = res.branches.includes("master");
         setBranch(hasMain ? "main" : (hasMaster ? "master" : res.branches[0]));
       }
-    } catch (err: any) {
-      setFetchBranchesError(err?.message || "Failed to fetch branches. Check URL/token.");
+    } catch (err) {
+      setFetchBranchesError(err instanceof Error ? err.message : "Failed to fetch branches. Check URL/token.");
     } finally {
       setIsFetchingBranches(false);
     }
@@ -111,7 +110,7 @@ export function RepositoriesView({
         git_account_id: repo.git_account_id || undefined,
       });
       setEditingBranches(res.branches || []);
-    } catch (err: any) {
+    } catch {
       setEditingError("Failed to fetch branches for editing.");
     } finally {
       setIsFetchingEditingBranches(false);
@@ -125,7 +124,7 @@ export function RepositoriesView({
       setEditingRepoId(null);
       if (onRefresh) onRefresh();
       onValidateRepository(repoId);
-    } catch (err: any) {
+    } catch {
       setEditingError("Failed to save branch change.");
     }
   }

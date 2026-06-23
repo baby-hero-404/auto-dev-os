@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,79 +42,6 @@ func (s *SeederService) SeedProject(ctx context.Context, projectID string) {
 	// Seeding of default rules and skills disabled as requested
 	// s.seedRules(ctx, projectID)
 	// s.seedSkills(ctx)
-}
-
-func (s *SeederService) seedRules(ctx context.Context, projectID string) {
-	defaults := []models.CreateRuleInput{
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Follow clean code principles: self-documenting code, meaningful variable names, small focused functions.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "All code changes must include tests. No PR may be merged without passing CI.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Use conventional commit messages: feat:, fix:, docs:, refactor:, test:, chore:.",
-			Enforcement: models.RuleEnforcementAdvisory,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Security first: never log secrets, validate all inputs, use parameterized queries.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Document architectural decisions in ADRs. Update ARCHITECTURE.md when adding new packages or changing data flow.",
-			Enforcement: models.RuleEnforcementAdvisory,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Strictly enforce the Socratic Gate (Definition of Ready): before starting implementation on any Medium/Hard tasks, ask the user at least 3 strategic questions to clarify specifications and boundary conditions. Do not start coding until requirements are explicitly confirmed.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Ensure all code edits are surgical and targeted. Modify only the necessary parts of the codebase, preserving surrounding code style, docstrings, and comments.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Practice Progressive Discovery and JIT Knowledge: read specific line ranges rather than loading entire files. Dynamically load/unload task-specific skills and remove them from context once the subtask is complete to avoid context window overflow.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-		{
-			Scope:       models.RuleScopeProject,
-			Content:     "Always perform self-checks and verify your implementation by running local tests and linting before marking a task as complete.",
-			Enforcement: models.RuleEnforcementStrict,
-		},
-	}
-
-	for _, input := range defaults {
-		if _, err := s.ruleRepo.Create(ctx, &projectID, input); err != nil {
-			slog.Warn("seed rule failed", "project_id", projectID, "error", err)
-		}
-	}
-	slog.Info("seeded default rules", "project_id", projectID, "count", len(defaults))
-}
-
-func (s *SeederService) seedSkills(ctx context.Context) {
-	defaults, err := loadPromptBaseSkills(s.skillsRoot)
-	if err != nil {
-		slog.Warn("load prompt base skills failed", "error", err)
-		return
-	}
-
-	for _, input := range defaults {
-		if _, err := s.skillRepo.Create(ctx, input); err != nil {
-			// Skill names are unique — skip duplicates silently on re-seed.
-			slog.Debug("seed skill skipped (likely duplicate)", "name", input.Name, "error", err)
-		}
-	}
-	slog.Info("seeded default skills", "count", len(defaults))
 }
 
 func loadPromptBaseSkills(skillsRoot string) ([]models.CreateSkillInput, error) {

@@ -68,7 +68,7 @@ export default function AIProvidersPage() {
     () => api.listProviderCredentials(orgID, token),
   );
 
-  const { data: providerModels = [], mutate: mutateModels, isLoading: isLoadingModels } = useSWR(
+  const { data: providerModels = [], mutate: mutateModels } = useSWR(
     orgID && token ? ["provider-models", orgID] : null,
     () => api.listProviderModels(orgID, token),
   );

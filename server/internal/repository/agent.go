@@ -95,13 +95,6 @@ func (r *AgentRepo) ListByOrgID(ctx context.Context, orgID string) ([]models.Age
 	return agents, nil
 }
 
-func (r *AgentRepo) ListByRole(ctx context.Context, orgID, role string) ([]models.Agent, error) {
-	var agents []models.Agent
-	if err := r.db.WithContext(ctx).Where("org_id = ? AND role = ?", orgID, role).Order("created_at DESC").Find(&agents).Error; err != nil {
-		return nil, fmt.Errorf("list agents by role: %w", err)
-	}
-	return agents, nil
-}
 
 func (r *AgentRepo) AssignToProject(ctx context.Context, projectID, agentID string) error {
 	var count int64

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,56 +10,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
-
-type fakeProviderCredentialService struct {
-	created models.CreateProviderCredentialInput
-	updated models.UpdateProviderCredentialInput
-	deleted string
-	tested  string
-	testRaw models.TestProviderCredentialInput
-}
-
-func (s *fakeProviderCredentialService) Create(_ context.Context, orgID string, input models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
-	s.created = input
-	return &models.ProviderCredentialResponse{
-		ID:         "cred-1",
-		Provider:   input.Provider,
-		Label:      input.Label,
-		Status:     models.ProviderCredentialStatusActive,
-		Configured: true,
-		KeySuffix:  "1234",
-	}, nil
-}
-
-func (s *fakeProviderCredentialService) ListByOrg(_ context.Context, orgID string) ([]models.ProviderCredentialResponse, error) {
-	return []models.ProviderCredentialResponse{{
-		ID:         "cred-1",
-		Provider:   "openai",
-		Label:      "primary",
-		Status:     models.ProviderCredentialStatusActive,
-		Configured: true,
-	}}, nil
-}
-
-func (s *fakeProviderCredentialService) Update(_ context.Context, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
-	s.updated = input
-	return &models.ProviderCredentialResponse{ID: id, Provider: "openai", Label: "updated", Status: models.ProviderCredentialStatusActive, Configured: true}, nil
-}
-
-func (s *fakeProviderCredentialService) Delete(_ context.Context, id string) error {
-	s.deleted = id
-	return nil
-}
-
-func (s *fakeProviderCredentialService) TestConnection(_ context.Context, id string) error {
-	s.tested = id
-	return nil
-}
-
-func (s *fakeProviderCredentialService) TestConnectionInput(_ context.Context, input models.TestProviderCredentialInput) error {
-	s.testRaw = input
-	return nil
-}
 
 type fakeProviderModelService struct {
 	created models.CreateProviderModelInput
@@ -157,11 +106,4 @@ func requestWithURLParams(method, target, body string, params map[string]string)
 		routeCtx.URLParams.Add(k, v)
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func decodeTestJSON(t *testing.T, rr *httptest.ResponseRecorder, out any) {
-	t.Helper()
-	if err := json.Unmarshal(rr.Body.Bytes(), out); err != nil {
-		t.Fatalf("decode response: %v; body=%s", err, rr.Body.String())
-	}
 }

@@ -32,9 +32,7 @@ func parseDiff(diffText string) []FileDiff {
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
 				name := parts[2]
-				if strings.HasPrefix(name, "a/") {
-					name = name[2:]
-				}
+				name = strings.TrimPrefix(name, "a/")
 				result = append(result, FileDiff{Name: name})
 				current = &result[len(result)-1]
 			}

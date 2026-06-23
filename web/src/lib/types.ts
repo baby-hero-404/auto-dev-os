@@ -60,7 +60,7 @@ export type Task = {
   priority: number;
   labels: string[];
   pr_urls?: string[];
-  pr_metadata?: any;
+  pr_metadata?: Record<string, unknown>;
   analysis?: TaskAnalysis;
   spec_status: string;
   created_at: string;

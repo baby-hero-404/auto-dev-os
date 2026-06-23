@@ -220,24 +220,6 @@ func isSkillMatchingRole(skillName string, agentRole string) bool {
 	return false
 }
 
-func ToolDefinitionsFromSkills(skills []models.Skill) []ToolDefinition {
-	tools := make([]ToolDefinition, 0, len(skills))
-	for _, skill := range skills {
-		if strings.TrimSpace(skill.Name) == "" {
-			continue
-		}
-		schema := skill.Schema
-		if len(schema) == 0 || !json.Valid(schema) {
-			schema = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		tools = append(tools, ToolDefinition{
-			Name:        skill.Name,
-			Description: skill.Description,
-			Parameters:  schema,
-		})
-	}
-	return tools
-}
 
 func FilterToolsBySkills(tools []ToolDefinition, skills []models.Skill) []ToolDefinition {
 	allowed := allowedToolSetFromSkills(skills)

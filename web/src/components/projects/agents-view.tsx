@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Bot, Users } from "lucide-react";
+
 import type { Agent } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { api, ApiError } from "@/lib/api";

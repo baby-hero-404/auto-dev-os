@@ -7,6 +7,7 @@ import { useTaskActions } from "@/lib/hooks/project/use-task-actions";
 import { useRepoActions } from "@/lib/hooks/project/use-repo-actions";
 import { api } from "@/lib/api";
 import type { Agent, Project, Repository, Rule, Task } from "@/lib/types";
+import type { KeyedMutator } from "swr";
 
 // Define the shape of the context
 interface ProjectContextValue {
@@ -33,7 +34,7 @@ interface ProjectContextValue {
   mutateRepos: () => void;
   mutateTasks: () => void;
   mutateProjectAgents: () => void;
-  mutateRules: (data?: any, shouldRevalidate?: boolean) => any;
+  mutateRules: KeyedMutator<Rule[]>;
   
   // Actions
   taskActions: ReturnType<typeof useTaskActions>;

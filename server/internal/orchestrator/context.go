@@ -162,9 +162,7 @@ func (r *FileContextRetriever) scanImportNeighbors(repoPath string, files []stri
 			// Find last path segment and look for files.
 			parts := strings.Split(imp, "/")
 			// Try to find a matching directory in the repo.
-			for _, candidate := range findDirFiles(repoPath, parts[len(parts)-1]) {
-				neighbors = append(neighbors, candidate)
-			}
+			neighbors = append(neighbors, findDirFiles(repoPath, parts[len(parts)-1])...)
 		}
 	}
 	return neighbors

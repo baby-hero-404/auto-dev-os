@@ -38,16 +38,6 @@ func (r *ProviderModelRepo) Create(ctx context.Context, orgID string, input mode
 	return model, nil
 }
 
-func (r *ProviderModelRepo) CreateBatch(ctx context.Context, modelsList []models.ProviderModel) error {
-	if len(modelsList) == 0 {
-		return nil
-	}
-	// Use ON CONFLICT DO NOTHING to avoid duplicate key violations during race conditions
-	if err := r.db.WithContext(ctx).Clauses(gorm.Expr("ON CONFLICT (org_id, provider, level_group, model_name) DO NOTHING")).Create(&modelsList).Error; err != nil {
-		return fmt.Errorf("create batch provider models: %w", err)
-	}
-	return nil
-}
 
 func (r *ProviderModelRepo) ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error) {
 	var list []models.ProviderModel

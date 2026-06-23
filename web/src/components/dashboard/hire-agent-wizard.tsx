@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, Loader2, Plus, X, Zap, Scale, Gem } from "lucide-react";
+import { ArrowLeft, ChevronDown, Loader2, Plus, X } from "lucide-react";
 import {
   AGENT_ROLES,
   ASSIGNMENT_STRATEGIES,
@@ -31,16 +31,6 @@ const ROLE_TIER_HINT: Record<string, TierID> = {
   "db-architect": "powerful",
 };
 
-const TIER_OPTIONS: Array<{
-  id: TierID;
-  title: string;
-  detail: string;
-  icon: typeof Zap;
-}> = [
-  { id: "fast", title: "Fastest & Cheapest", detail: "gateway / fast - best for review loops", icon: Zap },
-  { id: "balanced", title: "Smart & Balanced", detail: "gateway / balanced", icon: Scale },
-  { id: "powerful", title: "Most Capable", detail: "gateway / powerful - best for planning and audits", icon: Gem },
-];
 
 export function HireAgentWizard({
   roleTemplates,

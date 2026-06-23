@@ -61,11 +61,9 @@ func (h *MemoryHooks) PostStepRecord(ctx context.Context, agentID string, task *
 	}
 
 	content := fmt.Sprintf("Step '%s' completed with status '%s'.", stepID, status)
-	if output != nil {
-		// Include key output fields
-		for k, v := range output {
-			content += fmt.Sprintf("\n%s: %v", k, v)
-		}
+	// Include key output fields
+	for k, v := range output {
+		content += fmt.Sprintf("\n%s: %v", k, v)
 	}
 
 	taskID := task.ID

@@ -750,40 +750,6 @@ func getRoleFromSuffix(suffix string) string {
 	}
 }
 
-func (o *Orchestrator) AllocateWorktree(ctx context.Context, task *models.Task, repoID string, role string) (string, error) {
-	ws, err := o.LoadTaskWorkspace(ctx, task)
-	if err != nil {
-		return "", err
-	}
-
-	for i := range ws.Repos {
-		if ws.Repos[i].RepoID == repoID {
-			rWS := &ws.Repos[i]
-			if rWS.Paths.Worktrees == nil {
-				rWS.Paths.Worktrees = make(map[string]string)
-			}
-			if rWS.Branches.Role == nil {
-				rWS.Branches.Role = make(map[string]string)
-			}
-
-			if path, exists := rWS.Paths.Worktrees[role]; exists && path != "" {
-				return filepath.Join(ws.Root, path), nil
-			}
-
-			relPath := filepath.Join("code", "repos", rWS.Name, "worktrees", role)
-			rWS.Paths.Worktrees[role] = relPath
-			rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, role)
-
-			if err := o.SaveTaskWorkspaceMetadata(task, ws); err != nil {
-				return "", fmt.Errorf("failed to save metadata: %w", err)
-			}
-
-			return filepath.Join(ws.Root, relPath), nil
-		}
-	}
-	return "", fmt.Errorf("repo %s not found in workspace", repoID)
-}
-
 var secretRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)ghp_[a-zA-Z0-9]{36}`),
 	regexp.MustCompile(`(?i)github_pat_[a-zA-Z0-9_]{82}`),

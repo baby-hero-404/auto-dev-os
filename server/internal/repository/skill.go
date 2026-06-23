@@ -38,16 +38,6 @@ func (r *SkillRepo) List(ctx context.Context) ([]models.Skill, error) {
 	return skills, nil
 }
 
-func (r *SkillRepo) ListByNames(ctx context.Context, names []string) ([]models.Skill, error) {
-	var skills []models.Skill
-	if len(names) == 0 {
-		return skills, nil
-	}
-	if err := r.db.WithContext(ctx).Where("name IN ?", names).Order("name ASC").Find(&skills).Error; err != nil {
-		return nil, fmt.Errorf("list skills by names: %w", err)
-	}
-	return skills, nil
-}
 
 func (r *SkillRepo) Update(ctx context.Context, id string, input models.UpdateSkillInput) (*models.Skill, error) {
 	s, err := r.GetByID(ctx, id)

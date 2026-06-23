@@ -114,8 +114,8 @@ export default function Home() {
         const hasMaster = res.branches.includes("master");
         setRepoBranch(hasMain ? "main" : (hasMaster ? "master" : res.branches[0]));
       }
-    } catch (err: any) {
-      setFetchBranchesError(err?.message || "Failed to fetch branches. Check URL/Git Account.");
+    } catch (err) {
+      setFetchBranchesError(err instanceof Error ? err.message : "Failed to fetch branches. Check URL/Git Account.");
     } finally {
       setIsFetchingBranches(false);
     }

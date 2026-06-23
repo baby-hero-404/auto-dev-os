@@ -314,17 +314,7 @@ func TestOrchestrator_LLMCallTrace_And_Redaction(t *testing.T) {
 	}
 
 	// Reconstruct mock inputs
-	type Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	// Note: We use raw structure conversion since package import paths are identical.
-	type Response struct {
-		Content      string `json:"content"`
-		Model        string `json:"model"`
-		PromptTokens int    `json:"prompt_tokens"`
-		OutputTokens int    `json:"output_tokens"`
-	}
+
 
 	importMessages := []struct {
 		Role    string `json:"role"`

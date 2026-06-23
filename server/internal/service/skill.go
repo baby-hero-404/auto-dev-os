@@ -328,7 +328,7 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 	}
 
 	statusSyncing := "syncing"
-	source, _ = s.sourceRepo.Update(ctx, id, models.UpdateSkillSourceInput{Status: &statusSyncing})
+	_, _ = s.sourceRepo.Update(ctx, id, models.UpdateSkillSourceInput{Status: &statusSyncing})
 
 	repoName := getRepoNameFromURL(source.URL)
 	targetDir := filepath.Join(s.skillsRoot, "git", repoName)

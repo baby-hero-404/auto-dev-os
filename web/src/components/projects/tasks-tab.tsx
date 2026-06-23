@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import type { Task, Agent } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { TaskAction } from "./task-action";
-import { isActiveTask, agentName, timeAgo } from "@/lib/utils/task-utils";
+import { isActiveTask, timeAgo } from "@/lib/utils/task-utils";
 
 interface TasksTabProps {
   tasks: Task[];

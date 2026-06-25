@@ -11,6 +11,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
+	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -202,5 +203,17 @@ func TestSkillService_ListFiles_And_GetContent(t *testing.T) {
 	_, err = svc.GetFileContent(context.Background(), sourceID, "../../outside.txt")
 	if err == nil || !strings.Contains(err.Error(), "escapes boundary") {
 		t.Errorf("expected boundary escape error, got %v", err)
+	}
+}
+
+func TestSkillService_AddSource_ValidatesRepoURL(t *testing.T) {
+	svc := NewSkillService(nil, nil, t.TempDir())
+
+	_, err := svc.AddSource(context.Background(), models.CreateSkillSourceInput{URL: "not-a-repo"})
+	if err == nil {
+		t.Fatal("expected invalid repository URL error")
+	}
+	if !strings.Contains(err.Error(), "invalid repository URL") {
+		t.Fatalf("expected invalid repository URL error, got %v", err)
 	}
 }

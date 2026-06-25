@@ -19,6 +19,7 @@ func (r *RepositoryRepo) Create(ctx context.Context, projectID string, input mod
 	repo := &models.Repository{
 		ProjectID: projectID, URL: input.URL,
 		Provider: input.Provider, Branch: input.Branch, Token: input.Token,
+		DisplayName:  input.DisplayName,
 		GitAccountID: input.GitAccountID,
 	}
 	if err := r.db.WithContext(ctx).Create(repo).Error; err != nil {
@@ -71,6 +72,9 @@ func (r *RepositoryRepo) Update(ctx context.Context, id string, input models.Upd
 	}
 	if input.GitAccountID != nil {
 		updates["git_account_id"] = input.GitAccountID
+	}
+	if input.DisplayName != nil {
+		updates["display_name"] = *input.DisplayName
 	}
 	if input.ClonePath != nil {
 		updates["clone_path"] = *input.ClonePath

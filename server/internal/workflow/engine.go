@@ -8,7 +8,9 @@ import (
 )
 
 var ErrPaused = errors.New("workflow paused")
+var ErrWaitingApproval = errors.New("workflow waiting approval")
 var ErrReviewFixLoop = errors.New("review fix loop back")
+var ErrGraphChanged = errors.New("workflow graph changed dynamically")
 
 type PauseError struct {
 	Step   string
@@ -72,6 +74,14 @@ type Result struct {
 }
 
 func (e *Engine) Run(ctx context.Context, def Definition, initial map[string]any) (Result, error) {
+	return e.runInternal(ctx, def, initial, "")
+}
+
+func (e *Engine) Resume(ctx context.Context, def Definition, initial map[string]any, pausedStepID string) (Result, error) {
+	return e.runInternal(ctx, def, initial, pausedStepID)
+}
+
+func (e *Engine) runInternal(ctx context.Context, def Definition, initial map[string]any, pausedStepID string) (Result, error) {
 	if e.MaxParallel <= 0 {
 		e.MaxParallel = 4
 	}
@@ -113,8 +123,11 @@ func (e *Engine) Run(ctx context.Context, def Definition, initial map[string]any
 		for _, step := range ready {
 			step := step
 			result.Status[step.ID] = StepStatusRunning
-			if err := e.emit(ctx, Event{StepID: step.ID, Status: StepStatusRunning}); err != nil {
-				return result, err
+			// Skip emitting 'running' checkpoint if we are resuming this specific paused step to avoid redundant history corruption.
+			if step.ID != pausedStepID {
+				if err := e.emit(ctx, Event{StepID: step.ID, Status: StepStatusRunning}); err != nil {
+					return result, err
+				}
 			}
 			wg.Add(1)
 			go func() {
@@ -131,6 +144,9 @@ func (e *Engine) Run(ctx context.Context, def Definition, initial map[string]any
 				status := StepStatusFailed
 				if errors.Is(item.err, ErrPaused) {
 					status = StepStatusPaused
+					result.Paused = true
+				} else if errors.Is(item.err, ErrWaitingApproval) {
+					status = StepStatusWaitingApproval
 					result.Paused = true
 				}
 				result.Status[item.id] = status
@@ -228,6 +244,9 @@ func validateDefinition(def Definition) error {
 				return fmt.Errorf("step %q depends on unknown step %q", step.ID, dep)
 			}
 		}
+	}
+	if _, err := ValidateDAG(def); err != nil {
+		return err
 	}
 	return nil
 }

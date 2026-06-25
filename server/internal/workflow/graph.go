@@ -1,7 +1,6 @@
 package workflow
 
 // graph.go provides graph utilities for workflow DAG validation.
-// The actual DAG definition lives in steps.go (DefaultWorkflowDefinition).
 // This file contains the topological sort cycle detector used to
 // validate definitions at startup.
 

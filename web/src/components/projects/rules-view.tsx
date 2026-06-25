@@ -323,7 +323,7 @@ export function RulesView({
 
           <EnforcementToggle value={ruleEnforcement} onChange={setRuleEnforcement} disabled={isAddingRule} />
 
-          {ruleError && <p className="text-xs text-red-450">{ruleError}</p>}
+          {ruleError && <div className="rounded border border-red-500/20 bg-red-500/10 p-2.5 text-xs text-red-200" role="alert">{ruleError}</div>}
 
           <button
             type="submit"

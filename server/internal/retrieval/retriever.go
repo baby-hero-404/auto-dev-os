@@ -30,6 +30,10 @@ type ContextRetriever interface {
 	RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error)
 }
 
+type ContextKey string
+
+const WorkspaceRootKey ContextKey = "retriever_workspace_root"
+
 // SimpleFileRetriever retrieves relevant code snippets from a local checkout.
 // It uses lexical-semantic scoring over paths, identifiers, and nearby content so
 // it works without an external vector index or embedding service.
@@ -47,14 +51,18 @@ func NewSimpleFileRetriever(root string) *SimpleFileRetriever {
 }
 
 func (r *SimpleFileRetriever) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
-	if strings.TrimSpace(r.Root) == "" {
+	rootPath := r.Root
+	if wsRoot, ok := ctx.Value(WorkspaceRootKey).(string); ok && wsRoot != "" {
+		rootPath = wsRoot
+	}
+	if strings.TrimSpace(rootPath) == "" {
 		return nil, fmt.Errorf("retriever root is required")
 	}
 	if limit <= 0 {
 		limit = defaultSnippetLimit
 	}
 
-	root, err := filepath.Abs(r.Root)
+	root, err := filepath.Abs(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve retriever root: %w", err)
 	}

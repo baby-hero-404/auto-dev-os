@@ -62,7 +62,7 @@ export const repositories = {
   update(
     repoID: string,
     token: string,
-    input: { url?: string; provider?: string; branch?: string; token?: string; git_account_id?: string },
+    input: { url?: string; provider?: string; branch?: string; token?: string; git_account_id?: string; display_name?: string },
   ) {
     return request<Repository>(`/repositories/${repoID}`, {
       method: "PATCH",
@@ -78,6 +78,12 @@ export const repositories = {
       method: "POST",
       token,
       body: JSON.stringify(input),
+    });
+  },
+  delete(repoID: string, token: string) {
+    return request<void>(`/repositories/${repoID}`, {
+      method: "DELETE",
+      token,
     });
   },
 };
@@ -103,6 +109,20 @@ export const tasks = {
   analyze(taskID: string, token: string) {
     return request<Task>(`/tasks/${taskID}/analyze`, { method: "POST", token });
   },
+  update(
+    taskID: string,
+    token: string,
+    input: { title?: string; description?: string; complexity?: string; priority?: number; labels?: string[]; agent_id?: string; repository_id?: string },
+  ) {
+    return request<Task>(`/tasks/${taskID}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    });
+  },
+  delete(taskID: string, token: string) {
+    return request<{ status: string }>(`/tasks/${taskID}`, { method: "DELETE", token });
+  },
   approveAnalysis(taskID: string, token: string) {
     return request<Task>(`/tasks/${taskID}/analysis/approve`, { method: "POST", token });
   },
@@ -113,8 +133,18 @@ export const tasks = {
       body: JSON.stringify({ context }),
     });
   },
+  clarify(taskID: string, token: string, context: string) {
+    return request<Task>(`/tasks/${taskID}/clarify`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ context }),
+    });
+  },
   execute(taskID: string, token: string) {
     return request<WorkflowJob>(`/tasks/${taskID}/execute`, { method: "POST", token });
+  },
+  retry(taskID: string, token: string) {
+    return request<WorkflowJob>(`/tasks/${taskID}/retry`, { method: "POST", token });
   },
   workflow(taskID: string, token: string) {
     return request<WorkflowStatus>(`/tasks/${taskID}/workflow`, { token });

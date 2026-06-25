@@ -18,7 +18,7 @@ type fakePool struct {
 	cooldowns   []string
 }
 
-func (p *fakePool) SelectCredential(_ context.Context, orgID, provider string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error) {
+func (p *fakePool) SelectCredential(_ context.Context, orgID, provider, model string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error) {
 	for _, cred := range p.credentials {
 		if cred.Provider == provider && !excludeIDs[cred.ID] {
 			p.selected = append(p.selected, cred.ID)
@@ -28,8 +28,8 @@ func (p *fakePool) SelectCredential(_ context.Context, orgID, provider string, s
 	return nil, service.ErrNoCredentialsAvailable
 }
 
-func (p *fakePool) SetCooldown(_ context.Context, id string, _ time.Time) error {
-	p.cooldowns = append(p.cooldowns, id)
+func (p *fakePool) SetCooldown(_ context.Context, id string, model string, _ time.Time) error {
+	p.cooldowns = append(p.cooldowns, id+":"+model)
 	return nil
 }
 
@@ -55,7 +55,11 @@ func (p *fakeProvider) Name() string {
 	return p.name
 }
 
-func (p *fakeProvider) Chat(context.Context, []llm.Message) (*llm.Response, error) {
+func (p *fakeProvider) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+	return p.ChatWithOptions(ctx, messages, llm.ChatOptions{})
+}
+
+func (p *fakeProvider) ChatWithOptions(_ context.Context, _ []llm.Message, _ llm.ChatOptions) (*llm.Response, error) {
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -103,7 +107,7 @@ func TestAIGatewayChatRotatesCredentialOnRateLimit(t *testing.T) {
 	if resp.Content != "ok" || attempts != 2 {
 		t.Fatalf("expected second credential success, resp=%+v attempts=%d", resp, attempts)
 	}
-	if len(pool.cooldowns) != 1 || pool.cooldowns[0] != "cred-1" {
+	if len(pool.cooldowns) != 1 || pool.cooldowns[0] != "cred-1:gpt-4o" {
 		t.Fatalf("expected first credential cooldown, got %v", pool.cooldowns)
 	}
 	if strings.Join(pool.selected, ",") != "cred-1,cred-2" {

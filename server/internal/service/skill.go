@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -301,9 +303,11 @@ func (s *SkillService) ListSources(ctx context.Context) ([]models.SkillSource, e
 }
 
 func (s *SkillService) AddSource(ctx context.Context, input models.CreateSkillSourceInput) (*models.SkillSource, error) {
-	if input.URL == "" {
-		return nil, ErrValidation("url is required")
+	normalizedURL, err := validateSkillSourceURL(input.URL)
+	if err != nil {
+		return nil, err
 	}
+	input.URL = normalizedURL
 	src, err := s.sourceRepo.Create(ctx, input)
 	if err != nil {
 		return nil, err
@@ -326,6 +330,11 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 	if err != nil {
 		return nil, err
 	}
+	normalizedURL, err := validateSkillSourceURL(source.URL)
+	if err != nil {
+		return s.markSyncFailed(ctx, id, err)
+	}
+	source.URL = normalizedURL
 
 	statusSyncing := "syncing"
 	_, _ = s.sourceRepo.Update(ctx, id, models.UpdateSkillSourceInput{Status: &statusSyncing})
@@ -438,4 +447,36 @@ func getRepoNameFromURL(gitURL string) string {
 		return parts[len(parts)-1]
 	}
 	return "unknown"
+}
+
+func validateSkillSourceURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ErrValidation("url is required")
+	}
+
+	normalized := raw
+	if candidate, err := gitops.NormalizeGitURLToHTTPS(raw); err == nil && candidate != "" {
+		normalized = candidate
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
+	}
+
+	switch parsed.Scheme {
+	case "http", "https":
+		if parsed.Host == "" || strings.TrimSpace(parsed.Path) == "" || parsed.Path == "/" {
+			return "", ErrValidation("invalid repository URL: missing repository path")
+		}
+	case "file":
+		if strings.TrimSpace(parsed.Path) == "" {
+			return "", ErrValidation("invalid repository URL: missing local path")
+		}
+	default:
+		return "", ErrValidation("invalid repository URL: unsupported scheme")
+	}
+
+	return normalized, nil
 }

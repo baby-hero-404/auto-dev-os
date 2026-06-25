@@ -278,7 +278,7 @@ func TestPRHandler_Reject_ExceedsReviewLoopLimit(t *testing.T) {
 
 	taskRepo := &testTaskRepo{task: task}
 	workflowRepo := &testWorkflowRepo{}
-	
+
 	// Seed 3 pr_rejection checkpoints to hit default limit of 3
 	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
 	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
@@ -306,5 +306,3 @@ func TestPRHandler_Reject_ExceedsReviewLoopLimit(t *testing.T) {
 		t.Errorf("expected task status to be updated to failed, got %s", task.Status)
 	}
 }
-
-

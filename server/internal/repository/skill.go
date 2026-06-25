@@ -38,7 +38,6 @@ func (r *SkillRepo) List(ctx context.Context) ([]models.Skill, error) {
 	return skills, nil
 }
 
-
 func (r *SkillRepo) Update(ctx context.Context, id string, input models.UpdateSkillInput) (*models.Skill, error) {
 	s, err := r.GetByID(ctx, id)
 	if err != nil {

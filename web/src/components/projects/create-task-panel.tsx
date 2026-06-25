@@ -370,7 +370,7 @@ export function CreateTaskPanel({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-semibold text-foreground">{agent.name}</div>
-                      <div className="truncate text-[10px] text-content-muted">Role: {agent.role} • {agent.model_level_group || "Default Route"}</div>
+                      <div className="truncate text-[10px] text-content-muted">Role: {agent.role} • {agent.model_level_group || "Default Model Level Group"}</div>
                     </div>
                   </button>
                 );
@@ -378,7 +378,7 @@ export function CreateTaskPanel({
             </div>
           </Field>
 
-          {error && <p className="rounded border border-red-500/20 bg-red-550/10 p-2.5 text-xs text-red-200" role="alert">{error}</p>}
+          {error && <p className="rounded border border-red-500/20 bg-red-500/10 p-2.5 text-xs text-red-200" role="alert">{error}</p>}
         </div>
 
         {/* Modal Footer actions */}

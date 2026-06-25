@@ -16,8 +16,10 @@ import {
   ShieldCheck,
   Database,
   Sparkles,
+  AlertCircle,
 } from "lucide-react";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
+import { useSession } from "@/lib/session";
 
 const STEPS = [
   { id: "context_load", label: "Context", icon: Database },
@@ -72,6 +74,8 @@ export default function MonitorPage({
   const logEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
+  const session = useSession();
+
   const {
     task,
     workflow,
@@ -80,6 +84,9 @@ export default function MonitorPage({
     approvePR,
     startReview,
     submittingPR,
+    mutateWorkflow,
+    isLoading: isTaskLoading,
+    workflowError,
   } = useTaskWorkflow(taskID);
 
   const job = workflow?.job;
@@ -90,6 +97,46 @@ export default function MonitorPage({
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [logs, autoScroll]);
+
+  if (!session) {
+    return (
+      <main className="grid min-h-screen place-items-center p-6">
+        <div className="rounded-lg border border-stroke bg-card p-6">
+          <p className="mb-4 text-sm text-content-muted">Login from the dashboard before opening the monitor.</p>
+          <Link className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950" href="/">Back to login</Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (isTaskLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-6 flex flex-col justify-center items-center gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-primary" />
+        <p className="text-sm font-mono text-content-muted animate-pulse">Loading task monitor...</p>
+      </main>
+    );
+  }
+
+  if (workflowError) {
+    return (
+      <main className="grid min-h-screen place-items-center p-6">
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-6 max-w-lg text-center">
+          <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+          <p className="font-sans text-base font-semibold text-red-600 dark:text-red-400">Failed to load task monitor.</p>
+          <p className="mt-1 text-xs text-content-muted mb-4">{workflowError.message || "An unexpected error occurred."}</p>
+          <div className="flex justify-center gap-3">
+            <Link className="rounded-md border border-stroke bg-panel px-4 py-2 text-sm font-semibold text-foreground hover:bg-surface transition" href={`/projects/${projectID}`}>
+              Back to Project
+            </Link>
+            <button onClick={() => mutateWorkflow()} className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 transition">
+              Retry Load
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen p-5">

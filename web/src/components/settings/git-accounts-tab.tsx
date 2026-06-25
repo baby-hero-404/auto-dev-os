@@ -392,10 +392,10 @@ function GitAccountCard({
   const host = account.base_url || (account.provider === "gitlab" ? "gitlab.com" : "github.com");
 
   return (
-    <article className="glass-panel glow-on-hover rounded-lg p-4">
+    <article className="rounded-lg border border-stroke bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-primary-muted text-brand-primary">
+          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface text-brand-primary border border-stroke">
             <GitBranch size={19} />
           </div>
           <div className="min-w-0">

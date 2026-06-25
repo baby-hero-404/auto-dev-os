@@ -103,6 +103,7 @@ func (s *RepositoryService) Create(ctx context.Context, projectID string, input 
 		return nil, ErrValidation(fmt.Sprintf("invalid repository URL: %v", err))
 	}
 	input.URL = normalized
+	input.DisplayName = normalizeRepositoryDisplayName(input.DisplayName, input.URL)
 	if input.Token != "" && s.cipher != nil {
 		enc, err := s.cipher.Encrypt(input.Token)
 		if err != nil {
@@ -157,6 +158,10 @@ func (s *RepositoryService) Update(ctx context.Context, id string, input models.
 		}
 		input.URL = &normalized
 	}
+	if input.DisplayName != nil {
+		displayName := normalizeRepositoryDisplayName(*input.DisplayName, "")
+		input.DisplayName = &displayName
+	}
 	if input.Token != nil && *input.Token != "" && s.cipher != nil {
 		enc, err := s.cipher.Encrypt(*input.Token)
 		if err != nil {
@@ -173,6 +178,27 @@ func (s *RepositoryService) Update(ctx context.Context, id string, input models.
 		}
 	}
 	return repo, err
+}
+
+func normalizeRepositoryDisplayName(displayName string, repoURL string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName != "" {
+		return displayName
+	}
+	return repoDisplayNameFromURL(repoURL)
+}
+
+func repoDisplayNameFromURL(repoURL string) string {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
+		return "repository"
+	}
+	trimmed := strings.TrimSuffix(repoURL, "/")
+	trimmed = strings.TrimSuffix(trimmed, ".git")
+	if idx := strings.LastIndex(trimmed, "/"); idx != -1 && idx < len(trimmed)-1 {
+		return trimmed[idx+1:]
+	}
+	return "repository"
 }
 
 func (s *RepositoryService) Delete(ctx context.Context, id string) error {

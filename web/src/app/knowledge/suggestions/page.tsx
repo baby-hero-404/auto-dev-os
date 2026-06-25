@@ -16,6 +16,7 @@ import { useSession } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { LearningSuggestion } from "@/lib/types";
 import Link from "next/link";
 
@@ -29,6 +30,7 @@ export default function SuggestionsPage() {
   const [rejectionID, setRejectionID] = useState<string | null>(null);
   const [rejectionFeedback, setRejectionFeedback] = useState<string>("");
   const [actioningID, setActioningID] = useState<string | null>(null);
+  const [approveSuggestionId, setApproveSuggestionId] = useState<string | null>(null);
 
   // Fetch all agents in organization staff pool
   const { data: orgAgents = [], isLoading: loadingAgents } = useAuthedSWR(
@@ -53,10 +55,7 @@ export default function SuggestionsPage() {
   const suggestionsList = suggestionData?.suggestions ?? [];
   const selectedAgent = orgAgents.find((a) => a.id === activeAgentID);
 
-  async function handleApprove(id: string) {
-    if (!confirm("Are you sure you want to approve and apply this suggestion?")) {
-      return;
-    }
+  async function performApprove(id: string) {
     setActioningID(id);
     try {
       await api.approveSuggestion(id, token);
@@ -272,7 +271,7 @@ export default function SuggestionsPage() {
                           Reject Suggestion
                         </button>
                         <button
-                          onClick={() => handleApprove(suggestion.id)}
+                          onClick={() => setApproveSuggestionId(suggestion.id)}
                           className="rounded-md bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition cursor-pointer flex items-center gap-1"
                           disabled={actioningID === suggestion.id}
                         >
@@ -335,6 +334,19 @@ export default function SuggestionsPage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        isOpen={approveSuggestionId !== null}
+        title="Approve & Apply Suggestion"
+        description="Are you sure you want to approve and apply this suggestion? This will immediately apply the optimization rule or prompt patch."
+        confirmText="Approve"
+        variant="info"
+        onConfirm={() => {
+          if (approveSuggestionId) {
+            performApprove(approveSuggestionId);
+          }
+        }}
+        onClose={() => setApproveSuggestionId(null)}
+      />
     </DashboardLayout>
   );
 }

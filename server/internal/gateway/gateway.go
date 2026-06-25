@@ -37,8 +37,8 @@ type Options struct {
 }
 
 type credentialPool interface {
-	SelectCredential(context.Context, string, string, service.CredentialStrategy, map[string]bool) (*service.DecryptedCredential, error)
-	SetCooldown(context.Context, string, time.Time) error
+	SelectCredential(ctx context.Context, orgID, provider, model string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error)
+	SetCooldown(ctx context.Context, id string, model string, until time.Time) error
 }
 
 type ProviderModelResolver interface {
@@ -99,6 +99,10 @@ func NewAIGateway(opts Options) *AIGateway {
 func (g *AIGateway) Name() string { return "ai_gateway" }
 
 func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm.Response, err error) {
+	return g.ChatWithOptions(ctx, messages, llm.ChatOptions{})
+}
+
+func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message, chatOpts llm.ChatOptions) (resp *llm.Response, err error) {
 	startTime := time.Now()
 	opts, _ := llm.RouteOptionsFromContext(ctx)
 	var lastEntry *models.ComboEntry
@@ -182,7 +186,7 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 	}()
 
 	if opts.OrgID == "" || g.credentialPool == nil {
-		resp, err = g.chatFallback(ctx, messages)
+		resp, err = g.chatFallback(ctx, messages, chatOpts)
 		return resp, err
 	}
 
@@ -202,7 +206,7 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 		excluded := map[string]bool{}
 		for {
 			var cred *service.DecryptedCredential
-			cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, g.strategy, excluded)
+			cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, entry.Model, g.strategy, excluded)
 			if errors.Is(err, service.ErrNoCredentialsAvailable) {
 				failures = append(failures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
 				break
@@ -221,7 +225,7 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 			}
 			attempts := 4
 			for attempt := 0; attempt < attempts; attempt++ {
-				resp, err = provider.Chat(ctx, messages)
+				resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
 				if err == nil {
 					break
 				}
@@ -243,7 +247,7 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
 				if isTransientError(err) {
-					_ = g.credentialPool.SetCooldown(ctx, cred.ID, time.Now().Add(g.cooldown))
+					_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
 					excluded[cred.ID] = true
 					continue
 				}
@@ -260,11 +264,11 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 	return nil, err
 }
 
-func (g *AIGateway) chatFallback(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+func (g *AIGateway) chatFallback(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
 	if g.fallback == nil {
 		return nil, fmt.Errorf("llm provider is not configured")
 	}
-	return g.fallback.Chat(ctx, messages)
+	return g.fallback.ChatWithOptions(ctx, messages, opts)
 }
 
 func (g *AIGateway) routeEntries(ctx context.Context, opts llm.RouteOptions) ([]models.ComboEntry, error) {

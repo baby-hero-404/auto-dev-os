@@ -65,7 +65,7 @@ auto_code_os/
 ├── docs/                   # Documentation
 │   ├── ARCHITECTURE.md     # This file
 │   ├── ROADMAP.md          # Full product roadmap
-│   ├── features/           # Feature-specific documentation (§5.1-§5.10)
+│   ├── features/           # Feature-specific documentation (§5.1-§5.11)
 │   └── references/         # Learning reports & external project analysis
 │
 ├── resources/              # Open-source reference projects (git cloned)

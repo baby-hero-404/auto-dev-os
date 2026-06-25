@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, GitPullRequest, Search, SlidersHorizontal, Workflow } from "lucide-react";
 import type { Task, Agent } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { TaskAction } from "./task-action";
-import { isActiveTask, timeAgo } from "@/lib/utils/task-utils";
+import { isActiveTask, isFailedTask, needsReview } from "@/lib/utils/task-utils";
+import { formatRelativeTime } from "@/lib/utils/time";
 
 interface TasksTabProps {
   tasks: Task[];
@@ -13,7 +14,7 @@ interface TasksTabProps {
   projectID: string;
   isTasksLoading: boolean;
   isLoadingTask: Record<string, boolean>;
-  onTaskAction: (taskId: string, action: "analyze" | "execute") => Promise<void>;
+  onTaskAction: (taskId: string, action: "analyze" | "execute" | "delete") => Promise<any>;
 }
 
 type FilterStatus = "all" | "active" | "review" | "failed";
@@ -39,14 +40,8 @@ export function TasksTab({
 
     if (filter === "all") return true;
     if (filter === "active") return isActiveTask(task);
-    if (filter === "review") {
-      return (
-        task.status === "spec_review" ||
-        task.status === "human_review" ||
-        task.spec_status === "pending_review"
-      );
-    }
-    if (filter === "failed") return task.status === "failed";
+    if (filter === "review") return needsReview(task);
+    if (filter === "failed") return isFailedTask(task);
     return true;
   });
 
@@ -56,25 +51,24 @@ export function TasksTab({
     {
       id: "review",
       label: "Needs Review",
-      count: tasks.filter(
-        (t) => t.status === "spec_review" || t.status === "human_review" || t.spec_status === "pending_review"
-      ).length,
+      count: tasks.filter(needsReview).length,
     },
-    { id: "failed", label: "Failed", count: tasks.filter((t) => t.status === "failed").length },
+    { id: "failed", label: "Failed", count: tasks.filter(isFailedTask).length },
   ];
 
   return (
-    <div className="space-y-4">
+    <section className="rounded-lg border border-stroke bg-card">
       {/* Search and Filters Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-md">
+      <div className="border-b border-stroke p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="relative flex-1 xl:max-w-lg">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-content-muted" />
           <input
             type="text"
-            placeholder="Search and Filter..."
+            placeholder="Search tasks by title or description..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-md border border-stroke bg-card pl-9 pr-4 py-2 text-sm text-foreground placeholder-content-muted/50 focus:border-brand-primary focus:outline-none transition-all"
+            className="w-full rounded-md border border-stroke bg-background pl-9 pr-4 py-2 text-sm text-foreground placeholder-content-muted/50 transition-all focus:border-brand-primary focus:outline-none"
           />
         </div>
 
@@ -101,13 +95,16 @@ export function TasksTab({
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {/* Tasks Content */}
       {isTasksLoading ? (
-        <TasksSkeleton />
+        <div className="p-4">
+          <TasksSkeleton />
+        </div>
       ) : filteredTasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stroke bg-card py-12 text-center">
+        <div className="m-4 flex flex-col items-center justify-center rounded-lg border border-dashed border-stroke bg-background py-12 text-center">
           <SlidersHorizontal className="h-8 w-8 text-content-muted/60" />
           <p className="mt-4 font-sans text-base font-semibold text-foreground">No tasks found.</p>
           <p className="mt-1 max-w-sm text-xs text-content-muted">
@@ -117,42 +114,45 @@ export function TasksTab({
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-stroke border border-stroke bg-card rounded-lg overflow-hidden">
+        <div className="divide-y divide-stroke">
           {filteredTasks.map((task) => {
             const avatar = getAgentAvatar(task.agent_id, projectAgents);
             const statusDot = getStatusDot(task);
+            const stage = getTaskStage(task);
+            const priority = getPriorityLabel(task.priority);
 
             return (
               <article
                 key={task.id}
-                className="group flex flex-col justify-between gap-3 p-4 md:flex-row md:items-center transition hover:bg-surface/30"
+                className="group grid gap-4 p-4 transition hover:bg-surface/30 xl:grid-cols-[1fr_auto] xl:items-center"
               >
-                <div className="flex items-start gap-3 min-w-0 flex-1">
+                <div className="flex min-w-0 items-start gap-3">
                   {/* Status dot indicator */}
                   <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${statusDot}`} />
                   
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-sans font-semibold text-foreground truncate group-hover:text-brand-primary transition duration-150">
+                      <h3 className="min-w-0 truncate font-sans font-semibold text-foreground transition duration-150 group-hover:text-brand-primary">
                         {task.title}
                       </h3>
                       <Badge value={task.complexity} />
                       <Badge value={task.status} />
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-content-muted">
-                      <span>{timeAgo(task.updated_at)}</span>
-                      <span>•</span>
-                      <span>Agent: {avatar.name || "Auto-assign"}</span>
+                    <div className="mt-2 grid gap-2 text-xs text-content-muted sm:grid-cols-2 lg:grid-cols-4">
+                      <TaskMeta icon={stage.icon} label={stage.label} accent={stage.accent} />
+                      <TaskMeta icon={Clock3} label={formatRelativeTime(task.updated_at)} />
+                      <TaskMeta icon={AlertTriangle} label={priority} />
+                      <TaskMeta icon={Workflow} label={avatar.name || "Auto-assign"} />
                     </div>
                     {task.description && (
-                      <p className="mt-2 text-sm text-content-muted line-clamp-1 max-w-3xl">
+                      <p className="mt-2 line-clamp-2 max-w-4xl text-sm leading-6 text-content-muted">
                         {task.description}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end">
+                <div className="flex items-center justify-between gap-4 xl:justify-end">
                   {/* Agent avatar badge */}
                   <div
                     className={`flex h-7 w-7 items-center justify-center rounded-full border text-[11px] font-bold ${avatar.color}`}
@@ -173,7 +173,7 @@ export function TasksTab({
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -203,16 +203,50 @@ function getAgentAvatar(agentId?: string, agents: Agent[] = []) {
 }
 
 function getStatusDot(task: Task) {
-  if (task.status === "failed") return "bg-rose-500";
-  if (
-    task.status === "spec_review" ||
-    task.status === "human_review" ||
-    task.spec_status === "pending_review"
-  ) {
-    return "bg-amber-500 animate-pulse";
-  }
+  if (isFailedTask(task)) return "bg-rose-500";
+  if (needsReview(task)) return "bg-amber-500 animate-pulse";
   if (isActiveTask(task)) return "bg-emerald-500 animate-pulse-dot";
   return "bg-slate-300 dark:bg-slate-700";
+}
+
+function getTaskStage(task: Task) {
+  if (task.status === "merged") {
+    return { label: "Merged", icon: CheckCircle2, accent: "text-emerald-500" };
+  }
+  if (needsReview(task)) {
+    return { label: "Review gate", icon: GitPullRequest, accent: "text-amber-500" };
+  }
+  if (isFailedTask(task)) {
+    return { label: "Needs inspection", icon: AlertTriangle, accent: "text-rose-500" };
+  }
+  if (isActiveTask(task)) {
+    return { label: "In workflow", icon: Workflow, accent: "text-brand-primary" };
+  }
+  return { label: "Ready", icon: Clock3, accent: "text-content-muted" };
+}
+
+function getPriorityLabel(priority: number) {
+  if (priority >= 4) return "P1 Urgent";
+  if (priority === 3) return "P2 High";
+  if (priority === 2) return "P3 Medium";
+  return "P4 Low";
+}
+
+function TaskMeta({
+  icon: Icon,
+  label,
+  accent = "text-content-muted",
+}: {
+  icon: typeof Workflow;
+  label: string;
+  accent?: string;
+}) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <Icon size={13} className={`shrink-0 ${accent}`} />
+      <span className="truncate">{label}</span>
+    </span>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────

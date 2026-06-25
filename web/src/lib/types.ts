@@ -37,6 +37,7 @@ export type Project = {
 export type Repository = {
   id: string;
   project_id: string;
+  display_name: string;
   url: string;
   provider: string;
   branch: string;

@@ -56,37 +56,37 @@ export function SetupChecklist() {
 
   // ─── Data fetching ────────────────────────────────────────
   const { data: credentials = [], isLoading: isCredLoading } = useAuthedSWR(
-    orgID ? ["setup-credentials", orgID] : null,
+    orgID ? ["provider-credentials", orgID] : null,
     (t) => api.listProviderCredentials(orgID, t),
   );
 
   const { data: gitAccounts = [], isLoading: isGitLoading } = useAuthedSWR(
-    orgID ? ["setup-git-accounts", orgID] : null,
+    orgID ? ["git-accounts", orgID] : null,
     (t) => api.listGitAccounts(orgID, t),
   );
 
   const { data: projects = [], isLoading: isProjectsLoading } = useAuthedSWR(
-    orgID ? ["setup-projects", orgID] : null,
+    orgID ? ["projects", orgID] : null,
     (t) => api.listProjects(orgID, t),
   );
 
   const { data: orgAgents = [], isLoading: isAgentsLoading } = useAuthedSWR(
-    orgID ? ["setup-org-agents", orgID] : null,
+    orgID ? ["org-agents", orgID] : null,
     (t) => api.listOrgAgents(orgID, t),
   );
 
   const { data: overview, isLoading: isOverviewLoading } = useAuthedSWR(
-    orgID ? ["setup-overview", orgID] : null,
+    orgID ? ["analytics-overview", orgID] : null,
     (t) => api.analyticsOverview(t, orgID),
   );
 
   const { data: globalRules = [], isLoading: isGlobalRulesLoading } = useAuthedSWR(
-    orgID ? ["setup-global-rules", orgID] : null,
+    orgID ? ["global-rules", orgID] : null,
     (t) => api.listGlobalRules(orgID, t),
   );
 
   const { data: skills = [], isLoading: isSkillsLoading } = useAuthedSWR(
-    session?.token ? ["setup-skills"] : null,
+    session?.token ? ["global-skills"] : null,
     (t) => api.listSkills(t),
   );
 

@@ -35,7 +35,7 @@ test.describe("Auto Code OS E2E flows", () => {
 
     await page.getByRole("link", { name: "Skills", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Skills", exact: true })).toBeVisible();
-    await expect(page.getByText("clean-code")).toBeVisible();
+    await expect(page.getByText("clean-code").first()).toBeVisible();
 
     await page.getByRole("link", { name: "Rules", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Global Rules", level: 2 })).toBeVisible();

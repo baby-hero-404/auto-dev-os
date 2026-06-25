@@ -115,6 +115,40 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
+function validateSkillRepoURL(rawURL: string) {
+  const value = rawURL.trim();
+  if (!value) {
+    return "Repository URL is required.";
+  }
+
+  if (/\s/.test(value)) {
+    return "Repository URL cannot contain spaces.";
+  }
+
+  if (/^[\w.-]+@[\w.-]+:[^/].+$/.test(value)) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (!parsed.hostname || !parsed.pathname || parsed.pathname === "/")) {
+      return "Use a repository URL with an owner and repo path, for example https://github.com/org/repo.git.";
+    }
+    if ((parsed.protocol === "ssh:" || parsed.protocol === "git+ssh:") && (!parsed.hostname || !parsed.pathname || parsed.pathname === "/")) {
+      return "Use an SSH repository URL with a host and repo path, for example ssh://git@github.com/org/repo.git.";
+    }
+    if (parsed.protocol === "file:" && !parsed.pathname) {
+      return "Local file URLs must point to a repository path.";
+    }
+    if (!["http:", "https:", "ssh:", "git+ssh:", "file:"].includes(parsed.protocol)) {
+      return "Use an HTTPS, SSH, git+ssh, or file:// repository URL.";
+    }
+    return null;
+  } catch {
+    return "Use an HTTPS, SSH, git+ssh, or file:// repository URL.";
+  }
+}
+
 export default function SkillsPage() {
   const session = useSession();
   const token = session?.token ?? "";
@@ -135,18 +169,20 @@ export default function SkillsPage() {
   const [copiedContent, setCopiedContent] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [sourceViewMode, setSourceViewMode] = useState<"preview" | "raw">("preview");
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const sourceUrlError = useMemo(() => validateSkillRepoURL(newSourceURL), [newSourceURL]);
 
   const { data: rawSkills, mutate: mutateSkills, isLoading: isLoadingSkills } = useAuthedSWR<Skill[]>(
     token ? ["global-skills"] : null,
     (t) => api.listSkills(t),
   );
-  const skills = rawSkills || [];
+  const skills = useMemo(() => rawSkills || [], [rawSkills]);
 
   const { data: rawSources, mutate: mutateSources, isLoading: isLoadingSources } = useAuthedSWR<SkillSource[]>(
     token ? ["skill-sources"] : null,
     (t) => api.listSkillSources(t),
   );
-  const sources = rawSources || [];
+  const sources = useMemo(() => rawSources || [], [rawSources]);
 
   useEffect(() => {
     if (sources.length === 0 && !newSourceURL.trim()) {
@@ -156,75 +192,6 @@ export default function SkillsPage() {
       return () => clearTimeout(timer);
     }
   }, [sources.length, newSourceURL]);
-
-  const selectedSourceID = useMemo(() => {
-    if (!selectedSkill) return "";
-    const meta = parseSkillMeta(selectedSkill);
-    const source = sources.find((item) => repoNameFromURL(item.url) === meta.repo);
-    return source?.id ?? "";
-  }, [selectedSkill, sources]);
-
-  useEffect(() => {
-    if (!token || !selectedSourceID) {
-      const timer = setTimeout(() => {
-        setFilesList([]);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-
-    let isActive = true;
-
-    async function loadFiles() {
-      setIsLoadingFiles(true);
-      try {
-        const files = await api.listSkillSourceFiles(selectedSourceID, currentFolderPath, token);
-        const sorted = [...files].sort((a, b) => {
-          if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
-        if (isActive) setFilesList(sorted);
-      } catch {
-        if (isActive) setFilesList([]);
-      } finally {
-        if (isActive) setIsLoadingFiles(false);
-      }
-    }
-
-    loadFiles();
-
-    return () => {
-      isActive = false;
-    };
-  }, [currentFolderPath, selectedSourceID, token]);
-
-  useEffect(() => {
-    if (!token || !selectedSourceID || !selectedFilePath) {
-      const timer = setTimeout(() => {
-        setFileContent("");
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-
-    let isActive = true;
-
-    async function loadContent() {
-      setIsLoadingContent(true);
-      try {
-        const result = await api.getSkillSourceFileContent(selectedSourceID, selectedFilePath, token);
-        if (isActive) setFileContent(result.content);
-      } catch {
-        if (isActive) setFileContent("");
-      } finally {
-        if (isActive) setIsLoadingContent(false);
-      }
-    }
-
-    loadContent();
-
-    return () => {
-      isActive = false;
-    };
-  }, [selectedFilePath, selectedSourceID, token]);
 
   const sourceCount = sources.length;
   const syncedSourceCount = sources.filter((source) => source.status === "synced").length;
@@ -248,6 +215,74 @@ export default function SkillsPage() {
     });
   }, [searchQuery, selectedCategory, skills]);
 
+  const activeSkill = selectedSkill ?? filteredSkills[0] ?? null;
+  const activeFolderPath = selectedSkill ? currentFolderPath : activeSkill ? folderForSkill(activeSkill) : "";
+  const activeFilePath = selectedSkill ? selectedFilePath : activeSkill ? fileForSkill(activeSkill) : "";
+
+  const selectedSourceID = activeSkill ? sources.find((item) => repoNameFromURL(item.url) === parseSkillMeta(activeSkill).repo)?.id ?? "" : "";
+
+  useEffect(() => {
+    if (!token || !selectedSourceID) {
+      const timer = setTimeout(() => {
+        setFilesList([]);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+
+    let isActive = true;
+
+    async function loadFiles() {
+      setIsLoadingFiles(true);
+      try {
+        const files = await api.listSkillSourceFiles(selectedSourceID, activeFolderPath, token);
+        const sorted = [...files].sort((a, b) => {
+          if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        if (isActive) setFilesList(sorted);
+      } catch {
+        if (isActive) setFilesList([]);
+      } finally {
+        if (isActive) setIsLoadingFiles(false);
+      }
+    }
+
+    loadFiles();
+
+    return () => {
+      isActive = false;
+    };
+  }, [activeFolderPath, selectedSourceID, token]);
+
+  useEffect(() => {
+    if (!token || !selectedSourceID || !activeFilePath) {
+      const timer = setTimeout(() => {
+        setFileContent("");
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+
+    let isActive = true;
+
+    async function loadContent() {
+      setIsLoadingContent(true);
+      try {
+        const result = await api.getSkillSourceFileContent(selectedSourceID, activeFilePath, token);
+        if (isActive) setFileContent(result.content);
+      } catch {
+        if (isActive) setFileContent("");
+      } finally {
+        if (isActive) setIsLoadingContent(false);
+      }
+    }
+
+    loadContent();
+
+    return () => {
+      isActive = false;
+    };
+  }, [activeFilePath, selectedSourceID, token]);
+
   function selectSkill(skill: Skill) {
     const folder = folderForSkill(skill);
     setSelectedSkill(skill);
@@ -260,6 +295,10 @@ export default function SkillsPage() {
   async function addSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !newSourceURL.trim()) return;
+    if (sourceUrlError) {
+      toast.error(sourceUrlError);
+      return;
+    }
 
     if (sources.length >= 1) {
       toast.error("Only one skill repository can be connected at a time.");
@@ -332,157 +371,184 @@ export default function SkillsPage() {
     <DashboardLayout>
       <Toaster closeButton position="top-right" richColors />
 
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h2 className="font-mono text-2xl font-semibold text-foreground">Skills</h2>
-          <p className="mt-1 max-w-2xl text-sm text-content-muted">
-            Connect a skill repository, sync agent capabilities, and inspect source files before using them in workflows.
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-right text-xs">
-          <Metric label="Skills" value={skills.length} />
-          <Metric label="Categories" value={categoryCount} />
-          <Metric label="Sources" value={`${syncedSourceCount}/${sourceCount}`} />
-        </div>
-      </div>
-
-      {/* Top Banner Control for Repository Connection */}
-      {isLoadingSources ? (
-        <div className="mb-6 rounded-lg border border-stroke bg-card/60 p-4">
-          <LoadingState label="Loading repository status..." />
-        </div>
-      ) : sources.length === 0 ? (
-        <div className="mb-6 rounded-lg border border-stroke bg-card/60 backdrop-blur-sm p-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-primary/10 text-brand-primary">
-                <GitBranch size={18} />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Connect Skills Repository</h3>
-                <p className="text-xs text-content-muted">Connect an external source to load agent capability modules.</p>
-              </div>
-            </div>
-            <form onSubmit={addSource} className="flex min-w-0 max-w-xl flex-1 flex-row items-center gap-2">
-              <input
-                type="url"
-                value={newSourceURL}
-                onChange={(event) => setNewSourceURL(event.target.value)}
-                placeholder="https://github.com/baby-hero-404/prompt_base.git"
-                className="min-w-0 flex-1 rounded-md border border-stroke bg-background px-3 py-1.5 text-xs text-foreground outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20"
-                required
-              />
-              <button
-                type="submit"
-                disabled={isAddingSource || !newSourceURL.trim()}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isAddingSource ? <Loader2 size={13} className="animate-spin" /> : <GitBranch size={13} />}
-                Connect
-              </button>
-              <button
-                type="button"
-                onClick={() => setNewSourceURL(DEFAULT_SOURCE_URL)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-stroke bg-surface/50 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface"
-              >
-                Use Default
-              </button>
-            </form>
+      <div className="mx-auto w-full max-w-[1600px] space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="font-mono text-2xl font-semibold text-foreground">Skills</h2>
+            <p className="mt-1 max-w-2xl text-sm text-content-muted">
+              Connect a skill repository, sync agent capabilities, and inspect source files before using them in workflows.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowSetupGuide(!showSetupGuide)}
+              className="mt-3 inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-surface/85 cursor-pointer"
+            >
+              {showSetupGuide ? "Hide Setup Guide" : "Show Setup Guide"}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-right text-xs">
+            <Metric label="Skills" value={skills.length} />
+            <Metric label="Categories" value={categoryCount} />
+            <Metric label="Sources" value={`${syncedSourceCount}/${sourceCount}`} />
           </div>
         </div>
-      ) : (
-        <div className="mb-6 rounded-lg border border-stroke bg-card/60 backdrop-blur-sm p-4">
-          {sources.map((source) => {
-            const isSyncing = syncingSourceID === source.id;
-            const isDeleting = deletingSourceID === source.id;
-            return (
-              <div key={source.id}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-                      <GitBranch size={18} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-foreground">{repoNameFromURL(source.url)}</span>
-                        <StatusPill status={source.status} />
+
+        {/* Top Banner Control for Repository Connection */}
+        {isLoadingSources ? (
+          <div className="rounded-lg border border-stroke bg-card/60 p-4">
+            <LoadingState label="Loading repository status..." />
+          </div>
+        ) : sources.length === 0 ? (
+          <div className="rounded-lg border border-stroke bg-card/60 backdrop-blur-sm p-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-primary/10 text-brand-primary">
+                  <GitBranch size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Connect Skills Repository</h3>
+                  <p className="text-xs text-content-muted">Connect a Git repo that contains registry.json or registry.min.json at the root.</p>
+                </div>
+              </div>
+              <form onSubmit={addSource} className="flex min-w-0 max-w-xl flex-1 flex-row items-center gap-2">
+                <input
+                  type="url"
+                  value={newSourceURL}
+                  onChange={(event) => setNewSourceURL(event.target.value)}
+                  placeholder="https://github.com/baby-hero-404/prompt_base.git"
+                  aria-invalid={Boolean(sourceUrlError)}
+                  className="min-w-0 flex-1 rounded-md border border-stroke bg-background px-3 py-1.5 text-xs text-foreground outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isAddingSource || !newSourceURL.trim() || Boolean(sourceUrlError)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isAddingSource ? <Loader2 size={13} className="animate-spin" /> : <GitBranch size={13} />}
+                  Connect
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewSourceURL(DEFAULT_SOURCE_URL)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-stroke bg-surface/50 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-surface"
+                >
+                  Use Default
+                </button>
+              </form>
+            </div>
+            <p className={`mt-2 text-[11px] ${sourceUrlError ? "text-danger" : "text-content-muted"}`}>
+              {sourceUrlError || "Supported: HTTPS, SSH, or local file Git URLs. Toggle setup guide above for details."}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-stroke bg-card/60 backdrop-blur-sm p-4">
+            {sources.map((source) => {
+              const isSyncing = syncingSourceID === source.id;
+              const isDeleting = deletingSourceID === source.id;
+              return (
+                <div key={source.id}>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
+                        <GitBranch size={18} />
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-content-muted">{source.url}</div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <div className="flex items-center gap-1.5 rounded-md border border-stroke bg-surface/30 px-2.5 py-1">
-                      <span className="text-[10px] uppercase tracking-wider text-content-muted">Last Synced:</span>
-                      <span className="font-mono font-medium text-foreground">{formatDateTime(source.last_synced_at)}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-foreground">{repoNameFromURL(source.url)}</span>
+                          <StatusPill status={source.status} />
+                        </div>
+                        <div className="mt-0.5 truncate font-mono text-[11px] text-content-muted">{source.url}</div>
+                      </div>
                     </div>
                     
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => syncSource(source.id)}
-                        disabled={isSyncing || isDeleting}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-stroke bg-background px-3 py-1.5 font-semibold text-foreground transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isSyncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                        Sync
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteSource(source.id)}
-                        disabled={isDeleting || isSyncing}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-background px-3 py-1.5 font-semibold text-danger transition hover:bg-danger/5 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                        Disconnect
-                      </button>
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      <div className="flex items-center gap-1.5 rounded-md border border-stroke bg-surface/30 px-2.5 py-1">
+                        <span className="text-[10px] uppercase tracking-wider text-content-muted">Last Synced:</span>
+                        <span className="font-mono font-medium text-foreground">{formatDateTime(source.last_synced_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => syncSource(source.id)}
+                          disabled={isSyncing || isDeleting}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-3.5 py-1.5 font-semibold text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSyncing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                          Sync
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteSource(source.id)}
+                          disabled={isDeleting || isSyncing}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-background px-3 py-1.5 font-semibold text-danger transition hover:bg-danger/5 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                          Disconnect
+                        </button>
+                      </div>
                     </div>
                   </div>
+                  {source.error && (
+                    <div className="mt-3 flex flex-col gap-2 rounded-md border border-danger/20 bg-danger/5 p-3 text-xs text-danger">
+                      <div className="flex gap-2">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <span className="break-words flex-1">{source.error}</span>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => syncSource(source.id)}
+                          disabled={isSyncing}
+                          className="inline-flex items-center gap-1 rounded bg-danger/20 px-2.5 py-1 font-semibold text-danger border border-danger/30 hover:bg-danger/30 transition disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSyncing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                          Retry Sync
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {source.error && (
-                  <div className="mt-3 flex gap-2 rounded-md border border-danger/20 bg-danger/5 p-3 text-xs text-danger">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span className="break-words">{source.error}</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        )}
+
+        {showSetupGuide && <SkillsGuide />}
+
+        <div className="grid min-h-[720px] items-start gap-5 xl:grid-cols-[360px_330px_minmax(0,1fr)]">
+          <CatalogPanel
+            skills={filteredSkills}
+            selectedSkillID={activeSkill?.id ?? ""}
+            searchQuery={searchQuery}
+            categories={categories}
+            selectedCategory={selectedCategory}
+            totalSkills={skills.length}
+            isLoading={isLoadingSkills}
+            hasSource={sources.length > 0}
+            onSearchChange={setSearchQuery}
+            onCategoryChange={setSelectedCategory}
+            onSelectSkill={selectSkill}
+          />
+
+          <SkillWorkspace
+            selectedSkill={activeSkill}
+            currentFolderPath={activeFolderPath}
+            files={filesList}
+            selectedFilePath={activeFilePath}
+            fileContent={fileContent}
+            isLoadingFiles={isLoadingFiles}
+            isLoadingContent={isLoadingContent}
+            copiedSkillId={copiedSkillId}
+            copiedContent={copiedContent}
+            sourceViewMode={sourceViewMode}
+            onCopySkill={copySkillReference}
+            onCopyContent={copyCurrentFile}
+            onFolderChange={setCurrentFolderPath}
+            onFileSelect={setSelectedFilePath}
+            onSourceViewModeChange={setSourceViewMode}
+          />
         </div>
-      )}
-
-      <div className="grid min-h-[720px] items-start gap-5 xl:grid-cols-[360px_330px_minmax(0,1fr)]">
-        <CatalogPanel
-          skills={filteredSkills}
-          selectedSkillID={selectedSkill?.id ?? ""}
-          searchQuery={searchQuery}
-          categories={categories}
-          selectedCategory={selectedCategory}
-          totalSkills={skills.length}
-          isLoading={isLoadingSkills}
-          hasSource={sources.length > 0}
-          onSearchChange={setSearchQuery}
-          onCategoryChange={setSelectedCategory}
-          onSelectSkill={selectSkill}
-        />
-
-        <SkillWorkspace
-          selectedSkill={selectedSkill}
-          currentFolderPath={currentFolderPath}
-          files={filesList}
-          selectedFilePath={selectedFilePath}
-          fileContent={fileContent}
-          isLoadingFiles={isLoadingFiles}
-          isLoadingContent={isLoadingContent}
-          copiedSkillId={copiedSkillId}
-          copiedContent={copiedContent}
-          sourceViewMode={sourceViewMode}
-          onCopySkill={copySkillReference}
-          onCopyContent={copyCurrentFile}
-          onFolderChange={setCurrentFolderPath}
-          onFileSelect={setSelectedFilePath}
-          onSourceViewModeChange={setSourceViewMode}
-        />
       </div>
     </DashboardLayout>
   );
@@ -494,6 +560,64 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       <div className="font-mono text-sm font-semibold text-foreground">{value}</div>
       <div className="mt-0.5 text-[10px] uppercase tracking-wide text-content-muted">{label}</div>
     </div>
+  );
+}
+
+function SkillsGuide() {
+  return (
+    <section className="mb-6 rounded-lg border border-stroke bg-surface/20 p-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="max-w-2xl">
+          <h3 className="text-sm font-semibold text-foreground">Setup guide</h3>
+          <p className="mt-1 text-xs leading-relaxed text-content-muted">
+            Connect one Git repository, then sync it so the catalog can read <span className="font-mono text-foreground">registry.json</span> or{" "}
+            <span className="font-mono text-foreground">registry.min.json</span> at the repo root.
+          </p>
+        </div>
+        <div className="text-xs text-content-muted">Waiting for repository connection</div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="rounded-md border border-stroke bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Step 1</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">Paste a Git URL</div>
+          <p className="mt-1 text-xs leading-relaxed text-content-muted">Use HTTPS, SSH, git+ssh, or file://. The input is validated before connect.</p>
+        </div>
+        <div className="rounded-md border border-stroke bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Step 2</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">Sync the repository</div>
+          <p className="mt-1 text-xs leading-relaxed text-content-muted">The repo root must expose a registry file so skills can be indexed safely.</p>
+        </div>
+        <div className="rounded-md border border-stroke bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Step 3</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">Inspect catalog entries</div>
+          <p className="mt-1 text-xs leading-relaxed text-content-muted">Select a skill to view metadata, source folders, and file contents.</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-md border border-stroke bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Repo validation</div>
+          <p className="mt-1 text-xs leading-relaxed text-content-muted">
+            A suitable skills repo must be a normal Git repository, not a manually edited UI form. After sync, Auto Code OS reads the root registry
+            file, indexes the listed skills, and exposes only the synced source files in read-only mode.
+          </p>
+          <div className="mt-3 grid gap-2 text-xs text-content-muted">
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2">Root manifest: <span className="font-mono text-foreground">registry.json</span> or <span className="font-mono text-foreground">registry.min.json</span></div>
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2">Catalog source: <span className="font-mono text-foreground">skills</span> entries in the manifest</div>
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2">Editing rule: update the Git repo, then click Sync again</div>
+          </div>
+        </div>
+        <div className="rounded-md border border-stroke bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Valid URL examples</div>
+          <div className="mt-2 grid gap-2 text-xs text-content-muted">
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2 font-mono text-foreground">https://github.com/org/repo.git</div>
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2 font-mono text-foreground">git@github.com:org/repo.git</div>
+            <div className="rounded-md border border-stroke bg-surface/30 px-3 py-2 font-mono text-foreground">file:///tmp/local-skill-repo</div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -526,14 +650,26 @@ function CatalogPanel({
 }) {
   return (
     <section className="flex max-h-[calc(100vh-220px)] min-h-[620px] flex-col rounded-lg border border-stroke bg-card p-4">
-      <PanelHeader icon={Zap} title="Catalog" detail={`${skills.length} of ${totalSkills} skills`} />
+      <div className="flex items-start justify-between border-b border-stroke pb-3 mb-4">
+        <PanelHeader icon={Zap} title="Catalog" detail={`${skills.length} of ${totalSkills} skills`} />
+        <span className="rounded-full border border-stroke bg-surface/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-content-muted">
+          Read Only
+        </span>
+      </div>
+
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-content-muted">Catalog search</div>
+          <div className="text-xs text-content-muted">Search only the connected skills repository.</div>
+        </div>
+      </div>
 
       <div className="relative mb-3">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-content-muted" />
         <input
           value={searchQuery}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search by name, category, or repo"
+          placeholder="Search skills, categories, or registry entries"
           className="w-full rounded-md border border-stroke bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20"
         />
       </div>
@@ -561,17 +697,24 @@ function CatalogPanel({
                 key={skill.id}
                 type="button"
                 onClick={() => onSelectSkill(skill)}
-                className={`w-full rounded-md border p-3 text-left transition ${
+                className={`w-full rounded-md border p-3 text-left transition-all duration-200 ${
                   isSelected
-                    ? "border-brand-primary bg-brand-primary/10"
-                    : "border-stroke bg-surface/25 hover:border-stroke-strong hover:bg-surface/50"
+                    ? "border-brand-primary border-l-4 border-l-brand-primary pl-4 bg-brand-primary/12 shadow-sm ring-1 ring-brand-primary/15"
+                    : "cursor-pointer border-stroke bg-surface/25 hover:border-brand-primary/50 hover:bg-surface/60 hover:pl-4"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <span className="min-w-0 truncate font-mono text-sm font-semibold text-foreground">{skill.name}</span>
-                  <ChevronRight size={14} className="mt-0.5 shrink-0 text-content-muted" />
+                  <div className="flex items-center gap-2">
+                    {isSelected && (
+                      <span className="rounded-full border border-brand-primary/20 bg-brand-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-primary">
+                        Selected
+                      </span>
+                    )}
+                    <ChevronRight size={14} className="mt-0.5 shrink-0 text-content-muted" />
+                  </div>
                 </div>
-                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-content-muted">
+                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-content-muted/90">
                   {skill.description || "No description provided."}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -582,11 +725,24 @@ function CatalogPanel({
             );
           })
         ) : (
-          <EmptyState
-            icon={Database}
-            title={hasSource ? "No skills found" : "No repository connected"}
-            description={hasSource ? "Try a different search term or sync the repository." : "Connect a repository to sync the catalog."}
-          />
+          <div className="rounded-md border border-dashed border-stroke bg-surface/20 p-5">
+            <EmptyState
+              icon={Database}
+              title={hasSource ? "No skills found" : "No repository connected"}
+              description={
+                hasSource
+                  ? "Try a different search term, then sync the repository again."
+                  : "Connect a valid Git repository URL and sync it. The repo root must contain registry.json or registry.min.json."
+              }
+            />
+            {!hasSource && (
+              <div className="mt-4 grid gap-2 text-xs text-content-muted">
+                <div className="rounded-md border border-stroke bg-background px-3 py-2">1. Paste a Git URL in the connection bar above.</div>
+                <div className="rounded-md border border-stroke bg-background px-3 py-2">2. Sync the repo and confirm the root manifest exists.</div>
+                <div className="rounded-md border border-stroke bg-background px-3 py-2">3. Open a skill to inspect metadata and source files.</div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </section>
@@ -631,8 +787,8 @@ function SkillWorkspace({
       <section className="rounded-lg border border-dashed border-stroke bg-panel/30 p-8 xl:col-span-2">
         <EmptyState
           icon={Zap}
-          title="Select a skill"
-          description="Choose a catalog entry to inspect its metadata, source folder, and file contents."
+          title="No skill selected"
+          description="Select a skill from the catalog. The first matching skill auto-loads after sync."
         />
       </section>
     );
@@ -816,7 +972,12 @@ function SourceViewer({
   return (
     <section className="flex max-h-[calc(100vh-220px)] min-h-[620px] min-w-0 flex-col rounded-lg border border-stroke bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-stroke pb-3">
-        <PanelHeader icon={Terminal} title="Source" detail={selectedFilePath || "No file selected"} compact />
+        <div className="flex items-center gap-2.5 min-w-0">
+          <PanelHeader icon={Terminal} title="Source" detail={selectedFilePath || "No file selected"} compact />
+          <span className="rounded-full border border-stroke bg-surface/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-content-muted">
+            Read Only
+          </span>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           {isMarkdown && (
             <div className="flex rounded-md border border-stroke bg-background p-0.5">

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
-import { GitBranch, Loader2, Plus, RefreshCw, ShieldCheck, Edit3, Check, X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { GitBranch, Loader2, Plus, RefreshCw, ShieldCheck, Edit3, Check, X, Trash2, AlertTriangle } from "lucide-react";
 import type { Repository } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
@@ -17,16 +17,20 @@ export type LinkRepositoryPayload = {
 
 interface RepositoriesViewProps {
   projectID: string;
-  project: { default_branch?: string };
+  project?: { default_branch?: string } | null;
   token: string;
   orgID: string;
-  repositories: Repository[];
+  repositories?: Repository[];
   isLoading: boolean;
   isLinking: boolean;
   error: string;
+  repoLoading?: Record<string, boolean>;
+  repoOperation?: Record<string, "clone" | "validate" | undefined>;
+  repoErrors?: Record<string, string>;
   onLinkRepository: (payload: LinkRepositoryPayload) => Promise<boolean>;
   onCloneRepository: (repoID: string) => void;
   onValidateRepository: (repoID: string) => void;
+  onDeleteRepository: (repoID: string) => Promise<boolean>;
   onRefresh?: () => void;
 }
 
@@ -34,19 +38,29 @@ export function RepositoriesView({
   project,
   token,
   orgID,
-  repositories,
+  repositories = [],
   isLoading,
   isLinking,
   error,
+  repoLoading = {},
+  repoOperation = {},
+  repoErrors = {},
   onLinkRepository,
   onCloneRepository,
   onValidateRepository,
+  onDeleteRepository,
   onRefresh,
 }: RepositoriesViewProps) {
   const [url, setURL] = useState("");
-  const [branch, setBranch] = useState(project.default_branch || "main");
+  const [branch, setBranch] = useState(project?.default_branch || "main");
   const [tokenOverride, setTokenOverride] = useState("");
   const [gitAccountID, setGitAccountID] = useState("");
+
+  useEffect(() => {
+    if (project?.default_branch) {
+      setBranch(project.default_branch);
+    }
+  }, [project?.default_branch]);
 
   // Branch fetching state
   const [fetchedBranches, setFetchedBranches] = useState<string[]>([]);
@@ -55,10 +69,23 @@ export function RepositoriesView({
 
   // Branch editing state for existing repos
   const [editingRepoId, setEditingRepoId] = useState<string | null>(null);
+  const [editingNameRepoId, setEditingNameRepoId] = useState<string | null>(null);
+  const [confirmingDeleteRepoId, setConfirmingDeleteRepoId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const [editingBranch, setEditingBranch] = useState("");
   const [editingBranches, setEditingBranches] = useState<string[]>([]);
   const [isFetchingEditingBranches, setIsFetchingEditingBranches] = useState(false);
   const [editingError, setEditingError] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  // Real-time URL validation
+  const isInputUrlValid = useMemo(() => {
+    const trimmed = url.trim();
+    if (!trimmed) return true;
+    return trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../") ||
+      /^(https?:\/\/|git@|ssh:\/\/|git\+ssh:\/\/)/.test(trimmed) ||
+      /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\/[^\s]+$/.test(trimmed);
+  }, [url]);
 
   const provider = useMemo(() => detectProvider(url), [url]);
 
@@ -117,6 +144,12 @@ export function RepositoriesView({
     }
   }
 
+  function startEditingName(repo: Repository) {
+    setEditingNameRepoId(repo.id);
+    setEditingName(repo.display_name || repo.url.replace(/^https?:\/\//, "").replace(/\.git$/, "").split("/").pop() || "");
+    setEditingError("");
+  }
+
   async function handleSaveEditedBranch(repoId: string) {
     if (!editingBranch) return;
     try {
@@ -129,10 +162,35 @@ export function RepositoriesView({
     }
   }
 
+  async function handleSaveEditedName(repoId: string) {
+    const trimmedName = editingName.trim();
+    if (!trimmedName) {
+      setEditingError("Repository name is required.");
+      return;
+    }
+    try {
+      await api.projects.repositories.update(repoId, token, { display_name: trimmedName });
+      setEditingNameRepoId(null);
+      if (onRefresh) onRefresh();
+      onValidateRepository(repoId);
+    } catch {
+      setEditingError("Failed to save repository name.");
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setLocalError("");
     const trimmedURL = url.trim();
     if (!trimmedURL) return;
+
+    const isValid = trimmedURL.startsWith("/") || trimmedURL.startsWith("./") || trimmedURL.startsWith("../") ||
+      /^(https?:\/\/|git@|ssh:\/\/|git\+ssh:\/\/)/.test(trimmedURL) ||
+      /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\/[^\s]+$/.test(trimmedURL);
+    if (!isValid) {
+      setLocalError("Please enter a valid repository URL (e.g. https://github.com/org/repo.git).");
+      return;
+    }
 
     const linked = await onLinkRepository({
       url: trimmedURL,
@@ -149,6 +207,8 @@ export function RepositoriesView({
     setGitAccountID("");
     setFetchedBranches([]);
   }
+
+  const safeRepos = Array.isArray(repositories) ? repositories : [];
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
@@ -173,21 +233,65 @@ export function RepositoriesView({
 
         {isLoading ? (
           <RepositorySkeleton />
-        ) : repositories.length === 0 ? (
+        ) : safeRepos.length === 0 ? (
           <div className="rounded-lg border border-dashed border-stroke bg-card p-6 text-center">
             <p className="font-sans text-sm font-semibold text-foreground">No repository linked.</p>
             <p className="mt-1 text-xs text-content-muted">
-              Link a repository so AI agents can analyze files and run test suits.
+              Link a repository so AI agents can analyze files and run test suites.
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {repositories.map((repo) => {
+            {safeRepos.map((repo) => {
               const isEditing = editingRepoId === repo.id;
+              const isEditingName = editingNameRepoId === repo.id;
+              const repoName = repo.display_name || repo.url.replace(/^https?:\/\//, "").replace(/\.git$/, "").split("/").pop() || "repository";
               return (
                 <div key={repo.id} className="rounded-lg border border-stroke bg-card p-4">
-                  <div className="break-all text-sm font-semibold text-foreground">
-                    {repo.url.replace(/^https?:\/\//, "")}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      {isEditingName ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={editingName}
+                            onChange={(event) => setEditingName(event.target.value)}
+                            className="min-w-0 flex-1 rounded border border-stroke bg-surface px-3 py-1.5 text-sm font-semibold text-foreground outline-none transition focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEditedName(repo.id)}
+                            className="rounded bg-brand-primary p-1.5 text-slate-950 hover:opacity-90 transition cursor-pointer"
+                            title="Save repository name"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingNameRepoId(null)}
+                            className="rounded border border-stroke p-1.5 text-foreground hover:bg-surface transition cursor-pointer"
+                            title="Cancel"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="break-all text-sm font-semibold text-foreground">{repoName}</div>
+                          <button
+                            type="button"
+                            onClick={() => startEditingName(repo)}
+                            className="rounded p-1 text-content-muted hover:bg-surface hover:text-foreground transition cursor-pointer"
+                            title="Edit repository name"
+                          >
+                            <Edit3 size={11} />
+                          </button>
+                        </div>
+                      )}
+                      <div className="mt-0.5 break-all text-[11px] text-content-muted">
+                        {repo.url.replace(/^https?:\/\//, "")}
+                      </div>
+                    </div>
                   </div>
 
                   {isEditing ? (
@@ -239,10 +343,22 @@ export function RepositoriesView({
                     </div>
                   ) : (
                     <div className="mt-2.5 flex items-center justify-between text-xs text-content-muted">
-                      <span>
-                        Branch: <strong className="text-foreground">{repo.branch || "main"}</strong>
-                        <span className="px-1.5">•</span>
-                        Status: <strong className="text-foreground">{repo.clone_status || "not_cloned"}</strong>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        <span>
+                          Branch: <strong className="text-foreground">{repo.branch || "main"}</strong>
+                        </span>
+                        <span className="px-1.5 opacity-50">•</span>
+                        <span>
+                          Status: <strong className="text-foreground">{repo.clone_status || "not_cloned"}</strong>
+                        </span>
+                        {!repo.last_validated_at && (
+                          <>
+                            <span className="px-1.5 opacity-50">•</span>
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              <AlertTriangle size={10} /> Unverified
+                            </span>
+                          </>
+                        )}
                       </span>
                       <button
                         type="button"
@@ -254,24 +370,73 @@ export function RepositoriesView({
                     </div>
                   )}
 
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap justify-between items-center gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-3 py-1.5 text-xs text-foreground transition hover:bg-surface/80 cursor-pointer disabled:opacity-50"
+                        onClick={() => onCloneRepository(repo.id)}
+                        disabled={repoLoading[repo.id]}
+                        type="button"
+                      >
+                        {repoOperation[repo.id] === "clone" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                        {repoOperation[repo.id] === "clone" ? "Cloning..." : "Clone Repository"}
+                      </button>
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-3 py-1.5 text-xs text-foreground transition hover:bg-surface/80 cursor-pointer disabled:opacity-50"
+                        onClick={() => onValidateRepository(repo.id)}
+                        disabled={repoLoading[repo.id]}
+                        type="button"
+                      >
+                        {repoOperation[repo.id] === "validate" ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                        {repoOperation[repo.id] === "validate" ? "Validating..." : "Validate"}
+                      </button>
+                    </div>
+
                     <button
-                      className="inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-3 py-1.5 text-xs text-foreground transition hover:bg-surface/80 cursor-pointer"
-                      onClick={() => onCloneRepository(repo.id)}
+                      className="inline-flex items-center gap-1.5 rounded border border-red-500/25 bg-red-500/10 px-3 py-1.5 text-xs text-red-600 hover:bg-red-500/20 transition cursor-pointer disabled:opacity-50"
+                      onClick={() => setConfirmingDeleteRepoId(repo.id)}
+                      disabled={repoLoading[repo.id]}
                       type="button"
                     >
-                      <RefreshCw size={13} />
-                      Clone Repository
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-3 py-1.5 text-xs text-foreground transition hover:bg-surface/80 cursor-pointer"
-                      onClick={() => onValidateRepository(repo.id)}
-                      type="button"
-                    >
-                      <ShieldCheck size={13} />
-                      Validate
+                      <Trash2 size={13} />
+                      Unlink
                     </button>
                   </div>
+
+                  {repoErrors[repo.id] && (
+                    <p className="mt-2 text-xs text-red-500 dark:text-red-400 font-medium">
+                      {repoErrors[repo.id]}
+                    </p>
+                  )}
+
+                  {confirmingDeleteRepoId === repo.id && (
+                    <div className="mt-3 rounded border border-red-500/20 bg-red-500/10 p-3">
+                      <p className="text-xs text-red-600 dark:text-red-400 font-medium">
+                        Are you sure you want to unlink this repository from the project?
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={async () => {
+                            const success = await onDeleteRepository(repo.id);
+                            if (success) {
+                              setConfirmingDeleteRepoId(null);
+                            }
+                          }}
+                          className="rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 transition cursor-pointer"
+                          type="button"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteRepoId(null)}
+                          className="rounded border border-stroke bg-surface px-3 py-1 text-xs font-semibold text-foreground hover:bg-surface/80 transition cursor-pointer"
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -291,10 +456,19 @@ export function RepositoriesView({
               value={url}
               onChange={(event) => setURL(event.target.value)}
               placeholder="https://github.com/org/repo.git"
-              className="w-full rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition"
+              className={`w-full rounded border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none transition ${
+                !isInputUrlValid && url.trim()
+                  ? "border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500/20"
+                  : "border-stroke focus:border-brand-primary"
+              }`}
               disabled={isLinking}
               required
             />
+            {!isInputUrlValid && url.trim() && (
+              <p className="text-[10px] text-red-500 font-medium">
+                Invalid repository URL format. Use https://, git@, or local path.
+              </p>
+            )}
           </div>
 
           {gitAccounts.length === 0 ? (
@@ -386,8 +560,8 @@ export function RepositoriesView({
             )}
           </label>
 
-          {error && (
-            <p className="rounded border border-red-400/30 bg-red-950/40 p-2 text-xs text-red-200">{error}</p>
+          {(error || localError) && (
+            <p className="rounded border border-red-400/30 bg-red-950/40 p-2 text-xs text-red-200">{error || localError}</p>
           )}
 
           <button

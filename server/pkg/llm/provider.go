@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -21,16 +22,41 @@ const (
 
 // Message represents a single message in a conversation.
 type Message struct {
-	Role    string `json:"role"`    // "system", "user", "assistant"
-	Content string `json:"content"` // message text
+	Role          string     `json:"role"`                     // "system", "user", "assistant", "tool"
+	Content       string     `json:"content"`                  // message text
+	ToolCallID    string     `json:"tool_call_id,omitempty"`   // provider-specific tool call ID
+	ToolName      string     `json:"tool_name,omitempty"`      // tool name for tool messages
+	ToolArguments string     `json:"tool_arguments,omitempty"` // JSON arguments emitted by assistant
+	ToolCalls     []ToolCall `json:"tool_calls,omitempty"`     // assistant-requested tool calls
 }
 
 // Response represents the LLM's response.
 type Response struct {
-	Content      string `json:"content"`       // generated text
-	Model        string `json:"model"`         // model used
-	PromptTokens int    `json:"prompt_tokens"` // input tokens consumed
-	OutputTokens int    `json:"output_tokens"` // output tokens generated
+	Content      string     `json:"content"`       // generated text
+	Model        string     `json:"model"`         // model used
+	PromptTokens int        `json:"prompt_tokens"` // input tokens consumed
+	OutputTokens int        `json:"output_tokens"` // output tokens generated
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// ToolDefinition defines a native LLM tool schema.
+type ToolDefinition struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// ToolCall represents a tool invocation requested by the LLM.
+type ToolCall struct {
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// ChatOptions contains native tool definitions and choice constraints for the ChatWithOptions call.
+type ChatOptions struct {
+	Tools      []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice string           `json:"tool_choice,omitempty"`
 }
 
 // ProviderMetadata exposes normalized routing and cost metadata.
@@ -79,6 +105,9 @@ func RouteOptionsFromContext(ctx context.Context) (RouteOptions, bool) {
 type Provider interface {
 	// Chat sends a list of messages and returns the model's response.
 	Chat(ctx context.Context, messages []Message) (*Response, error)
+
+	// ChatWithOptions sends messages with optional native tool schemas.
+	ChatWithOptions(ctx context.Context, messages []Message, opts ChatOptions) (*Response, error)
 
 	// Name returns the provider identifier (e.g. "openai").
 	Name() string

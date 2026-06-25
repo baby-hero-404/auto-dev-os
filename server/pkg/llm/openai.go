@@ -43,10 +43,11 @@ func (o *OpenAI) Metadata() ProviderMetadata {
 
 // Chat sends messages to the OpenAI Chat Completions API.
 func (o *OpenAI) Chat(ctx context.Context, messages []Message) (*Response, error) {
-	payload := map[string]interface{}{
-		"model":    o.model,
-		"messages": messages,
-	}
+	return o.ChatWithOptions(ctx, messages, ChatOptions{})
+}
+
+func (o *OpenAI) ChatWithOptions(ctx context.Context, messages []Message, opts ChatOptions) (*Response, error) {
+	payload := openAIChatPayload(o.model, messages, opts)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -75,6 +76,78 @@ func (o *OpenAI) Chat(ctx context.Context, messages []Message) (*Response, error
 		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
+	return parseOpenAIChatResponse(respBody)
+}
+
+func openAIChatPayload(model string, messages []Message, opts ChatOptions) map[string]interface{} {
+	payload := map[string]interface{}{
+		"model":    model,
+		"messages": openAIMessages(messages),
+	}
+	if len(opts.Tools) > 0 {
+		payload["tools"] = openAITools(opts.Tools)
+		if opts.ToolChoice != "" {
+			payload["tool_choice"] = opts.ToolChoice
+		}
+	}
+	return payload
+}
+
+func openAIMessages(messages []Message) []map[string]any {
+	out := make([]map[string]any, 0, len(messages))
+	for _, msg := range messages {
+		m := map[string]any{
+			"role": msg.Role,
+		}
+		if msg.Role == "tool" {
+			m["tool_call_id"] = msg.ToolCallID
+			m["content"] = msg.Content
+		} else {
+			m["content"] = msg.Content
+			if len(msg.ToolCalls) > 0 {
+				var calls []map[string]any
+				for _, call := range msg.ToolCalls {
+					calls = append(calls, map[string]any{
+						"id":   call.ID,
+						"type": "function",
+						"function": map[string]any{
+							"name":      call.Name,
+							"arguments": call.Arguments,
+						},
+					})
+				}
+				m["tool_calls"] = calls
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func openAITools(tools []ToolDefinition) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		var parameters any
+		if len(tool.Parameters) > 0 {
+			if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+				parameters = map[string]any{"type": "object"}
+			}
+		} else {
+			parameters = map[string]any{"type": "object"}
+		}
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  parameters,
+			},
+		})
+	}
+	return out
+}
+
+func parseOpenAIChatResponse(respBody []byte) (*Response, error) {
 	var result openaiResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
@@ -84,12 +157,21 @@ func (o *OpenAI) Chat(ctx context.Context, messages []Message) (*Response, error
 		return nil, fmt.Errorf("OpenAI returned no choices")
 	}
 
-	return &Response{
-		Content:      result.Choices[0].Message.Content,
+	msg := result.Choices[0].Message
+	resp := &Response{
+		Content:      msg.Content,
 		Model:        result.Model,
 		PromptTokens: result.Usage.PromptTokens,
 		OutputTokens: result.Usage.CompletionTokens,
-	}, nil
+	}
+	for _, toolCall := range msg.ToolCalls {
+		resp.ToolCalls = append(resp.ToolCalls, ToolCall{
+			ID:        toolCall.ID,
+			Name:      toolCall.Function.Name,
+			Arguments: toolCall.Function.Arguments,
+		})
+	}
+	return resp, nil
 }
 
 // OpenAI response structures.
@@ -97,7 +179,15 @@ type openaiResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls,omitempty"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {

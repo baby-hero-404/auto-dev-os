@@ -29,7 +29,7 @@ export function ProjectSidebar({
   ];
 
   return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-stroke bg-card p-4">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-stroke bg-card p-4 md:flex">
       {/* Title / Project Name */}
       <div className="mb-8 px-3 py-2">
         <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-content-muted/60">

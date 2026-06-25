@@ -38,7 +38,6 @@ func (r *ProviderModelRepo) Create(ctx context.Context, orgID string, input mode
 	return model, nil
 }
 
-
 func (r *ProviderModelRepo) ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error) {
 	var list []models.ProviderModel
 	query := r.db.WithContext(ctx).Where("org_id = ?", orgID)

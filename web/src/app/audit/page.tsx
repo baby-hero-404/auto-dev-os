@@ -114,49 +114,50 @@ export default function AuditLogPage() {
 
   return (
     <DashboardLayout>
-      <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="font-mono text-2xl font-semibold">Audit Log</h1>
-          <p className="mt-1 text-sm text-content-muted">
-            Immutable trace log of all critical workspace activities and security events.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={exportAuditCSV}
-            disabled={filteredLogs.length === 0}
-            className="flex items-center gap-2 rounded-md border border-stroke bg-panel px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-900 disabled:opacity-50"
-          >
-            <Download size={15} />
-            Export CSV
-          </button>
-          <div className="rounded-full border border-stroke bg-panel px-3 py-1 text-xs text-content-muted flex items-center gap-1.5">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            Compliance Active
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="font-mono text-2xl font-semibold">Audit Log</h1>
+            <p className="mt-1 text-sm text-content-muted">
+              Immutable trace log of all critical workspace activities and security events.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={exportAuditCSV}
+              disabled={filteredLogs.length === 0}
+              className="flex items-center gap-2 rounded-md border border-stroke bg-card px-3 py-2 text-sm text-slate-200 transition hover:bg-surface disabled:opacity-50"
+            >
+              <Download size={15} />
+              Export CSV
+            </button>
+            <div className="rounded-full border border-stroke bg-surface px-3 py-1 text-xs text-content-muted flex items-center gap-1.5">
+              <ShieldCheck size={14} className="text-emerald-400" />
+              Compliance Active
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Summary dashboard */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-stroke bg-panel p-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-stroke bg-card p-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-content-muted">Total Events</div>
           <div className="mt-2 font-mono text-3xl font-bold">{totalEvents}</div>
           <div className="mt-1 text-xs text-content-muted">Across all components</div>
         </div>
-        <div className="rounded-lg border border-stroke bg-panel p-4">
+        <div className="rounded-lg border border-stroke bg-card p-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-content-muted">Security & Policy</div>
           <div className="mt-2 font-mono text-3xl font-bold text-amber-400">{highRiskEvents}</div>
           <div className="mt-1 text-xs text-content-muted">Secrets accessed & rule edits</div>
         </div>
-        <div className="rounded-lg border border-stroke bg-panel p-4">
+        <div className="rounded-lg border border-stroke bg-card p-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-content-muted">PR Workflows</div>
           <div className="mt-2 font-mono text-3xl font-bold text-sky-400">
             {(summary["pr.created"] ?? 0) + (summary["pr.approved"] ?? 0)}
           </div>
           <div className="mt-1 text-xs text-content-muted">Reviews & merge actions</div>
         </div>
-        <div className="rounded-lg border border-stroke bg-panel p-4">
+        <div className="rounded-lg border border-stroke bg-card p-4">
           <div className="text-xs font-semibold uppercase tracking-wider text-content-muted">Agent Failures</div>
           <div className="mt-2 font-mono text-3xl font-bold text-red-400">{summary["workflow.failed"] ?? 0}</div>
           <div className="mt-1 text-xs text-content-muted">Failed runs needing review</div>
@@ -164,20 +165,20 @@ export default function AuditLogPage() {
       </div>
 
       {/* Filters & search */}
-      <div className="mb-6 grid gap-4 rounded-lg border border-stroke bg-panel p-4 md:grid-cols-[1fr_180px_180px_140px]">
+      <div className="grid gap-4 rounded-lg border border-stroke bg-card p-4 md:grid-cols-[1fr_180px_180px_140px]">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 text-content-muted" size={16} />
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by action, ID, keyword..."
-            className="w-full rounded-md border border-stroke bg-slate-950/50 py-2 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:border-brand-primary focus:outline-none"
+            className="w-full rounded-md border border-stroke bg-background py-2 pl-10 pr-4 text-sm text-foreground placeholder-slate-500 focus:border-brand-primary focus:outline-none"
           />
         </div>
         <select
           value={selectedAction}
           onChange={(e) => setSelectedAction(e.target.value)}
-          className="rounded-md border border-stroke bg-slate-950/50 px-3 py-2 text-sm text-slate-300 focus:border-brand-primary focus:outline-none"
+          className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none"
         >
           <option value="">All Actions</option>
           <option value="task.created">Task Created</option>
@@ -192,7 +193,7 @@ export default function AuditLogPage() {
         <select
           value={selectedEntity}
           onChange={(e) => setSelectedEntity(e.target.value)}
-          className="rounded-md border border-stroke bg-slate-950/50 px-3 py-2 text-sm text-slate-300 focus:border-brand-primary focus:outline-none"
+          className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none"
         >
           <option value="">All Entity Types</option>
           <option value="task">Tasks</option>
@@ -204,7 +205,7 @@ export default function AuditLogPage() {
         <select
           value={days}
           onChange={(e) => setDays(Number(e.target.value))}
-          className="rounded-md border border-stroke bg-slate-950/50 px-3 py-2 text-sm text-slate-300 focus:border-brand-primary focus:outline-none"
+          className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none"
         >
           <option value="1">Last 24h</option>
           <option value="7">Last 7 days</option>
@@ -220,10 +221,10 @@ export default function AuditLogPage() {
       )}
 
       {/* Audit logs stream */}
-      <div className="overflow-hidden rounded-lg border border-stroke bg-panel">
+      <div className="overflow-hidden rounded-lg border border-stroke bg-card">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted bg-slate-950/30">
+            <thead className="border-b border-stroke text-xs uppercase tracking-wide text-content-muted bg-surface/50">
               <tr>
                 <th className="px-4 py-3.5 w-[180px]">Timestamp</th>
                 <th className="px-4 py-3.5 w-[160px]">Actor</th>
@@ -243,8 +244,8 @@ export default function AuditLogPage() {
                   <Fragment key={log.id}>
                     <tr
                       onClick={() => setExpandedLog(isExpanded ? null : log.id)}
-                      className={`border-b border-stroke/60 cursor-pointer transition hover:bg-slate-900/50 ${
-                        isExpanded ? "bg-slate-900/20" : ""
+                      className={`border-b border-stroke/60 cursor-pointer transition hover:bg-surface/30 ${
+                        isExpanded ? "bg-surface/50" : ""
                       }`}
                     >
                       <td className="px-4 py-3.5 font-mono text-xs text-content-muted">
@@ -305,9 +306,9 @@ export default function AuditLogPage() {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr className="bg-slate-950/40 border-b border-stroke/40">
+                      <tr className="bg-surface/20 border-b border-stroke/40">
                         <td colSpan={6} className="p-4">
-                          <div className="rounded-md border border-stroke/50 bg-slate-950 p-4">
+                          <div className="rounded-md border border-stroke bg-card p-4">
                             <div className="mb-2.5 flex items-center justify-between text-xs text-content-muted">
                               <span className="font-mono">Event metadata ID: {log.id}</span>
                               {isSecret && (
@@ -316,7 +317,7 @@ export default function AuditLogPage() {
                                 </span>
                               )}
                             </div>
-                            <pre className="overflow-x-auto font-mono text-xs text-emerald-400/90 leading-relaxed">
+                            <pre className="overflow-x-auto font-mono text-xs text-emerald-400/90 leading-relaxed bg-background p-3 rounded border border-stroke">
                               {JSON.stringify(log.details, null, 2)}
                             </pre>
                             {log.task_id && (
@@ -325,7 +326,7 @@ export default function AuditLogPage() {
                                   href={`/tasks/${log.task_id}`}
                                   className="text-xs font-semibold text-brand-primary hover:underline flex items-center gap-1.5"
                                 >
-                                  Go to Task Workflow &rarr;
+                                  Go to Task Workflow →
                                 </a>
                               </div>
                             )}
@@ -347,6 +348,7 @@ export default function AuditLogPage() {
           </table>
         </div>
       </div>
+    </div>
     </DashboardLayout>
   );
 }

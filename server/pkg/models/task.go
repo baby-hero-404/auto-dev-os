@@ -31,9 +31,10 @@ const (
 )
 
 // ValidTaskTransitions defines allowed status transitions.
+// Note: TaskStatusContextLoading allows jumping directly to testing/review/PR for read-only or analysis tasks.
 var ValidTaskTransitions = map[string][]string{
 	TaskStatusTodo:           {TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusCoding},
-	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusFailed},
+	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusTesting, TaskStatusPrReady, TaskStatusFailed},
 	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
 	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
 	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusFailed},
@@ -43,7 +44,7 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusPrReady:        {TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed, TaskStatusFixing},
 	TaskStatusHumanReview:    {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
 	TaskStatusMerged:         {},
-	TaskStatusFailed:         {TaskStatusTodo, TaskStatusAnalyzing},
+	TaskStatusFailed:         {TaskStatusTodo, TaskStatusContextLoading, TaskStatusAnalyzing},
 }
 
 const (
@@ -108,6 +109,8 @@ type UpdateTaskInput struct {
 
 type TaskAnalysis struct {
 	Complexity             string   `json:"complexity"`
+	// PrimaryCategory classifies the task type (e.g., "feature", "bug", "docs").
+	PrimaryCategory        string   `json:"primary_category,omitempty"`
 	Scope                  string   `json:"scope"`
 	AffectedFiles          []string `json:"affected_files"`
 	Risks                  []string `json:"risks"`

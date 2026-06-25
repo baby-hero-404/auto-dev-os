@@ -17,6 +17,7 @@ import { useSession } from "@/lib/session";
 import { api, ApiError } from "@/lib/api";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { EpisodicMemory, KnowledgeEdge, MemorySearchResult } from "@/lib/types";
 import Link from "next/link";
 
@@ -32,6 +33,7 @@ export default function KnowledgePage() {
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<MemorySearchResult[] | null>(null);
   const [inspectingMemoryID, setInspectingMemoryID] = useState<string | null>(null);
+  const [deleteMemoryId, setDeleteMemoryId] = useState<string | null>(null);
 
   // Fetch all agents in organization staff pool
   const { data: orgAgents = [], isLoading: loadingAgents } = useAuthedSWR(
@@ -84,10 +86,7 @@ export default function KnowledgePage() {
     setSearchResults(null);
   }
 
-  async function handleDeleteMemory(memoryID: string) {
-    if (!confirm("Are you sure you want to delete this episodic memory item?")) {
-      return;
-    }
+  async function performDeleteMemory(memoryID: string) {
     try {
       await api.deleteMemory(memoryID, token);
       mutateMemories();
@@ -267,7 +266,7 @@ export default function KnowledgePage() {
                       memory={item.memory}
                       score={item.final_score}
                       isAdmin={isAdmin}
-                      onDelete={handleDeleteMemory}
+                      onDelete={setDeleteMemoryId}
                       onInspect={setInspectingMemoryID}
                       isInspecting={inspectingMemoryID === item.memory.id}
                     />
@@ -307,7 +306,7 @@ export default function KnowledgePage() {
                       key={mem.id}
                       memory={mem}
                       isAdmin={isAdmin}
-                      onDelete={handleDeleteMemory}
+                      onDelete={setDeleteMemoryId}
                       onInspect={setInspectingMemoryID}
                       isInspecting={inspectingMemoryID === mem.id}
                     />
@@ -405,6 +404,19 @@ export default function KnowledgePage() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        isOpen={deleteMemoryId !== null}
+        title="Prune Memory"
+        description="Are you sure you want to delete this episodic memory item? This action cannot be undone."
+        confirmText="Delete"
+        variant="danger"
+        onConfirm={() => {
+          if (deleteMemoryId) {
+            performDeleteMemory(deleteMemoryId);
+          }
+        }}
+        onClose={() => setDeleteMemoryId(null)}
+      />
     </DashboardLayout>
   );
 }

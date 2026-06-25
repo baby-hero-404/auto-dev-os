@@ -7,6 +7,7 @@ type Repository struct {
 	ID              string     `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
 	ProjectID       string     `json:"project_id" gorm:"type:uuid;not null"`
 	GitAccountID    *string    `json:"git_account_id,omitempty" gorm:"type:uuid;default:null"`
+	DisplayName     string     `json:"display_name" gorm:"default:''"`
 	URL             string     `json:"url" gorm:"not null"`
 	Provider        string     `json:"provider" gorm:"default:'github'"`
 	Branch          string     `json:"branch" gorm:"default:'main'"`
@@ -25,6 +26,7 @@ type CreateRepositoryInput struct {
 	Branch       string  `json:"branch"`
 	Token        string  `json:"token"`
 	GitAccountID *string `json:"git_account_id"`
+	DisplayName  string  `json:"display_name,omitempty"`
 }
 
 // UpdateRepositoryInput is the payload to partially update a repository.
@@ -34,6 +36,7 @@ type UpdateRepositoryInput struct {
 	Branch       *string `json:"branch,omitempty"`
 	Token        *string `json:"token,omitempty"`
 	GitAccountID *string `json:"git_account_id,omitempty"`
+	DisplayName  *string `json:"display_name,omitempty"`
 	ClonePath    *string `json:"clone_path,omitempty"`
 	CloneStatus  *string `json:"clone_status,omitempty"`
 }

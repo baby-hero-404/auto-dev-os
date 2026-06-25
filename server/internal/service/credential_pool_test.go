@@ -157,3 +157,64 @@ func expectCreateCredential(mock sqlmock.Sqlmock, id, provider, encryptedKey str
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 	mock.ExpectCommit()
 }
+
+func TestCredentialPoolService_SelectCredentialModelCooldown(t *testing.T) {
+	svc, mock, encryptedKey, cleanup := newCredentialPoolServiceForTest(t, "plain-key")
+	defer cleanup()
+
+	creds := []models.ProviderCredential{
+		{ID: "cred-1", OrgID: "org-1", Provider: "openai", Label: "default", EncryptedKey: encryptedKey, Status: models.ProviderCredentialStatusActive, Priority: 1},
+		{ID: "cred-2", OrgID: "org-1", Provider: "openai", Label: "default", EncryptedKey: encryptedKey, Status: models.ProviderCredentialStatusActive, Priority: 2},
+	}
+
+	// 1. Initially, SelectCredential for "gpt-4o" should return "cred-1" (since priority 1 < 2)
+	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	cred, err := svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o", StrategyFillFirst, nil)
+	if err != nil {
+		t.Fatalf("SelectCredential failed: %v", err)
+	}
+	if cred.ID != "cred-1" {
+		t.Fatalf("expected cred-1, got %s", cred.ID)
+	}
+
+	// 2. Put "cred-1" on cooldown for model "gpt-4o"
+	svc.SetCooldown(context.Background(), "cred-1", "gpt-4o", time.Now().Add(5*time.Minute))
+
+	// 3. SelectCredential for "gpt-4o" should now skip "cred-1" and return "cred-2"
+	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	cred, err = svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o", StrategyFillFirst, nil)
+	if err != nil {
+		t.Fatalf("SelectCredential failed: %v", err)
+	}
+	if cred.ID != "cred-2" {
+		t.Fatalf("expected cred-2, got %s", cred.ID)
+	}
+
+	// 4. SelectCredential for another model, say "gpt-4o-mini", should still return "cred-1"
+	// since the cooldown is model-specific!
+	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	cred, err = svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o-mini", StrategyFillFirst, nil)
+	if err != nil {
+		t.Fatalf("SelectCredential failed: %v", err)
+	}
+	if cred.ID != "cred-1" {
+		t.Fatalf("expected cred-1 for gpt-4o-mini, got %s", cred.ID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func expectListActiveProviderCredentials(mock sqlmock.Sqlmock, orgID, provider string, creds []models.ProviderCredential) {
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{
+		"id", "org_id", "provider", "label", "encrypted_key", "base_url", "status", "priority", "cooldown_until", "metadata", "created_at", "updated_at",
+	})
+	for _, c := range creds {
+		rows.AddRow(c.ID, c.OrgID, c.Provider, c.Label, c.EncryptedKey, c.BaseURL, c.Status, c.Priority, c.CooldownUntil, c.Metadata, now, now)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "provider_credentials" WHERE (org_id = $1 AND provider = $2 AND status = $3) AND (cooldown_until IS NULL OR cooldown_until < NOW()) ORDER BY priority ASC, created_at ASC`)).
+		WithArgs(orgID, provider, models.ProviderCredentialStatusActive).
+		WillReturnRows(rows)
+}

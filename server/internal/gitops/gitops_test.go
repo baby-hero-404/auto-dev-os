@@ -70,6 +70,16 @@ func TestNormalizeGitURLToHTTPS(t *testing.T) {
 			input:   "   ",
 			wantErr: true,
 		},
+		{
+			name:  "Domain name path autocomplete",
+			input: "github.com/sunshine12396/test",
+			want:  "https://github.com/sunshine12396/test",
+		},
+		{
+			name:    "Invalid url string with no domain or scheme",
+			input:   "some-random-string",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -95,7 +95,6 @@ func (r *AgentRepo) ListByOrgID(ctx context.Context, orgID string) ([]models.Age
 	return agents, nil
 }
 
-
 func (r *AgentRepo) AssignToProject(ctx context.Context, projectID, agentID string) error {
 	var count int64
 	if err := r.db.WithContext(ctx).

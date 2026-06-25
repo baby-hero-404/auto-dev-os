@@ -12,10 +12,16 @@ type fakeProvider struct {
 	resp  *Response
 	err   error
 	calls int
+	opts  ChatOptions
 }
 
-func (p *fakeProvider) Chat(context.Context, []Message) (*Response, error) {
+func (p *fakeProvider) Chat(ctx context.Context, messages []Message) (*Response, error) {
+	return p.ChatWithOptions(ctx, messages, ChatOptions{})
+}
+
+func (p *fakeProvider) ChatWithOptions(_ context.Context, _ []Message, opts ChatOptions) (*Response, error) {
 	p.calls++
+	p.opts = opts
 	if p.err != nil {
 		return nil, p.err
 	}

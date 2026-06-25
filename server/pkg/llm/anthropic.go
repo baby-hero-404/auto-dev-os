@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
@@ -43,15 +44,19 @@ func (a *Anthropic) Metadata() ProviderMetadata {
 
 // Chat sends messages to the Anthropic Messages API.
 func (a *Anthropic) Chat(ctx context.Context, messages []Message) (*Response, error) {
+	return a.ChatWithOptions(ctx, messages, ChatOptions{})
+}
+
+func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opts ChatOptions) (*Response, error) {
 	// Anthropic requires system message to be separate from the messages array.
 	var systemPrompt string
-	var userMessages []Message
+	var userMessages []map[string]any
 
 	for _, msg := range messages {
 		if msg.Role == "system" {
 			systemPrompt = msg.Content
 		} else {
-			userMessages = append(userMessages, msg)
+			userMessages = append(userMessages, anthropicMessage(msg))
 		}
 	}
 
@@ -62,6 +67,12 @@ func (a *Anthropic) Chat(ctx context.Context, messages []Message) (*Response, er
 	}
 	if systemPrompt != "" {
 		payload["system"] = systemPrompt
+	}
+	if len(opts.Tools) > 0 {
+		payload["tools"] = anthropicTools(opts.Tools)
+		if opts.ToolChoice != "" && opts.ToolChoice != "auto" {
+			payload["tool_choice"] = map[string]any{"type": opts.ToolChoice}
+		}
 	}
 
 	body, err := json.Marshal(payload)
@@ -101,19 +112,93 @@ func (a *Anthropic) Chat(ctx context.Context, messages []Message) (*Response, er
 		return nil, fmt.Errorf("Anthropic returned no content")
 	}
 
+	var contentParts []string
+	var toolCalls []ToolCall
+	for _, part := range result.Content {
+		if part.Type == "tool_use" {
+			toolCalls = append(toolCalls, ToolCall{
+				ID:        part.ID,
+				Name:      part.Name,
+				Arguments: string(part.Input),
+			})
+			continue
+		}
+		if part.Text != "" {
+			contentParts = append(contentParts, part.Text)
+		}
+	}
+
 	return &Response{
-		Content:      result.Content[0].Text,
+		Content:      strings.Join(contentParts, "\n"),
 		Model:        result.Model,
 		PromptTokens: result.Usage.InputTokens,
 		OutputTokens: result.Usage.OutputTokens,
+		ToolCalls:    toolCalls,
 	}, nil
+}
+
+func anthropicMessage(msg Message) map[string]any {
+	role := msg.Role
+	if role == "tool" {
+		return map[string]any{
+			"role": "user",
+			"content": []map[string]any{{
+				"type":        "tool_result",
+				"tool_use_id": msg.ToolCallID,
+				"content":     msg.Content,
+			}},
+		}
+	}
+	if len(msg.ToolCalls) > 0 {
+		var content []map[string]any
+		if msg.Content != "" {
+			content = append(content, map[string]any{"type": "text", "text": msg.Content})
+		}
+		for _, call := range msg.ToolCalls {
+			input := any(map[string]any{})
+			if strings.TrimSpace(call.Arguments) != "" {
+				var parsed any
+				if err := json.Unmarshal([]byte(call.Arguments), &parsed); err == nil {
+					input = parsed
+				}
+			}
+			content = append(content, map[string]any{
+				"type":  "tool_use",
+				"id":    call.ID,
+				"name":  call.Name,
+				"input": input,
+			})
+		}
+		return map[string]any{"role": role, "content": content}
+	}
+	return map[string]any{"role": role, "content": msg.Content}
+}
+
+func anthropicTools(tools []ToolDefinition) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		var schema any = map[string]any{"type": "object"}
+		if len(tool.Parameters) > 0 {
+			_ = json.Unmarshal(tool.Parameters, &schema)
+		}
+		out = append(out, map[string]any{
+			"name":         tool.Name,
+			"description":  tool.Description,
+			"input_schema": schema,
+		})
+	}
+	return out
 }
 
 // Anthropic response structures.
 type anthropicResponse struct {
 	Model   string `json:"model"`
 	Content []struct {
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	Usage struct {
 		InputTokens  int `json:"input_tokens"`

@@ -7,7 +7,7 @@ export function useProjectData(projectID: string) {
   const session = useSession();
   const token = session?.token ?? "";
 
-  const { data: project, mutate: mutateProject, isLoading: isProjectLoading } = useSWR(
+  const { data: project, mutate: mutateProject, isLoading: isProjectLoading, error: projectError } = useSWR(
     projectID && token ? ["project", projectID] : null,
     () => api.getProject(projectID, token),
   );
@@ -35,10 +35,10 @@ export function useProjectData(projectID: string) {
 
   return {
     project,
-    repositories,
-    tasks,
-    projectAgents,
-    rules,
+    repositories: repositories ?? [],
+    tasks: tasks ?? [],
+    projectAgents: projectAgents ?? [],
+    rules: rules ?? [],
     mutateProject,
     mutateRepos,
     mutateTasks,
@@ -49,9 +49,10 @@ export function useProjectData(projectID: string) {
     isTasksLoading,
     isAgentsLoading,
     isRulesLoading,
+    projectError,
   };
 }
 
 function isActiveTask(task: Task) {
-  return ["analyzing", "running", "assigned", "planning", "coding", "reviewing", "fixing", "testing", "in_progress"].includes(task.status);
+  return ["context_loading", "analyzing", "running", "assigned", "planning", "coding", "reviewing", "fixing", "testing", "in_progress"].includes(task.status);
 }

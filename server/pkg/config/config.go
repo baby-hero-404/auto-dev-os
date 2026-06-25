@@ -87,13 +87,13 @@ type AutoCodeOSConfig struct {
 type Config struct {
 	AutoCodeOS AutoCodeOSConfig `mapstructure:"auto_code_os"`
 	Server     ServerConfig     `mapstructure:"server"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Auth      AuthConfig      `mapstructure:"auth"`
-	LLM       LLMConfig       `mapstructure:"llm"`
-	Sandbox   SandboxConfig   `mapstructure:"sandbox"`
-	Worker    WorkerConfig    `mapstructure:"worker"`
-	Telemetry TelemetryConfig `mapstructure:"telemetry"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Auth       AuthConfig       `mapstructure:"auth"`
+	LLM        LLMConfig        `mapstructure:"llm"`
+	Sandbox    SandboxConfig    `mapstructure:"sandbox"`
+	Worker     WorkerConfig     `mapstructure:"worker"`
+	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
+	Logging    LoggingConfig    `mapstructure:"logging"`
 }
 
 //go:embed config.yaml
@@ -207,7 +207,7 @@ func configureLLM(cfg *LLMConfig) error {
 		cfg.APIKey = cfg.AnthropicAPIKey
 	case "gemini":
 		if cfg.Model == "" {
-			cfg.Model = "gemini-3.1-pro-preview"
+			cfg.Model = "gemini-2.5-pro"
 		}
 		cfg.APIKey = cfg.GeminiAPIKey
 	case "9router":

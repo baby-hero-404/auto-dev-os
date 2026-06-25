@@ -5,13 +5,18 @@ RUN apt-get update \
         bash \
         ca-certificates \
         curl \
+        default-jdk \
         git \
         make \
+        maven \
         nodejs \
         npm \
+        patch \
         python3 \
         python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+        python3-pytest \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
 
 WORKDIR /workspace
 

@@ -8,63 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-type AgentAssigner interface {
-	Assign(ctx context.Context, task *models.Task) (*models.Agent, error)
-	AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error)
-	MarkRunning(ctx context.Context, agentID string) error
-	Release(ctx context.Context, agentID string) error
-}
-
-type PromptBuilder interface {
-	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []ToolDefinition, error)
-	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []ToolDefinition, error)
-}
-
-type GitOpsClient interface {
-	CloneRepo(ctx context.Context, repoURL, token, branch, localPath string) (string, error)
-	// CloneForTask clones a repository resolving credentials from the linked GitAccount.
-	// Use this instead of CloneRepo inside the orchestrator so the git account token
-	// is never stored in the task/repo model and is always resolved at clone time.
-	CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error)
-	CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error
-	CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error
-	CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error)
-	MergePullRequest(ctx context.Context, repoURL, prURL string) error
-}
-
-type MemoryRecorder interface {
-	SessionStart(ctx context.Context, agentID string, task *models.Task) ([]models.EpisodicMemory, error)
-	PostStepRecord(ctx context.Context, agentID string, task *models.Task, sessionID, stepID, status string, output map[string]any)
-	SessionEnd(ctx context.Context, agentID string, task *models.Task, sessionID, finalStatus string)
-}
-
-type LearningRecorder interface {
-	ComputeConfidence(ctx context.Context, agentID, complexity string) float64
-	EvaluateOutcome(ctx context.Context, task *models.Task, job *models.WorkflowJob)
-	DetectPatterns(ctx context.Context, agentID string)
-	SuggestRuleFromErrors(ctx context.Context, agentID string)
-	SuggestPromptPatch(ctx context.Context, task *models.Task, job *models.WorkflowJob)
-}
-
-type ArtifactRepository interface {
-	Create(ctx context.Context, artifact *models.WorkflowArtifact) error
-	ListByJobID(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error)
-	ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error)
-}
-
-type RepositoryRepository interface {
-	ListByProjectID(ctx context.Context, projectID string) ([]models.Repository, error)
-}
-
-type ProjectRepository interface {
-	GetByID(ctx context.Context, id string) (*models.Project, error)
-}
-
+// Orchestrator coordinates the end-to-end workflow for task execution:
+// agent assignment, workspace provisioning, step execution, and cleanup.
 type Orchestrator struct {
 	tasks         TaskRepository
 	workflows     WorkflowRepository
@@ -78,6 +29,7 @@ type Orchestrator struct {
 	artifacts     ArtifactRepository
 	repositories  RepositoryRepository
 	projects      ProjectRepository
+	sandboxGit    gitops.SandboxGitClient
 	workspaceRoot string
 	retention     WorkspaceRetention
 	wg            sync.WaitGroup
@@ -85,6 +37,7 @@ type Orchestrator struct {
 	lockConns     sync.Map
 }
 
+// WorkspaceRetention configures how long completed workspaces are kept.
 type WorkspaceRetention struct {
 	Retention time.Duration
 	Interval  time.Duration
@@ -94,32 +47,16 @@ func defaultWorkspaceRetention() WorkspaceRetention {
 	return WorkspaceRetention{Retention: 72 * time.Hour, Interval: time.Hour}
 }
 
-type TaskRepository interface {
-	GetByID(ctx context.Context, id string) (*models.Task, error)
-	Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error)
-}
-
-type WorkflowRepository interface {
-	Enqueue(ctx context.Context, taskID string) (*models.WorkflowJob, error)
-	ClaimNext(ctx context.Context) (*models.WorkflowJob, error)
-	LatestByTaskID(ctx context.Context, taskID string) (*models.WorkflowJob, error)
-	UpdateJob(ctx context.Context, jobID string, updates map[string]any) (*models.WorkflowJob, error)
-	CreateCheckpoint(ctx context.Context, checkpoint models.WorkflowCheckpoint) error
-	ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error)
-	DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error
-	CreateLog(ctx context.Context, log models.TaskLog) error
-	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
-	ResetStuckJobs(ctx context.Context) error
-	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)
-	ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error
-}
-
 func NewOrchestrator(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime) *Orchestrator {
-	return &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, retention: defaultWorkspaceRetention()}
+	o := &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, retention: defaultWorkspaceRetention()}
+	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
+	return o
 }
 
 func NewOrchestratorWithPrompt(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime, prompts PromptBuilder) *Orchestrator {
-	return &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, prompts: prompts, retention: defaultWorkspaceRetention()}
+	o := &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, prompts: prompts, retention: defaultWorkspaceRetention()}
+	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
+	return o
 }
 
 func (o *Orchestrator) SetMemoryHooks(hooks MemoryRecorder) {
@@ -166,7 +103,8 @@ func (o *Orchestrator) ListArtifacts(ctx context.Context, jobID string) ([]model
 }
 
 func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
-	if _, err := o.tasks.GetByID(ctx, taskID); err != nil {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -176,8 +114,19 @@ func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.Work
 		if err != nil {
 			return nil, err
 		}
+		if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
+			if _, err := o.updateTaskStatus(ctx, taskID, models.TaskStatusContextLoading); err != nil {
+				return nil, err
+			}
+		}
 		o.log(ctx, taskID, &job.ID, "info", "paused workflow job resumed")
 		return updated, nil
+	}
+
+	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
+		if _, err := o.updateTaskStatus(ctx, taskID, models.TaskStatusContextLoading); err != nil {
+			return nil, err
+		}
 	}
 
 	job, err := o.workflows.Enqueue(ctx, taskID)
@@ -188,28 +137,28 @@ func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.Work
 	return job, nil
 }
 
-// RestartFromLastStep re-enqueues a failed task for execution.
+// RetryFromLastStep re-enqueues a failed task for execution.
 // The worker will automatically load checkpoints and skip steps
 // that already succeeded, resuming from the first incomplete step.
-func (o *Orchestrator) RestartFromLastStep(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
+func (o *Orchestrator) RetryFromLastStep(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
 	task, err := o.tasks.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	if task.Status != models.TaskStatusFailed {
-		return nil, fmt.Errorf("can only restart failed tasks (current status: %s)", task.Status)
+		return nil, fmt.Errorf("can only retry failed tasks (current status: %s)", task.Status)
 	}
 
 	// Transition task back to analyzing so the workflow can start.
 	if _, err := o.updateTaskStatus(ctx, taskID, models.TaskStatusAnalyzing); err != nil {
-		return nil, fmt.Errorf("failed to transition task for restart: %w", err)
+		return nil, fmt.Errorf("failed to transition task for retry: %w", err)
 	}
 
 	job, err := o.workflows.Enqueue(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	o.log(ctx, taskID, &job.ID, "info", "workflow restarted from last successful checkpoint")
+	o.log(ctx, taskID, &job.ID, "info", "workflow retried from last successful checkpoint")
 	return job, nil
 }
 
@@ -311,19 +260,19 @@ func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) 
 			maxReviewFixCycles = p.MaxReviewFixCycles
 		}
 	}
-	
+
 	checkpoints, err := o.workflows.ListCheckpoints(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	
+
 	rejectionCount := 0
 	for _, cp := range checkpoints {
 		if cp.Step == "pr_rejection" {
 			rejectionCount++
 		}
 	}
-	
+
 	if rejectionCount >= maxReviewFixCycles {
 		failed := models.TaskStatusFailed
 		_, _ = o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &failed})

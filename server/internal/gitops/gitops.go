@@ -23,6 +23,7 @@ type GitProvider interface {
 
 // NormalizeGitURLToHTTPS converts a Git SSH URL (scp-like or standard ssh://) to a standard HTTPS URL.
 // If the input is already an HTTP/HTTPS URL, it returns it unchanged.
+// It also autocompletes domain-only paths (e.g. github.com/owner/repo) to HTTPS and validates the URL format.
 func NormalizeGitURLToHTTPS(rawURL string) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -61,7 +62,21 @@ func NormalizeGitURLToHTTPS(rawURL string) (string, error) {
 		return rawURL, nil
 	}
 
-	return rawURL, nil
+	// Case 4: Existing directory on disk (for local testing)
+	if fi, err := os.Stat(rawURL); err == nil && fi.IsDir() {
+		return rawURL, nil
+	}
+
+	// Case 5: Domain name path (e.g., github.com/owner/repo)
+	firstSlash := strings.Index(rawURL, "/")
+	if firstSlash != -1 {
+		hostPart := rawURL[:firstSlash]
+		if strings.Contains(hostPart, ".") {
+			return "https://" + rawURL, nil
+		}
+	}
+
+	return "", fmt.Errorf("invalid repository URL: must be a valid HTTP/HTTPS/SSH URL or an existing local path")
 }
 
 // gitCommand creates an exec.Cmd for git and disables credential prompts

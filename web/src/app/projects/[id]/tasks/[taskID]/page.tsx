@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -12,18 +13,28 @@ import {
   AlertCircle,
   MessageSquare,
   Sparkles,
+  Trash2,
+  Edit2,
+  X,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 import { Markdown } from "@/components/ui/markdown";
 import { WorkflowArtifact } from "@/lib/types";
 import { SpecReviewSection } from "@/components/projects/spec-review-section";
 import { LogConsole } from "@/components/dashboard/log-console";
-import { getRiskAssessment } from "@/lib/utils/tasks";
+import { getRiskAssessment, splitTaskDescription } from "@/lib/utils/task-utils";
+import { TaskDiffViewer, parseUnifiedDiff } from "@/components/projects/task-diff-viewer";
+import { TaskPrReview } from "@/components/projects/task-pr-review";
+import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 const workflowSteps = [
+  "context_load",
   "analyze",
   "plan",
   "code_backend",
@@ -35,46 +46,7 @@ const workflowSteps = [
   "pr",
 ];
 
-const RISK_BADGES: Record<string, string> = {
-  low: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-warning/10 text-warning border-warning/20",
-  high: "bg-danger/10 text-danger border-danger/20",
-  critical: "bg-danger/20 text-danger border-danger/30 animate-pulse",
-};
 
-interface ParsedFileDiff {
-  filename: string;
-  diffLines: string[];
-}
-
-function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
-  if (!diffText) return [];
-  const lines = diffText.split("\n");
-  const fileDiffs: ParsedFileDiff[] = [];
-  let currentDiff: ParsedFileDiff | null = null;
-
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      const parts = line.split(" b/");
-      let filename = "";
-      if (parts.length > 1) {
-        filename = parts[1].trim();
-      } else {
-        const match = line.match(/b\/(.*)$/);
-        filename = match ? match[1] : "unknown";
-      }
-      currentDiff = {
-        filename,
-        diffLines: [line],
-      };
-      fileDiffs.push(currentDiff);
-    } else if (currentDiff) {
-      currentDiff.diffLines.push(line);
-    }
-  }
-
-  return fileDiffs;
-}
 
 export default function ProjectTaskDetailPage({
   params,
@@ -83,8 +55,12 @@ export default function ProjectTaskDetailPage({
 }) {
   const { id: projectID, taskID } = use(params);
   const [activeSpecTab, setActiveSpecTab] = useState<"summary" | "proposal" | "specs" | "design" | "tasks">("summary");
-  const [rawSelectedFile, setSelectedFile] = useState<string | null>(null);
   const [completedPlanSteps, setCompletedPlanSteps] = useState<Record<number, boolean>>({});
+  const session = useSession();
+  const token = session?.token ?? "";
+
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const togglePlanStep = (idx: number) => {
     setCompletedPlanSteps((prev) => ({ ...prev, [idx]: !prev[idx] }));
@@ -103,13 +79,27 @@ export default function ProjectTaskDetailPage({
     specFeedbackText,
     setSpecFeedbackText,
     execute,
+    analyze,
+    retry,
     approveSpec,
     requestSpecChanges,
     submitSpecChanges,
     approvePR,
     rejectPR,
     startReview,
+    deleteTask,
+    updateTask,
+    mutateWorkflow,
+    isLoading: isTaskLoading,
+    workflowError,
   } = useTaskWorkflow(taskID);
+
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [editedDesc, setEditedDesc] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Fetch live workspace artifacts for the active workflow job
   const jobID = workflow?.job?.id;
@@ -125,20 +115,22 @@ export default function ProjectTaskDetailPage({
     return diffArts.length > 0 ? diffArts[diffArts.length - 1] : null;
   }, [artifacts]);
 
-  const parsedDiffs = useMemo(() => {
-    if (!latestDiffArtifact) return [];
-    let diffText = "";
+  const diffText = useMemo(() => {
+    if (!latestDiffArtifact) return "";
     const payload = latestDiffArtifact.payload;
-    if (typeof payload === "string") {
-      diffText = payload;
-    } else if (payload && typeof payload === "object") {
+    if (typeof payload === "string") return payload;
+    if (payload && typeof payload === "object") {
       const obj = payload as Record<string, unknown>;
-      diffText = (typeof obj.diff === "string" ? obj.diff : "") || 
-                 (typeof obj.patch === "string" ? obj.patch : "") || 
-                 JSON.stringify(payload);
+      return (typeof obj.diff === "string" ? obj.diff : "") || 
+             (typeof obj.patch === "string" ? obj.patch : "") || 
+             JSON.stringify(payload);
     }
-    return parseUnifiedDiff(diffText);
+    return "";
   }, [latestDiffArtifact]);
+
+  const parsedDiffs = useMemo(() => {
+    return parseUnifiedDiff(diffText);
+  }, [diffText]);
 
   const parsedDiffFiles = useMemo(() => {
     return parsedDiffs.map((d) => d.filename);
@@ -153,6 +145,14 @@ export default function ProjectTaskDetailPage({
     }
     return map;
   }, [workflow]);
+
+  const workflowCompletion = useMemo(() => {
+    const finished = workflowSteps.filter((step) => {
+      const status = latest.get(step);
+      return status === "success" || status === "recorded";
+    }).length;
+    return Math.round((finished / workflowSteps.length) * 100);
+  }, [latest]);
 
   // Parse task analysis
   const analysisData = useMemo(() => {
@@ -177,6 +177,14 @@ export default function ProjectTaskDetailPage({
     return data;
   }, [task]);
 
+  const clarificationQuestions = useMemo(() => {
+    return Array.isArray(analysisData.clarification_questions)
+      ? analysisData.clarification_questions.filter(
+          (question): question is string => typeof question === "string" && question.trim().length > 0,
+        )
+      : [];
+  }, [analysisData.clarification_questions]);
+
   const prSummaries = useMemo(() => {
     if (!task?.pr_metadata) return [];
     try {
@@ -197,8 +205,6 @@ export default function ProjectTaskDetailPage({
     return parsedDiffFiles.length > 0 ? parsedDiffFiles : affectedFiles;
   }, [prSummaries, parsedDiffFiles, analysisData.affected_files]);
 
-  const selectedFile = rawSelectedFile || displayFiles[0] || null;
-
   const riskAssessment = useMemo(() => {
     if (prSummaries.length > 0 && prSummaries[0].risk_level) {
       return {
@@ -209,59 +215,289 @@ export default function ProjectTaskDetailPage({
     return getRiskAssessment(task?.complexity ?? "easy", displayFiles, analysisData.risk_domains);
   }, [prSummaries, task?.complexity, displayFiles, analysisData.risk_domains]);
 
-  const activeFileDiff = useMemo(() => {
-    return parsedDiffs.find((d) => d.filename === selectedFile);
-  }, [parsedDiffs, selectedFile]);
+  const descriptionParts = useMemo(
+    () => splitTaskDescription(task?.description ?? ""),
+    [task?.description],
+  );
 
   const isReviewWaiting = task?.status === "human_review";
   const isPRMerged = task?.status === "merged";
+  const hasPR = !!(task?.pr_urls && task.pr_urls.length > 0);
+  const isExecutionReady = !!(
+    task &&
+    (task.status === "approved" || task.spec_status === "auto_approved" || task.spec_status === "approved") &&
+    (task.status === "todo" || task.status === "approved" || task.status === "planning" || task.status === "failed")
+  );
+
+  // Early returns can now happen safely AFTER all hook calls
+  if (!session) {
+    return (
+      <main className="grid min-h-screen place-items-center p-6">
+        <div className="rounded-lg border border-stroke bg-card p-6">
+          <p className="mb-4 text-sm text-content-muted">Login from the dashboard before opening a task.</p>
+          <Link className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950" href="/">Back to login</Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (isTaskLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-6 flex flex-col justify-center items-center gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-primary" />
+        <p className="text-sm font-mono text-content-muted animate-pulse">Loading task workspace...</p>
+      </main>
+    );
+  }
+
+  if (workflowError) {
+    return (
+      <main className="grid min-h-screen place-items-center p-6">
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-6 max-w-lg text-center">
+          <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+          <p className="font-sans text-base font-semibold text-red-600 dark:text-red-400">Failed to load task workflow.</p>
+          <p className="mt-1 text-xs text-content-muted mb-4">{workflowError.message || "An unexpected error occurred."}</p>
+          <div className="flex justify-center gap-3">
+            <Link className="rounded-md border border-stroke bg-panel px-4 py-2 text-sm font-semibold text-foreground hover:bg-surface transition" href={`/projects/${projectID}`}>
+              Back to Project
+            </Link>
+            <button onClick={() => mutateWorkflow()} className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 transition">
+              Retry Load
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const handleDeleteTask = async () => {
+    setIsDeleting(true);
+    const success = await deleteTask();
+    if (success) {
+      router.push(`/projects/${projectID}`);
+    } else {
+      setIsDeleting(false);
+    }
+  };
 
   return (
-    <main className="min-h-screen bg-background text-content font-sans p-6 md:p-8 max-w-7xl mx-auto space-y-6">
-      <header className="flex flex-col justify-between gap-4 border-b border-stroke pb-5 md:flex-row md:items-end">
-        <div>
-          <Link
-            href={`/projects/${projectID}`}
-            className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-content-muted transition hover:text-foreground"
-          >
-            <ArrowLeft size={14} />
-            Back to Project
-          </Link>
-          <h1 className="font-heading text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-            {task?.title ?? "Task workflow"}
-          </h1>
-          <p className="mt-1.5 max-w-4xl text-sm text-content-muted leading-relaxed">
-            {task?.description ?? "Loading task details..."}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {task && task.status === "pr_ready" && (
-            <button
-              className="inline-flex items-center gap-2 rounded-md border border-brand-primary bg-transparent px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/10 shadow-sm cursor-pointer"
-              onClick={startReview}
-              type="button"
-              disabled={submittingPR}
-            >
-              <Sparkles size={15} />
-              Start Review
-            </button>
-          )}
-          {task &&
-            (task.spec_status === "approved" ||
-              task.spec_status === "auto_approved" ||
-              task.status === "todo" ||
-              task.status === "approved") && (
-              <button
-                className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 shadow-sm cursor-pointer"
-                onClick={execute}
-                type="button"
+    <main className="min-h-screen bg-background px-4 py-5 font-sans text-content md:px-8 md:py-7">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
+          <div className="flex flex-col justify-between gap-5 xl:flex-row xl:items-start">
+            {/* Header Content Block */}
+            <div className="min-w-0 flex-1">
+              <Link
+                href={`/projects/${projectID}`}
+                className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold text-content-muted transition hover:text-foreground"
               >
-                <Play size={15} fill="currentColor" />
-                Execute DAG
-              </button>
-            )}
-        </div>
-      </header>
+                <ArrowLeft size={14} />
+                Back to Project
+              </Link>
+
+              {isEditingTitle ? (
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="text"
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    className="font-heading text-2xl md:text-3xl font-bold tracking-tight text-foreground bg-surface border border-stroke rounded px-3 py-1 focus:outline-none focus:border-brand-primary min-w-[300px] max-w-xl"
+                    disabled={isSaving}
+                    autoFocus
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!editedTitle.trim()) return;
+                      setIsSaving(true);
+                      await updateTask({ title: editedTitle.trim() });
+                      setIsEditingTitle(false);
+                      setIsSaving(false);
+                    }}
+                    disabled={isSaving}
+                    className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded border border-emerald-500/20 transition cursor-pointer"
+                    title="Save Title"
+                  >
+                    <Check size={16} />
+                  </button>
+                  <button
+                    onClick={() => setIsEditingTitle(false)}
+                    disabled={isSaving}
+                    className="p-2 bg-danger/10 hover:bg-danger/20 text-danger rounded border border-danger/20 transition cursor-pointer"
+                    title="Cancel"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : (
+                <h1 className="group flex items-center gap-2 font-heading text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+                  <span className="min-w-0 truncate">{task?.title ?? "Task workflow"}</span>
+                  {task && (
+                    <button
+                      onClick={() => {
+                        setEditedTitle(task.title);
+                        setIsEditingTitle(true);
+                      }}
+                      className="opacity-40 hover:opacity-100 focus:opacity-100 group-hover:opacity-100 focus-within:opacity-100 p-1 text-content-muted hover:text-foreground hover:bg-surface rounded transition cursor-pointer"
+                      title="Edit Title"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                  )}
+                </h1>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {task && <Badge value={task.status} />}
+                {task?.spec_status && <Badge value={task.spec_status} />}
+                {workflow?.job && <Badge value={workflow.job.status} />}
+                {task && (
+                  <span className="rounded border border-stroke bg-surface px-2 py-0.5 text-xs font-medium text-content-muted">
+                    Priority {task.priority}
+                  </span>
+                )}
+              </div>
+
+              {isEditingDesc ? (
+                <div className="flex flex-col gap-2 mt-3 max-w-4xl">
+                  <textarea
+                    value={editedDesc}
+                    onChange={(e) => setEditedDesc(e.target.value)}
+                    className="text-sm text-foreground bg-surface border border-stroke rounded px-3 py-2 focus:outline-none focus:border-brand-primary min-h-[100px] resize-y"
+                    disabled={isSaving}
+                    autoFocus
+                    placeholder="Detail the target objective, files to modify, or technical requirements."
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setIsEditingDesc(false)}
+                      disabled={isSaving}
+                      className="px-3 py-1.5 text-xs font-semibold border border-stroke hover:bg-surface rounded transition cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setIsSaving(true);
+                        await updateTask({ description: editedDesc.trim() });
+                        setIsEditingDesc(false);
+                        setIsSaving(false);
+                      }}
+                      disabled={isSaving}
+                      className="px-3 py-1.5 text-xs font-semibold bg-brand-primary text-slate-950 hover:opacity-90 rounded transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isSaving ? "Saving..." : "Save Description"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="group mt-1.5 max-w-4xl space-y-3">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1 rounded-lg border border-stroke bg-surface/20 p-3">
+                      {descriptionParts.body ? (
+                        <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
+                          <Markdown content={descriptionParts.body} />
+                        </div>
+                      ) : (
+                        <p className="text-sm text-content-muted/70 italic">No description provided. Click the edit icon to add one.</p>
+                      )}
+                    </div>
+                    {task && (
+                      <button
+                        onClick={() => {
+                          setEditedDesc(task.description || "");
+                          setIsEditingDesc(true);
+                        }}
+                        className="opacity-40 hover:opacity-100 focus:opacity-100 group-hover:opacity-100 focus-within:opacity-100 p-1 text-content-muted hover:text-foreground hover:bg-surface rounded transition shrink-0 cursor-pointer"
+                        title="Edit Description"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                  {descriptionParts.context && (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-content-muted">
+                      <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                        Request history
+                      </div>
+                      <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
+                        <Markdown content={descriptionParts.context} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Sidebar Action Block */}
+            <div className="flex shrink-0 flex-col gap-3 rounded-lg border border-stroke bg-background p-3 xl:w-72">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-content-muted">Workflow progress</span>
+                <span className="font-mono text-sm font-semibold text-foreground">{workflowCompletion}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-surface">
+                <div className="h-full rounded-full bg-brand-primary transition-all" style={{ width: `${workflowCompletion}%` }} />
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-[11px] text-content-muted">
+                <div className="rounded border border-stroke bg-card px-2 py-1">
+                  <div className="font-mono text-foreground">{workflow?.checkpoints?.length ?? 0}</div>
+                  checkpoints
+                </div>
+                <div className="rounded border border-stroke bg-card px-2 py-1">
+                  <div className="font-mono text-foreground">{workflow?.job?.attempts ?? 0}</div>
+                  attempts
+                </div>
+                <div className="rounded border border-stroke bg-card px-2 py-1">
+                  <div className="font-mono text-foreground">{displayFiles.length}</div>
+                  files
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {task && task.status === "pr_ready" && (
+                  <button
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-brand-primary bg-transparent px-3 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/10 shadow-sm cursor-pointer"
+                    onClick={startReview}
+                    type="button"
+                    disabled={submittingPR}
+                  >
+                    <Sparkles size={15} />
+                    Start Review
+                  </button>
+                )}
+                {task && (task.status === "todo" || task.status === "failed") && !isExecutionReady && (
+                  <button
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 shadow-sm cursor-pointer"
+                    onClick={task.status === "failed" ? retry : analyze}
+                    type="button"
+                  >
+                    <Play size={15} />
+                    {task.status === "failed" ? "Retry Analyze" : "Analyze"}
+                  </button>
+                )}
+                {task && isExecutionReady && (
+                  <button
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 shadow-sm cursor-pointer"
+                    onClick={task.status === "failed" ? retry : execute}
+                    type="button"
+                  >
+                    <Play size={15} fill="currentColor" />
+                    {task.status === "failed" ? "Retry Execute" : "Execute"}
+                  </button>
+                )}
+                {task && (
+                  <button
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm font-semibold text-danger transition hover:bg-danger/20 disabled:opacity-50 cursor-pointer shadow-sm"
+                    onClick={() => setIsDeleteConfirmOpen(true)}
+                    type="button"
+                    disabled={isDeleting}
+                  >
+                    <Trash2 size={15} />
+                    Delete Task
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
 
       {error && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300 flex items-center gap-2" role="alert">
@@ -324,172 +560,59 @@ export default function ProjectTaskDetailPage({
             </div>
           )}
 
-          <div className="grid lg:grid-cols-[340px_1fr] border-b border-stroke min-h-[420px]">
-            {/* PR Summary Sidebar */}
-            <div className="border-r border-stroke p-5 space-y-5 bg-surface/10">
-              <div>
-                <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2 flex items-center gap-1">
-                  <Sparkles size={12} className="text-brand-primary" /> AI PR Summary
-                </h3>
-                {prSummaries.length > 0 && prSummaries[0].body ? (
-                  <div className="text-xs leading-relaxed text-content-muted prose dark:prose-invert max-h-60 overflow-y-auto pr-1">
-                    <Markdown content={prSummaries[0].body} />
-                  </div>
-                ) : (
-                  <p className="text-xs leading-relaxed text-content-muted">
-                    Automated changes generated for this execution run. The agent completed the code-backend,
-                    code-frontend, and successfully compiled all builds.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                  Risk Assessment
-                </h3>
-                <div className={`rounded-lg border p-3.5 ${RISK_BADGES[riskAssessment.level]} space-y-2`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-sans text-[10px] font-bold uppercase tracking-wider">
-                      Level: {riskAssessment.level}
-                    </span>
-                  </div>
-                  <p className="text-[11px] leading-relaxed opacity-90">{riskAssessment.reason}</p>
-                  <div className="pt-1.5 border-t border-current/10">
-                    <span className="font-mono text-[9px] font-bold uppercase tracking-wider opacity-85">
-                      Risk Domains: {analysisData.risk_domains?.join(", ") || "none"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                  Changed Files ({displayFiles.length})
-                </h3>
-                <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-                  {displayFiles.map((file) => (
-                    <button
-                      key={file}
-                      onClick={() => setSelectedFile(file)}
-                      className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs font-mono transition-all cursor-pointer border ${
-                        selectedFile === file
-                          ? "bg-brand-primary/10 border-brand-primary/20 text-brand-primary"
-                          : "border-transparent text-content-muted hover:bg-surface hover:text-foreground"
-                      }`}
-                    >
-                      <span className="truncate">{file.split("/").pop()}</span>
-                      <span className="text-[9px] opacity-65 truncate max-w-[100px]">{file}</span>
-                    </button>
-                  ))}
-                  {displayFiles.length === 0 && (
-                    <p className="text-xs text-content-muted italic">No file modifications detected.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Git Diff Review Canvas */}
-            <div className="p-5 flex flex-col min-w-0 bg-surface/5">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="font-mono text-[11px] text-content-muted truncate max-w-[80%]">
-                  Diff Review &mdash;{" "}
-                  <span className="text-foreground font-semibold">{selectedFile || "Select a file"}</span>
-                </span>
-                <span className="text-[9px] bg-surface border border-stroke text-content-muted px-2 py-0.5 rounded font-mono uppercase">
-                  Git Diff
-                </span>
-              </div>
-
-              <div className="flex-1 min-h-[350px] overflow-auto rounded-lg border border-stroke bg-slate-950 dark:bg-black p-4 font-mono text-xs leading-relaxed shadow-inner">
-                {selectedFile ? (
-                  activeFileDiff ? (
-                    <div className="space-y-0.5 font-mono text-[11px] text-foreground select-text">
-                      {activeFileDiff.diffLines.map((line, idx) => {
-                        let lineClass = "text-slate-400";
-                        if (line.startsWith("+") && !line.startsWith("+++")) {
-                          lineClass = "bg-emerald-500/15 text-emerald-400 px-1 border-l-2 border-emerald-500";
-                        } else if (line.startsWith("-") && !line.startsWith("---")) {
-                          lineClass = "bg-rose-500/15 text-rose-400 px-1 border-l-2 border-rose-500";
-                        } else if (line.startsWith("@@")) {
-                          lineClass = "text-purple-400 bg-purple-500/10 font-semibold py-0.5";
-                        } else if (line.startsWith("diff ") || line.startsWith("index ")) {
-                          lineClass = "text-slate-500/80 italic";
-                        } else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
-                          lineClass = "text-slate-400 font-semibold";
-                        } else {
-                          lineClass = "text-slate-300 pl-1.5";
-                        }
-                        return (
-                          <div key={idx} className={`font-mono whitespace-pre-wrap ${lineClass}`}>
-                            {line}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-content-muted py-12">
-                      <p className="text-sm">Diff details not available inside sandbox state.</p>
-                      <p className="text-[10px] mt-1">Review live branch changes via your Git provider.</p>
-                    </div>
-                  )
-                ) : (
-                  <div className="h-full flex items-center justify-center text-content-muted py-12">
-                    Select a file on the left to inspect git changes.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <TaskDiffViewer
+            diffText={diffText}
+            displayFiles={displayFiles}
+            prSummaries={prSummaries}
+            riskAssessment={riskAssessment}
+            riskDomains={analysisData.risk_domains || []}
+          />
 
           {/* Action Footer */}
-          {(isReviewWaiting || task?.status === "pr_ready") && (
-            <div className="p-5 bg-surface/40 flex flex-col gap-4">
-              {task?.status === "pr_ready" ? (
-                <div className="flex justify-end">
-                  <button
-                    onClick={startReview}
-                    disabled={submittingPR}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-brand-primary bg-transparent px-4 py-2 text-sm font-semibold text-brand-primary hover:bg-brand-primary/10 transition cursor-pointer disabled:opacity-50"
-                  >
-                    <Sparkles size={15} />
-                    Start Review
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-start gap-3">
-                    <MessageSquare size={16} className="text-content-muted mt-2.5 shrink-0" />
-                    <textarea
-                      value={feedback}
-                      onChange={(e) => setFeedback(e.target.value)}
-                      placeholder="Leave rejection feedback to trigger a fix cycle..."
-                      className="flex-1 rounded-lg border border-stroke bg-surface p-3 text-sm text-foreground placeholder-content-muted/50 focus:border-brand-primary focus:outline-none min-h-[90px] transition-colors"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2.5">
-                    <button
-                      onClick={rejectPR}
-                      disabled={submittingPR || !feedback.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/20 bg-orange-500/5 px-4 py-2 text-sm font-semibold text-orange-600 hover:bg-orange-500/10 transition cursor-pointer disabled:opacity-50"
-                    >
-                      <AlertCircle size={15} />
-                      Reject &amp; Request Fixes
-                    </button>
-                    <button
-                      onClick={approvePR}
-                      disabled={submittingPR}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
-                    >
-                      <Check size={15} />
-                      Approve &amp; Merge
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+          <TaskPrReview
+            task={task}
+            hasPR={hasPR}
+            isReviewWaiting={isReviewWaiting}
+            submittingPR={submittingPR}
+            feedback={feedback}
+            setFeedback={setFeedback}
+            startReview={startReview}
+            rejectPR={rejectPR}
+            approvePR={approvePR}
+          />
         </section>
       )}
+
+      <section className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-heading text-base font-bold text-foreground">Task Flow</h2>
+            <p className="mt-1 text-xs text-content-muted">Analysis, implementation, review, testing, and PR gates for this task.</p>
+          </div>
+          {workflow?.job?.step && (
+            <span className="rounded-md border border-brand-primary/25 bg-brand-primary/10 px-2.5 py-1 text-xs font-semibold text-brand-primary">
+              Current: {workflow.job.step.replace("_", " ")}
+            </span>
+          )}
+        </div>
+        <div className="grid gap-2 md:grid-cols-5 xl:grid-cols-10">
+          {workflowSteps.map((step, index) => {
+            const status = latest.get(step) ?? "pending";
+            return (
+              <div key={step} className="rounded-lg border border-stroke bg-surface/30 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-content-muted">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <WorkflowDot status={status} />
+                </div>
+                <div className="mt-2 text-xs font-semibold capitalize text-foreground">{step.replace("_", " ")}</div>
+                <div className="mt-1 text-[10px] font-bold uppercase text-content-muted">{status}</div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
         {/* Main Details and Spec Section */}
@@ -586,17 +709,43 @@ export default function ProjectTaskDetailPage({
                     </div>
                   )}
 
-                  {analysisData.clarification_questions && analysisData.clarification_questions.length > 0 && (
-                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 space-y-1.5">
-                      <h3 className="font-sans text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                        <AlertCircle size={14} />
-                        Questions / Clarifications Required
-                      </h3>
-                      <ul className="list-disc list-inside space-y-1 text-xs text-amber-800 dark:text-amber-300">
-                        {analysisData.clarification_questions.map((q, idx) => (
-                          <li key={idx}>{q}</li>
-                        ))}
-                      </ul>
+                  <TaskClarificationForm
+                    taskID={taskID}
+                    specStatus={task?.spec_status}
+                    token={token}
+                    clarificationQuestions={clarificationQuestions}
+                    onAnswersSubmitted={async () => { await mutateWorkflow(); }}
+                  />
+
+                  {task?.spec_status === "changes_requested" && clarificationQuestions.length === 0 && (
+                    <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-4">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle size={14} className="mt-0.5 text-sky-500" />
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-sky-700 dark:text-sky-400">
+                            Spec changes requested
+                          </h3>
+                          <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                            This task was sent back for a spec update, but there were no clarification questions to answer.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {clarificationQuestions.length > 0 && task?.spec_status === "changes_requested" && (
+                    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
+                      <div className="flex items-start gap-2">
+                        <Check size={14} className="mt-0.5 text-emerald-500" />
+                        <div>
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                            Clarification responses submitted
+                          </h3>
+                          <p className="mt-1 text-xs leading-relaxed text-content-muted">
+                            Your answers were recorded as change requests. The task now waits for a new spec review decision.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -680,30 +829,6 @@ export default function ProjectTaskDetailPage({
               )}
             </div>
           )}
-
-          {/* Workflow Progress Panel */}
-          <div className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <h2 className="font-heading text-base font-bold text-foreground">Workflow Progress</h2>
-              {task && <Badge value={task.status} />}
-              {task && <Badge value={task.spec_status} />}
-              {workflow?.job && <Badge value={workflow.job.status} />}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-              {workflowSteps.map((step) => {
-                const status = latest.get(step) ?? "pending";
-                return (
-                  <div key={step} className="rounded-lg border border-stroke bg-surface/30 p-3">
-                    <div className="mb-1.5 flex items-center justify-between">
-                      <span className="font-mono text-xs font-semibold capitalize text-foreground">{step.replace("_", " ")}</span>
-                      <WorkflowDot status={status} />
-                    </div>
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-content-muted">{status}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
 
           <LogConsole logs={logs} />
         </section>
@@ -796,6 +921,17 @@ export default function ProjectTaskDetailPage({
           </div>
         </div>
       )}
+      </div>
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        title="Delete Task"
+        description="Are you sure you want to delete this task? This action cannot be undone."
+        confirmText="Delete"
+        variant="danger"
+        onConfirm={handleDeleteTask}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+      />
     </main>
   );
 }

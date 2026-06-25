@@ -41,7 +41,7 @@ const DEFAULT_FLEET = [
     name: "AI Reviewer",
     role: "reviewer",
     goal: "Review changes for correctness, regressions, security issues, and missing tests.",
-    model_level_group: "powerful",
+    model_level_group: "balanced",
     autonomy_level: "approval_required",
     assignment_strategy: "auto_join",
   },
@@ -49,6 +49,22 @@ const DEFAULT_FLEET = [
     name: "AI QA Tester",
     role: "qa",
     goal: "Design and run verification checks for functional and regression coverage.",
+    model_level_group: "balanced",
+    autonomy_level: "supervised",
+    assignment_strategy: "auto_join",
+  },
+  {
+    name: "AI Security Auditor",
+    role: "security-auditor",
+    goal: "Scan for vulnerabilities and verify secret safety.",
+    model_level_group: "balanced",
+    autonomy_level: "approval_required",
+    assignment_strategy: "auto_join",
+  },
+  {
+    name: "AI DB Architect",
+    role: "db-architect",
+    goal: "Design schemas, create migrations, and optimize queries.",
     model_level_group: "balanced",
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
@@ -282,13 +298,12 @@ export function MembersPanel() {
                         <div className="mt-1 flex items-center gap-1.5">
                           <span className="text-xs text-content-muted capitalize">{agent.role}</span>
                           <span className="text-xs text-content-muted/60">·</span>
-                          <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.2 text-[10px] font-bold uppercase ${
-                            agent.model_level_group === "fast"
-                              ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                              : agent.model_level_group === "powerful"
+                          <span className={`inline-flex items-center gap-0.5 rounded px-1 py-0.2 text-[10px] font-bold uppercase ${agent.model_level_group === "fast"
+                            ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                            : agent.model_level_group === "powerful"
                               ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
                               : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
-                          }`}>
+                            }`}>
                             {agent.model_level_group === "fast" && "⚡ "}
                             {agent.model_level_group === "balanced" && "⚖️ "}
                             {agent.model_level_group === "powerful" && "🚀 "}
@@ -448,5 +463,5 @@ function providerSummary(agents: Agent[]) {
 function seedFleetTitle(agentCount: number) {
   if (agentCount >= DEFAULT_FLEET.length) return "Fleet already seeded";
   if (agentCount > 0) return `${agentCount} of ${DEFAULT_FLEET.length} agents created - click to retry`;
-  return "Create the default five-agent fleet";
+  return "Create the default seven-agent fleet";
 }

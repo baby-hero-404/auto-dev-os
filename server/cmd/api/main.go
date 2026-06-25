@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -18,6 +19,9 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/handler"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/skills"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
@@ -121,9 +125,10 @@ func run() error {
 	}()
 	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, cfg.Sandbox.SkillsRoot)
 	agentManager := orchestrator.NewAgentManager(agentRepo)
-	promptAssembler := orchestrator.NewPromptAssemblerWithRules(
+	promptAssembler := prompt.NewPromptAssemblerWithRules(
 		retrieval.NewSimpleFileRetriever("."),
 		ruleRepo,
+		skills.BuiltinToolDefinitions(),
 		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
 	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentManager, sandboxRuntime, promptAssembler)
@@ -148,16 +153,17 @@ func run() error {
 
 	// Phase 6: Memory & Learning
 	memorySvc := service.NewMemoryService(memoryRepo, edgeRepo)
-	if cfg.LLM.OpenAIAPIKey != "" {
+	hasOpenAIKey := cfg.LLM.OpenAIAPIKey != "" && !strings.Contains(cfg.LLM.OpenAIAPIKey, "your-openai-key")
+	if hasOpenAIKey {
 		memorySvc.SetEmbedder(llm.NewOpenAIEmbedder(cfg.LLM.OpenAIAPIKey, cfg.LLM.EmbeddingModel))
 	} else {
-		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured")
+		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured or is a placeholder")
 	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
 	learningSvc.SetSkillService(skillSvc)
 	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "resources", "prompt_base")))
-	memoryHooks := orchestrator.NewMemoryHooks(memorySvc)
-	learningEngine := orchestrator.NewLearningEngine(memorySvc, learningSvc, taskRepo)
+	memoryHooks := learning.NewMemoryHooks(memorySvc)
+	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo)
 	// Attach hooks to orchestrator
 	orch.SetMemoryHooks(memoryHooks)
 	orch.SetLearningEngine(learningEngine)

@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -91,14 +93,39 @@ func (m *AgentManager) MarkRunning(ctx context.Context, agentID string) error {
 }
 
 func rolesForTask(task *models.Task) []string {
-	switch task.Complexity {
-	case models.TaskComplexityHard:
-		return []string{models.AgentRolePlanner, models.AgentRoleBackend, models.AgentRoleReviewer}
-	case models.TaskComplexityMedium:
-		return []string{models.AgentRoleBackend, models.AgentRoleReviewer, models.AgentRolePlanner}
-	default:
-		return []string{models.AgentRolePlanner, models.AgentRoleBackend}
+	// 1. Initial phases: Always use Planner
+	if task.Status == "" || task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusContextLoading || task.Status == models.TaskStatusAnalyzing || task.Status == models.TaskStatusSpecReview {
+		return []string{models.AgentRolePlanner, models.AgentRoleBackend, models.AgentRoleFrontend}
 	}
+
+	// 2. Reviewing phases: Always use Reviewer
+	if task.Status == models.TaskStatusReviewing || task.Status == models.TaskStatusHumanReview {
+		return []string{models.AgentRoleReviewer, models.AgentRolePlanner, models.AgentRoleBackend}
+	}
+
+	// 3. Execution phases: Determine role by PrimaryCategory from Analysis
+	primaryRole := models.AgentRoleBackend // fallback
+	if len(task.Analysis) > 0 {
+		var analysis models.TaskAnalysis
+		if err := json.Unmarshal(task.Analysis, &analysis); err == nil {
+			switch strings.ToLower(analysis.PrimaryCategory) {
+			case "frontend", "ui", "ux":
+				primaryRole = models.AgentRoleFrontend
+			case "database", "db":
+				primaryRole = models.AgentRoleDBArchitect
+			case "qa", "testing":
+				primaryRole = models.AgentRoleQA
+			case "security":
+				primaryRole = models.AgentRoleSecurityAuditor
+			}
+		}
+	}
+
+	roles := []string{primaryRole, models.AgentRolePlanner}
+	if primaryRole != models.AgentRoleBackend {
+		roles = append(roles, models.AgentRoleBackend)
+	}
+	return roles
 }
 
 func (m *AgentManager) Release(ctx context.Context, agentID string) error {

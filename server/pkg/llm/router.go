@@ -129,6 +129,10 @@ func appendProvider(chains *[]FallbackChain, levelGroup string, provider Provide
 func (g *Gateway) Name() string { return "gateway" }
 
 func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, error) {
+	return g.ChatWithOptions(ctx, messages, ChatOptions{})
+}
+
+func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatOpts ChatOptions) (*Response, error) {
 	ctx, span := otel.Tracer("auto-code-os/llm").Start(ctx, "llm.gateway.chat")
 	defer span.End()
 	opts, _ := RouteOptionsFromContext(ctx)
@@ -156,7 +160,7 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 	var failures []string
 	for _, provider := range chain.Providers {
 		meta := metadataForProvider(provider)
-		resp, latency, err := g.chatWithRetry(ctx, provider, messages)
+		resp, latency, err := g.chatWithRetry(ctx, provider, messages, chatOpts)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s/%s: %v", provider.Name(), meta.Model, err))
 			g.record(ctx, opts, meta, nil, latency, "failed", err.Error())
@@ -177,7 +181,7 @@ func (g *Gateway) Chat(ctx context.Context, messages []Message) (*Response, erro
 	return nil, fmt.Errorf("llm gateway exhausted fallbacks for level group %q: %s", levelGroup, strings.Join(failures, "; "))
 }
 
-func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages []Message) (*Response, int64, error) {
+func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages []Message, opts ChatOptions) (*Response, int64, error) {
 	attempts := g.maxRetries + 1
 	if attempts < 1 {
 		attempts = 1
@@ -185,7 +189,7 @@ func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages
 	var lastErr error
 	start := time.Now()
 	for attempt := 0; attempt < attempts; attempt++ {
-		resp, err := provider.Chat(ctx, messages)
+		resp, err := provider.ChatWithOptions(ctx, messages, opts)
 		if err == nil {
 			return resp, time.Since(start).Milliseconds(), nil
 		}

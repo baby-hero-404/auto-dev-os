@@ -239,7 +239,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/tasks/{taskID}/logs", workflowH.Logs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
-			r.Post("/tasks/{taskID}/restart", workflowH.Restart)
+			r.Post("/tasks/{taskID}/restart", workflowH.Retry)
+			r.Post("/tasks/{taskID}/retry", workflowH.Retry)
 			r.Get("/workflows/{jobID}/artifacts", workflowH.Artifacts)
 
 			r.Get("/rules/{ruleID}", ruleH.GetByID)

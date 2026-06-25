@@ -18,7 +18,7 @@ export function useTaskWorkflow(taskID: string) {
   const appendLogs = useRealtimeLogStore((state) => state.appendLogs);
   const clearLogs = useRealtimeLogStore((state) => state.clearLogs);
 
-  const { data: workflow, mutate: mutateWorkflow } = useAuthedSWR(
+  const { data: workflow, mutate: mutateWorkflow, error: workflowError } = useAuthedSWR(
     taskID ? ["workflow", taskID] : null,
     (token) => api.taskWorkflow(taskID, token),
     { refreshInterval: (latestWorkflow) => (isWorkflowTerminal(latestWorkflow?.job?.status) ? 0 : 2500) },
@@ -54,6 +54,28 @@ export function useTaskWorkflow(taskID: string) {
       await Promise.all([mutateWorkflow(), mutateLogs()]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to execute workflow");
+    }
+  }
+
+  async function analyze() {
+    if (!token) return;
+    setError("");
+    try {
+      await api.analyzeTask(taskID, token);
+      await Promise.all([mutateWorkflow(), mutateLogs()]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to run analysis");
+    }
+  }
+
+  async function retry() {
+    if (!token) return;
+    setError("");
+    try {
+      await api.retryTask(taskID, token);
+      await Promise.all([mutateWorkflow(), mutateLogs()]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to retry workflow");
     }
   }
 
@@ -135,12 +157,39 @@ export function useTaskWorkflow(taskID: string) {
     setIsRequestingChanges(true);
   }
 
+  async function deleteTask() {
+    if (!token) return false;
+    setError("");
+    try {
+      await api.deleteTask(taskID, token);
+      return true;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete task");
+      return false;
+    }
+  }
+
+  async function updateTask(fields: { title?: string; description?: string }) {
+    if (!token) return false;
+    setError("");
+    try {
+      await api.updateTask(taskID, token, fields);
+      await mutateWorkflow();
+      return true;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update task");
+      return false;
+    }
+  }
+
   return {
     task,
     workflow,
     logs,
     error,
     setError,
+    isLoading: !workflow && !workflowError && !!token,
+    workflowError,
     feedback,
     setFeedback,
     submittingPR,
@@ -149,12 +198,16 @@ export function useTaskWorkflow(taskID: string) {
     specFeedbackText,
     setSpecFeedbackText,
     execute,
+    analyze,
+    retry,
     approveSpec,
     requestSpecChanges,
     submitSpecChanges,
     approvePR,
     rejectPR,
     startReview,
+    deleteTask,
+    updateTask,
     mutateWorkflow,
     mutateLogs,
   };

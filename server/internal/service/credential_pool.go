@@ -27,7 +27,7 @@ const (
 const (
 	testOpenAIModel    = "gpt-5.4-mini"
 	testAnthropicModel = "claude-haiku-4-5"
-	testGeminiModel    = "gemini-3.1-flash-lite"
+	testGeminiModel    = "gemini-3.5-flash"
 	testNineRouterMode = "balanced"
 )
 
@@ -51,6 +51,7 @@ type CredentialPoolService struct {
 	seeder           providerModelSeeder
 	mu               sync.Mutex
 	rrCounters       map[string]int
+	modelCooldowns   map[string]time.Time
 }
 
 type credentialConnectionTester func(context.Context, models.ProviderCredential, string) error
@@ -61,6 +62,7 @@ func NewCredentialPoolService(repo *repository.ProviderCredentialRepo, cipher *S
 		cipher:           cipher,
 		connectionTester: testProviderConnection,
 		rrCounters:       map[string]int{},
+		modelCooldowns:   map[string]time.Time{},
 	}
 }
 
@@ -144,12 +146,11 @@ func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID str
 		}
 	case "gemini":
 		defaults = []models.CreateProviderModelInput{
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 0},
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 1},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 0},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.1-flash", Priority: 1},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 0},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 1},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.5-flash", Priority: 0},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 1},
 			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 0},
-			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-3.1-pro", Priority: 1},
 		}
 	}
 
@@ -266,7 +267,7 @@ func (s *CredentialPoolService) TestConnectionInput(ctx context.Context, input m
 	}, strings.TrimSpace(input.APIKey))
 }
 
-func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, provider string, strategy CredentialStrategy, excludeIDs map[string]bool) (*DecryptedCredential, error) {
+func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, provider, model string, strategy CredentialStrategy, excludeIDs map[string]bool) (*DecryptedCredential, error) {
 	creds, err := s.repo.ListActiveByOrgAndProvider(ctx, orgID, strings.ToLower(provider))
 	if err != nil {
 		return nil, err
@@ -279,6 +280,14 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 		}
 		if cred.CooldownUntil != nil && cred.CooldownUntil.After(now) {
 			continue
+		}
+		if model != "" {
+			s.mu.Lock()
+			cooldownUntil, onCooldown := s.modelCooldowns[cred.ID+":"+model]
+			s.mu.Unlock()
+			if onCooldown && cooldownUntil.After(now) {
+				continue
+			}
 		}
 		available = append(available, cred)
 	}
@@ -312,7 +321,23 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 	}, nil
 }
 
-func (s *CredentialPoolService) SetCooldown(ctx context.Context, id string, until time.Time) error {
+func (s *CredentialPoolService) SetCooldown(ctx context.Context, id string, model string, until time.Time) error {
+	if model != "" {
+		s.mu.Lock()
+		s.modelCooldowns[id+":"+model] = until
+		// Prune expired cooldowns periodically to prevent map growth
+		now := time.Now()
+		for k, v := range s.modelCooldowns {
+			if now.After(v) {
+				delete(s.modelCooldowns, k)
+			}
+		}
+		s.mu.Unlock()
+
+		slog.Info("provider credential model-specific rate limited", "id", id, "model", model, "cooldown_until", until)
+		return nil
+	}
+
 	cred, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err

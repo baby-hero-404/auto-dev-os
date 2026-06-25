@@ -17,12 +17,13 @@ const (
 
 // Step status constants used across the engine and API.
 const (
-	StepStatusPending = "pending"
-	StepStatusRunning = "running"
-	StepStatusSuccess = "success"
-	StepStatusFailed  = "failed"
-	StepStatusSkipped = "skipped"
-	StepStatusPaused  = "paused"
+	StepStatusPending         = "pending"
+	StepStatusRunning         = "running"
+	StepStatusSuccess         = "success"
+	StepStatusFailed          = "failed"
+	StepStatusSkipped         = "skipped"
+	StepStatusPaused          = "paused"
+	StepStatusWaitingApproval = "waiting_approval"
 )
 
 // StepNameOrder returns the canonical step names in execution order.

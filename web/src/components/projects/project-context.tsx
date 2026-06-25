@@ -42,6 +42,9 @@ interface ProjectContextValue {
   
   // Generic Project Actions
   handleUpdateProject: (input: Parameters<typeof api.updateProject>[2]) => Promise<void>;
+  
+  // Errors
+  projectError?: unknown;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -67,6 +70,7 @@ export function ProjectProvider({ projectID, children }: { projectID: string; ch
     isTasksLoading,
     isAgentsLoading,
     isRulesLoading,
+    projectError,
   } = useProjectData(projectID);
 
   const taskActions = useTaskActions(projectID, token, mutateTasks);
@@ -100,6 +104,7 @@ export function ProjectProvider({ projectID, children }: { projectID: string; ch
     taskActions,
     repoActions,
     handleUpdateProject,
+    projectError,
   };
 
   return (

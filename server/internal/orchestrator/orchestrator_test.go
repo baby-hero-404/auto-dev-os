@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
+	orchtester "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/tester"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -46,8 +49,9 @@ func (m *mockTaskRepo) Update(ctx context.Context, id string, input models.Updat
 }
 
 type mockWorkflowRepo struct {
-	job        *models.WorkflowJob
-	checkpoint *models.WorkflowCheckpoint
+	job         *models.WorkflowJob
+	checkpoint  *models.WorkflowCheckpoint
+	checkpoints []models.WorkflowCheckpoint
 }
 
 func (m *mockWorkflowRepo) Enqueue(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
@@ -75,10 +79,14 @@ func (m *mockWorkflowRepo) UpdateJob(ctx context.Context, id string, updates map
 
 func (m *mockWorkflowRepo) CreateCheckpoint(ctx context.Context, cp models.WorkflowCheckpoint) error {
 	m.checkpoint = &cp
+	m.checkpoints = append(m.checkpoints, cp)
 	return nil
 }
 
 func (m *mockWorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error) {
+	if len(m.checkpoints) > 0 {
+		return m.checkpoints, nil
+	}
 	if m.checkpoint != nil {
 		return []models.WorkflowCheckpoint{*m.checkpoint}, nil
 	}
@@ -87,6 +95,7 @@ func (m *mockWorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) (
 
 func (m *mockWorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
 	m.checkpoint = nil
+	m.checkpoints = nil
 	return nil
 }
 
@@ -164,8 +173,37 @@ func (m *mockSandboxRuntime) Prewarm(ctx context.Context) error {
 	return nil
 }
 
+type mockAnalyzeSandboxRuntime struct {
+	commands []string
+	outputs  map[string]string
+}
+
+func (m *mockAnalyzeSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
+	cmd := ""
+	if len(req.Command) >= 3 {
+		cmd = req.Command[2]
+	}
+	m.commands = append(m.commands, cmd)
+	for contains, out := range m.outputs {
+		if strings.Contains(cmd, contains) {
+			return &sandbox.CommandResult{ExitCode: 0, Stdout: out}, nil
+		}
+	}
+	return &sandbox.CommandResult{ExitCode: 0, Stdout: ""}, nil
+}
+
+func (m *mockAnalyzeSandboxRuntime) Health(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockAnalyzeSandboxRuntime) Prewarm(ctx context.Context) error {
+	return nil
+}
+
 type mockLLMProvider struct {
-	responses map[string]string
+	responses       map[string]string
+	responseQueue   []*llm.Response
+	lastChatOptions llm.ChatOptions
 }
 
 func (m *mockLLMProvider) Name() string {
@@ -173,6 +211,16 @@ func (m *mockLLMProvider) Name() string {
 }
 
 func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+	return m.ChatWithOptions(ctx, messages, llm.ChatOptions{})
+}
+
+func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+	m.lastChatOptions = opts
+	if len(m.responseQueue) > 0 {
+		resp := m.responseQueue[0]
+		m.responseQueue = m.responseQueue[1:]
+		return resp, nil
+	}
 	lastMsg := messages[len(messages)-1].Content
 	content := `{"patch": "diff --git a/main.go b/main.go\n"}`
 	for k, v := range m.responses {
@@ -379,7 +427,7 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_StepPR_NoChangesKeepsPrReady(t *testing.T) {
+func TestOrchestrator_StepPR_NoChangesMerged(t *testing.T) {
 	task := &models.Task{
 		ID:          "task-no-change",
 		ProjectID:   "proj-no-change",
@@ -405,7 +453,7 @@ func TestOrchestrator_StepPR_NoChangesKeepsPrReady(t *testing.T) {
 	orch.SetArtifactRepository(artifactRepo)
 	orch.SetRepositoryRepository(reposRepo)
 
-	runners := orch.stepRunners(task, agent, job.ID)
+	runners := orch.stepRunners(task, agent, job.ID, job.Step)
 	runner := runners[workflow.StepPR]
 	if runner == nil {
 		t.Fatal("missing PR step runner")
@@ -420,8 +468,8 @@ func TestOrchestrator_StepPR_NoChangesKeepsPrReady(t *testing.T) {
 	if status, _ := out["status"].(string); status != "no_changes_detected" {
 		t.Fatalf("expected no_changes_detected status, got %v", out["status"])
 	}
-	if task.Status != models.TaskStatusPrReady {
-		t.Fatalf("expected task status pr_ready, got %s", task.Status)
+	if task.Status != models.TaskStatusMerged {
+		t.Fatalf("expected task status merged, got %s", task.Status)
 	}
 	if len(taskRepo.updated) == 0 {
 		t.Fatal("expected task updates to be recorded")
@@ -430,8 +478,8 @@ func TestOrchestrator_StepPR_NoChangesKeepsPrReady(t *testing.T) {
 		if update.PRURLs != nil {
 			t.Fatalf("expected no PR URL update when no changes are detected, got %v", []string(*update.PRURLs))
 		}
-		if update.Status != nil && *update.Status != models.TaskStatusPrReady {
-			t.Fatalf("expected only pr_ready status update, got %s", *update.Status)
+		if update.Status != nil && *update.Status != models.TaskStatusMerged {
+			t.Fatalf("expected only merged status update, got %s", *update.Status)
 		}
 	}
 }
@@ -466,9 +514,9 @@ func TestParseJSONMarkdown(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := parseJSONMarkdown(tc.input)
+			res, err := llmrunner.ParseJSONMarkdown(tc.input)
 			if err != nil {
-				t.Fatalf("parseJSONMarkdown failed: %v", err)
+				t.Fatalf("llmrunner.ParseJSONMarkdown failed: %v", err)
 			}
 			raw, _ := json.Marshal(res)
 			var expectedMap map[string]any
@@ -489,16 +537,16 @@ func TestOrchestrator_RemoveWorkspaceSafety(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "task-1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.removeWorkspace("task-1"); err != nil {
+	if err := orch.RemoveWorkspace("task-1"); err != nil {
 		t.Fatalf("remove workspace: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "task-1")); !os.IsNotExist(err) {
 		t.Fatalf("expected workspace removed, got err=%v", err)
 	}
-	if err := orch.removeWorkspace(""); err == nil {
+	if err := orch.RemoveWorkspace(""); err == nil {
 		t.Fatal("expected empty task id to be rejected")
 	}
-	if err := orch.removeWorkspace("../outside"); err == nil {
+	if err := orch.RemoveWorkspace("../outside"); err == nil {
 		t.Fatal("expected escaping task id to be rejected")
 	}
 }
@@ -577,29 +625,34 @@ func TestMatchAffectedFile(t *testing.T) {
 		{"internal/app/backend/handlers.go", "internal/app/backend/handlers.go", true},
 		{"internal/app/backend/handlers.go", "internal/app/backend/other.go", false},
 
+		// Directory Prefix Match
+		{"internal/app/backend", "internal/app/backend/handlers.go", true},
+		{"internal/app/backend", "internal/app/backend/models/user.go", true},
+		{"internal/app/backend", "internal/app/backend-other/handlers.go", false},
+
 		// Glob Match
 		{"*.go", "main.go", true},
+		{"*.go", "internal/app/backend/handlers.go", false},             // base name match fallback disabled for safety
 		{"internal/**/*.go", "internal/app/backend/handlers.go", false}, // filepath.Match doesn't support ** recursive glob
 
-		// Extension / Description Matches
-		{"New GoLang source files (.go)", "internal/app/backend/handlers.go", true},
+		// Extension / Description Matches (Should now be false/rejected)
+		{"New GoLang source files (.go)", "internal/app/backend/handlers.go", false},
 		{"New GoLang source files (.go)", "go.mod", false},
-		{"Documentation files (if applicable)", "README.md", true},
+		{"Documentation files (if applicable)", "README.md", false},
 
-		// Catch-all
-		{"All relevant source files of the original project (language unknown)", "internal/app/backend/handlers.go", true},
-		{"All relevant source files", "package.json", true},
+		// Catch-all (Should now be false/rejected)
+		{"All relevant source files of the original project (language unknown)", "internal/app/backend/handlers.go", false},
+		{"All relevant source files", "package.json", false},
 
-		// Filename Inclusion
-		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "go.mod", true},
-		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "Dockerfile", true},
-		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "main.go", false},
+		// Filename Inclusion (Should now be false/rejected)
+		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "go.mod", false},
+		{"New GoLang project configuration files (e.g., go.mod, Dockerfile for Go)", "Dockerfile", false},
 	}
 
 	for i, tc := range tests {
-		actual := matchAffectedFile(tc.pattern, tc.file)
+		actual := patch.MatchAffectedFile(tc.pattern, tc.file)
 		if actual != tc.expected {
-			t.Errorf("Test %d failed: matchAffectedFile(%q, %q) expected %v, got %v", i, tc.pattern, tc.file, tc.expected, actual)
+			t.Errorf("Test %d failed: patch.MatchAffectedFile(%q, %q) expected %v, got %v", i, tc.pattern, tc.file, tc.expected, actual)
 		}
 	}
 }
@@ -637,7 +690,7 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 	}}
 	orch.SetLLMProvider(mockLLM)
 
-	runners := orch.stepRunners(task, agent, "job-1")
+	runners := orch.stepRunners(task, agent, "job-1", "")
 	analyzeRunner := runners[workflow.StepAnalyze]
 
 	res, err := analyzeRunner(context.Background(), workflow.StepContext{})
@@ -653,6 +706,83 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 	}
 	if res["spec_status"] != models.TaskSpecStatusAutoApproved {
 		t.Errorf("expected output spec_status AutoApproved, got %v", res["spec_status"])
+	}
+}
+
+func TestOrchestrator_StepAnalyze_UsesNativeToolCalls(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "native-analyze-tools-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:          "task-native-tools",
+		ProjectID:   "proj-native-tools",
+		Title:       "Inspect code",
+		Description: "Analyze the current source before planning",
+		Status:      models.TaskStatusAnalyzing,
+		Complexity:  models.TaskComplexityMedium,
+		SpecStatus:  models.TaskSpecStatusDraft,
+	}
+	agent := &models.Agent{
+		ID:            "agent-native-tools",
+		Name:          "Agent Native Tools",
+		AutonomyLevel: models.AgentAutonomyAutonomous,
+	}
+	finalAnalysis := map[string]any{
+		"complexity":              "medium",
+		"primary_category":        "backend",
+		"scope":                   "Inspect code and prepare implementation plan.",
+		"affected_files":          []string{"src/main.go"},
+		"risks":                   []string{},
+		"risk_domains":            []string{},
+		"execution_plan":          []string{"Read source files", "Implement changes"},
+		"clarification_questions": []string{},
+		"required_skills":         []string{},
+		"proposal_md":             "## Why\nNeed change.\n",
+		"specs_md":                "## ADDED Requirements\n### Requirement: Native tools\nThe analyzer SHALL use native tools.\n",
+		"design_md":               "## Context\nNative tools.\n",
+		"tasks_md":                "## 1. Work\n- [ ] 1.1 Implement\n",
+	}
+	finalBytes, _ := json.Marshal(finalAnalysis)
+	mockLLM := &mockLLMProvider{responseQueue: []*llm.Response{
+		{
+			Model: "mock-model",
+			ToolCalls: []llm.ToolCall{{
+				ID:        "call-list-files",
+				Name:      "list_files",
+				Arguments: "{}",
+			}},
+		},
+		{
+			Model:   "mock-model",
+			Content: string(finalBytes),
+		},
+	}}
+	analyzeRuntime := &mockAnalyzeSandboxRuntime{outputs: map[string]string{
+		"find .": "src/main.go\n",
+	}}
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-native-tools"}}
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	orch.workspaceRoot = tmpDir
+	orch.runtime = analyzeRuntime
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-native-tools", "")
+	res, err := runners[workflow.StepAnalyze](context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error for native tool analyze: %v", err)
+	}
+	if res["spec_status"] != models.TaskSpecStatusAutoApproved {
+		t.Fatalf("expected auto-approved spec, got %v", res["spec_status"])
+	}
+	if len(mockLLM.lastChatOptions.Tools) != 3 {
+		t.Fatalf("expected analyze tool definitions to be passed to LLM, got %+v", mockLLM.lastChatOptions.Tools)
+	}
+	if len(analyzeRuntime.commands) == 0 || !strings.Contains(strings.Join(analyzeRuntime.commands, "\n"), "find .") {
+		t.Fatalf("expected list_files native tool to execute through sandbox, got %#v", analyzeRuntime.commands)
 	}
 }
 
@@ -683,7 +813,7 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
 	orch.SetLLMProvider(mockLLM)
 
-	runners := orch.stepRunners(task, agent, "job-loop")
+	runners := orch.stepRunners(task, agent, "job-loop", "")
 	fixRunner := runners[workflow.StepFix]
 
 	// 1. Run without cycle limit reached
@@ -720,6 +850,114 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	}
 	if resLimit["status"] != "skipped" {
 		t.Errorf("expected status skipped, got %v", resLimit["status"])
+	}
+}
+
+func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-review-cycle",
+		ProjectID:  "proj-review-cycle",
+		Title:      "Review cycle task",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusReviewing,
+	}
+	agent := &models.Agent{ID: "agent-review", Role: models.AgentRoleReviewer}
+
+	workflowRepo := &mockWorkflowRepo{
+		job: &models.WorkflowJob{ID: "job-review-cycle", TaskID: task.ID},
+		checkpoints: []models.WorkflowCheckpoint{
+			{TaskID: task.ID, Step: workflow.StepReview, State: []byte(`{"status":"running"}`)},
+			{TaskID: task.ID, Step: workflow.StepReview, State: []byte(`{"status":"failed"}`)},
+			{TaskID: task.ID, Step: workflow.StepReview, State: []byte(`{"status":"success"}`)},
+			{TaskID: task.ID, Step: workflow.StepFix, State: []byte(`{"status":"success"}`)},
+			{TaskID: task.ID, Step: workflow.StepReview, State: []byte(`{"status":"success"}`)},
+		},
+	}
+	orch := NewOrchestratorWithPrompt(&mockTaskRepo{task: task}, workflowRepo, &mockAgentAssigner{agent: agent}, &mockSandboxRuntime{}, nil)
+	orch.SetLLMProvider(&mockLLMProvider{responses: map[string]string{
+		"Review": `{"findings":[{"severity":"high","file":"main.go","line":1,"recommendation":"fix it"}]}`,
+	}})
+
+	out, err := orch.executeStepReview(context.Background(), task, agent, "job-review-cycle", workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("executeStepReview returned error: %v", err)
+	}
+	if out["cycle_limit_reached"] == true {
+		t.Fatal("cycle limit should not be reached when only two review checkpoints succeeded")
+	}
+	if task.Status != models.TaskStatusFixing {
+		t.Fatalf("expected review with findings to move to fixing, got %s", task.Status)
+	}
+}
+
+func TestOrchestrator_GetTaskRepoHostPath_FailsOnRepositoryIDMismatch(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "repo-path-mismatch-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoID := "repo-a"
+	task := &models.Task{ID: "task-path", ProjectID: "proj-path", RepositoryID: &repoID}
+	orch := &Orchestrator{
+		workspaceRoot: tmpDir,
+		repositories: &testMockRepositoriesRepo{repos: []models.Repository{{
+			ID:  "repo-b",
+			URL: "https://github.com/example/repo-b.git",
+		}}},
+	}
+
+	ws := orch.GetTaskWorkspace(task)
+	ws.Repos = []models.RepoWorkspace{{
+		RepoID: "repo-b",
+		Name:   "repo-b",
+		Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-b", "main")},
+	}}
+	if err := os.MkdirAll(ws.Root, 0o755); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+		t.Fatalf("failed to save metadata: %v", err)
+	}
+
+	if _, err := orch.getTaskRepoHostPath(context.Background(), task); err == nil {
+		t.Fatal("expected repository ID mismatch to fail fast")
+	}
+}
+
+func TestOrchestrator_ReadAffectedFileContent_ResolvesRepoRelativePath(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "affected-file-root-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoID := "repo-a"
+	task := &models.Task{ID: "task-affected", ProjectID: "proj-affected", RepositoryID: &repoID}
+	orch := &Orchestrator{workspaceRoot: tmpDir}
+	ws := orch.GetTaskWorkspace(task)
+	ws.Repos = []models.RepoWorkspace{{
+		RepoID: repoID,
+		Name:   "repo-a",
+		Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
+	}}
+	repoRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
+		t.Fatalf("failed to create repo dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+		t.Fatalf("failed to save metadata: %v", err)
+	}
+
+	content, ok := orch.readAffectedFileContent(context.Background(), task, "src/main.go")
+	if !ok {
+		t.Fatal("expected repo-relative affected file to resolve")
+	}
+	if !strings.Contains(content, "package main") {
+		t.Fatalf("unexpected content: %q", content)
 	}
 }
 
@@ -819,7 +1057,7 @@ func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
 	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
 	orch.SetLLMProvider(mockLLM)
 
-	runners := orch.stepRunners(task, agent, "job-loop")
+	runners := orch.stepRunners(task, agent, "job-loop", "")
 	fixRunner := runners[workflow.StepFix]
 
 	ctx := context.Background()
@@ -908,7 +1146,7 @@ index abc..def 100644
 +console.log("world");
 `
 
-	splitPatches := splitPatchByRepo(patchText)
+	splitPatches := patch.SplitPatchByRepo(patchText)
 	if len(splitPatches) != 2 {
 		t.Errorf("expected 2 split patches, got: %d", len(splitPatches))
 	}
@@ -935,6 +1173,16 @@ index abc..def 100644
 	}
 
 	localPath := "/tmp/workspaces/task-1"
+	repo := models.Repository{
+		ID:  repoID,
+		URL: "https://github.com/example/repo-a.git",
+	}
+
+	repoPathWithoutMetadata := orch.repoHostPath(singleTask, nil, repo)
+	expectedRepoPathWithoutMetadata := filepath.Clean("/tmp/workspaces/task-1/code/repos/repo-a/main")
+	if filepath.Clean(repoPathWithoutMetadata) != expectedRepoPathWithoutMetadata {
+		t.Errorf("expected repo path without metadata: %s, got: %s", expectedRepoPathWithoutMetadata, repoPathWithoutMetadata)
+	}
 
 	// Suffix case
 	bePath := orch.hostWorktreePath(singleTask, localPath, "-be-worktree")
@@ -974,5 +1222,311 @@ index abc..def 100644
 	// multiBePath relative to multiLocalPath is "repo-a-be-worktree"
 	if multiContainerBe != "/workspace/repo-a-be-worktree" {
 		t.Errorf("expected multi-repo container path: /workspace/repo-a-be-worktree, got: %s", multiContainerBe)
+	}
+}
+
+func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "analyze-source-root-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoID := "repo-a"
+	task := &models.Task{ID: "task-analyze-root", ProjectID: "proj-analyze-root", RepositoryID: &repoID}
+	analyzeRuntime := &mockAnalyzeSandboxRuntime{outputs: map[string]string{
+		"find .":    "src/main.go\n",
+		"grep -RIn": "./src/main.go:2: const marker = true\n",
+	}}
+	orch := &Orchestrator{workspaceRoot: tmpDir, runtime: analyzeRuntime}
+	ws := orch.GetTaskWorkspace(task)
+	ws.Repos = []models.RepoWorkspace{{
+		RepoID: repoID,
+		Name:   "repo-a",
+		Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
+	}}
+	repoRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
+		t.Fatalf("failed to create repo src: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte("package main\nconst marker = true\n"), 0o644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ws.Root, "logs"), 0o755); err != nil {
+		t.Fatalf("failed to create logs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Root, "logs", "llm.txt"), []byte("marker in generated logs\n"), 0o644); err != nil {
+		t.Fatalf("failed to write generated file: %v", err)
+	}
+	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+		t.Fatalf("failed to save metadata: %v", err)
+	}
+
+	agent := &models.Agent{ID: "agent-analyze"}
+	files, err := orch.listAnalyzeFiles(context.Background(), task, agent)
+	if err != nil {
+		t.Fatalf("listAnalyzeFiles returned error: %v", err)
+	}
+	if !strings.Contains(files, "src/main.go") {
+		t.Fatalf("expected source file in analyze list, got: %s", files)
+	}
+	if strings.Contains(files, "logs/llm.txt") || strings.Contains(files, "code/repos") {
+		t.Fatalf("analyze list should not expose generated workspace paths, got: %s", files)
+	}
+
+	grepResult, err := orch.grepAnalyzeFiles(context.Background(), task, agent, "marker")
+	if err != nil {
+		t.Fatalf("grepAnalyzeFiles returned error: %v", err)
+	}
+	if !strings.Contains(grepResult, "src/main.go") {
+		t.Fatalf("expected grep to find source file, got: %s", grepResult)
+	}
+	if strings.Contains(grepResult, "logs/llm.txt") {
+		t.Fatalf("grep should not search generated logs, got: %s", grepResult)
+	}
+	if len(analyzeRuntime.commands) == 0 || !strings.Contains(strings.Join(analyzeRuntime.commands, "\n"), "find .") {
+		t.Fatalf("expected analyze tools to run through sandbox commands, got: %#v", analyzeRuntime.commands)
+	}
+}
+
+func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "analyze-multi-repo-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{ID: "task-analyze-multi", ProjectID: "proj-analyze-multi"}
+	analyzeRuntime := &mockAnalyzeSandboxRuntime{outputs: map[string]string{
+		"find .":        "src/main.go\n",
+		"head -c 20000": "repo-b marker\n",
+	}}
+	orch := &Orchestrator{workspaceRoot: tmpDir, runtime: analyzeRuntime}
+	ws := orch.GetTaskWorkspace(task)
+	ws.Repos = []models.RepoWorkspace{
+		{
+			RepoID: "repo-a",
+			Name:   "repo-a",
+			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
+		},
+		{
+			RepoID: "repo-b",
+			Name:   "repo-b",
+			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-b", "main")},
+		},
+	}
+	for _, repo := range ws.Repos {
+		repoRoot := filepath.Join(ws.Root, repo.Paths.Main)
+		if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
+			t.Fatalf("failed to create repo src: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte(repo.Name+" marker\n"), 0o644); err != nil {
+			t.Fatalf("failed to write source file: %v", err)
+		}
+	}
+	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+		t.Fatalf("failed to save metadata: %v", err)
+	}
+
+	agent := &models.Agent{ID: "agent-analyze"}
+	files, err := orch.listAnalyzeFiles(context.Background(), task, agent)
+	if err != nil {
+		t.Fatalf("listAnalyzeFiles returned error: %v", err)
+	}
+	if !strings.Contains(files, "repo-a/src/main.go") || !strings.Contains(files, "repo-b/src/main.go") {
+		t.Fatalf("expected prefixed multi-repo files, got: %s", files)
+	}
+
+	content, err := orch.readAnalyzeFile(context.Background(), task, agent, "repo-b/src/main.go")
+	if err != nil {
+		t.Fatalf("readAnalyzeFile returned error: %v", err)
+	}
+	if !strings.Contains(content, "repo-b marker") {
+		t.Fatalf("unexpected repo-b content: %s", content)
+	}
+}
+
+func TestTestProjectDetectionAndTargetedCommands(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "test-project-detection-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cases := []struct {
+		name       string
+		marker     string
+		changed    string
+		wantKind   orchtester.ProjectKind
+		wantInCmd  string
+		goPackages map[string]bool
+	}{
+		{
+			name:       "go",
+			marker:     "go.mod",
+			changed:    "pkg/service.go",
+			wantKind:   orchtester.ProjectGo,
+			wantInCmd:  "go test -v ./pkg/...",
+			goPackages: map[string]bool{"./pkg": true},
+		},
+		{name: "node", marker: "package.json", changed: "src/app.ts", wantKind: orchtester.ProjectJS, wantInCmd: "npm test"},
+		{name: "python", marker: "pyproject.toml", changed: "app/main.py", wantKind: orchtester.ProjectPython, wantInCmd: "pytest"},
+		{name: "java", marker: "pom.xml", changed: "src/App.java", wantKind: orchtester.ProjectJava, wantInCmd: "mvn test"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(tmpDir, tc.name)
+			if err := os.MkdirAll(filepath.Join(root, filepath.Dir(tc.changed)), 0o755); err != nil {
+				t.Fatalf("failed to create source dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(root, tc.marker), []byte("marker"), 0o644); err != nil {
+				t.Fatalf("failed to write marker: %v", err)
+			}
+
+			kind, markers := orchtester.DetectProjectKindNear(root, tc.changed)
+			if kind != tc.wantKind {
+				t.Fatalf("expected kind %s, got %s", tc.wantKind, kind)
+			}
+			if len(markers) == 0 {
+				t.Fatal("expected markers for detected project kind")
+			}
+
+			goPackages := tc.goPackages
+			if goPackages == nil {
+				goPackages = map[string]bool{}
+			}
+			cmd, ok := orchtester.TargetedTestCommand(kind, "/workspace", []string{tc.changed}, goPackages)
+			if !ok {
+				t.Fatal("expected targeted command")
+			}
+			if !strings.Contains(cmd, tc.wantInCmd) {
+				t.Fatalf("expected command to contain %q, got %q", tc.wantInCmd, cmd)
+			}
+		})
+	}
+}
+
+func TestFullVerificationScriptUsesSharedMarkers(t *testing.T) {
+	script := orchtester.FullVerificationScript()
+	for _, expected := range []string{"go.mod", "package.json", "requirements.txt", "pyproject.toml", "pytest.ini", "pom.xml", "build.gradle"} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("expected full verification script to contain marker %s", expected)
+		}
+	}
+}
+
+func TestOrchestrator_StepAnalyze_FallbackForcesReview(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-fallback",
+		ProjectID:   "proj-fallback",
+		Title:       "Test Fallback Task",
+		Description: "Simple test description",
+		Status:      models.TaskStatusAnalyzing,
+		Complexity:  models.TaskComplexityMedium,
+		SpecStatus:  models.TaskSpecStatusDraft,
+	}
+
+	agent := &models.Agent{
+		ID:            "agent-fallback",
+		Name:          "Agent Fallback",
+		AutonomyLevel: models.AgentAutonomyAutonomous, // autonomous would normally auto-approve
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-fallback"}}
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+
+	// Malformed LLM response to trigger fallback
+	mockLLM := &mockLLMProvider{responses: map[string]string{
+		"": "this is not valid JSON and will fail parsing",
+	}}
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-fallback", "")
+	analyzeRunner := runners[workflow.StepAnalyze]
+
+	res, err := analyzeRunner(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatalf("expected PauseError, got nil")
+	}
+
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected workflow.PauseError, got %v", err)
+	}
+
+	if pauseErr.Step != workflow.StepAnalyze {
+		t.Errorf("expected PauseError step %s, got %s", workflow.StepAnalyze, pauseErr.Step)
+	}
+
+	if !strings.Contains(pauseErr.Reason, "fallback from malformed analyzer output") {
+		t.Errorf("expected PauseError reason to mention fallback, got: %s", pauseErr.Reason)
+	}
+
+	if task.SpecStatus != models.TaskSpecStatusPendingReview {
+		t.Errorf("expected spec status PendingReview, got %s", task.SpecStatus)
+	}
+	if task.Status != models.TaskStatusSpecReview {
+		t.Errorf("expected task status SpecReview, got %s", task.Status)
+	}
+	if res != nil {
+		t.Errorf("expected nil result on pause error, got %v", res)
+	}
+}
+
+func TestOrchestrator_StepAnalyze_ComplexityChangeTriggersGraphRebuild(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-graph-change",
+		ProjectID:   "proj-graph-change",
+		Status:      models.TaskStatusAnalyzing,
+		Complexity:  models.TaskComplexityEasy, // Initial complexity
+		SpecStatus:  models.TaskSpecStatusDraft,
+	}
+
+	agent := &models.Agent{
+		ID:            "agent-graph-change",
+		AutonomyLevel: models.AgentAutonomyAutonomous,
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-graph-change"}}
+	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+
+	mockLLM := &mockLLMProvider{responses: map[string]string{
+		"": `{
+			"complexity": "hard",
+			"primary_category": "backend",
+			"scope": "test scope",
+			"affected_files": [],
+			"risks": [],
+			"risk_domains": [],
+			"execution_plan": [],
+			"clarification_questions": [],
+			"required_skills": []
+		}`,
+	}}
+	orch.SetLLMProvider(mockLLM)
+
+	runners := orch.stepRunners(task, agent, "job-graph-change", "")
+	analyzeRunner := runners[workflow.StepAnalyze]
+
+	res, err := analyzeRunner(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatalf("expected ErrGraphChanged, got nil")
+	}
+
+	if !errors.Is(err, workflow.ErrGraphChanged) {
+		t.Fatalf("expected workflow.ErrGraphChanged, got %v", err)
+	}
+
+	if task.Complexity != models.TaskComplexityHard {
+		t.Errorf("expected complexity to update to hard, got %s", task.Complexity)
+	}
+	if task.SpecStatus != models.TaskSpecStatusAutoApproved {
+		t.Errorf("expected auto_approved spec status, got %s", task.SpecStatus)
+	}
+	if res == nil {
+		t.Errorf("expected result to contain output even when returning ErrGraphChanged")
 	}
 }

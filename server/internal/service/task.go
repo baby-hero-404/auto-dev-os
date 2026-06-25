@@ -35,7 +35,11 @@ func (s *TaskService) Create(ctx context.Context, projectID string, input models
 			return nil, ErrValidation("repository does not belong to the project")
 		}
 	}
-	return s.repo.Create(ctx, projectID, input)
+	task, err := s.repo.Create(ctx, projectID, input)
+	if err != nil {
+		return nil, err
+	}
+	return task, nil
 }
 
 func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {

@@ -138,3 +138,63 @@ func TestEngine_ResumeFromCheckpoint(t *testing.T) {
 		t.Fatalf("expected 3 steps executed (code, test, pr), got %d: %v", len(executed), executed)
 	}
 }
+
+func TestEngine_ResumeFromPausedState(t *testing.T) {
+	var mu sync.Mutex
+	events := []Event{}
+
+	engine := &Engine{
+		MaxParallel: 1,
+		OnEvent: func(ctx context.Context, e Event) error {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+			return nil
+		},
+		CompletedSteps: map[string]map[string]any{
+			"analyze": {"status": "ok"},
+		},
+	}
+
+	run := func(id string) StepFunc {
+		return func(context.Context, StepContext) (map[string]any, error) {
+			if id == "code" {
+				return map[string]any{"status": "ok"}, nil
+			}
+			return map[string]any{"status": "ok"}, nil
+		}
+	}
+
+	def := Definition{Steps: []StepDefinition{
+		{ID: "analyze", Run: run("analyze")},
+		{ID: "code", DependsOn: []string{"analyze"}, Run: run("code")},
+		{ID: "test", DependsOn: []string{"code"}, Run: run("test")},
+	}}
+
+	// Resume the "code" step which was previously paused
+	_, err := engine.Resume(context.Background(), def, nil, "code")
+	if err != nil {
+		t.Fatalf("Resume returned error: %v", err)
+	}
+
+	// Verify events
+	var codeRunningCount int
+	var testRunningCount int
+	for _, e := range events {
+		if e.StepID == "code" && e.Status == StepStatusRunning {
+			codeRunningCount++
+		}
+		if e.StepID == "test" && e.Status == StepStatusRunning {
+			testRunningCount++
+		}
+	}
+
+	// The `running` event should be skipped for the paused step
+	if codeRunningCount != 0 {
+		t.Fatalf("expected 0 running events for resumed step 'code', got %d", codeRunningCount)
+	}
+	// The `running` event should still emit for the subsequent step
+	if testRunningCount != 1 {
+		t.Fatalf("expected 1 running event for subsequent step 'test', got %d", testRunningCount)
+	}
+}

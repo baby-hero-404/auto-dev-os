@@ -336,8 +336,7 @@ export default function AnalyticsPage() {
               <YAxis type="category" dataKey="step" stroke="#94a3b8" fontSize={11} width={100} />
               <Tooltip
                 contentStyle={{ background: "#0f172a", border: "1px solid rgba(148,163,184,0.22)", borderRadius: 8, fontSize: 12 }}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={(value: any) => [`${Math.round(Number(value) / 1000)}s`, "Avg Duration"]}
+                formatter={(value: unknown) => [`${Math.round(Number(value) / 1000)}s`, "Avg Duration"]}
               />
               <Bar dataKey="avg_ms" fill="var(--color-brand-primary)" radius={[0, 6, 6, 0]} />
             </BarChart>
@@ -528,7 +527,7 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {recentFailures.map((failure) => (
+              {(recentFailures || []).map((failure) => (
                 <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                   <td className="px-4 py-3">
                     <Link href={`/projects/${failure.project_id}/tasks/${failure.task_id}/monitor`} className="font-medium text-white hover:text-brand-primary">
@@ -545,7 +544,7 @@ export default function AnalyticsPage() {
                   </td>
                 </tr>
               ))}
-              {recentFailures.length === 0 && (
+              {(!recentFailures || recentFailures.length === 0) && (
                 <tr>
                   <td className="px-4 py-8 text-center text-content-muted" colSpan={5}>
                     No failed tasks recorded.

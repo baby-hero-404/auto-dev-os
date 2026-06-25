@@ -48,10 +48,11 @@ func (n *NineRouter) Metadata() ProviderMetadata {
 
 // Chat sends messages to the OpenAI-compatible completions endpoint.
 func (n *NineRouter) Chat(ctx context.Context, messages []Message) (*Response, error) {
-	payload := map[string]interface{}{
-		"model":    n.model,
-		"messages": messages,
-	}
+	return n.ChatWithOptions(ctx, messages, ChatOptions{})
+}
+
+func (n *NineRouter) ChatWithOptions(ctx context.Context, messages []Message, opts ChatOptions) (*Response, error) {
+	payload := openAIChatPayload(n.model, messages, opts)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -83,19 +84,5 @@ func (n *NineRouter) Chat(ctx context.Context, messages []Message) (*Response, e
 		return nil, fmt.Errorf("9router/Gateway API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
-	var result openaiResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("gateway returned no choices")
-	}
-
-	return &Response{
-		Content:      result.Choices[0].Message.Content,
-		Model:        result.Model,
-		PromptTokens: result.Usage.PromptTokens,
-		OutputTokens: result.Usage.CompletionTokens,
-	}, nil
+	return parseOpenAIChatResponse(respBody)
 }

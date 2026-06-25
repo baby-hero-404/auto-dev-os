@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { Zap, Scale, Rocket } from "lucide-react";
 
 import type { Agent } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -208,9 +209,9 @@ function AgentCard({
                   ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
                   : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
               }`}>
-                {agent.model_level_group === "fast" && "⚡ "}
-                {agent.model_level_group === "balanced" && "⚖️ "}
-                {agent.model_level_group === "powerful" && "🚀 "}
+                {agent.model_level_group === "fast" && <Zap size={10} className="inline mr-0.5" />}
+                {agent.model_level_group === "balanced" && <Scale size={10} className="inline mr-0.5" />}
+                {agent.model_level_group === "powerful" && <Rocket size={10} className="inline mr-0.5" />}
                 {agent.model_level_group}
               </span>
             </div>

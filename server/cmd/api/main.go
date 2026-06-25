@@ -131,24 +131,28 @@ func run() error {
 		skills.BuiltinToolDefinitions(),
 		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
 	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
-	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentManager, sandboxRuntime, promptAssembler)
 	artifactRepo := repository.NewArtifactRepo(db)
-	orch.SetArtifactRepository(artifactRepo)
 	gitProvider := gitops.NewGitHubProvider("")
 	gitOpsAdapter := gitops.NewGitOpsAdapter(gitProvider, repoRepo, cfg.Sandbox.WorkspaceRoot, secretCipher)
 	gitOpsAdapter.SetGitAccountLookup(gitAccountRepo)
-	orch.SetGitOpsClient(gitOpsAdapter)
-	orch.SetRepositoryRepository(repoRepo)
-	orch.SetProjectRepository(projRepo)
-	orch.SetWorkspaceRoot(cfg.Sandbox.WorkspaceRoot)
-	orch.SetWorkspaceRetention(
-		time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
-		time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
-	)
+
+	opts := []orchestrator.Option{
+		orchestrator.WithPrompts(promptAssembler),
+		orchestrator.WithArtifactRepository(artifactRepo),
+		orchestrator.WithGitOpsClient(gitOpsAdapter),
+		orchestrator.WithRepositoryRepository(repoRepo),
+		orchestrator.WithProjectRepository(projRepo),
+		orchestrator.WithWorkspaceRoot(cfg.Sandbox.WorkspaceRoot),
+		orchestrator.WithWorkspaceRetention(
+			time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
+			time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
+		),
+	}
+
 	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {
 		slog.Warn("llm provider disabled", "error", err)
 	} else if provider != nil {
-		orch.SetLLMProvider(provider)
+		opts = append(opts, orchestrator.WithLLMProvider(provider))
 	}
 
 	// Phase 6: Memory & Learning
@@ -164,9 +168,10 @@ func run() error {
 	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "resources", "prompt_base")))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
 	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo)
-	// Attach hooks to orchestrator
-	orch.SetMemoryHooks(memoryHooks)
-	orch.SetLearningEngine(learningEngine)
+
+	opts = append(opts, orchestrator.WithMemoryHooks(memoryHooks), orchestrator.WithLearningEngine(learningEngine))
+
+	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
 	repoSvc := service.NewRepositoryService(repoRepo, secretCipher)
 	repoSvc.SetProjectRepo(projRepo)

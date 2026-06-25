@@ -1,4 +1,4 @@
-package orchestrator
+package steps
 
 import (
 	"context"
@@ -18,26 +18,33 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func (o *Orchestrator) executeStepContextLoad(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
+func ExecuteContextLoad(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
 	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
-		if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusContextLoading); err != nil {
+		if _, err := deps.UpdateTaskStatus(ctx, task.ID, models.TaskStatusContextLoading); err != nil {
 			return nil, fmt.Errorf("update task status: %w", err)
 		}
 	}
 
-	repoPaths := o.resolveContextRepoPaths(ctx, task)
-	result := o.gatherRepoContexts(ctx, task, agent, repoPaths)
+	repoPaths := resolveContextRepoPaths(deps, task)
+	result := gatherRepoContexts(ctx, deps, task, agent, repoPaths)
 
-	_ = o.saveArtifact(ctx, jobID, task.ID, workflow.StepContextLoad, "context", result)
+	_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepContextLoad, "context", result)
 	return result, nil
 }
 
-func (o *Orchestrator) resolveContextRepoPaths(ctx context.Context, task *models.Task) []string {
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+func resolveContextRepoPaths(deps *Deps, task *models.Task) []string {
+	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
 	var repoPaths []string
 
-	ws, errWS := o.LoadTaskWorkspace(ctx, task)
-	if errWS == nil {
+	var ws *models.TaskWorkspace
+	var errWS error
+	if deps.Wkspace != nil {
+		ws, errWS = deps.Wkspace.LoadTaskWorkspace(ctxHelper(task), task)
+	} else {
+		errWS = fmt.Errorf("wkspace manager is nil")
+	}
+
+	if errWS == nil && ws != nil {
 		for _, rWS := range ws.Repos {
 			repoAbs := filepath.Join(ws.Root, rWS.Paths.Main)
 			if _, errStat := os.Stat(repoAbs); errStat == nil {
@@ -68,8 +75,12 @@ func (o *Orchestrator) resolveContextRepoPaths(ctx context.Context, task *models
 	return repoPaths
 }
 
-func (o *Orchestrator) gatherRepoContexts(ctx context.Context, task *models.Task, agent *models.Agent, repoPaths []string) map[string]any {
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+func ctxHelper(task *models.Task) context.Context {
+	return context.Background()
+}
+
+func gatherRepoContexts(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, repoPaths []string) map[string]any {
+	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
 
 	result := map[string]any{}
 	gitLogs := map[string]string{}
@@ -85,24 +96,24 @@ func (o *Orchestrator) gatherRepoContexts(ctx context.Context, task *models.Task
 		if rel == "." {
 			rel = "root"
 		}
-		containerPath := o.containerPathForHostPath(task, rp, "")
+		containerPath := deps.ContainerPathForHostPath(task, rp, "")
 
-		if gitLog := o.getSandboxGitOutput(ctx, task, agent, rel, containerPath, "get_git_log", "log -5 --oneline"); gitLog != "" {
+		if gitLog := getSandboxGitOutput(ctx, deps, task, agent, rel, containerPath, "get_git_log", "log -5 --oneline"); gitLog != "" {
 			gitLogs[rel] = gitLog
 		}
 
-		if branch := o.getSandboxGitOutput(ctx, task, agent, rel, containerPath, "get_git_branch", "rev-parse --abbrev-ref HEAD"); branch != "" {
+		if branch := getSandboxGitOutput(ctx, deps, task, agent, rel, containerPath, "get_git_branch", "rev-parse --abbrev-ref HEAD"); branch != "" {
 			currentBranches[rel] = branch
 		}
 
-		testCommands = append(testCommands, o.detectTestCommands(rp, rel)...)
-		ciConfigs = append(ciConfigs, o.detectCIConfigs(rp, rel)...)
-		o.loadRepoDocs(rp, rel, conventions, architectures, contributings)
+		testCommands = append(testCommands, detectTestCommands(rp, rel)...)
+		ciConfigs = append(ciConfigs, detectCIConfigs(rp, rel)...)
+		loadRepoDocs(rp, rel, conventions, architectures, contributings)
 	}
 
 	missingDoc := len(architectures) == 0 || len(contributings) == 0 || len(conventions) == 0
 	if missingDoc && len(repoPaths) > 0 {
-		o.ensureRepoProfile(ctx, task, agent, repoPaths[0], architectures, conventions)
+		ensureRepoProfile(ctx, deps, task, agent, repoPaths[0], architectures, conventions)
 	}
 
 	result["git_logs"] = gitLogs
@@ -134,7 +145,7 @@ func (o *Orchestrator) gatherRepoContexts(ctx context.Context, task *models.Task
 	return result
 }
 
-func (o *Orchestrator) detectTestCommands(rp, rel string) []string {
+func detectTestCommands(rp, rel string) []string {
 	var cmds []string
 	if _, err := os.Stat(filepath.Join(rp, "Makefile")); err == nil {
 		cmds = append(cmds, fmt.Sprintf("make test (in %s)", rel))
@@ -163,7 +174,7 @@ func (o *Orchestrator) detectTestCommands(rp, rel string) []string {
 	return cmds
 }
 
-func (o *Orchestrator) detectCIConfigs(rp, rel string) []string {
+func detectCIConfigs(rp, rel string) []string {
 	var configs []string
 	if files, err := os.ReadDir(filepath.Join(rp, ".github", "workflows")); err == nil {
 		for _, f := range files {
@@ -178,7 +189,7 @@ func (o *Orchestrator) detectCIConfigs(rp, rel string) []string {
 	return configs
 }
 
-func (o *Orchestrator) loadRepoDocs(rp, rel string, conventions, architectures, contributings map[string]string) {
+func loadRepoDocs(rp, rel string, conventions, architectures, contributings map[string]string) {
 	conventionFiles := []string{".editorconfig", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".golangci.yml"}
 	for _, file := range conventionFiles {
 		if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, file), 10000); err == nil {
@@ -193,9 +204,9 @@ func (o *Orchestrator) loadRepoDocs(rp, rel string, conventions, architectures, 
 	}
 }
 
-func (o *Orchestrator) getSandboxGitOutput(ctx context.Context, task *models.Task, agent *models.Agent, rel, containerPath, stepPrefix, gitCmd string) string {
+func getSandboxGitOutput(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rel, containerPath, stepPrefix, gitCmd string) string {
 	cmd := fmt.Sprintf("git -C %s %s", orchestratorworkspace.QuoteShellArg(containerPath), gitCmd)
-	if diffOutput, err := o.runSandboxStep(ctx, task, agent, stepPrefix+"_"+rel, cmd); err == nil {
+	if diffOutput, err := deps.RunSandboxStep(ctx, task, agent, stepPrefix+"_"+rel, cmd); err == nil {
 		if stdout, ok := diffOutput["stdout"].(string); ok && stdout != "" {
 			return strings.TrimSpace(stdout)
 		}
@@ -203,10 +214,10 @@ func (o *Orchestrator) getSandboxGitOutput(ctx context.Context, task *models.Tas
 	return ""
 }
 
-func (o *Orchestrator) ensureRepoProfile(ctx context.Context, task *models.Task, agent *models.Agent, rp string, architectures, conventions map[string]string) {
+func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rp string, architectures, conventions map[string]string) {
 	var repoURL string
-	if task.RepositoryID != nil && o.repositories != nil {
-		if repos, err := o.repositories.ListByProjectID(ctx, task.ProjectID); err == nil {
+	if task.RepositoryID != nil && deps.Repos != nil {
+		if repos, err := deps.Repos.ListByProjectID(ctx, task.ProjectID); err == nil {
 			for _, r := range repos {
 				if r.ID == *task.RepositoryID {
 					repoURL = r.URL
@@ -216,9 +227,9 @@ func (o *Orchestrator) ensureRepoProfile(ctx context.Context, task *models.Task,
 		}
 	}
 
-	containerPath := o.containerPathForHostPath(task, rp, "")
+	containerPath := deps.ContainerPathForHostPath(task, rp, "")
 	if repoURL == "" {
-		repoURL = o.getSandboxGitOutput(ctx, task, agent, "remote", containerPath, "get_git_remote_origin", "remote get-url origin")
+		repoURL = getSandboxGitOutput(ctx, deps, task, agent, "remote", containerPath, "get_git_remote_origin", "remote get-url origin")
 	}
 	if repoURL == "" {
 		repoURL = filepath.Base(rp)
@@ -226,9 +237,9 @@ func (o *Orchestrator) ensureRepoProfile(ctx context.Context, task *models.Task,
 
 	repoURL = sanitizeRepoURL(repoURL)
 	repoHash := getRepoHash(repoURL)
-	currentCommit := o.getSandboxGitOutput(ctx, task, agent, "commit", containerPath, "get_git_commit", "rev-parse HEAD")
+	currentCommit := getSandboxGitOutput(ctx, deps, task, agent, "commit", containerPath, "get_git_commit", "rev-parse HEAD")
 
-	cacheFile := filepath.Join(filepath.Dir(o.workspaceRoot), "repositories", repoHash, "profile.json")
+	cacheFile := filepath.Join(filepath.Dir(deps.WorkspaceRoot), "repositories", repoHash, "profile.json")
 	var profile RepoProfile
 	cacheHit := false
 
@@ -240,8 +251,8 @@ func (o *Orchestrator) ensureRepoProfile(ctx context.Context, task *models.Task,
 		}
 	}
 
-	if !cacheHit && o.llm != nil {
-		profile, cacheHit = o.generateRepoProfile(ctx, task, agent, rp, repoURL, currentCommit, cacheFile)
+	if !cacheHit && deps.LLM != nil {
+		profile, cacheHit = generateRepoProfile(ctx, deps, task, agent, rp, repoURL, currentCommit, cacheFile)
 	}
 
 	if cacheHit {
@@ -259,7 +270,7 @@ func (o *Orchestrator) ensureRepoProfile(ctx context.Context, task *models.Task,
 	}
 }
 
-func (o *Orchestrator) generateRepoProfile(ctx context.Context, task *models.Task, agent *models.Agent, rp, repoURL, currentCommit, cacheFile string) (RepoProfile, bool) {
+func generateRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rp, repoURL, currentCommit, cacheFile string) (RepoProfile, bool) {
 	var profile RepoProfile
 	treeStr := scanRepoDirectoryTree(rp, 3)
 	var configs []string
@@ -318,7 +329,7 @@ Return ONLY the raw JSON object. Do not include markdown code block formatting (
 		RouteName:  "profiler",
 	})
 
-	resp, err := o.llm.Chat(routeCtx, messages)
+	resp, err := deps.LLM.Chat(routeCtx, messages)
 	if err == nil {
 		cleaned := cleanJSONResponse(resp.Content)
 		if errUnmarshal := json.Unmarshal([]byte(cleaned), &profile); errUnmarshal == nil {

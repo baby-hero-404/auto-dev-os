@@ -82,7 +82,6 @@ func (o *Orchestrator) containerPathForHostPath(task *models.Task, hostPath stri
 	return orchestratorworkspace.ContainerPathForHostPath(localPath, activeWorkspaceHostPath, hostPath)
 }
 
-
 func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool) {
 	file = strings.TrimSpace(file)
 	if file == "" {

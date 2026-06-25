@@ -108,7 +108,7 @@ type UpdateTaskInput struct {
 }
 
 type TaskAnalysis struct {
-	Complexity             string   `json:"complexity"`
+	Complexity string `json:"complexity"`
 	// PrimaryCategory classifies the task type (e.g., "feature", "bug", "docs").
 	PrimaryCategory        string   `json:"primary_category,omitempty"`
 	Scope                  string   `json:"scope"`

@@ -52,7 +52,7 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 			skills = append(skills, skill)
 		}
 	}
-	
+
 	base := a.baseTools
 	if base == nil {
 		base = []llm.ToolDefinition{}

@@ -152,7 +152,7 @@ func TestPRHandler_Reject_TriggersRepair(t *testing.T) {
 	workflowRepo := &testWorkflowRepo{}
 
 	// Initialize orchestrator with mocks
-	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	orch := orchestrator.New(taskRepo, workflowRepo, nil, nil)
 
 	taskSvc := &mockTaskSvc{task: task}
 	auditSvc := &mockAuditSvc{}
@@ -233,7 +233,7 @@ func TestPRHandler_StartReview_And_Approve(t *testing.T) {
 
 	taskRepo := &testTaskRepo{task: task}
 	workflowRepo := &testWorkflowRepo{}
-	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	orch := orchestrator.New(taskRepo, workflowRepo, nil, nil)
 	taskSvc := &mockTaskSvc{task: task}
 	auditSvc := &mockAuditSvc{}
 
@@ -284,7 +284,7 @@ func TestPRHandler_Reject_ExceedsReviewLoopLimit(t *testing.T) {
 	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
 	_ = workflowRepo.CreateCheckpoint(context.Background(), models.WorkflowCheckpoint{TaskID: "task-789", Step: "pr_rejection"})
 
-	orch := orchestrator.NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
+	orch := orchestrator.New(taskRepo, workflowRepo, nil, nil)
 	taskSvc := &mockTaskSvc{task: task}
 	auditSvc := &mockAuditSvc{}
 

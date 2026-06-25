@@ -1,16 +1,41 @@
-package orchestrator
+package steps
 
 import (
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+type mockTaskRepository struct {
+	task *models.Task
+}
+
+func (m *mockTaskRepository) GetByID(ctx context.Context, id string) (*models.Task, error) {
+	return m.task, nil
+}
+
+func (m *mockTaskRepository) Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error) {
+	return m.task, nil
+}
+
+type mockLLMProvider struct {
+	chatFunc func(ctx context.Context, messages []llm.Message) (*llm.Response, error)
+}
+
+func (m *mockLLMProvider) Name() string { return "mock" }
+func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+	return m.chatFunc(ctx, messages)
+}
+func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+	return m.Chat(ctx, messages)
+}
 
 func TestSanitizeRepoURL(t *testing.T) {
 	tests := []struct {
@@ -75,17 +100,12 @@ func TestStepContextLoad_Caching(t *testing.T) {
 		ID: "agent-123",
 	}
 
-	// Create workspace structure without any docs
 	workspaceRoot := filepath.Join(tmpDir, "workspaces")
 	taskWorkspace := filepath.Join(workspaceRoot, task.ID)
 	if err := os.MkdirAll(taskWorkspace, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Mock sandbox commands to return empty outputs
-	sandboxRuntime := &mockSandboxRuntime{}
-
-	// Setup LLM Provider to return mock profile JSON
 	mockProfile := RepoProfile{
 		RepoURL:     "github.com/org/repo",
 		GeneratedAt: "2026-06-24T15:40:00Z",
@@ -105,7 +125,7 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	profileBytes, _ := json.Marshal(mockProfile)
 
 	llmCallCount := 0
-	llmProvider := &mockLLMProviderWithCallback{
+	llmProvider := &mockLLMProvider{
 		chatFunc: func(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
 			llmCallCount++
 			return &llm.Response{
@@ -115,17 +135,34 @@ func TestStepContextLoad_Caching(t *testing.T) {
 		},
 	}
 
-	taskRepo := &mockTaskRepo{task: task}
-	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-123"}}
-
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
-	orch.SetLLMProvider(llmProvider)
-	orch.SetWorkspaceRoot(workspaceRoot)
+	deps := &Deps{
+		WorkspaceRoot: workspaceRoot,
+		Tasks:         &mockTaskRepository{task: task},
+		LLM:           llmProvider,
+		RunSandboxStep: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
+			if strings.Contains(stepID, "get_git_commit") {
+				return map[string]any{"stdout": "abc123commit"}, nil
+			}
+			if strings.Contains(stepID, "get_git_remote_origin") {
+				return map[string]any{"stdout": ""}, nil
+			}
+			return map[string]any{"stdout": "mock output"}, nil
+		},
+		SaveArtifact: func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
+			return nil
+		},
+		UpdateTaskStatus: func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
+			return task, nil
+		},
+		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
+			return hostPath
+		},
+	}
 
 	// First execution (Cache Miss)
-	res, err := orch.executeStepContextLoad(context.Background(), task, agent, "job-123", workflow.StepContext{})
+	res, err := ExecuteContextLoad(context.Background(), deps, task, agent, "job-123", workflow.StepContext{})
 	if err != nil {
-		t.Fatalf("executeStepContextLoad failed: %v", err)
+		t.Fatalf("ExecuteContextLoad failed: %v", err)
 	}
 
 	if llmCallCount != 1 {
@@ -145,9 +182,9 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	}
 
 	// Second execution (Cache Hit)
-	res2, err := orch.executeStepContextLoad(context.Background(), task, agent, "job-123", workflow.StepContext{})
+	res2, err := ExecuteContextLoad(context.Background(), deps, task, agent, "job-123", workflow.StepContext{})
 	if err != nil {
-		t.Fatalf("second executeStepContextLoad failed: %v", err)
+		t.Fatalf("second ExecuteContextLoad failed: %v", err)
 	}
 
 	if llmCallCount != 1 {
@@ -158,20 +195,4 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	if !ok || architectures2["cached_profile"] == "" {
 		t.Errorf("expected cached_profile in architectures on cache hit")
 	}
-}
-
-type mockLLMProviderWithCallback struct {
-	chatFunc func(ctx context.Context, messages []llm.Message) (*llm.Response, error)
-}
-
-func (m *mockLLMProviderWithCallback) Name() string {
-	return "mock-callback-model"
-}
-
-func (m *mockLLMProviderWithCallback) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
-	return m.chatFunc(ctx, messages)
-}
-
-func (m *mockLLMProviderWithCallback) ChatWithOptions(ctx context.Context, messages []llm.Message, _ llm.ChatOptions) (*llm.Response, error) {
-	return m.Chat(ctx, messages)
 }

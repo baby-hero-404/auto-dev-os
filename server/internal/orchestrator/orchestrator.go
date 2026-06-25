@@ -8,8 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/checkpoint"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -35,6 +39,9 @@ type Orchestrator struct {
 	wg            sync.WaitGroup
 	lockCancels   sync.Map
 	lockConns     sync.Map
+	wkspace       *wkspace.Manager
+	checkpoints   *checkpoint.Store
+	repoutil      *repoutil.Manager
 }
 
 // WorkspaceRetention configures how long completed workspaces are kept.
@@ -47,52 +54,81 @@ func defaultWorkspaceRetention() WorkspaceRetention {
 	return WorkspaceRetention{Retention: 72 * time.Hour, Interval: time.Hour}
 }
 
-func NewOrchestrator(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime) *Orchestrator {
-	o := &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, retention: defaultWorkspaceRetention()}
+type Option func(*Orchestrator)
+
+func WithMemoryHooks(hooks MemoryRecorder) Option {
+	return func(o *Orchestrator) {
+		o.memHooks = hooks
+	}
+}
+
+func WithLearningEngine(engine LearningRecorder) Option {
+	return func(o *Orchestrator) {
+		o.learnEngine = engine
+	}
+}
+
+func WithGitOpsClient(client GitOpsClient) Option {
+	return func(o *Orchestrator) {
+		o.gitOps = client
+	}
+}
+
+func WithArtifactRepository(repo ArtifactRepository) Option {
+	return func(o *Orchestrator) {
+		o.artifacts = repo
+	}
+}
+
+func WithRepositoryRepository(repo RepositoryRepository) Option {
+	return func(o *Orchestrator) {
+		o.repositories = repo
+	}
+}
+
+func WithProjectRepository(repo ProjectRepository) Option {
+	return func(o *Orchestrator) {
+		o.projects = repo
+	}
+}
+
+func WithWorkspaceRoot(rootPath string) Option {
+	return func(o *Orchestrator) {
+		o.workspaceRoot = rootPath
+	}
+}
+
+func WithWorkspaceRetention(retention, interval time.Duration) Option {
+	return func(o *Orchestrator) {
+		o.retention = WorkspaceRetention{Retention: retention, Interval: interval}
+	}
+}
+
+func WithLLMProvider(provider llm.Provider) Option {
+	return func(o *Orchestrator) {
+		o.llm = provider
+	}
+}
+
+func WithPrompts(prompts PromptBuilder) Option {
+	return func(o *Orchestrator) {
+		o.prompts = prompts
+	}
+}
+
+func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime, opts ...Option) *Orchestrator {
+	o := &Orchestrator{
+		tasks:     taskRepo,
+		workflows: workflowRepo,
+		agents:    agentManager,
+		runtime:   runtime,
+		retention: defaultWorkspaceRetention(),
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
 	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
 	return o
-}
-
-func NewOrchestratorWithPrompt(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime, prompts PromptBuilder) *Orchestrator {
-	o := &Orchestrator{tasks: taskRepo, workflows: workflowRepo, agents: agentManager, runtime: runtime, prompts: prompts, retention: defaultWorkspaceRetention()}
-	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
-	return o
-}
-
-func (o *Orchestrator) SetMemoryHooks(hooks MemoryRecorder) {
-	o.memHooks = hooks
-}
-
-func (o *Orchestrator) SetLearningEngine(engine LearningRecorder) {
-	o.learnEngine = engine
-}
-
-func (o *Orchestrator) SetGitOpsClient(client GitOpsClient) {
-	o.gitOps = client
-}
-
-func (o *Orchestrator) SetArtifactRepository(repo ArtifactRepository) {
-	o.artifacts = repo
-}
-
-func (o *Orchestrator) SetRepositoryRepository(repo RepositoryRepository) {
-	o.repositories = repo
-}
-
-func (o *Orchestrator) SetProjectRepository(repo ProjectRepository) {
-	o.projects = repo
-}
-
-func (o *Orchestrator) SetWorkspaceRoot(rootPath string) {
-	o.workspaceRoot = rootPath
-}
-
-func (o *Orchestrator) SetWorkspaceRetention(retention, interval time.Duration) {
-	o.retention = WorkspaceRetention{Retention: retention, Interval: interval}
-}
-
-func (o *Orchestrator) SetLLMProvider(provider llm.Provider) {
-	o.llm = provider
 }
 
 func (o *Orchestrator) ListArtifacts(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error) {
@@ -280,4 +316,238 @@ func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) 
 		return fmt.Errorf("review loop limit of %d exceeded. task has failed", maxReviewFixCycles)
 	}
 	return nil
+}
+
+func (o *Orchestrator) initWkspace() {
+	if o.wkspace == nil {
+		o.wkspace = wkspace.NewManager(
+			o.tasks,
+			o.workflows,
+			o.repositories,
+			o.gitOps,
+			o.artifacts,
+			o.workspaceRoot,
+			wkspace.WorkspaceRetention{
+				Retention: o.retention.Retention,
+				Interval:  o.retention.Interval,
+			},
+			o.log,
+			o.applyPatch,
+		)
+	} else {
+		o.wkspace.Tasks = o.tasks
+		o.wkspace.Workflows = o.workflows
+		o.wkspace.Repositories = o.repositories
+		o.wkspace.GitOps = o.gitOps
+		o.wkspace.Artifacts = o.artifacts
+		o.wkspace.WorkspaceRoot = o.workspaceRoot
+		o.wkspace.Retention = wkspace.WorkspaceRetention{
+			Retention: o.retention.Retention,
+			Interval:  o.retention.Interval,
+		}
+	}
+}
+
+func (o *Orchestrator) GetTaskWorkspace(task *models.Task) *models.TaskWorkspace {
+	o.initWkspace()
+	return o.wkspace.GetTaskWorkspace(task)
+}
+
+func (o *Orchestrator) InitTaskWorkspace(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
+	o.initWkspace()
+	return o.wkspace.InitTaskWorkspace(ctx, task)
+}
+
+func (o *Orchestrator) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
+	o.initWkspace()
+	return o.wkspace.LoadTaskWorkspace(ctx, task)
+}
+
+func (o *Orchestrator) SaveTaskWorkspaceMetadata(task *models.Task, ws *models.TaskWorkspace) error {
+	o.initWkspace()
+	return o.wkspace.SaveTaskWorkspaceMetadata(task, ws)
+}
+
+func (o *Orchestrator) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task, path string) (*models.RepoWorkspace, error) {
+	o.initWkspace()
+	return o.wkspace.FindRepoWorkspaceByPath(ctx, task, path)
+}
+
+func (o *Orchestrator) RemoveWorkspace(taskID string) error {
+	o.initWkspace()
+	return o.wkspace.RemoveWorkspace(taskID)
+}
+
+func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
+	o.initWkspace()
+	o.wkspace.StartWorkspacePruner(ctx)
+}
+
+func (o *Orchestrator) StartLogPruner(ctx context.Context, retentionDays int, fileRoot string) {
+	o.initWkspace()
+	o.wkspace.StartLogPruner(ctx, retentionDays, fileRoot)
+}
+
+func (o *Orchestrator) ensureWorkspaceCloned(ctx context.Context, task *models.Task, agent *models.Agent, jobID string) error {
+	o.initWkspace()
+	return o.wkspace.EnsureWorkspaceCloned(ctx, task, agent, jobID)
+}
+
+func (o *Orchestrator) cleanupWorkspaceAfterFinalState(ctx context.Context, taskID string) {
+	o.initWkspace()
+	o.wkspace.CleanupWorkspaceAfterFinalState(ctx, taskID)
+}
+
+func (o *Orchestrator) partialCleanupWorkspace(ctx context.Context, taskID string) error {
+	o.initWkspace()
+	return o.wkspace.PartialCleanupWorkspace(ctx, taskID)
+}
+
+func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
+	o.initWkspace()
+	return o.wkspace.PruneWorkspaces(ctx)
+}
+
+func (o *Orchestrator) releaseWorkspaceLock(taskID string) {
+	o.initWkspace()
+	o.wkspace.ReleaseWorkspaceLock(taskID)
+}
+
+func (o *Orchestrator) initCheckpoints() {
+	if o.checkpoints == nil {
+		o.checkpoints = checkpoint.NewStore(
+			o.workflows,
+			o.artifacts,
+			o.log,
+		)
+	} else {
+		o.checkpoints.Workflows = o.workflows
+		o.checkpoints.Artifacts = o.artifacts
+	}
+}
+
+func (o *Orchestrator) getSuccessfulCheckpoint(ctx context.Context, taskID string, step string) (map[string]any, bool) {
+	o.initCheckpoints()
+	return o.checkpoints.GetSuccessful(ctx, taskID, step)
+}
+
+func (o *Orchestrator) countSuccessfulCheckpoints(ctx context.Context, taskID string, step string) int {
+	o.initCheckpoints()
+	return o.checkpoints.CountSuccessful(ctx, taskID, step)
+}
+
+func (o *Orchestrator) getSavedPatch(ctx context.Context, taskID string, step string) (string, error) {
+	o.initCheckpoints()
+	return o.checkpoints.GetSavedPatch(ctx, taskID, step)
+}
+
+func (o *Orchestrator) saveArtifact(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
+	o.initCheckpoints()
+	return o.checkpoints.SaveArtifact(ctx, jobID, taskID, step, artType, payload)
+}
+
+func (o *Orchestrator) withCheckpointRecovery(task *models.Task, agent *models.Agent, jobStep string, stepID string, runner workflow.StepFunc) workflow.StepFunc {
+	o.initCheckpoints()
+	return o.checkpoints.WithCheckpointRecovery(task, agent, jobStep, stepID, runner, o.applyPatch, o.updateTaskStatus)
+}
+
+func (o *Orchestrator) initRepoutil() {
+	if o.repoutil == nil {
+		var listRepos func(ctx context.Context, projectID string) ([]models.Repository, error)
+		if o.repositories != nil {
+			listRepos = o.repositories.ListByProjectID
+		}
+		var getChangedFiles func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) ([]string, error)
+		var getDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error)
+		var getWorkspaceDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, worktreeSuffix string) (string, error)
+		var getPRDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error)
+		if o.sandboxGit != nil {
+			getChangedFiles = o.sandboxGit.GetChangedFiles
+			getDiff = o.sandboxGit.GetDiff
+			getWorkspaceDiff = o.sandboxGit.GetWorkspaceDiff
+			getPRDiff = o.sandboxGit.GetPRDiff
+		}
+		o.repoutil = repoutil.NewManager(
+			o.workspaceRoot,
+			listRepos,
+			o.GetTaskWorkspace,
+			o.LoadTaskWorkspace,
+			o.SaveTaskWorkspaceMetadata,
+			o.FindRepoWorkspaceByPath,
+			o.containerPathForHostPath,
+			o.runSandboxStep,
+			o.runSandboxStepInWorktree,
+			getChangedFiles,
+			getDiff,
+			getWorkspaceDiff,
+			getPRDiff,
+			o.log,
+		)
+	} else {
+		o.repoutil.WorkspaceRoot = o.workspaceRoot
+		if o.repositories != nil {
+			o.repoutil.ListRepositories = o.repositories.ListByProjectID
+		}
+		if o.sandboxGit != nil {
+			o.repoutil.SandboxGitGetChangedFiles = o.sandboxGit.GetChangedFiles
+			o.repoutil.SandboxGitGetDiff = o.sandboxGit.GetDiff
+			o.repoutil.SandboxGitGetWorkspaceDiff = o.sandboxGit.GetWorkspaceDiff
+			o.repoutil.SandboxGitGetPRDiff = o.sandboxGit.GetPRDiff
+		}
+	}
+}
+
+func (o *Orchestrator) getTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
+	o.initRepoutil()
+	return o.repoutil.GetTaskRepoHostPath(ctx, task)
+}
+
+func (o *Orchestrator) hostWorktreePath(task *models.Task, repoPath string, worktreeSuffix string) string {
+	o.initRepoutil()
+	return o.repoutil.HostWorktreePath(task, repoPath, worktreeSuffix)
+}
+
+func (o *Orchestrator) repoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string {
+	o.initRepoutil()
+	return o.repoutil.RepoHostPath(task, ws, repo)
+}
+
+func (o *Orchestrator) applyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
+	o.initRepoutil()
+	return o.repoutil.ApplyPatch(ctx, task, agent, stepID, patchText, worktreeSuffix)
+}
+
+func (o *Orchestrator) captureWorkspaceDiff(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
+	o.initRepoutil()
+	return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
+}
+
+func (o *Orchestrator) capturePRDiff(ctx context.Context, task *models.Task, agent *models.Agent, baseBranch string) (string, error) {
+	o.initRepoutil()
+	return o.repoutil.CapturePRDiff(ctx, task, agent, baseBranch)
+}
+
+func (o *Orchestrator) getChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, targetPath string, worktreeSuffix string) ([]string, error) {
+	o.initRepoutil()
+	return o.repoutil.GetChangedFiles(ctx, task, agent, targetPath, worktreeSuffix)
+}
+
+func (o *Orchestrator) loadTargetRepositories(ctx context.Context, task *models.Task) ([]models.Repository, error) {
+	o.initRepoutil()
+	return o.repoutil.LoadTargetRepositories(ctx, task)
+}
+
+func (o *Orchestrator) setupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+	o.initRepoutil()
+	o.repoutil.SetupRoleBranches(ctx, task, agent, jobID, repos, ws)
+}
+
+func (o *Orchestrator) setupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
+	o.initRepoutil()
+	return o.repoutil.SetupRoleWorktrees(ctx, task, agent, repos, ws, roleName, roleLabel, worktreeSuffix)
+}
+
+func (o *Orchestrator) commitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
+	o.initRepoutil()
+	return o.repoutil.CommitRoleWorktrees(ctx, task, agent, repos, ws, roleName, roleLabel, worktreeSuffix)
 }

@@ -12,7 +12,9 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	orchtester "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/tester"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -359,12 +361,13 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	llmProvider := &mockLLMProvider{responses: llmResponses}
 
 	// Initialize Orchestrator
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentAssigner, sandboxRuntime, nil)
-	orch.SetLLMProvider(llmProvider)
-	orch.SetGitOpsClient(gitOps)
-	orch.SetArtifactRepository(artifactRepo)
-	orch.SetRepositoryRepository(reposRepo)
-	orch.SetWorkspaceRoot(tmpDir)
+	orch := New(taskRepo, workflowRepo, agentAssigner, sandboxRuntime,
+		WithLLMProvider(llmProvider),
+		WithGitOpsClient(gitOps),
+		WithArtifactRepository(artifactRepo),
+		WithRepositoryRepository(reposRepo),
+		WithWorkspaceRoot(tmpDir),
+	)
 
 	// Run execution
 	orch.run(context.Background(), "job-123")
@@ -448,10 +451,11 @@ func TestOrchestrator_StepPR_NoChangesMerged(t *testing.T) {
 	artifactRepo := &mockArtifactRepo{}
 	reposRepo := &mockRepositoriesRepo{repo: repo}
 
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, agentAssigner, sandboxRuntime, nil)
-	orch.SetGitOpsClient(gitOps)
-	orch.SetArtifactRepository(artifactRepo)
-	orch.SetRepositoryRepository(reposRepo)
+	orch := New(taskRepo, workflowRepo, agentAssigner, sandboxRuntime,
+		WithGitOpsClient(gitOps),
+		WithArtifactRepository(artifactRepo),
+		WithRepositoryRepository(reposRepo),
+	)
 
 	runners := orch.stepRunners(task, agent, job.ID, job.Step)
 	runner := runners[workflow.StepPR]
@@ -531,8 +535,7 @@ func TestParseJSONMarkdown(t *testing.T) {
 
 func TestOrchestrator_RemoveWorkspaceSafety(t *testing.T) {
 	root := t.TempDir()
-	orch := NewOrchestrator(nil, nil, nil, nil)
-	orch.SetWorkspaceRoot(root)
+	orch := New(nil, nil, nil, nil, WithWorkspaceRoot(root))
 
 	if err := os.MkdirAll(filepath.Join(root, "task-1"), 0o755); err != nil {
 		t.Fatal(err)
@@ -566,9 +569,10 @@ func TestOrchestrator_PruneWorkspacesHonorsRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orch := NewOrchestrator(nil, nil, nil, nil)
-	orch.SetWorkspaceRoot(root)
-	orch.SetWorkspaceRetention(time.Hour, time.Hour)
+	orch := New(nil, nil, nil, nil,
+		WithWorkspaceRoot(root),
+		WithWorkspaceRetention(time.Hour, time.Hour),
+	)
 
 	removed, err := orch.pruneWorkspaces(context.Background())
 	if err != nil {
@@ -600,7 +604,7 @@ func TestOrchestrator_PruneLogsHonorsRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, err := pruneLogFiles(context.Background(), 14, root)
+	removed, err := wkspace.PruneLogFiles(context.Background(), 14, root)
 	if err != nil {
 		t.Fatalf("prune log files: %v", err)
 	}
@@ -675,7 +679,6 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 
 	taskRepo := &mockTaskRepo{task: task}
 	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-1"}}
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
 	llmResponses := map[string]any{
 		"complexity":              "medium",
 		"spec_status":             "approved",
@@ -688,7 +691,7 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 	mockLLM := &mockLLMProvider{responses: map[string]string{
 		"Analyze": string(rawBytes),
 	}}
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, nil, WithLLMProvider(mockLLM))
 
 	runners := orch.stepRunners(task, agent, "job-1", "")
 	analyzeRunner := runners[workflow.StepAnalyze]
@@ -765,10 +768,10 @@ func TestOrchestrator_StepAnalyze_UsesNativeToolCalls(t *testing.T) {
 	}}
 	taskRepo := &mockTaskRepo{task: task}
 	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-native-tools"}}
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
-	orch.workspaceRoot = tmpDir
-	orch.runtime = analyzeRuntime
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, analyzeRuntime,
+		WithWorkspaceRoot(tmpDir),
+		WithLLMProvider(mockLLM),
+	)
 
 	runners := orch.stepRunners(task, agent, "job-native-tools", "")
 	res, err := runners[workflow.StepAnalyze](context.Background(), workflow.StepContext{})
@@ -810,8 +813,7 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	mockLLM := &mockLLMProvider{responses: llmResponses}
 	sandboxRuntime := &mockSandboxRuntime{}
 
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, sandboxRuntime, WithLLMProvider(mockLLM))
 
 	runners := orch.stepRunners(task, agent, "job-loop", "")
 	fixRunner := runners[workflow.StepFix]
@@ -873,12 +875,13 @@ func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testi
 			{TaskID: task.ID, Step: workflow.StepReview, State: []byte(`{"status":"success"}`)},
 		},
 	}
-	orch := NewOrchestratorWithPrompt(&mockTaskRepo{task: task}, workflowRepo, &mockAgentAssigner{agent: agent}, &mockSandboxRuntime{}, nil)
-	orch.SetLLMProvider(&mockLLMProvider{responses: map[string]string{
-		"Review": `{"findings":[{"severity":"high","file":"main.go","line":1,"recommendation":"fix it"}]}`,
-	}})
+	orch := New(&mockTaskRepo{task: task}, workflowRepo, &mockAgentAssigner{agent: agent}, &mockSandboxRuntime{},
+		WithLLMProvider(&mockLLMProvider{responses: map[string]string{
+			"Review": `{"findings":[{"severity":"high","file":"main.go","line":1,"recommendation":"fix it"}]}`,
+		}}),
+	)
 
-	out, err := orch.executeStepReview(context.Background(), task, agent, "job-review-cycle", workflow.StepContext{})
+	out, err := steps.ExecuteReview(context.Background(), orch.makeStepsDeps(task, agent, "job-review-cycle"), task, agent, "job-review-cycle", workflow.StepContext{})
 	if err != nil {
 		t.Fatalf("executeStepReview returned error: %v", err)
 	}
@@ -888,6 +891,14 @@ func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testi
 	if task.Status != models.TaskStatusFixing {
 		t.Fatalf("expected review with findings to move to fixing, got %s", task.Status)
 	}
+}
+
+type testMockRepositoriesRepo struct {
+	repos []models.Repository
+}
+
+func (m *testMockRepositoriesRepo) ListByProjectID(ctx context.Context, projectID string) ([]models.Repository, error) {
+	return m.repos, nil
 }
 
 func TestOrchestrator_GetTaskRepoHostPath_FailsOnRepositoryIDMismatch(t *testing.T) {
@@ -1011,10 +1022,11 @@ func TestOrchestrator_Resume_DoesNotLoseCode(t *testing.T) {
 		},
 	}
 
-	orch := NewOrchestrator(taskRepo, workflowRepo, agentAssigner, sandboxRuntime)
-	orch.SetGitOpsClient(gitOps)
-	orch.SetRepositoryRepository(reposRepo)
-	orch.SetWorkspaceRoot(tmpDir)
+	orch := New(taskRepo, workflowRepo, agentAssigner, sandboxRuntime,
+		WithGitOpsClient(gitOps),
+		WithRepositoryRepository(reposRepo),
+		WithWorkspaceRoot(tmpDir),
+	)
 
 	// Since hasSuccessfulCodeStep is true and local git directory exists,
 	// ensureWorkspaceCloned must NOT call resetExistingWorkspace (so gitOps must not be queried or clean git commands run).
@@ -1054,8 +1066,7 @@ func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
 	mockLLM := &mockLLMProvider{responses: llmResponses}
 	sandboxRuntime := &mockSandboxRuntime{}
 
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, sandboxRuntime, nil)
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, sandboxRuntime, WithLLMProvider(mockLLM))
 
 	runners := orch.stepRunners(task, agent, "job-loop", "")
 	fixRunner := runners[workflow.StepFix]
@@ -1099,9 +1110,10 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 			URL: "https://github.com/different/repo.git",
 		},
 	}
-	orchNoMatch := NewOrchestrator(taskRepo, workflowRepo, nil, nil)
-	orchNoMatch.SetGitOpsClient(gitOps)
-	orchNoMatch.SetRepositoryRepository(reposRepoNoMatch)
+	orchNoMatch := New(taskRepo, workflowRepo, nil, nil,
+		WithGitOpsClient(gitOps),
+		WithRepositoryRepository(reposRepoNoMatch),
+	)
 
 	_, err := orchNoMatch.ApproveMerge(context.Background(), task.ID)
 	if err == nil || !strings.Contains(err.Error(), "no matching repository found for PR URL") {
@@ -1114,9 +1126,10 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 			URL: "https://github.com/test/repo.git",
 		},
 	}
-	orchMatch := NewOrchestrator(taskRepo, workflowRepo, nil, nil)
-	orchMatch.SetGitOpsClient(gitOps)
-	orchMatch.SetRepositoryRepository(reposRepoMatch)
+	orchMatch := New(taskRepo, workflowRepo, nil, nil,
+		WithGitOpsClient(gitOps),
+		WithRepositoryRepository(reposRepoMatch),
+	)
 
 	updated, err := orchMatch.ApproveMerge(context.Background(), task.ID)
 	if err != nil {
@@ -1225,127 +1238,6 @@ index abc..def 100644
 	}
 }
 
-func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "analyze-source-root-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoID := "repo-a"
-	task := &models.Task{ID: "task-analyze-root", ProjectID: "proj-analyze-root", RepositoryID: &repoID}
-	analyzeRuntime := &mockAnalyzeSandboxRuntime{outputs: map[string]string{
-		"find .":    "src/main.go\n",
-		"grep -RIn": "./src/main.go:2: const marker = true\n",
-	}}
-	orch := &Orchestrator{workspaceRoot: tmpDir, runtime: analyzeRuntime}
-	ws := orch.GetTaskWorkspace(task)
-	ws.Repos = []models.RepoWorkspace{{
-		RepoID: repoID,
-		Name:   "repo-a",
-		Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
-	}}
-	repoRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
-	if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
-		t.Fatalf("failed to create repo src: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte("package main\nconst marker = true\n"), 0o644); err != nil {
-		t.Fatalf("failed to write source file: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(ws.Root, "logs"), 0o755); err != nil {
-		t.Fatalf("failed to create logs dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(ws.Root, "logs", "llm.txt"), []byte("marker in generated logs\n"), 0o644); err != nil {
-		t.Fatalf("failed to write generated file: %v", err)
-	}
-	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
-		t.Fatalf("failed to save metadata: %v", err)
-	}
-
-	agent := &models.Agent{ID: "agent-analyze"}
-	files, err := orch.listAnalyzeFiles(context.Background(), task, agent)
-	if err != nil {
-		t.Fatalf("listAnalyzeFiles returned error: %v", err)
-	}
-	if !strings.Contains(files, "src/main.go") {
-		t.Fatalf("expected source file in analyze list, got: %s", files)
-	}
-	if strings.Contains(files, "logs/llm.txt") || strings.Contains(files, "code/repos") {
-		t.Fatalf("analyze list should not expose generated workspace paths, got: %s", files)
-	}
-
-	grepResult, err := orch.grepAnalyzeFiles(context.Background(), task, agent, "marker")
-	if err != nil {
-		t.Fatalf("grepAnalyzeFiles returned error: %v", err)
-	}
-	if !strings.Contains(grepResult, "src/main.go") {
-		t.Fatalf("expected grep to find source file, got: %s", grepResult)
-	}
-	if strings.Contains(grepResult, "logs/llm.txt") {
-		t.Fatalf("grep should not search generated logs, got: %s", grepResult)
-	}
-	if len(analyzeRuntime.commands) == 0 || !strings.Contains(strings.Join(analyzeRuntime.commands, "\n"), "find .") {
-		t.Fatalf("expected analyze tools to run through sandbox commands, got: %#v", analyzeRuntime.commands)
-	}
-}
-
-func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "analyze-multi-repo-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	task := &models.Task{ID: "task-analyze-multi", ProjectID: "proj-analyze-multi"}
-	analyzeRuntime := &mockAnalyzeSandboxRuntime{outputs: map[string]string{
-		"find .":        "src/main.go\n",
-		"head -c 20000": "repo-b marker\n",
-	}}
-	orch := &Orchestrator{workspaceRoot: tmpDir, runtime: analyzeRuntime}
-	ws := orch.GetTaskWorkspace(task)
-	ws.Repos = []models.RepoWorkspace{
-		{
-			RepoID: "repo-a",
-			Name:   "repo-a",
-			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
-		},
-		{
-			RepoID: "repo-b",
-			Name:   "repo-b",
-			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-b", "main")},
-		},
-	}
-	for _, repo := range ws.Repos {
-		repoRoot := filepath.Join(ws.Root, repo.Paths.Main)
-		if err := os.MkdirAll(filepath.Join(repoRoot, "src"), 0o755); err != nil {
-			t.Fatalf("failed to create repo src: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte(repo.Name+" marker\n"), 0o644); err != nil {
-			t.Fatalf("failed to write source file: %v", err)
-		}
-	}
-	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
-		t.Fatalf("failed to save metadata: %v", err)
-	}
-
-	agent := &models.Agent{ID: "agent-analyze"}
-	files, err := orch.listAnalyzeFiles(context.Background(), task, agent)
-	if err != nil {
-		t.Fatalf("listAnalyzeFiles returned error: %v", err)
-	}
-	if !strings.Contains(files, "repo-a/src/main.go") || !strings.Contains(files, "repo-b/src/main.go") {
-		t.Fatalf("expected prefixed multi-repo files, got: %s", files)
-	}
-
-	content, err := orch.readAnalyzeFile(context.Background(), task, agent, "repo-b/src/main.go")
-	if err != nil {
-		t.Fatalf("readAnalyzeFile returned error: %v", err)
-	}
-	if !strings.Contains(content, "repo-b marker") {
-		t.Fatalf("unexpected repo-b content: %s", content)
-	}
-}
-
 func TestTestProjectDetectionAndTargetedCommands(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-project-detection-*")
 	if err != nil {
@@ -1435,13 +1327,11 @@ func TestOrchestrator_StepAnalyze_FallbackForcesReview(t *testing.T) {
 
 	taskRepo := &mockTaskRepo{task: task}
 	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-fallback"}}
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
-
 	// Malformed LLM response to trigger fallback
 	mockLLM := &mockLLMProvider{responses: map[string]string{
 		"": "this is not valid JSON and will fail parsing",
 	}}
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, nil, WithLLMProvider(mockLLM))
 
 	runners := orch.stepRunners(task, agent, "job-fallback", "")
 	analyzeRunner := runners[workflow.StepAnalyze]
@@ -1477,11 +1367,11 @@ func TestOrchestrator_StepAnalyze_FallbackForcesReview(t *testing.T) {
 
 func TestOrchestrator_StepAnalyze_ComplexityChangeTriggersGraphRebuild(t *testing.T) {
 	task := &models.Task{
-		ID:          "task-graph-change",
-		ProjectID:   "proj-graph-change",
-		Status:      models.TaskStatusAnalyzing,
-		Complexity:  models.TaskComplexityEasy, // Initial complexity
-		SpecStatus:  models.TaskSpecStatusDraft,
+		ID:         "task-graph-change",
+		ProjectID:  "proj-graph-change",
+		Status:     models.TaskStatusAnalyzing,
+		Complexity: models.TaskComplexityEasy, // Initial complexity
+		SpecStatus: models.TaskSpecStatusDraft,
 	}
 
 	agent := &models.Agent{
@@ -1491,8 +1381,6 @@ func TestOrchestrator_StepAnalyze_ComplexityChangeTriggersGraphRebuild(t *testin
 
 	taskRepo := &mockTaskRepo{task: task}
 	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-graph-change"}}
-	orch := NewOrchestratorWithPrompt(taskRepo, workflowRepo, nil, nil, nil)
-
 	mockLLM := &mockLLMProvider{responses: map[string]string{
 		"": `{
 			"complexity": "hard",
@@ -1506,7 +1394,7 @@ func TestOrchestrator_StepAnalyze_ComplexityChangeTriggersGraphRebuild(t *testin
 			"required_skills": []
 		}`,
 	}}
-	orch.SetLLMProvider(mockLLM)
+	orch := New(taskRepo, workflowRepo, nil, nil, WithLLMProvider(mockLLM))
 
 	runners := orch.stepRunners(task, agent, "job-graph-change", "")
 	analyzeRunner := runners[workflow.StepAnalyze]

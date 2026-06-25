@@ -285,7 +285,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
 				"status":     models.WorkflowJobStatusQueued,
 				"step":       workflow.StepReview,
-				"last_error": nil,
+				"last_error": "",
 			})
 			return
 		}
@@ -293,7 +293,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			o.log(ctx, task.ID, &job.ID, "info", "Workflow graph dynamically changed due to complexity update. Re-queueing job.")
 			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
 				"status":     models.WorkflowJobStatusQueued,
-				"last_error": nil,
+				"last_error": "",
 			})
 			return
 		}
@@ -360,7 +360,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	defer o.cleanupWorkspaceAfterFinalState(cleanupCtx, task.ID)
-	if _, err := o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusDone, "step": models.WorkflowStepDone, "last_error": nil}); err != nil {
+	if _, err := o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusDone, "step": models.WorkflowStepDone, "last_error": ""}); err != nil {
 		o.fail(ctx, job, err)
 		return
 	}

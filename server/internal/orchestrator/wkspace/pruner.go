@@ -1,4 +1,4 @@
-package orchestrator
+package wkspace
 
 import (
 	"context"
@@ -12,16 +12,16 @@ import (
 )
 
 // StartWorkspacePruner runs a periodic cleanup loop for old workspaces.
-func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
-	if o.retention.Retention <= 0 {
+func (m *Manager) StartWorkspacePruner(ctx context.Context) {
+	if m.Retention.Retention <= 0 {
 		return
 	}
-	interval := o.retention.Interval
+	interval := m.Retention.Interval
 	if interval <= 0 {
 		interval = time.Hour
 	}
 
-	if removed, err := o.pruneWorkspaces(ctx); err != nil {
+	if removed, err := m.PruneWorkspaces(ctx); err != nil {
 		observability.Warn(ctx, "workspace prune failed", "error", err)
 	} else if removed > 0 {
 		observability.Info(ctx, "workspace prune completed", "removed", removed)
@@ -34,7 +34,7 @@ func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if removed, err := o.pruneWorkspaces(ctx); err != nil {
+			if removed, err := m.PruneWorkspaces(ctx); err != nil {
 				observability.Warn(ctx, "workspace prune failed", "error", err)
 			} else if removed > 0 {
 				observability.Info(ctx, "workspace prune completed", "removed", removed)
@@ -43,8 +43,8 @@ func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
 	}
 }
 
-func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
-	root := o.workspaceRoot
+func (m *Manager) PruneWorkspaces(ctx context.Context) (int, error) {
+	root := m.WorkspaceRoot
 	if root == "" {
 		root = "/tmp/auto-code-os/workspaces"
 	}
@@ -56,7 +56,7 @@ func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	cutoff := time.Now().Add(-o.retention.Retention)
+	cutoff := time.Now().Add(-m.Retention.Retention)
 	removed := 0
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -68,18 +68,18 @@ func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
 			continue
 		}
 		taskID := entry.Name()
-		if o.tasks != nil {
-			task, err := o.tasks.GetByID(ctx, taskID)
+		if m.Tasks != nil {
+			task, err := m.Tasks.GetByID(ctx, taskID)
 			if err != nil {
 				if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "record not found") {
-					if err := o.RemoveWorkspace(taskID); err == nil {
+					if err := m.RemoveWorkspace(taskID); err == nil {
 						removed++
 					}
 				}
 				continue
 			}
 			if task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusFailed {
-				if err := o.partialCleanupWorkspace(ctx, taskID); err != nil {
+				if err := m.PartialCleanupWorkspace(ctx, taskID); err != nil {
 					observability.Warn(ctx, "workspace prune failed", "name", taskID, "error", err)
 					continue
 				}
@@ -87,7 +87,7 @@ func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
 			}
 		} else {
 			if info.ModTime().Before(cutoff) {
-				if err := o.RemoveWorkspace(entry.Name()); err != nil {
+				if err := m.RemoveWorkspace(entry.Name()); err != nil {
 					observability.Warn(ctx, "workspace prune failed", "name", entry.Name(), "error", err)
 					continue
 				}
@@ -99,12 +99,12 @@ func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
 }
 
 // StartLogPruner runs a periodic cleanup loop for old log files.
-func (o *Orchestrator) StartLogPruner(ctx context.Context, retentionDays int, fileRoot string) {
+func (m *Manager) StartLogPruner(ctx context.Context, retentionDays int, fileRoot string) {
 	if retentionDays <= 0 || fileRoot == "" {
 		return
 	}
 	interval := time.Hour
-	if pruned, err := pruneLogFiles(ctx, retentionDays, fileRoot); err != nil {
+	if pruned, err := PruneLogFiles(ctx, retentionDays, fileRoot); err != nil {
 		observability.Warn(ctx, "log files prune failed", "error", err)
 	} else if pruned > 0 {
 		observability.Info(ctx, "log files prune completed", "pruned", pruned)
@@ -117,7 +117,7 @@ func (o *Orchestrator) StartLogPruner(ctx context.Context, retentionDays int, fi
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if pruned, err := pruneLogFiles(ctx, retentionDays, fileRoot); err != nil {
+			if pruned, err := PruneLogFiles(ctx, retentionDays, fileRoot); err != nil {
 				observability.Warn(ctx, "log files prune failed", "error", err)
 			} else if pruned > 0 {
 				observability.Info(ctx, "log files prune completed", "pruned", pruned)
@@ -126,7 +126,7 @@ func (o *Orchestrator) StartLogPruner(ctx context.Context, retentionDays int, fi
 	}
 }
 
-func pruneLogFiles(ctx context.Context, retentionDays int, fileRoot string) (int, error) {
+func PruneLogFiles(ctx context.Context, retentionDays int, fileRoot string) (int, error) {
 	entries, err := os.ReadDir(fileRoot)
 	if err != nil {
 		if os.IsNotExist(err) {

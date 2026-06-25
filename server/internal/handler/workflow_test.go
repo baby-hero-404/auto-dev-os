@@ -36,7 +36,6 @@ func (m *mockArtifactRepo) ListByTaskID(ctx context.Context, taskID string) ([]m
 }
 
 func TestWorkflowHandler_Artifacts(t *testing.T) {
-	orch := orchestrator.NewOrchestrator(nil, nil, nil, nil)
 	repo := &mockArtifactRepo{
 		artifacts: []models.WorkflowArtifact{
 			{
@@ -47,7 +46,7 @@ func TestWorkflowHandler_Artifacts(t *testing.T) {
 			},
 		},
 	}
-	orch.SetArtifactRepository(repo)
+	orch := orchestrator.New(nil, nil, nil, nil, orchestrator.WithArtifactRepository(repo))
 
 	h := NewWorkflowHandler(orch)
 

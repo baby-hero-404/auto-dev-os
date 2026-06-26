@@ -18,22 +18,78 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecuteAnalyze(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, stepCtx workflow.StepContext) (map[string]any, error) {
-	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
+
+// AnalyzeStep implements Step for the analysis phase.
+type AnalyzeStep struct {
+	rt            StepRuntime
+	workspaceRoot string
+	tasks         TaskReader
+	taskUpdate    TaskUpdater
+	projects      ProjectReader
+	llm           LLMChatter
+	prompts       PromptAssembler
+	sandbox       SandboxRunner
+	artifacts     ArtifactSaver
+	status        StatusUpdater
+	traces        TraceRecorder
+	log           Logger
+	wkspace       WorkspaceLoader
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+}
+
+func NewAnalyzeStep(
+	rt StepRuntime,
+	workspaceRoot string,
+	tasks TaskReader,
+	taskUpdate TaskUpdater,
+	projects ProjectReader,
+	llm LLMChatter,
+	prompts PromptAssembler,
+	sandbox SandboxRunner,
+	artifacts ArtifactSaver,
+	status StatusUpdater,
+	traces TraceRecorder,
+	log Logger,
+	wkspace WorkspaceLoader,
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+) *AnalyzeStep {
+	return &AnalyzeStep{
+		rt:            rt,
+		workspaceRoot: workspaceRoot,
+		tasks:         tasks,
+		taskUpdate:    taskUpdate,
+		projects:      projects,
+		llm:           llm,
+		prompts:       prompts,
+		sandbox:       sandbox,
+		artifacts:     artifacts,
+		status:        status,
+		traces:        traces,
+		log:           log,
+		wkspace:       wkspace,
+		containerPath: containerPath,
+	}
+}
+
+func (s *AnalyzeStep) ID() string                              { return workflow.StepAnalyze }
+func (s *AnalyzeStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusAnalyzing }
+
+func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
 	ctx = context.WithValue(ctx, retrieval.WorkspaceRootKey, localPath)
 
-	if deps.Prompts != nil {
-		messages, tools, err := deps.Prompts.AssembleForAgent(ctx, *task, agent, nil)
+	if s.prompts != nil {
+		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil)
 		if err != nil {
 			return nil, fmt.Errorf("assemble prompt: %w", err)
 		}
-		deps.Log(ctx, task.ID, nil, "info", fmt.Sprintf("assembled prompt with %d messages and %d tools", len(messages), len(tools)))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("assembled prompt with %d messages and %d tools", len(messages), len(tools)))
 	}
-	if patch.TaskReadyForExecution(task) {
-		return map[string]any{"complexity": task.Complexity, "spec_status": task.SpecStatus}, nil
+	if patch.TaskReadyForExecution(s.rt.Task) {
+		return StepResult{"complexity": s.rt.Task.Complexity, "spec_status": s.rt.Task.SpecStatus}, nil
 	}
 
-	analysis, fallbackUsed, err := runAnalyzeProcess(ctx, deps, task, agent, stepCtx)
+	analysis, fallbackUsed, err := s.runAnalyzeProcess(ctx, stepCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -42,41 +98,41 @@ func ExecuteAnalyze(ctx context.Context, deps *Deps, task *models.Task, agent *m
 		analysis.Complexity = models.TaskComplexityEasy
 	}
 
-	writeOpenSpecFiles(ctx, deps, task, localPath, analysis)
+	s.writeOpenSpecFiles(ctx, localPath, analysis)
 
-	return applyAnalyzePolicy(ctx, deps, task, agent, analysis, fallbackUsed)
+	return s.applyAnalyzePolicy(ctx, analysis, fallbackUsed)
 }
 
-func runAnalyzeProcess(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, stepCtx workflow.StepContext) (models.TaskAnalysis, bool, error) {
-	if deps.LLM == nil {
-		return deriveWorkflowAnalysis(task), true, nil
+func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.StepContext) (models.TaskAnalysis, bool, error) {
+	if s.llm == nil {
+		return deriveWorkflowAnalysis(s.rt.Task), true, nil
 	}
 
 	instruction := buildAnalyzeInstruction(stepCtx)
-	messages, err := buildAnalyzeMessages(ctx, deps, task, agent, instruction)
+	messages, err := s.buildAnalyzeMessages(ctx, instruction)
 	if err != nil {
 		return models.TaskAnalysis{}, false, err
 	}
 
-	parsedFinal, loopErr := runAnalyzeLLMLoop(ctx, deps, task, agent, messages)
+	parsedFinal, loopErr := s.runAnalyzeLLMLoop(ctx, messages)
 	if loopErr != nil || parsedFinal == nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("agent failed to output a final spec JSON: %v, falling back to derived analysis", loopErr))
-		return deriveWorkflowAnalysis(task), true, nil
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("agent failed to output a final spec JSON: %v, falling back to derived analysis", loopErr))
+		return deriveWorkflowAnalysis(s.rt.Task), true, nil
 	}
 
 	return parseAnalysisFinal(parsedFinal), false, nil
 }
 
-func buildAnalyzeMessages(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, instruction string) ([]llm.Message, error) {
+func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction string) ([]llm.Message, error) {
 	var messages []llm.Message
 	var err error
-	if deps.Prompts != nil {
-		messages, _, err = deps.Prompts.AssembleForAgent(ctx, *task, agent, nil)
+	if s.prompts != nil {
+		messages, _, err = s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		messages = []llm.Message{{Role: "user", Content: task.Title + "\n\n" + task.Description}}
+		messages = []llm.Message{{Role: "user", Content: s.rt.Task.Title + "\n\n" + s.rt.Task.Description}}
 	}
 	messages = append(messages, llm.Message{
 		Role:    "user",
@@ -184,15 +240,15 @@ Group related tasks under numbered headings. Each task MUST be a checkbox.
 	return instruction
 }
 
-func runAnalyzeLLMLoop(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, messages []llm.Message) (map[string]any, error) {
+func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Message) (map[string]any, error) {
 	maxIterations := 6
 	analyzeTools := analyzeToolDefinitions()
 
 	for i := 0; i < maxIterations; i++ {
-		routeName := agent.ModelLevelGroup
-		if deps.Projects != nil {
-			if p, err := deps.Projects.GetByID(ctx, task.ProjectID); err == nil {
-				if agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
+		routeName := s.rt.Agent.ModelLevelGroup
+		if s.projects != nil {
+			if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
+				if s.rt.Agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
 					routeName = p.DefaultModelLevel
 				} else if (routeName == "" || routeName == "default") && p.DefaultModelLevel != "" {
 					routeName = p.DefaultModelLevel
@@ -200,29 +256,31 @@ func runAnalyzeLLMLoop(ctx context.Context, deps *Deps, task *models.Task, agent
 			}
 		}
 		routeCtx := llm.WithRouteOptions(ctx, llm.RouteOptions{
-			Complexity: task.Complexity,
-			OrgID:      agent.OrgID,
-			ProjectID:  task.ProjectID,
-			AgentID:    agent.ID,
-			TaskID:     task.ID,
+			Complexity: s.rt.Task.Complexity,
+			OrgID:      s.rt.Agent.OrgID,
+			ProjectID:  s.rt.Task.ProjectID,
+			AgentID:    s.rt.Agent.ID,
+			TaskID:     s.rt.Task.ID,
 			RouteName:  routeName,
 		})
 
-		resp, err := deps.LLM.ChatWithOptions(routeCtx, messages, llm.ChatOptions{Tools: analyzeTools, ToolChoice: "auto"})
+		resp, err := s.llm.ChatWithOptions(routeCtx, messages, llm.ChatOptions{Tools: analyzeTools, ToolChoice: "auto"})
 		if err != nil {
 			return nil, fmt.Errorf("llm tool loop call failed: %w", err)
 		}
-		deps.Log(ctx, task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", i+1, resp.Model))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", i+1, resp.Model))
 
 		if len(resp.ToolCalls) > 0 {
-			deps.WriteLLMCallTrace(ctx, task, agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls})
+			if s.traces != nil {
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls})
+			}
 			messages = append(messages, llm.Message{
 				Role:      "assistant",
 				Content:   resp.Content,
 				ToolCalls: resp.ToolCalls,
 			})
 			for _, call := range resp.ToolCalls {
-				toolResult := executeAnalyzeTool(ctx, deps, task, agent, call.Name, call.Arguments)
+				toolResult := s.executeAnalyzeTool(ctx, call.Name, call.Arguments)
 				messages = append(messages, llm.Message{
 					Role:       "tool",
 					ToolCallID: call.ID,
@@ -235,11 +293,17 @@ func runAnalyzeLLMLoop(ctx context.Context, deps *Deps, task *models.Task, agent
 
 		parsedJSON, parseErr := llmrunner.ParseJSONMarkdown(resp.Content)
 		if parseErr != nil {
-			deps.WriteLLMCallTrace(ctx, task, agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content})
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output is invalid JSON: %v", i+1, parseErr))
+			if s.traces != nil {
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content})
+			}
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output is invalid JSON: %v", i+1, parseErr))
+			content := resp.Content
+			if content == "" {
+				content = "(empty response)"
+			}
 			messages = append(messages, llm.Message{
 				Role:    "assistant",
-				Content: resp.Content,
+				Content: content,
 			})
 			messages = append(messages, llm.Message{
 				Role:    "user",
@@ -248,20 +312,26 @@ func runAnalyzeLLMLoop(ctx context.Context, deps *Deps, task *models.Task, agent
 			continue
 		}
 
-		deps.WriteLLMCallTrace(ctx, task, agent, workflow.StepAnalyze, messages, resp, parsedJSON)
+		if s.traces != nil {
+			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON)
+		}
 
 		if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
 			toolName, _ := toolUse["name"].(string)
 			toolArgs, _ := toolUse["arguments"].(map[string]any)
 			argsBytes, _ := json.Marshal(toolArgs)
-			deps.Log(ctx, task.ID, nil, "info", fmt.Sprintf("Agent requested legacy tool %s with args %v", toolName, toolArgs))
+			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("Agent requested legacy tool %s with args %v", toolName, toolArgs))
+			content := resp.Content
+			if content == "" {
+				content = "(empty response)"
+			}
 			messages = append(messages, llm.Message{
 				Role:    "assistant",
-				Content: resp.Content,
+				Content: content,
 			})
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Tool %s result:\n%s\n\nPlease output either the next native tool call or the final spec JSON.", toolName, executeAnalyzeTool(ctx, deps, task, agent, toolName, string(argsBytes))),
+				Content: fmt.Sprintf("Tool %s result:\n%s\n\nPlease output either the next native tool call or the final spec JSON.", toolName, s.executeAnalyzeTool(ctx, toolName, string(argsBytes))),
 			})
 			continue
 		}
@@ -340,21 +410,21 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 	return analysis
 }
 
-func writeOpenSpecFiles(ctx context.Context, deps *Deps, task *models.Task, localPath string, analysis models.TaskAnalysis) {
-	changeName := patch.DeriveChangeName(task)
+func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, analysis models.TaskAnalysis) {
+	changeName := patch.DeriveChangeName(s.rt.Task)
 	changeDir := filepath.Join(localPath, "openspec", "changes", changeName)
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to create change directory: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to create change directory: %v", err))
 		return
 	}
 
 	proposalContent := analysis.ProposalMD
 	if proposalContent == "" {
-		proposalContent = fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description)
+		proposalContent = fmt.Sprintf("## Proposal for %s\n\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
 	}
 	specsContent := analysis.SpecsMD
 	if specsContent == "" {
-		specsContent = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description)
+		specsContent = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
 	}
 	designContent := analysis.DesignMD
 	if designContent == "" {
@@ -375,26 +445,26 @@ func writeOpenSpecFiles(ctx context.Context, deps *Deps, task *models.Task, loca
 	}
 
 	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposalContent), 0o644); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save proposal.md: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save proposal.md: %v", err))
 	}
 	if err := os.WriteFile(filepath.Join(changeDir, "specs.md"), []byte(specsContent), 0o644); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save specs.md: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save specs.md: %v", err))
 	}
 	if err := os.WriteFile(filepath.Join(changeDir, "design.md"), []byte(designContent), 0o644); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save design.md: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save design.md: %v", err))
 	}
 	if err := os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasksContent), 0o644); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save tasks.md: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save tasks.md: %v", err))
 	}
 
-	meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", changeName, task.ID)
+	meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", changeName, s.rt.Task.ID)
 	if err := os.WriteFile(filepath.Join(changeDir, ".openspec.yaml"), []byte(meta), 0o644); err != nil {
-		deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save .openspec.yaml: %v", err))
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save .openspec.yaml: %v", err))
 	}
 }
 
-func applyAnalyzePolicy(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, analysis models.TaskAnalysis, fallbackUsed bool) (map[string]any, error) {
-	oldComplexity := task.Complexity
+func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.TaskAnalysis, fallbackUsed bool) (StepResult, error) {
+	oldComplexity := s.rt.Task.Complexity
 	raw, err := json.Marshal(analysis)
 	if err != nil {
 		return nil, fmt.Errorf("marshal analysis: %w", err)
@@ -402,8 +472,8 @@ func applyAnalyzePolicy(ctx context.Context, deps *Deps, task *models.Task, agen
 
 	var projectAutonomy string
 	var projectReviewPolicy string
-	if deps.Projects != nil {
-		if p, err := deps.Projects.GetByID(ctx, task.ProjectID); err == nil {
+	if s.projects != nil {
+		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
 			projectAutonomy = p.DefaultAutonomy
 			projectReviewPolicy = p.AutoReviewPolicy
 		}
@@ -413,7 +483,7 @@ func applyAnalyzePolicy(ctx context.Context, deps *Deps, task *models.Task, agen
 		analysis.Complexity,
 		analysis.AffectedFiles,
 		analysis.RiskDomains,
-		agent.AutonomyLevel,
+		s.rt.Agent.AutonomyLevel,
 		projectAutonomy,
 		projectReviewPolicy,
 		len(analysis.ClarificationQuestions) > 0,
@@ -426,31 +496,35 @@ func applyAnalyzePolicy(ctx context.Context, deps *Deps, task *models.Task, agen
 		pauseReason = "workflow paused for human spec review due to fallback from malformed analyzer output"
 	}
 
-	if _, err := deps.Tasks.Update(ctx, task.ID, models.UpdateTaskInput{
-		Complexity: &analysis.Complexity,
-		Analysis:   raw,
-		SpecStatus: &specStatus,
-	}); err != nil {
-		return nil, fmt.Errorf("update task metadata: %w", err)
+	if s.taskUpdate != nil {
+		if _, err := s.taskUpdate.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+			Complexity: &analysis.Complexity,
+			Analysis:   raw,
+			SpecStatus: &specStatus,
+		}); err != nil {
+			return nil, fmt.Errorf("update task metadata: %w", err)
+		}
 	}
 
-	if _, err := deps.UpdateTaskStatus(ctx, task.ID, status); err != nil {
-		return nil, fmt.Errorf("update task status: %w", err)
+	if s.status != nil {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, status); err != nil {
+			return nil, fmt.Errorf("update task status: %w", err)
+		}
 	}
 
-	task.Complexity = analysis.Complexity
-	task.SpecStatus = specStatus
-	task.Analysis = raw
+	s.rt.Task.Complexity = analysis.Complexity
+	s.rt.Task.SpecStatus = specStatus
+	s.rt.Task.Analysis = raw
 
 	if specStatus == models.TaskSpecStatusPendingReview || specStatus == models.TaskSpecStatusChangesRequested {
 		return nil, workflow.PauseError{Step: workflow.StepAnalyze, Reason: pauseReason}
 	}
 
 	if oldComplexity != analysis.Complexity && specStatus == models.TaskSpecStatusAutoApproved {
-		return map[string]any{"complexity": analysis.Complexity, "spec_status": specStatus}, workflow.ErrGraphChanged
+		return StepResult{"complexity": analysis.Complexity, "spec_status": specStatus}, workflow.ErrGraphChanged
 	}
 
-	return map[string]any{"complexity": analysis.Complexity, "spec_status": specStatus}, nil
+	return StepResult{"complexity": analysis.Complexity, "spec_status": specStatus}, nil
 }
 
 func deriveWorkflowAnalysis(task *models.Task) models.TaskAnalysis {
@@ -493,3 +567,4 @@ func deriveWorkflowAnalysis(task *models.Task) models.TaskAnalysis {
 		ClarificationQuestions: questions,
 	}
 }
+

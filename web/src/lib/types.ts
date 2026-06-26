@@ -48,6 +48,20 @@ export type Repository = {
   token?: string;
 };
 
+export type TaskStatus =
+  | "todo"
+  | "context_loading"
+  | "analyzing"
+  | "spec_review"
+  | "coding"
+  | "reviewing"
+  | "fixing"
+  | "testing"
+  | "pr_ready"
+  | "human_review"
+  | "merged"
+  | "failed";
+
 export type Task = {
   id: string;
   project_id: string;
@@ -56,7 +70,7 @@ export type Task = {
   repository_id?: string;
   title: string;
   description: string;
-  status: string;
+  status: TaskStatus;
   complexity: "easy" | "medium" | "hard";
   priority: number;
   labels: string[];

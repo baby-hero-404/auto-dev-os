@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useRef, useState, useEffect } from "react";
+import { use, useRef, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -17,11 +17,26 @@ import {
   Database,
   Sparkles,
   AlertCircle,
+  LucideIcon,
 } from "lucide-react";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 import { useSession } from "@/lib/session";
 
-const STEPS = [
+type StepItem = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+const EASY_STEPS: StepItem[] = [
+  { id: "context_load", label: "Context", icon: Database },
+  { id: "analyze", label: "Analyze", icon: Circle },
+  { id: "code_backend", label: "Code", icon: Terminal },
+  { id: "test", label: "Test", icon: CheckCircle2 },
+  { id: "pr", label: "PR", icon: Circle },
+];
+
+const STANDARD_STEPS: StepItem[] = [
   { id: "context_load", label: "Context", icon: Database },
   { id: "analyze", label: "Analyze", icon: Circle },
   { id: "plan", label: "Plan", icon: Circle },
@@ -33,6 +48,13 @@ const STEPS = [
   { id: "test", label: "Test", icon: CheckCircle2 },
   { id: "pr", label: "PR", icon: Circle },
 ];
+
+function getWorkflowSteps(complexity: string | undefined): StepItem[] {
+  if (complexity === "easy") {
+    return EASY_STEPS;
+  }
+  return STANDARD_STEPS;
+}
 
 function stepStatus(
   stepId: string,
@@ -91,6 +113,7 @@ export default function MonitorPage({
 
   const job = workflow?.job;
   const checkpoints = workflow?.checkpoints ?? [];
+  const steps = useMemo(() => getWorkflowSteps(task?.complexity), [task?.complexity]);
 
   useEffect(() => {
     if (autoScroll && logEndRef.current) {
@@ -162,9 +185,8 @@ export default function MonitorPage({
             {(!job || job.status === "failed") &&
               task &&
               (task.spec_status === "approved" ||
-                task.spec_status === "auto_approved" ||
-                task.status === "todo" ||
-                task.status === "approved") && (
+                task.spec_status === "auto_approved") &&
+              (task.status === "todo" || task.status === "failed") && (
                 <button
                   className="inline-flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
                   onClick={execute}
@@ -224,7 +246,7 @@ export default function MonitorPage({
               Workflow Progress
             </h2>
             <div className="flex items-center gap-1 overflow-x-auto pb-2">
-              {STEPS.map((step, i) => {
+              {steps.map((step, i) => {
                 const status = job
                   ? stepStatus(step.id, job.step, job.status, checkpoints)
                   : "pending";
@@ -246,7 +268,7 @@ export default function MonitorPage({
                         {step.label}
                       </span>
                     </div>
-                    {i < STEPS.length - 1 && (
+                    {i < steps.length - 1 && (
                       <div
                         className={`mx-0.5 h-px w-4 ${
                           status === "done"

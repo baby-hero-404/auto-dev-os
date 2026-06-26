@@ -8,7 +8,7 @@ interface TaskActionProps {
   task: Task;
   projectID: string;
   isLoading?: boolean;
-  onAction?: (action: "analyze" | "execute" | "delete") => Promise<any> | void;
+  onAction?: (action: "analyze" | "execute" | "delete") => Promise<boolean> | void;
 }
 
 export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionProps) {
@@ -16,13 +16,12 @@ export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionP
 
   const isPendingSpecReview = task.status === "spec_review" || task.spec_status === "pending_review";
   const isExecutionReady =
-    (task.status === "approved" || task.spec_status === "auto_approved" || task.spec_status === "approved") &&
-    (task.status === "todo" || task.status === "approved" || task.status === "planning");
+    (task.spec_status === "auto_approved" || task.spec_status === "approved") &&
+    task.status === "todo";
 
   const showMonitor = [
     "context_loading",
     "analyzing",
-    "planning",
     "coding",
     "reviewing",
     "fixing",

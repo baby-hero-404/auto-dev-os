@@ -1,31 +1,27 @@
-import type { Task, Agent } from "@/lib/types";
+import type { Task, Agent, TaskStatus } from "@/lib/types";
 
-const activeStatuses = new Set([
+const activeStatuses = new Set<TaskStatus>([
   "context_loading",
   "analyzing",
-  "running",
-  "assigned",
-  "planning",
   "coding",
   "reviewing",
   "fixing",
   "testing",
-  "in_progress",
 ]);
 
-const reviewStatuses = new Set(["spec_review", "human_review"]);
-const failedStatuses = new Set(["failed", "blocked", "needs_changes", "changes_requested"]);
+const reviewStatuses = new Set<TaskStatus>(["spec_review", "human_review"]);
+const failedStatuses = new Set<TaskStatus>(["failed"]);
 
 export const workflowStages = [
   { label: "Todo", statuses: ["todo"] },
-  { label: "Analyze", statuses: ["context_loading", "analyzing", "planning"] },
+  { label: "Analyze", statuses: ["context_loading", "analyzing"] },
   { label: "Spec Review", statuses: ["spec_review"] },
-  { label: "Code", statuses: ["assigned", "in_progress", "running", "coding"] },
+  { label: "Code", statuses: ["coding"] },
   { label: "Review/Fix", statuses: ["reviewing", "fixing"] },
   { label: "Test", statuses: ["testing"] },
   { label: "PR", statuses: ["pr_ready"] },
   { label: "Human Review", statuses: ["human_review"] },
-  { label: "Merged", statuses: ["merged", "done", "completed"] },
+  { label: "Merged", statuses: ["merged"] },
 ];
 
 export function isActiveTask(task: Task) {
@@ -97,8 +93,8 @@ export function deriveHydratedProjectStatus(doneTasks: number, totalTasks: numbe
   return "active";
 }
 
-export function isDoneStatus(status: string) {
-  return ["done", "completed", "merged"].includes(status);
+export function isDoneStatus(status: TaskStatus) {
+  return status === "merged";
 }
 
 export function deriveProjectStatus(tasks: Task[]) {
@@ -106,7 +102,7 @@ export function deriveProjectStatus(tasks: Task[]) {
   if (tasks.some(isFailedTask)) {
     return "blocked";
   }
-  if (tasks.some((task) => isActiveTask(task) || task.status === "approved" || task.status === "queued")) {
+  if (tasks.some(isActiveTask)) {
     return "active";
   }
   if (tasks.every((task) => isDoneStatus(task.status))) return "done";

@@ -38,6 +38,10 @@ func (m *Manager) CapturePRDiff(ctx context.Context, task *models.Task, agent *m
 		HostWorktreePath:         m.HostWorktreePath,
 		ContainerPathForHostPath: m.ContainerPathForHostPath,
 		GetPRDiff:                m.SandboxGitGetPRDiff,
+		LoadTaskWorkspace:        m.LoadTaskWorkspace,
+	}
+	if m.ListRepositories != nil {
+		runner.ListRepositories = m.ListRepositories
 	}
 	return runner.CapturePRDiff(ctx, task, agent, baseBranch)
 }

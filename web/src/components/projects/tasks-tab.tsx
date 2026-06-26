@@ -14,7 +14,7 @@ interface TasksTabProps {
   projectID: string;
   isTasksLoading: boolean;
   isLoadingTask: Record<string, boolean>;
-  onTaskAction: (taskId: string, action: "analyze" | "execute" | "delete") => Promise<any>;
+  onTaskAction: (taskId: string, action: "analyze" | "execute" | "delete") => Promise<boolean>;
 }
 
 type FilterStatus = "all" | "active" | "review" | "failed";

@@ -11,11 +11,66 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecuteCodeFrontend(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
-	t, err := deps.Tasks.GetByID(ctx, task.ID)
-	if err == nil {
+// FrontendAgentAssigner defines the optional hook to assign a role-specific frontend agent.
+type FrontendAgentAssigner interface {
+	AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error)
+}
+
+// CodeFrontendStep implements Step for the frontend coding track.
+type CodeFrontendStep struct {
+	rt        StepRuntime
+	tasks     TaskReader
+	llm       LLMRunner
+	agents    any
+	worktree  WorktreeManager
+	patcher   PatchApplier
+	diff      DiffCapturer
+	workspace WorkspaceLoader
+	artifacts ArtifactSaver
+	tester    TestRunner
+	log       Logger
+}
+
+func NewCodeFrontendStep(
+	rt StepRuntime,
+	tasks TaskReader,
+	llm LLMRunner,
+	agents any,
+	worktree WorktreeManager,
+	patcher PatchApplier,
+	diff DiffCapturer,
+	workspace WorkspaceLoader,
+	artifacts ArtifactSaver,
+	tester TestRunner,
+	log Logger,
+) *CodeFrontendStep {
+	return &CodeFrontendStep{
+		rt:        rt,
+		tasks:     tasks,
+		llm:       llm,
+		agents:    agents,
+		worktree:  worktree,
+		patcher:   patcher,
+		diff:      diff,
+		workspace: workspace,
+		artifacts: artifacts,
+		tester:    tester,
+		log:       log,
+	}
+}
+
+func (s *CodeFrontendStep) ID() string                         { return workflow.StepCodeFrontend }
+func (s *CodeFrontendStep) StatusOnResume(_ StepResult) string { return models.TaskStatusCoding }
+
+func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	var t *models.Task
+	var err error
+	if s.tasks != nil {
+		t, err = s.tasks.GetByID(ctx, s.rt.Task.ID)
+	}
+	if err == nil && t != nil {
 		if t.Complexity == models.TaskComplexityEasy {
-			return map[string]any{"status": "skipped", "info": "skipped frontend step for easy task"}, nil
+			return StepResult{"status": "skipped", "info": "skipped frontend step for easy task"}, nil
 		}
 		var analysis models.TaskAnalysis
 		if json.Unmarshal(t.Analysis, &analysis) == nil {
@@ -27,90 +82,114 @@ func ExecuteCodeFrontend(ctx context.Context, deps *Deps, task *models.Task, age
 				}
 			}
 			if !hasFrontend {
-				return map[string]any{"status": "skipped", "info": "no frontend files affected"}, nil
+				return StepResult{"status": "skipped", "info": "no frontend files affected"}, nil
 			}
 		}
 	}
-	frontendAgent := agent
-	if manager, ok := deps.Agents.(interface {
-		AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error)
-	}); ok {
-		if fg, err := manager.AssignFrontendAgent(ctx, task); err == nil && fg != nil {
-			frontendAgent = fg
-			deps.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("assigned frontend agent %s for frontend coding step", frontendAgent.Name))
+
+	frontendAgent := s.rt.Agent
+	assignedAgentID := ""
+	if assigner, ok := s.agents.(FrontendAgentAssigner); ok {
+		fg, err := assigner.AssignFrontendAgent(ctx, s.rt.Task)
+		if err != nil {
+			return nil, fmt.Errorf("failed to assign frontend agent for frontend coding step: %w", err)
 		}
+		if fg != nil {
+			frontendAgent = fg
+			assignedAgentID = fg.ID
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("assigned frontend agent %s for frontend coding step", frontendAgent.Name))
+		}
+	}
+	if assignedAgentID != "" && (s.rt.Agent == nil || assignedAgentID != s.rt.Agent.ID) {
+		defer func() {
+			if releaser, ok := s.agents.(AgentReleaser); ok {
+				if err := releaser.Release(context.WithoutCancel(ctx), assignedAgentID); err != nil {
+					s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("release frontend agent failed: %v", err))
+				}
+			}
+		}()
+	}
+	if frontendAgent == nil || frontendAgent.Role != models.AgentRoleFrontend {
+		roleStr := "nil"
+		if frontendAgent != nil {
+			roleStr = frontendAgent.Role
+		}
+		return nil, fmt.Errorf("frontend coding step requires a frontend agent, but got role %s", roleStr)
 	}
 
 	worktreeSuffix := ""
 	if t != nil && t.Complexity != models.TaskComplexityEasy {
 		worktreeSuffix = "-fe-worktree"
-		if deps.RepoUtil != nil {
-			if targetRepos, err := deps.RepoUtil.LoadTargetRepositories(ctx, task); err == nil {
+		if s.worktree != nil {
+			if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
 				var ws *models.TaskWorkspace
-				if deps.Wkspace != nil {
-					ws, _ = deps.Wkspace.LoadTaskWorkspace(ctx, task)
+				if s.workspace != nil {
+					ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
 				}
-				if err := deps.RepoUtil.SetupRoleWorktrees(ctx, task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
+				if err := s.worktree.SetupRoleWorktrees(ctx, s.rt.Task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
 
-	if deps.LLM != nil {
-		out, err := deps.RunLLMStep(ctx, task, frontendAgent, jobID, workflow.StepCodeFrontend, "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.")
-		if err != nil {
-			return nil, err
-		}
-		if parsed, ok := out["parsed"].(map[string]any); ok {
-			p := patch.ExtractPatch(parsed)
-			if p != "" {
-				_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepCodeFrontend, "patch", p)
-				if deps.RepoUtil != nil {
-					if applyErr := deps.RepoUtil.ApplyPatch(ctx, task, frontendAgent, workflow.StepCodeFrontend, p, worktreeSuffix); applyErr != nil {
-						return nil, fmt.Errorf("apply patch: %w", applyErr)
-					}
+	if s.llm == nil {
+		return nil, fmt.Errorf("llm provider is not configured")
+	}
+
+	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, workflow.StepCodeFrontend, "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.")
+	if err != nil {
+		return nil, err
+	}
+	if parsed, ok := out["parsed"].(map[string]any); ok {
+		p := patch.ExtractPatch(parsed)
+		if p != "" {
+			if s.artifacts != nil {
+				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeFrontend, "patch", p)
+			}
+			if s.patcher != nil {
+				if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, frontendAgent, workflow.StepCodeFrontend, p, worktreeSuffix); applyErr != nil {
+					return nil, fmt.Errorf("apply patch: %w", applyErr)
 				}
 			}
 		}
-		if deps.RepoUtil != nil {
-			if diffText, diffErr := deps.RepoUtil.CaptureWorkspaceDiff(ctx, task, frontendAgent, workflow.StepCodeFrontend, worktreeSuffix); diffErr == nil && diffText != "" {
-				_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepCodeFrontend, "diff", diffText)
+	}
+	if s.diff != nil {
+		if diffText, diffErr := s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, frontendAgent, workflow.StepCodeFrontend, worktreeSuffix); diffErr == nil && diffText != "" {
+			if s.artifacts != nil {
+				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeFrontend, "diff", diffText)
 			}
 		}
+	}
 
-		var changedFiles []string
-		if deps.RepoUtil != nil {
-			repoHostPath, err := deps.RepoUtil.GetTaskRepoHostPath(ctx, task)
-			if err != nil {
+	var changedFiles []string
+	if s.diff != nil {
+		repoHostPath, err := s.diff.GetTaskRepoHostPath(ctx, s.rt.Task)
+		if err == nil {
+			var diffErr error
+			changedFiles, diffErr = s.diff.GetChangedFiles(ctx, s.rt.Task, frontendAgent, repoHostPath, worktreeSuffix)
+			if diffErr != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to get changed files: %v", diffErr))
+			}
+		}
+	}
+
+	if worktreeSuffix != "" && s.worktree != nil {
+		if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
+			var ws *models.TaskWorkspace
+			if s.workspace != nil {
+				ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
+			}
+			if err := s.worktree.CommitRoleWorktrees(ctx, s.rt.Task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
 				return nil, err
 			}
-
-			var diffErr error
-			changedFiles, diffErr = deps.RepoUtil.GetChangedFiles(ctx, task, frontendAgent, repoHostPath, worktreeSuffix)
-			if diffErr != nil {
-				deps.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to get changed files: %v", diffErr))
-			}
 		}
-
-		if worktreeSuffix != "" && deps.RepoUtil != nil {
-			if targetRepos, err := deps.RepoUtil.LoadTargetRepositories(ctx, task); err == nil {
-				var ws *models.TaskWorkspace
-				if deps.Wkspace != nil {
-					ws, _ = deps.Wkspace.LoadTaskWorkspace(ctx, task)
-				}
-				if err := deps.RepoUtil.CommitRoleWorktrees(ctx, task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
-					return nil, err
-				}
-			}
-		}
-
-		if len(changedFiles) > 0 {
-			if _, errT := deps.RunTargetedTests(ctx, task, frontendAgent, jobID, "code_frontend_test", changedFiles, worktreeSuffix); errT != nil {
-				deps.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("targeted tests failed: %v", errT))
-			}
-		}
-		return out, nil
 	}
-	return nil, fmt.Errorf("llm provider is not configured")
+
+	if len(changedFiles) > 0 && s.tester != nil {
+		if _, errT := s.tester.RunTargetedTests(ctx, s.rt.Task, frontendAgent, s.rt.JobID, "code_frontend_test", changedFiles, worktreeSuffix); errT != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("targeted tests failed: %v", errT))
+		}
+	}
+	return out, nil
 }

@@ -9,24 +9,65 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
-	t, err := deps.Tasks.GetByID(ctx, task.ID)
+
+// MergeStep implements Step for the merge phase.
+type MergeStep struct {
+	rt            StepRuntime
+	tasks         TaskReader
+	worktree      WorktreeManager
+	workspace     WorkspaceLoader
+	git           SandboxGitClient
+	diff          DiffCapturer
+	artifacts     ArtifactSaver
+	status        StatusUpdater
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+}
+
+func NewMergeStep(
+	rt StepRuntime,
+	tasks TaskReader,
+	worktree WorktreeManager,
+	workspace WorkspaceLoader,
+	git SandboxGitClient,
+	diff DiffCapturer,
+	artifacts ArtifactSaver,
+	status StatusUpdater,
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+) *MergeStep {
+	return &MergeStep{
+		rt:            rt,
+		tasks:         tasks,
+		worktree:      worktree,
+		workspace:     workspace,
+		git:           git,
+		diff:          diff,
+		artifacts:     artifacts,
+		status:        status,
+		containerPath: containerPath,
+	}
+}
+
+func (s *MergeStep) ID() string                              { return workflow.StepMerge }
+func (s *MergeStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusReviewing }
+
+func (s *MergeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
 	if err == nil && t.Complexity == models.TaskComplexityEasy {
-		if deps.Wkspace != nil {
-			if ws, errWS := deps.Wkspace.LoadTaskWorkspace(ctx, task); errWS == nil {
+		if s.workspace != nil {
+			if ws, errWS := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task); errWS == nil {
 				for i := range ws.Repos {
 					ws.Repos[i].Status.MergeStatus = models.MergeStatusSkipped
 				}
-				_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+				_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 			}
 		}
-		return map[string]any{"status": "skipped", "info": "skipped merge step for easy task"}, nil
+		return StepResult{"status": "skipped", "info": "skipped merge step for easy task"}, nil
 	}
 
 	var targetRepos []models.Repository
-	if deps.RepoUtil != nil {
+	if s.worktree != nil {
 		var errRepo error
-		targetRepos, errRepo = deps.RepoUtil.LoadTargetRepositories(ctx, task)
+		targetRepos, errRepo = s.worktree.LoadTargetRepositories(ctx, s.rt.Task)
 		if errRepo != nil {
 			targetRepos = nil
 		}
@@ -35,48 +76,48 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 	var workspace *models.TaskWorkspace
 	var ws *models.TaskWorkspace
 	var errWS error
-	if deps.Wkspace != nil {
-		ws, errWS = deps.Wkspace.LoadTaskWorkspace(ctx, task)
+	if s.workspace != nil {
+		ws, errWS = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
 		if errWS == nil {
 			workspace = ws
 		}
 	}
 
-	integrationBranch := fmt.Sprintf("feature/%s", task.ID)
-	beBranch := fmt.Sprintf("feature/%s-be", task.ID)
-	feBranch := fmt.Sprintf("feature/%s-fe", task.ID)
+	integrationBranch := fmt.Sprintf("feature/%s", s.rt.Task.ID)
+	beBranch := fmt.Sprintf("feature/%s-be", s.rt.Task.ID)
+	feBranch := fmt.Sprintf("feature/%s-fe", s.rt.Task.ID)
 
 	hasConflicts := false
 	var conflictDetails []string
 
 	for _, repo := range targetRepos {
 		var localPath string
-		if deps.RepoUtil != nil {
-			localPath = deps.RepoUtil.RepoHostPath(task, workspace, repo)
+		if s.worktree != nil {
+			localPath = s.worktree.RepoHostPath(s.rt.Task, workspace, repo)
 		}
-		containerLocalPath := deps.ContainerPathForHostPath(task, localPath, "")
+		containerLocalPath := s.containerPath(s.rt.Task, localPath, "")
 
 		repoMergeStatus := models.MergeStatusMerged
 		repoHasConflict := false
 
 		// 1. Checkout integration branch
-		errCheckout := deps.SandboxGit.CheckoutBranch(ctx, task, agent, containerLocalPath, integrationBranch)
+		errCheckout := s.git.CheckoutBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, integrationBranch)
 		if errCheckout != nil {
-			if deps.Wkspace != nil && errWS == nil {
+			if s.workspace != nil && errWS == nil {
 				for i := range ws.Repos {
 					if ws.Repos[i].RepoID == repo.ID {
 						ws.Repos[i].Status.MergeStatus = models.MergeStatusFailed
 					}
 				}
-				_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+				_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 			}
 			return nil, fmt.Errorf("checkout integration branch failed for repo %s: %w", repo.URL, errCheckout)
 		}
 
 		// Check if backend branch exists before merging
-		hasBeBranch := deps.SandboxGit.HasBranch(ctx, task, agent, containerLocalPath, beBranch)
+		hasBeBranch := s.git.HasBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, beBranch)
 		if hasBeBranch {
-			mergeStatus, errMergeBe := deps.SandboxGit.MergeBranch(ctx, task, agent, containerLocalPath, beBranch)
+			mergeStatus, errMergeBe := s.git.MergeBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, beBranch)
 			if errMergeBe != nil {
 				if mergeStatus == models.MergeStatusConflict {
 					hasConflicts = true
@@ -85,13 +126,13 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 					conflictDetails = append(conflictDetails, fmt.Sprintf("Repo %s (backend):\n%s", repo.URL, errMergeBe.Error()))
 				} else {
 					repoMergeStatus = models.MergeStatusFailed
-					if deps.Wkspace != nil && errWS == nil {
+					if s.workspace != nil && errWS == nil {
 						for i := range ws.Repos {
 							if ws.Repos[i].RepoID == repo.ID {
 								ws.Repos[i].Status.MergeStatus = repoMergeStatus
 							}
 						}
-						_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+						_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 					}
 					return nil, fmt.Errorf("merge backend branch failed for repo %s: %w", repo.URL, errMergeBe)
 				}
@@ -101,10 +142,10 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 		// Check if frontend branch exists before merging (only if no conflict has occurred on this repo yet)
 		hasFeBranch := false
 		if !repoHasConflict {
-			hasFeBranch = deps.SandboxGit.HasBranch(ctx, task, agent, containerLocalPath, feBranch)
+			hasFeBranch = s.git.HasBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, feBranch)
 		}
 		if !repoHasConflict && hasFeBranch {
-			mergeStatus, errMergeFe := deps.SandboxGit.MergeBranch(ctx, task, agent, containerLocalPath, feBranch)
+			mergeStatus, errMergeFe := s.git.MergeBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, feBranch)
 			if errMergeFe != nil {
 				if mergeStatus == models.MergeStatusConflict {
 					hasConflicts = true
@@ -113,13 +154,13 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 					conflictDetails = append(conflictDetails, fmt.Sprintf("Repo %s (frontend):\n%s", repo.URL, errMergeFe.Error()))
 				} else {
 					repoMergeStatus = models.MergeStatusFailed
-					if deps.Wkspace != nil && errWS == nil {
+					if s.workspace != nil && errWS == nil {
 						for i := range ws.Repos {
 							if ws.Repos[i].RepoID == repo.ID {
 								ws.Repos[i].Status.MergeStatus = repoMergeStatus
 							}
 						}
-						_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+						_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 					}
 					return nil, fmt.Errorf("merge frontend branch failed for repo %s: %w", repo.URL, errMergeFe)
 				}
@@ -129,20 +170,20 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 		if !repoHasConflict {
 			// Commit the merge if there are staged changes
 			commitMsg := "Merge role branches into integration"
-			if errCommit := deps.SandboxGit.CommitChanges(ctx, task, agent, containerLocalPath, commitMsg); errCommit != nil {
-				if deps.Wkspace != nil && errWS == nil {
+			if errCommit := s.git.CommitChanges(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, commitMsg); errCommit != nil {
+				if s.workspace != nil && errWS == nil {
 					for i := range ws.Repos {
 						if ws.Repos[i].RepoID == repo.ID {
 							ws.Repos[i].Status.MergeStatus = models.MergeStatusFailed
 						}
 					}
-					_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+					_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 				}
 				return nil, fmt.Errorf("failed to commit merge for repo %s: %w", repo.URL, errCommit)
 			}
 		}
 
-		if deps.Wkspace != nil && errWS == nil {
+		if s.workspace != nil && errWS == nil {
 			for i := range ws.Repos {
 				if ws.Repos[i].RepoID == repo.ID {
 					ws.Repos[i].Status.MergeStatus = repoMergeStatus
@@ -151,13 +192,13 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 		}
 	}
 
-	if deps.Wkspace != nil && errWS == nil {
-		_ = deps.Wkspace.SaveTaskWorkspaceMetadata(task, ws)
+	if s.workspace != nil && errWS == nil {
+		_ = s.workspace.SaveTaskWorkspaceMetadata(s.rt.Task, ws)
 	}
 
 	if hasConflicts {
 		conflictStr := strings.Join(conflictDetails, "\n")
-		_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepMerge, "conflict", conflictStr)
+		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepMerge, "conflict", conflictStr)
 		return nil, workflow.PauseError{
 			Step:   workflow.StepMerge,
 			Reason: fmt.Sprintf("merge conflict in files:\n%s\n— manual resolution required", conflictStr),
@@ -165,17 +206,19 @@ func ExecuteMerge(ctx context.Context, deps *Deps, task *models.Task, agent *mod
 	}
 
 	var diffText string
-	if deps.RepoUtil != nil {
+	if s.diff != nil {
 		var errDiff error
-		diffText, errDiff = deps.RepoUtil.CaptureWorkspaceDiff(ctx, task, agent, workflow.StepMerge, "")
+		diffText, errDiff = s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepMerge, "")
 		if errDiff != nil {
 			return nil, fmt.Errorf("merge check failed: %w", errDiff)
 		}
 	}
-	if _, err := deps.UpdateTaskStatus(ctx, task.ID, models.TaskStatusReviewing); err != nil {
-		return nil, err
+	if s.status != nil {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusReviewing); err != nil {
+			return nil, err
+		}
 	}
-	return map[string]any{
+	return StepResult{
 		"status":    "changes_reconciled",
 		"info":      "local changes reconciled",
 		"diff_size": len(diffText),

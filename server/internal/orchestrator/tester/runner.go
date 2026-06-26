@@ -34,31 +34,73 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 	mountedHostPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 
 	type moduleGroup struct {
-		kind       ProjectKind
-		files      []string
-		goPackages map[string]bool
+		kind            ProjectKind
+		files           []string
+		goPackages      map[string]bool
+		mountedHostPath string
 	}
 
 	groups := make(map[string]*moduleGroup)
 
 	for _, file := range changedFiles {
-		kind, markers := DetectProjectKindNear(mountedHostPath, file)
+		var fileMountedHostPath string
+		var relFile string
+
+		if task.RepositoryID != nil {
+			fileMountedHostPath = mountedHostPath
+			relFile = file
+		} else {
+			repoName := ""
+			relFile = file
+			if strings.HasPrefix(file, "code/repos/") {
+				parts := strings.SplitN(file[len("code/repos/"):], "/", 3)
+				if len(parts) >= 3 {
+					if parts[1] == "worktrees" {
+						subparts := strings.SplitN(file[len("code/repos/"):], "/", 4)
+						if len(subparts) == 4 && subparts[1] == "worktrees" {
+							repoName = subparts[0]
+							relFile = subparts[3]
+						} else {
+							repoName = parts[0]
+							relFile = parts[2]
+						}
+					} else {
+						repoName = parts[0]
+						relFile = parts[2]
+					}
+				}
+			} else {
+				if idx := strings.Index(file, "/"); idx != -1 {
+					repoName = file[:idx]
+					relFile = file[idx+1:]
+				}
+			}
+			if repoName != "" {
+				repoMainHostPath := filepath.Join(repoHostPath, "code", "repos", repoName, "main")
+				fileMountedHostPath = r.HostWorktreePath(task, repoMainHostPath, worktreeSuffix)
+			} else {
+				fileMountedHostPath = repoHostPath
+			}
+		}
+
+		kind, markers := DetectProjectKindNear(fileMountedHostPath, relFile)
 
 		modRelDir := ""
-		relFile := file
 		if len(markers) > 0 {
-			if dir, rf, found := FindModuleDir(mountedHostPath, file, markers); found {
+			if dir, rf, found := FindModuleDir(fileMountedHostPath, relFile, markers); found {
 				modRelDir = dir
 				relFile = rf
 			}
 		}
 
-		g, ok := groups[modRelDir]
+		absModDir := filepath.Join(fileMountedHostPath, modRelDir)
+		g, ok := groups[absModDir]
 		if !ok {
 			g = &moduleGroup{
-				goPackages: make(map[string]bool),
+				goPackages:      make(map[string]bool),
+				mountedHostPath: fileMountedHostPath,
 			}
-			groups[modRelDir] = g
+			groups[absModDir] = g
 		}
 		if g.kind == ProjectUnknown {
 			g.kind = kind
@@ -78,12 +120,16 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 	var testErrors []string
 	var testResults []map[string]any
 
-	for modRelDir, g := range groups {
-		containerModPath := r.ContainerPathForHostPath(task, filepath.Join(mountedHostPath, modRelDir), "")
+	for absModDir, g := range groups {
+		containerModPath := r.ContainerPathForHostPath(task, absModDir, "")
+		modRelDir := ""
+		if rel, errRel := filepath.Rel(g.mountedHostPath, absModDir); errRel == nil {
+			modRelDir = rel
+		}
 
 		kind := g.kind
 		if kind == ProjectUnknown {
-			kind = DetectProjectKind(filepath.Join(mountedHostPath, modRelDir))
+			kind = DetectProjectKind(absModDir)
 		}
 		cmd, ok := TargetedTestCommand(kind, containerModPath, g.files, g.goPackages)
 		if !ok {

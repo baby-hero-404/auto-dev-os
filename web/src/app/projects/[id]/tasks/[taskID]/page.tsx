@@ -33,7 +33,15 @@ import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 
-const workflowSteps = [
+const EASY_STEPS = [
+  "context_load",
+  "analyze",
+  "code_backend",
+  "test",
+  "pr",
+];
+
+const STANDARD_STEPS = [
   "context_load",
   "analyze",
   "plan",
@@ -146,13 +154,20 @@ export default function ProjectTaskDetailPage({
     return map;
   }, [workflow]);
 
+  const workflowSteps = useMemo(() => {
+    if (task?.complexity === "easy") {
+      return EASY_STEPS;
+    }
+    return STANDARD_STEPS;
+  }, [task?.complexity]);
+
   const workflowCompletion = useMemo(() => {
     const finished = workflowSteps.filter((step) => {
       const status = latest.get(step);
       return status === "success" || status === "recorded";
     }).length;
     return Math.round((finished / workflowSteps.length) * 100);
-  }, [latest]);
+  }, [latest, workflowSteps]);
 
   // Parse task analysis
   const analysisData = useMemo(() => {
@@ -225,8 +240,8 @@ export default function ProjectTaskDetailPage({
   const hasPR = !!(task?.pr_urls && task.pr_urls.length > 0);
   const isExecutionReady = !!(
     task &&
-    (task.status === "approved" || task.spec_status === "auto_approved" || task.spec_status === "approved") &&
-    (task.status === "todo" || task.status === "approved" || task.status === "planning" || task.status === "failed")
+    (task.spec_status === "auto_approved" || task.spec_status === "approved") &&
+    (task.status === "todo" || task.status === "failed")
   );
 
   // Early returns can now happen safely AFTER all hook calls

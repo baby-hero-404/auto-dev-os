@@ -23,20 +23,20 @@ func GetTaskWorkspace(workspaceRoot string, task *models.Task) *models.TaskWorks
 }
 
 func ContainerPathForHostPath(localPath string, activeWorkspaceHostPath string, hostPath string) string {
-	rel, err := filepath.Rel(activeWorkspaceHostPath, hostPath)
-	if err == nil && !strings.HasPrefix(rel, "..") {
-		if rel == "." {
-			return "/workspace"
-		}
-		return filepath.Join("/workspace", rel)
-	}
-
 	relMain, errMain := filepath.Rel(localPath, hostPath)
-	if errMain == nil && !strings.HasPrefix(relMain, "..") {
+	if errMain == nil && relMain != ".." && !strings.HasPrefix(relMain, ".."+string(filepath.Separator)) {
 		if relMain == "." {
 			return "/workspace"
 		}
 		return filepath.Join("/workspace", relMain)
+	}
+
+	rel, err := filepath.Rel(activeWorkspaceHostPath, hostPath)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel == "." {
+			return "/workspace"
+		}
+		return filepath.Join("/workspace", rel)
 	}
 
 	return "/workspace"

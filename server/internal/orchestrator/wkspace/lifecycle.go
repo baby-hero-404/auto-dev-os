@@ -172,12 +172,12 @@ func (m *Manager) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task
 	for i := range ws.Repos {
 		rWS := &ws.Repos[i]
 		mainAbs := filepath.Join(ws.Root, rWS.Paths.Main)
-		if mainAbs == absPath || strings.HasPrefix(absPath, mainAbs) {
+		if rel, errRel := filepath.Rel(mainAbs, absPath); errRel == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return rWS, nil
 		}
 		for _, wtRel := range rWS.Paths.Worktrees {
 			wtAbs := filepath.Join(ws.Root, wtRel)
-			if wtAbs == absPath || strings.HasPrefix(absPath, wtAbs) {
+			if rel, errRel := filepath.Rel(wtAbs, absPath); errRel == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				return rWS, nil
 			}
 		}

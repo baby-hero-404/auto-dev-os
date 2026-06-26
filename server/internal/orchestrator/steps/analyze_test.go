@@ -87,18 +87,38 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		t.Fatalf("failed to write generated file: %v", err)
 	}
 
-	deps := &Deps{
-		WorkspaceRoot: tmpDir,
-		Runtime:       analyzeRuntime,
-		Wkspace:       &mockWorkspaceLoader{ws: ws},
-		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
-			localPath := sandbox.WorkspacePath(tmpDir, task.ID)
-			return "/workspace" + strings.TrimPrefix(hostPath, localPath)
-		},
+	agent := &models.Agent{ID: "agent-analyze"}
+	containerPathFn := func(task *models.Task, hostPath string, worktreeSuffix string) string {
+		localPath := sandbox.WorkspacePath(tmpDir, task.ID)
+		return "/workspace" + strings.TrimPrefix(hostPath, localPath)
 	}
 
-	agent := &models.Agent{ID: "agent-analyze"}
-	files, err := listAnalyzeFiles(context.Background(), deps, task, agent)
+	step := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: agent},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		nil,
+		nil,
+		nil,
+		sandboxRunnerAdapter{run: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
+			res, err := analyzeRuntime.Run(ctx, sandbox.CommandRequest{
+				Command: []string{"bash", "-lc", command},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return StepResult{"exit_code": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr}, nil
+		}},
+		nil,
+		nil,
+		nil,
+		&mockLogger{},
+		&mockWorkspaceLoader{ws: ws},
+		containerPathFn,
+	)
+
+	files, err := step.listAnalyzeFiles(context.Background())
 	if err != nil {
 		t.Fatalf("listAnalyzeFiles returned error: %v", err)
 	}
@@ -109,7 +129,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		t.Fatalf("analyze list should not expose generated workspace paths, got: %s", files)
 	}
 
-	grepResult, err := grepAnalyzeFiles(context.Background(), deps, task, agent, "marker")
+	grepResult, err := step.grepAnalyzeFiles(context.Background(), "marker")
 	if err != nil {
 		t.Fatalf("grepAnalyzeFiles returned error: %v", err)
 	}
@@ -162,18 +182,38 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 		}
 	}
 
-	deps := &Deps{
-		WorkspaceRoot: tmpDir,
-		Runtime:       analyzeRuntime,
-		Wkspace:       &mockWorkspaceLoader{ws: ws},
-		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
-			localPath := sandbox.WorkspacePath(tmpDir, task.ID)
-			return "/workspace" + strings.TrimPrefix(hostPath, localPath)
-		},
+	agent := &models.Agent{ID: "agent-analyze"}
+	containerPathFn := func(task *models.Task, hostPath string, worktreeSuffix string) string {
+		localPath := sandbox.WorkspacePath(tmpDir, task.ID)
+		return "/workspace" + strings.TrimPrefix(hostPath, localPath)
 	}
 
-	agent := &models.Agent{ID: "agent-analyze"}
-	files, err := listAnalyzeFiles(context.Background(), deps, task, agent)
+	step := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: agent},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		nil,
+		nil,
+		nil,
+		sandboxRunnerAdapter{run: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
+			res, err := analyzeRuntime.Run(ctx, sandbox.CommandRequest{
+				Command: []string{"bash", "-lc", command},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return StepResult{"exit_code": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr}, nil
+		}},
+		nil,
+		nil,
+		nil,
+		&mockLogger{},
+		&mockWorkspaceLoader{ws: ws},
+		containerPathFn,
+	)
+
+	files, err := step.listAnalyzeFiles(context.Background())
 	if err != nil {
 		t.Fatalf("listAnalyzeFiles returned error: %v", err)
 	}
@@ -181,7 +221,7 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 		t.Fatalf("expected prefixed multi-repo files, got: %s", files)
 	}
 
-	content, err := readAnalyzeFile(context.Background(), deps, task, agent, "repo-b/src/main.go")
+	content, err := step.readAnalyzeFile(context.Background(), "repo-b/src/main.go")
 	if err != nil {
 		t.Fatalf("readAnalyzeFile returned error: %v", err)
 	}

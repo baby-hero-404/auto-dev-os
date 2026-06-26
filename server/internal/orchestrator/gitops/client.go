@@ -3,6 +3,7 @@ package gitops
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
@@ -95,8 +96,18 @@ func (c *DefaultSandboxGitClient) CommitChanges(ctx context.Context, task *model
 	return nil
 }
 
+func getDiffPrefixes(containerPath string) string {
+	rel, err := filepath.Rel("/workspace", containerPath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	return fmt.Sprintf(" --src-prefix=a/%s/ --dst-prefix=b/%s/", rel, rel)
+}
+
 func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
-	cmd := fmt.Sprintf("git -C %s diff", workspace.QuoteShellArg(containerPath))
+	prefixes := getDiffPrefixes(containerPath)
+	cmd := fmt.Sprintf("git -C %s diff%s", workspace.QuoteShellArg(containerPath), prefixes)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_diff", cmd)
 	if out != nil {
 		if stdout, ok := out["stdout"].(string); ok {
@@ -107,9 +118,11 @@ func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task
 }
 
 func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, baseBranch string) (string, error) {
-	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[2]s...HEAD 2>/dev/null || git diff master...HEAD 2>/dev/null || git diff HEAD~1 2>/dev/null || git diff)",
+	prefixes := getDiffPrefixes(containerPath)
+	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[3]s %[2]s...HEAD 2>/dev/null || git diff %[3]s master...HEAD 2>/dev/null || git diff %[3]s HEAD~1 2>/dev/null || git diff %[3]s)",
 		workspace.QuoteShellArg(containerPath),
 		workspace.QuoteShellArg(baseBranch),
+		prefixes,
 	)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_pr_diff", diffCmd)
 	if out != nil {
@@ -138,32 +151,52 @@ func (c *DefaultSandboxGitClient) GetChangedFiles(ctx context.Context, task *mod
 }
 
 func (c *DefaultSandboxGitClient) GetWorkspaceDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, worktreeSuffix string) (string, error) {
-	var pattern string
-	if worktreeSuffix != "" {
-		pattern = fmt.Sprintf("*%s", worktreeSuffix)
-	} else {
-		pattern = "*"
-	}
 	stepName := "git_diff_multi"
 	if worktreeSuffix != "" {
 		stepName += "_" + worktreeSuffix
 	}
-	out, err := c.RunSandboxStep(ctx, task, agent, stepName, fmt.Sprintf(`
-		DIFF_OUT=""
-		for d in %[1]s/%[2]s/ ; do
-			if [ -e "$d/.git" ]; then
-				pushd "$d" > /dev/null
-				REPO_DIFF=$(git diff)
-				if [ -n "$REPO_DIFF" ]; then
-					d_name=$(basename "$d")
-					repo_display="${d_name%%%[3]s}"
-					DIFF_OUT="${DIFF_OUT}--- Repository: ${repo_display}\n${REPO_DIFF}\n\n"
-				fi
-				popd > /dev/null
-			fi
-		done
-		echo -e "$DIFF_OUT"
-	`, workspace.QuoteShellArg(containerPath), pattern, worktreeSuffix))
+	pyScript := `import json, os, subprocess, sys
+container_path = sys.argv[1]
+suffix = sys.argv[2]
+clean_suffix = suffix.lstrip("-").replace("-worktree", "") if suffix else ""
+if clean_suffix in ("be", "backend"):
+    role = "backend"
+elif clean_suffix in ("fe", "frontend"):
+    role = "frontend"
+elif clean_suffix == "fix":
+    role = "fix"
+else:
+    role = clean_suffix
+meta_path = os.path.join(container_path, "metadata.json")
+if not os.path.exists(meta_path):
+    sys.exit(0)
+with open(meta_path) as f:
+    meta = json.load(f)
+diff_out = []
+for repo in meta.get("repos", []):
+    name = repo.get("name")
+    paths = repo.get("paths", {})
+    rel_path = ""
+    if role:
+        rel_path = paths.get("worktrees", {}).get(role, "")
+    if not rel_path:
+        rel_path = paths.get("main", "")
+    if not rel_path:
+        continue
+    full_path = os.path.join(container_path, rel_path)
+    if os.path.exists(os.path.join(full_path, ".git")):
+        res = subprocess.run(["git", "-C", full_path, "diff", f"--src-prefix=a/{rel_path}/", f"--dst-prefix=b/{rel_path}/"], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            diff_out.append(f"--- Repository: {name}\n{res.stdout}")
+print("\n".join(diff_out))`
+
+	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",
+		workspace.QuoteShellArg(pyScript),
+		workspace.QuoteShellArg(containerPath),
+		workspace.QuoteShellArg(worktreeSuffix),
+	)
+
+	out, err := c.RunSandboxStep(ctx, task, agent, stepName, cmd)
 	if err != nil {
 		return "", fmt.Errorf("multi-repo git diff failed: %w", err)
 	}
@@ -172,38 +205,54 @@ func (c *DefaultSandboxGitClient) GetWorkspaceDiff(ctx context.Context, task *mo
 }
 
 func (c *DefaultSandboxGitClient) GetWorkspaceChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, worktreeSuffix string) ([]string, error) {
-	var pattern string
-	if worktreeSuffix != "" {
-		pattern = fmt.Sprintf("*%s", worktreeSuffix)
-	} else {
-		pattern = "*"
-	}
 	stepName := "git_status_multi"
 	if worktreeSuffix != "" {
 		stepName += "_" + worktreeSuffix
 	}
-	out, err := c.RunSandboxStep(ctx, task, agent, stepName, fmt.Sprintf(`
-		FILES_OUT=""
-		for d in %[1]s/%[2]s/ ; do
-			if [ -e "$d/.git" ]; then
-				pushd "$d" > /dev/null
-				REPO_STATUS=$(git status --porcelain)
-				if [ -n "$REPO_STATUS" ]; then
-					d_name=$(basename "$d")
-					repo_display="${d_name%%%[3]s}"
-					echo "$REPO_STATUS" | while read -r line; do
-						if [ ${#line} -gt 2 ]; then
-							file_path="${line:3}"
-							# Prefix with repo name if needed, or just return relative paths
-							FILES_OUT="${FILES_OUT}repos/${repo_display}/${file_path}\n"
-						fi
-					done
-				fi
-				popd > /dev/null
-			fi
-		done
-		echo -e "$FILES_OUT"
-	`, workspace.QuoteShellArg(containerPath), pattern, worktreeSuffix))
+	pyScript := `import json, os, subprocess, sys
+container_path = sys.argv[1]
+suffix = sys.argv[2]
+clean_suffix = suffix.lstrip("-").replace("-worktree", "") if suffix else ""
+if clean_suffix in ("be", "backend"):
+    role = "backend"
+elif clean_suffix in ("fe", "frontend"):
+    role = "frontend"
+elif clean_suffix == "fix":
+    role = "fix"
+else:
+    role = clean_suffix
+meta_path = os.path.join(container_path, "metadata.json")
+if not os.path.exists(meta_path):
+    sys.exit(0)
+with open(meta_path) as f:
+    meta = json.load(f)
+files_out = []
+for repo in meta.get("repos", []):
+    name = repo.get("name")
+    paths = repo.get("paths", {})
+    rel_path = ""
+    if role:
+        rel_path = paths.get("worktrees", {}).get(role, "")
+    if not rel_path:
+        rel_path = paths.get("main", "")
+    if not rel_path:
+        continue
+    full_path = os.path.join(container_path, rel_path)
+    if os.path.exists(os.path.join(full_path, ".git")):
+        res = subprocess.run(["git", "-C", full_path, "status", "--porcelain"], capture_output=True, text=True)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if len(line) > 2:
+                    files_out.append(f"repos/{name}/{line[3:].strip()}")
+print("\n".join(files_out))`
+
+	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",
+		workspace.QuoteShellArg(pyScript),
+		workspace.QuoteShellArg(containerPath),
+		workspace.QuoteShellArg(worktreeSuffix),
+	)
+
+	out, err := c.RunSandboxStep(ctx, task, agent, stepName, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("multi-repo git status failed: %w", err)
 	}

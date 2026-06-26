@@ -51,9 +51,10 @@ func (m *mockTaskRepo) Update(ctx context.Context, id string, input models.Updat
 }
 
 type mockWorkflowRepo struct {
-	job         *models.WorkflowJob
-	checkpoint  *models.WorkflowCheckpoint
-	checkpoints []models.WorkflowCheckpoint
+	job            *models.WorkflowJob
+	checkpoint     *models.WorkflowCheckpoint
+	checkpoints    []models.WorkflowCheckpoint
+	agentUpdateErr error
 }
 
 func (m *mockWorkflowRepo) Enqueue(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
@@ -69,6 +70,9 @@ func (m *mockWorkflowRepo) LatestByTaskID(ctx context.Context, taskID string) (*
 }
 
 func (m *mockWorkflowRepo) UpdateJob(ctx context.Context, id string, updates map[string]any) (*models.WorkflowJob, error) {
+	if updates["agent_id"] != nil && m.agentUpdateErr != nil {
+		return nil, m.agentUpdateErr
+	}
 	if updates["status"] != nil {
 		m.job.Status = updates["status"].(string)
 	}
@@ -122,7 +126,8 @@ func (m *mockWorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any
 }
 
 type mockAgentAssigner struct {
-	agent *models.Agent
+	agent       *models.Agent
+	releasedIDs []string
 }
 
 func (m *mockAgentAssigner) Assign(ctx context.Context, task *models.Task) (*models.Agent, error) {
@@ -130,15 +135,21 @@ func (m *mockAgentAssigner) Assign(ctx context.Context, task *models.Task) (*mod
 }
 
 func (m *mockAgentAssigner) AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	return m.agent, nil
+	a := *m.agent
+	a.Role = models.AgentRoleReviewer
+	return &a, nil
 }
 
 func (m *mockAgentAssigner) AssignBackendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	return m.agent, nil
+	a := *m.agent
+	a.Role = models.AgentRoleBackend
+	return &a, nil
 }
 
 func (m *mockAgentAssigner) AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	return m.agent, nil
+	a := *m.agent
+	a.Role = models.AgentRoleFrontend
+	return &a, nil
 }
 
 func (m *mockAgentAssigner) MarkRunning(ctx context.Context, agentID string) error {
@@ -146,6 +157,7 @@ func (m *mockAgentAssigner) MarkRunning(ctx context.Context, agentID string) err
 }
 
 func (m *mockAgentAssigner) Release(ctx context.Context, agentID string) error {
+	m.releasedIDs = append(m.releasedIDs, agentID)
 	return nil
 }
 
@@ -156,10 +168,10 @@ type mockSandboxRuntime struct {
 func (m *mockSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
 	m.commands = append(m.commands, req.Command...)
 	stdout := ""
-	if len(req.Command) >= 3 && strings.Contains(req.Command[2], "git diff") {
+	if len(req.Command) >= 3 && (strings.Contains(req.Command[2], "git diff") || (strings.Contains(req.Command[2], "python3") && strings.Contains(req.Command[2], "diff"))) {
 		stdout = "diff --git a/file.go b/file.go\n+new line"
-	} else if len(req.Command) >= 3 && strings.Contains(req.Command[2], "git status --porcelain") {
-		stdout = " M file.go\n"
+	} else if len(req.Command) >= 3 && (strings.Contains(req.Command[2], "git status --porcelain") || (strings.Contains(req.Command[2], "python3") && strings.Contains(req.Command[2], "status"))) {
+		stdout = "repos/repo/file.go\n"
 	}
 	return &sandbox.CommandResult{
 		ExitCode: 0,
@@ -430,6 +442,48 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_Run_ReleasesAgentWhenFailureOccursAfterAssign(t *testing.T) {
+	task := &models.Task{
+		ID:          "task-release",
+		ProjectID:   "proj-release",
+		Title:       "Release Agent",
+		Description: "Fail after assigning the agent.",
+		Status:      models.TaskStatusContextLoading,
+		Complexity:  models.TaskComplexityMedium,
+		SpecStatus:  models.TaskSpecStatusApproved,
+	}
+	job := &models.WorkflowJob{
+		ID:     "job-release",
+		TaskID: task.ID,
+		Status: models.WorkflowJobStatusQueued,
+	}
+	agent := &models.Agent{
+		ID:   "agent-release",
+		Name: "Release Agent",
+		Role: models.AgentRoleBackend,
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: job, agentUpdateErr: errors.New("persist assigned agent failed")}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+	orch := New(taskRepo, workflowRepo, agentAssigner, &mockSandboxRuntime{})
+
+	orch.run(context.Background(), job.ID)
+
+	if len(agentAssigner.releasedIDs) != 1 {
+		t.Fatalf("expected assigned agent to be released once, got %d releases", len(agentAssigner.releasedIDs))
+	}
+	if agentAssigner.releasedIDs[0] != agent.ID {
+		t.Fatalf("expected release of agent %s, got %s", agent.ID, agentAssigner.releasedIDs[0])
+	}
+	if job.Status != models.WorkflowJobStatusFailed {
+		t.Fatalf("expected job status failed, got %s", job.Status)
+	}
+	if task.Status != models.TaskStatusFailed {
+		t.Fatalf("expected task status failed, got %s", task.Status)
+	}
+}
+
 func TestOrchestrator_StepPR_NoChangesMerged(t *testing.T) {
 	task := &models.Task{
 		ID:          "task-no-change",
@@ -514,6 +568,16 @@ func TestParseJSONMarkdown(t *testing.T) {
 			input:    "Sure, here is the result:\n{\n  \"a\": 4\n}\nHope this helps!",
 			expected: `{"a": 4}`,
 		},
+		{
+			name:     "json array",
+			input:    `[{"a": 1}]`,
+			expected: `{"array": [{"a": 1}]}`,
+		},
+		{
+			name:     "json array in markdown",
+			input:    "```json\n[{\"a\": 2}]\n```",
+			expected: `{"array": [{"a": 2}]}`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -536,20 +600,21 @@ func TestParseJSONMarkdown(t *testing.T) {
 func TestOrchestrator_RemoveWorkspaceSafety(t *testing.T) {
 	root := t.TempDir()
 	orch := New(nil, nil, nil, nil, WithWorkspaceRoot(root))
+	orch.initWkspace()
 
 	if err := os.MkdirAll(filepath.Join(root, "task-1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.RemoveWorkspace("task-1"); err != nil {
+	if err := orch.wkspace.RemoveWorkspace("task-1"); err != nil {
 		t.Fatalf("remove workspace: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "task-1")); !os.IsNotExist(err) {
 		t.Fatalf("expected workspace removed, got err=%v", err)
 	}
-	if err := orch.RemoveWorkspace(""); err == nil {
+	if err := orch.wkspace.RemoveWorkspace(""); err == nil {
 		t.Fatal("expected empty task id to be rejected")
 	}
-	if err := orch.RemoveWorkspace("../outside"); err == nil {
+	if err := orch.wkspace.RemoveWorkspace("../outside"); err == nil {
 		t.Fatal("expected escaping task id to be rejected")
 	}
 }
@@ -573,8 +638,9 @@ func TestOrchestrator_PruneWorkspacesHonorsRetention(t *testing.T) {
 		WithWorkspaceRoot(root),
 		WithWorkspaceRetention(time.Hour, time.Hour),
 	)
+	orch.initWkspace()
 
-	removed, err := orch.pruneWorkspaces(context.Background())
+	removed, err := orch.wkspace.PruneWorkspaces(context.Background())
 	if err != nil {
 		t.Fatalf("prune workspaces: %v", err)
 	}
@@ -627,6 +693,9 @@ func TestMatchAffectedFile(t *testing.T) {
 	}{
 		// Exact Match
 		{"internal/app/backend/handlers.go", "internal/app/backend/handlers.go", true},
+		{"readme.md", "code/repos/test/main/readme.md", true},
+		{"Dockerfile", "code/repos/test/main/Dockerfile", true},
+		{"src/readme.md", "code/repos/test/main/src/readme.md", true},
 		{"internal/app/backend/handlers.go", "internal/app/backend/other.go", false},
 
 		// Directory Prefix Match
@@ -825,7 +894,7 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 			workflow.StepReview: {
 				"cycle_limit_reached": false,
 				"parsed": map[string]any{
-					"findings": []any{"finding 1"},
+					"findings": []any{map[string]any{"file": "main.go", "severity": "high"}},
 				},
 			},
 		},
@@ -841,7 +910,7 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 			workflow.StepReview: {
 				"cycle_limit_reached": true,
 				"parsed": map[string]any{
-					"findings": []any{"finding 1"},
+					"findings": []any{map[string]any{"file": "main.go", "severity": "high"}},
 				},
 			},
 		},
@@ -881,7 +950,24 @@ func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testi
 		}}),
 	)
 
-	out, err := steps.ExecuteReview(context.Background(), orch.makeStepsDeps(task, agent, "job-review-cycle"), task, agent, "job-review-cycle", workflow.StepContext{})
+	orch.initRepoutil()
+	orch.initCheckpoints()
+	orch.initWkspace()
+
+	step := steps.NewReviewStep(
+		steps.StepRuntime{Task: task, Agent: agent, JobID: "job-review-cycle"},
+		orch.tasks,
+		orch.projects,
+		llmRunnerAdapter{run: orch.runLLMStep},
+		orch.repoutil,
+		artifactSaverAdapter{save: orch.checkpoints.SaveArtifact},
+		orch.agents,
+		orch.checkpoints,
+		statusUpdaterAdapter{update: orch.updateTaskStatus},
+		loggerAdapter{log: orch.log},
+	)
+
+	out, err := step.Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
 		t.Fatalf("executeStepReview returned error: %v", err)
 	}
@@ -917,8 +1003,10 @@ func TestOrchestrator_GetTaskRepoHostPath_FailsOnRepositoryIDMismatch(t *testing
 			URL: "https://github.com/example/repo-b.git",
 		}}},
 	}
+	orch.initWkspace()
+	orch.initRepoutil()
 
-	ws := orch.GetTaskWorkspace(task)
+	ws := orch.wkspace.GetTaskWorkspace(task)
 	ws.Repos = []models.RepoWorkspace{{
 		RepoID: "repo-b",
 		Name:   "repo-b",
@@ -927,11 +1015,11 @@ func TestOrchestrator_GetTaskRepoHostPath_FailsOnRepositoryIDMismatch(t *testing
 	if err := os.MkdirAll(ws.Root, 0o755); err != nil {
 		t.Fatalf("failed to create workspace: %v", err)
 	}
-	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+	if err := orch.wkspace.SaveTaskWorkspaceMetadata(task, ws); err != nil {
 		t.Fatalf("failed to save metadata: %v", err)
 	}
 
-	if _, err := orch.getTaskRepoHostPath(context.Background(), task); err == nil {
+	if _, err := orch.repoutil.GetTaskRepoHostPath(context.Background(), task); err == nil {
 		t.Fatal("expected repository ID mismatch to fail fast")
 	}
 }
@@ -946,7 +1034,8 @@ func TestOrchestrator_ReadAffectedFileContent_ResolvesRepoRelativePath(t *testin
 	repoID := "repo-a"
 	task := &models.Task{ID: "task-affected", ProjectID: "proj-affected", RepositoryID: &repoID}
 	orch := &Orchestrator{workspaceRoot: tmpDir}
-	ws := orch.GetTaskWorkspace(task)
+	orch.initWkspace()
+	ws := orch.wkspace.GetTaskWorkspace(task)
 	ws.Repos = []models.RepoWorkspace{{
 		RepoID: repoID,
 		Name:   "repo-a",
@@ -959,7 +1048,7 @@ func TestOrchestrator_ReadAffectedFileContent_ResolvesRepoRelativePath(t *testin
 	if err := os.WriteFile(filepath.Join(repoRoot, "src", "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
-	if err := orch.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+	if err := orch.wkspace.SaveTaskWorkspaceMetadata(task, ws); err != nil {
 		t.Fatalf("failed to save metadata: %v", err)
 	}
 
@@ -1177,6 +1266,7 @@ index abc..def 100644
 	orch := &Orchestrator{
 		workspaceRoot: "/tmp/workspaces",
 	}
+	orch.initRepoutil()
 
 	// Single repo case
 	repoID := "single-repo-id"
@@ -1191,28 +1281,28 @@ index abc..def 100644
 		URL: "https://github.com/example/repo-a.git",
 	}
 
-	repoPathWithoutMetadata := orch.repoHostPath(singleTask, nil, repo)
+	repoPathWithoutMetadata := orch.repoutil.RepoHostPath(singleTask, nil, repo)
 	expectedRepoPathWithoutMetadata := filepath.Clean("/tmp/workspaces/task-1/code/repos/repo-a/main")
 	if filepath.Clean(repoPathWithoutMetadata) != expectedRepoPathWithoutMetadata {
 		t.Errorf("expected repo path without metadata: %s, got: %s", expectedRepoPathWithoutMetadata, repoPathWithoutMetadata)
 	}
 
 	// Suffix case
-	bePath := orch.hostWorktreePath(singleTask, localPath, "-be-worktree")
+	bePath := orch.repoutil.HostWorktreePath(singleTask, localPath, "-be-worktree")
 	expectedBePath := filepath.Clean("/tmp/workspaces/task-1/be")
 	if filepath.Clean(bePath) != expectedBePath {
 		t.Errorf("expected single-repo bePath: %s, got: %s", expectedBePath, bePath)
 	}
 
 	containerBe := orch.containerPathForHostPath(singleTask, bePath, "-be-worktree")
-	if containerBe != "/workspace" {
-		t.Errorf("expected containerPath for worktree to be /workspace, got: %s", containerBe)
+	if containerBe != "/workspace/be" {
+		t.Errorf("expected containerPath for worktree to be /workspace/be, got: %s", containerBe)
 	}
 
 	// Child in worktree case
 	containerBeFile := orch.containerPathForHostPath(singleTask, filepath.Join(bePath, "src/main.go"), "-be-worktree")
-	if containerBeFile != "/workspace/src/main.go" {
-		t.Errorf("expected container path /workspace/src/main.go, got: %s", containerBeFile)
+	if containerBeFile != "/workspace/be/src/main.go" {
+		t.Errorf("expected container path /workspace/be/src/main.go, got: %s", containerBeFile)
 	}
 
 	// Multi repo case
@@ -1224,7 +1314,7 @@ index abc..def 100644
 	multiLocalPath := "/tmp/workspaces/task-2"
 	multiRepoPath := filepath.Join(multiLocalPath, "repo-a")
 
-	multiBePath := orch.hostWorktreePath(multiTask, multiRepoPath, "-be-worktree")
+	multiBePath := orch.repoutil.HostWorktreePath(multiTask, multiRepoPath, "-be-worktree")
 	expectedMultiBePath := filepath.Clean("/tmp/workspaces/task-2/repo-a-be-worktree")
 	if filepath.Clean(multiBePath) != expectedMultiBePath {
 		t.Errorf("expected multi-repo bePath: %s, got: %s", expectedMultiBePath, multiBePath)

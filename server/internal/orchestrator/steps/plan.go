@@ -8,38 +8,73 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecutePlan(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
-	t, err := deps.Tasks.GetByID(ctx, task.ID)
-	if err == nil && t.Complexity == models.TaskComplexityEasy {
-		return map[string]any{"status": "skipped", "info": "skipped plan step for easy task"}, nil
+
+// PlanStep implements Step for the execution planning phase.
+type PlanStep struct {
+	rt        StepRuntime
+	tasks     TaskReader
+	llm       LLMRunner
+	worktree  WorktreeManager
+	workspace WorkspaceLoader
+	status    StatusUpdater
+	log       Logger
+}
+
+func NewPlanStep(
+	rt StepRuntime,
+	tasks TaskReader,
+	llm LLMRunner,
+	worktree WorktreeManager,
+	workspace WorkspaceLoader,
+	status StatusUpdater,
+	log Logger,
+) *PlanStep {
+	return &PlanStep{
+		rt:        rt,
+		tasks:     tasks,
+		llm:       llm,
+		worktree:  worktree,
+		workspace: workspace,
+		status:    status,
+		log:       log,
 	}
-	var out map[string]any
-	if deps.LLM != nil {
-		out, err = deps.RunLLMStep(ctx, task, agent, jobID, workflow.StepPlan, "Create a concise JSON execution plan with subtasks, risks, and test strategy.")
+}
+
+func (s *PlanStep) ID() string                              { return workflow.StepPlan }
+func (s *PlanStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusCoding }
+
+func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
+	if err == nil && t.Complexity == models.TaskComplexityEasy {
+		return StepResult{"status": "skipped", "info": "skipped plan step for easy task"}, nil
+	}
+	var out StepResult
+	if s.llm != nil {
+		out, err = s.llm.RunLLMStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepPlan, "Create a concise JSON execution plan with subtasks, risks, and test strategy.")
 	} else {
 		plan := []any{
 			map[string]any{"id": "backend", "role": models.AgentRoleBackend, "description": "Implement server-side changes and data contracts."},
 			map[string]any{"id": "frontend", "role": models.AgentRoleFrontend, "description": "Implement user-facing workflow updates when applicable."},
 		}
-		out, err = map[string]any{"subtasks": plan}, nil
+		out, err = StepResult{"subtasks": plan}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	// Allocate branches idempotently for medium/hard tasks
-	if deps.RepoUtil != nil {
-		targetRepos, errRepos := deps.RepoUtil.LoadTargetRepositories(ctx, task)
+	if s.worktree != nil {
+		targetRepos, errRepos := s.worktree.LoadTargetRepositories(ctx, s.rt.Task)
 		if errRepos == nil && len(targetRepos) > 0 {
-			integrationBranch := fmt.Sprintf("feature/%s", task.ID)
-			beBranch := fmt.Sprintf("feature/%s-be", task.ID)
-			feBranch := fmt.Sprintf("feature/%s-fe", task.ID)
+			integrationBranch := fmt.Sprintf("feature/%s", s.rt.Task.ID)
+			beBranch := fmt.Sprintf("feature/%s-be", s.rt.Task.ID)
+			feBranch := fmt.Sprintf("feature/%s-fe", s.rt.Task.ID)
 
 			var ws *models.TaskWorkspace
-			if deps.Wkspace != nil {
-				ws, _ = deps.Wkspace.LoadTaskWorkspace(ctx, task)
+			if s.workspace != nil {
+				ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
 			}
-			deps.RepoUtil.SetupRoleBranches(ctx, task, agent, jobID, targetRepos, ws)
+			s.worktree.SetupRoleBranches(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, targetRepos, ws)
 			out["branches"] = map[string]string{
 				"integration": integrationBranch,
 				"backend":     beBranch,
@@ -48,8 +83,11 @@ func ExecutePlan(ctx context.Context, deps *Deps, task *models.Task, agent *mode
 		}
 	}
 
-	if _, err := deps.UpdateTaskStatus(ctx, task.ID, models.TaskStatusCoding); err != nil {
-		return nil, err
+	if s.status != nil {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusCoding); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
+

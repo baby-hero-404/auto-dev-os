@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
-	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 func analyzeToolDefinitions() []llm.ToolDefinition {
@@ -19,22 +17,22 @@ func analyzeToolDefinitions() []llm.ToolDefinition {
 		{
 			Name:        "list_files",
 			Description: "List relevant source files in the task workspace. Use this before reading files when repository structure is unknown.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 		},
 		{
 			Name:        "read_file",
 			Description: "Read a single workspace file by repository-relative path.",
-			Parameters:  json.RawMessage(`{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Repository-relative file path to read."}},"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Repository-relative file path to read."}}}`),
 		},
 		{
 			Name:        "grep_search",
 			Description: "Search workspace files for a literal query string and return matching lines.",
-			Parameters:  json.RawMessage(`{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Literal text to search for."}},"additionalProperties":false}`),
+			Parameters:  json.RawMessage(`{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Literal text to search for."}}}`),
 		},
 	}
 }
 
-func executeAnalyzeTool(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, toolName, arguments string) string {
+func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, arguments string) string {
 	var args map[string]any
 	if strings.TrimSpace(arguments) != "" {
 		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -47,7 +45,7 @@ func executeAnalyzeTool(ctx context.Context, deps *Deps, task *models.Task, agen
 
 	switch toolName {
 	case "list_files":
-		result, err := listAnalyzeFiles(ctx, deps, task, agent)
+		result, err := s.listAnalyzeFiles(ctx)
 		if err != nil {
 			return "Error: " + err.Error()
 		}
@@ -57,7 +55,7 @@ func executeAnalyzeTool(ctx context.Context, deps *Deps, task *models.Task, agen
 		if strings.TrimSpace(path) == "" {
 			return `Error: missing required "path" argument`
 		}
-		result, err := readAnalyzeFile(ctx, deps, task, agent, path)
+		result, err := s.readAnalyzeFile(ctx, path)
 		if err != nil {
 			return "Error: " + err.Error()
 		}
@@ -67,7 +65,7 @@ func executeAnalyzeTool(ctx context.Context, deps *Deps, task *models.Task, agen
 		if strings.TrimSpace(query) == "" {
 			return `Error: missing required "query" argument`
 		}
-		result, err := grepAnalyzeFiles(ctx, deps, task, agent, query)
+		result, err := s.grepAnalyzeFiles(ctx, query)
 		if err != nil {
 			return "Error: " + err.Error()
 		}
@@ -82,12 +80,12 @@ type analyzeSourceRoot struct {
 	prefix string
 }
 
-func analyzeSourceRoots(ctx context.Context, deps *Deps, task *models.Task) []analyzeSourceRoot {
-	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
-	if deps.Wkspace == nil {
+func (s *AnalyzeStep) analyzeSourceRoots(ctx context.Context) []analyzeSourceRoot {
+	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	if s.wkspace == nil {
 		return []analyzeSourceRoot{{path: localPath}}
 	}
-	ws, err := deps.Wkspace.LoadTaskWorkspace(ctx, task)
+	ws, err := s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task)
 	if err != nil || ws == nil || len(ws.Repos) == 0 {
 		return []analyzeSourceRoot{{path: localPath}}
 	}
@@ -95,7 +93,7 @@ func analyzeSourceRoots(ctx context.Context, deps *Deps, task *models.Task) []an
 	var roots []analyzeSourceRoot
 	targetCount := 0
 	for _, repo := range ws.Repos {
-		if task.RepositoryID != nil && repo.RepoID != *task.RepositoryID {
+		if s.rt.Task.RepositoryID != nil && repo.RepoID != *s.rt.Task.RepositoryID {
 			continue
 		}
 		if repo.Paths.Main == "" {
@@ -104,14 +102,14 @@ func analyzeSourceRoots(ctx context.Context, deps *Deps, task *models.Task) []an
 		targetCount++
 	}
 	for _, repo := range ws.Repos {
-		if task.RepositoryID != nil && repo.RepoID != *task.RepositoryID {
+		if s.rt.Task.RepositoryID != nil && repo.RepoID != *s.rt.Task.RepositoryID {
 			continue
 		}
 		if repo.Paths.Main == "" {
 			continue
 		}
 		prefix := ""
-		if task.RepositoryID == nil && targetCount > 1 {
+		if s.rt.Task.RepositoryID == nil && targetCount > 1 {
 			prefix = repo.Name
 		}
 		roots = append(roots, analyzeSourceRoot{
@@ -125,12 +123,27 @@ func analyzeSourceRoots(ctx context.Context, deps *Deps, task *models.Task) []an
 	return roots
 }
 
-func listAnalyzeFiles(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent) (string, error) {
+func (s *AnalyzeStep) getContainerRoot(rootPath string) string {
+	if s.containerPath != nil {
+		return s.containerPath(s.rt.Task, rootPath, "")
+	}
+	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	rel, err := filepath.Rel(localPath, rootPath)
+	if err == nil && !strings.HasPrefix(rel, "..") {
+		if rel == "." {
+			return "/workspace"
+		}
+		return "/workspace/" + rel
+	}
+	return "/workspace"
+}
+
+func (s *AnalyzeStep) listAnalyzeFiles(ctx context.Context) (string, error) {
 	var files []string
-	for _, root := range analyzeSourceRoots(ctx, deps, task) {
-		containerRoot := deps.ContainerPathForHostPath(task, root.path, "")
+	for _, root := range s.analyzeSourceRoots(ctx) {
+		containerRoot := s.getContainerRoot(root.path)
 		cmd := fmt.Sprintf("cd %s && find . \\( -name .git -o -name node_modules -o -name vendor -o -name dist -o -name artifacts -o -name logs -o -name specs -o -name openspec -o -name context -o -name pr \\) -prune -o -type f -print | sed 's#^\\\\./##'", orchestratorworkspace.QuoteShellArg(containerRoot))
-		out, err := runAnalyzeSandboxCommand(ctx, deps, task, agent, cmd)
+		out, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err != nil {
 			return "", err
 		}
@@ -148,9 +161,9 @@ func listAnalyzeFiles(ctx context.Context, deps *Deps, task *models.Task, agent 
 	return strings.Join(files, "\n"), nil
 }
 
-func readAnalyzeFile(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, subPath string) (string, error) {
+func (s *AnalyzeStep) readAnalyzeFile(ctx context.Context, subPath string) (string, error) {
 	subPath = filepath.Clean(strings.TrimSpace(subPath))
-	for _, root := range analyzeSourceRoots(ctx, deps, task) {
+	for _, root := range s.analyzeSourceRoots(ctx) {
 		relPath := subPath
 		if root.prefix != "" {
 			prefix := root.prefix + string(filepath.Separator)
@@ -162,13 +175,13 @@ func readAnalyzeFile(ctx context.Context, deps *Deps, task *models.Task, agent *
 		if !orchestratorworkspace.IsSafeRelativeSourcePath(relPath) {
 			continue
 		}
-		containerRoot := deps.ContainerPathForHostPath(task, root.path, "")
+		containerRoot := s.getContainerRoot(root.path)
 		cmd := fmt.Sprintf("cd %s && if [ -f %s ]; then head -c 20000 %s; else exit 2; fi",
 			orchestratorworkspace.QuoteShellArg(containerRoot),
 			orchestratorworkspace.QuoteShellArg(relPath),
 			orchestratorworkspace.QuoteShellArg(relPath),
 		)
-		content, err := runAnalyzeSandboxCommand(ctx, deps, task, agent, cmd)
+		content, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err == nil {
 			return content, nil
 		}
@@ -176,15 +189,15 @@ func readAnalyzeFile(ctx context.Context, deps *Deps, task *models.Task, agent *
 	return "", fmt.Errorf("file %s not found in source roots", subPath)
 }
 
-func grepAnalyzeFiles(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, query string) (string, error) {
+func (s *AnalyzeStep) grepAnalyzeFiles(ctx context.Context, query string) (string, error) {
 	var matches []string
-	for _, root := range analyzeSourceRoots(ctx, deps, task) {
-		containerRoot := deps.ContainerPathForHostPath(task, root.path, "")
+	for _, root := range s.analyzeSourceRoots(ctx) {
+		containerRoot := s.getContainerRoot(root.path)
 		cmd := fmt.Sprintf("cd %s && grep -RIn --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=dist --exclude-dir=artifacts --exclude-dir=logs --exclude-dir=specs --exclude-dir=openspec --exclude-dir=context --exclude-dir=pr -- %s . || true",
 			orchestratorworkspace.QuoteShellArg(containerRoot),
 			orchestratorworkspace.QuoteShellArg(query),
 		)
-		result, err := runAnalyzeSandboxCommand(ctx, deps, task, agent, cmd)
+		result, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err != nil {
 			return "", err
 		}
@@ -205,28 +218,20 @@ func grepAnalyzeFiles(ctx context.Context, deps *Deps, task *models.Task, agent 
 	return strings.Join(matches, "\n"), nil
 }
 
-func runAnalyzeSandboxCommand(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, command string) (string, error) {
-	if deps.Runtime == nil {
-		return "", fmt.Errorf("sandbox runtime is not configured")
+func (s *AnalyzeStep) runAnalyzeSandboxCommand(ctx context.Context, command string) (string, error) {
+	if s.sandbox == nil {
+		return "", fmt.Errorf("sandbox runner is not configured")
 	}
-	agentID := ""
-	if agent != nil {
-		agentID = agent.ID
-	}
-	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
-	result, err := deps.Runtime.Run(ctx, sandbox.CommandRequest{
-		TaskID:      task.ID,
-		AgentID:     agentID,
-		Workspace:   localPath,
-		Command:     []string{"bash", "-lc", command},
-		NetworkMode: sandbox.NetworkModeNone,
-		Timeout:     time.Minute,
-	})
+	result, err := s.sandbox.RunCommand(ctx, s.rt.Task, s.rt.Agent, "analyze_sandbox_cmd", command)
 	if err != nil {
 		return "", err
 	}
-	if result.ExitCode != 0 {
-		return "", fmt.Errorf("analyze sandbox command failed with exit code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	exitCode, _ := result["exit_code"].(int)
+	stdout, _ := result["stdout"].(string)
+	stderr, _ := result["stderr"].(string)
+	if exitCode != 0 {
+		return "", fmt.Errorf("analyze sandbox command failed with exit status %d: %s", exitCode, strings.TrimSpace(stderr))
 	}
-	return result.Stdout, nil
+	return stdout, nil
 }
+

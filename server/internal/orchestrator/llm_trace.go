@@ -32,7 +32,8 @@ func redactSecrets(s string) string {
 }
 
 func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any) {
-	ws := o.GetTaskWorkspace(task)
+	o.initWkspace()
+	ws := o.wkspace.GetTaskWorkspace(task)
 	stepTraceDir := filepath.Join(ws.Root, "logs", "llm", stepID)
 	_ = os.MkdirAll(stepTraceDir, 0o755)
 

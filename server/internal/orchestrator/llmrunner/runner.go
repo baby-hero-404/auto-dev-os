@@ -96,7 +96,11 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 				parsed = map[string]any{"raw_content": resp.Content}
 				break
 			}
-			messages = append(messages, llm.Message{Role: "assistant", Content: resp.Content})
+			content := resp.Content
+			if content == "" {
+				content = "(empty response)"
+			}
+			messages = append(messages, llm.Message{Role: "assistant", Content: content})
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: fmt.Sprintf("Your output was not valid JSON. Error: %v. Please correct the syntax and output ONLY strictly valid JSON matching the requested format directly (or inside a ```json ``` block).", err),

@@ -18,70 +18,141 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecuteContextLoad(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, _ workflow.StepContext) (map[string]any, error) {
-	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
-		if _, err := deps.UpdateTaskStatus(ctx, task.ID, models.TaskStatusContextLoading); err != nil {
-			return nil, fmt.Errorf("update task status: %w", err)
+// ContextLoadStep implements Step for context loading.
+type ContextLoadStep struct {
+	rt            StepRuntime
+	workspaceRoot string
+	tasks         TaskReader
+	status        StatusUpdater
+	wkspace       WorkspaceLoader
+	sandbox       SandboxRunner
+	llm           LLMChatter
+	artifacts     ArtifactSaver
+	repos         RepositoryLister
+	log           Logger
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+}
+
+func NewContextLoadStep(
+	rt StepRuntime,
+	workspaceRoot string,
+	tasks TaskReader,
+	status StatusUpdater,
+	wkspace WorkspaceLoader,
+	sandbox SandboxRunner,
+	llm LLMChatter,
+	artifacts ArtifactSaver,
+	repos RepositoryLister,
+	log Logger,
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+) *ContextLoadStep {
+	return &ContextLoadStep{
+		rt:            rt,
+		workspaceRoot: workspaceRoot,
+		tasks:         tasks,
+		status:        status,
+		wkspace:       wkspace,
+		sandbox:       sandbox,
+		llm:           llm,
+		artifacts:     artifacts,
+		repos:         repos,
+		log:           log,
+		containerPath: containerPath,
+	}
+}
+
+func (s *ContextLoadStep) ID() string { return workflow.StepContextLoad }
+
+func (s *ContextLoadStep) StatusOnResume(_ StepResult) string {
+	return models.TaskStatusContextLoading
+}
+
+func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	if s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == models.TaskStatusFailed || s.rt.Task.Status == "" {
+		if s.status != nil {
+			if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusContextLoading); err != nil {
+				return nil, fmt.Errorf("update task status: %w", err)
+			}
 		}
 	}
 
-	repoPaths := resolveContextRepoPaths(deps, task)
-	result := gatherRepoContexts(ctx, deps, task, agent, repoPaths)
+	repoPaths := s.resolveContextRepoPaths(ctx)
+	result := s.gatherRepoContexts(ctx, repoPaths)
 
-	_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepContextLoad, "context", result)
+	if s.artifacts != nil {
+		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepContextLoad, "context", result)
+	}
 	return result, nil
 }
 
-func resolveContextRepoPaths(deps *Deps, task *models.Task) []string {
-	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
-	var repoPaths []string
+type contextSourceRoot struct {
+	path   string
+	prefix string
+}
+
+func (s *ContextLoadStep) resolveContextRepoPaths(ctx context.Context) []contextSourceRoot {
+	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	var roots []contextSourceRoot
 
 	var ws *models.TaskWorkspace
 	var errWS error
-	if deps.Wkspace != nil {
-		ws, errWS = deps.Wkspace.LoadTaskWorkspace(ctxHelper(task), task)
+	if s.wkspace != nil {
+		ws, errWS = s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task)
 	} else {
 		errWS = fmt.Errorf("wkspace manager is nil")
 	}
 
 	if errWS == nil && ws != nil {
+		targetCount := 0
 		for _, rWS := range ws.Repos {
+			if s.rt.Task.RepositoryID != nil && rWS.RepoID != *s.rt.Task.RepositoryID {
+				continue
+			}
+			if rWS.Paths.Main != "" {
+				targetCount++
+			}
+		}
+		for _, rWS := range ws.Repos {
+			if s.rt.Task.RepositoryID != nil && rWS.RepoID != *s.rt.Task.RepositoryID {
+				continue
+			}
+			if rWS.Paths.Main == "" {
+				continue
+			}
 			repoAbs := filepath.Join(ws.Root, rWS.Paths.Main)
 			if _, errStat := os.Stat(repoAbs); errStat == nil {
-				repoPaths = append(repoPaths, repoAbs)
+				prefix := ""
+				if s.rt.Task.RepositoryID == nil && targetCount > 1 {
+					prefix = rWS.Name
+				}
+				roots = append(roots, contextSourceRoot{path: repoAbs, prefix: prefix})
 			}
 		}
 	}
 
-	if len(repoPaths) == 0 {
-		repoPaths = append(repoPaths, localPath)
-		if task.RepositoryID == nil {
+	if len(roots) == 0 {
+		roots = append(roots, contextSourceRoot{path: localPath, prefix: ""})
+		if s.rt.Task.RepositoryID == nil {
 			if files, err := os.ReadDir(localPath); err == nil {
 				for _, f := range files {
 					if f.IsDir() && !strings.HasPrefix(f.Name(), ".") {
 						subPath := filepath.Join(localPath, f.Name())
 						if _, errGit := os.Stat(filepath.Join(subPath, ".git")); errGit == nil {
-							repoPaths = append(repoPaths, subPath)
+							roots = append(roots, contextSourceRoot{path: subPath, prefix: f.Name()})
 						} else if _, errMod := os.Stat(filepath.Join(subPath, "go.mod")); errMod == nil {
-							repoPaths = append(repoPaths, subPath)
+							roots = append(roots, contextSourceRoot{path: subPath, prefix: f.Name()})
 						} else if _, errPkg := os.Stat(filepath.Join(subPath, "package.json")); errPkg == nil {
-							repoPaths = append(repoPaths, subPath)
+							roots = append(roots, contextSourceRoot{path: subPath, prefix: f.Name()})
 						}
 					}
 				}
 			}
 		}
 	}
-	return repoPaths
+	return roots
 }
 
-func ctxHelper(task *models.Task) context.Context {
-	return context.Background()
-}
-
-func gatherRepoContexts(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, repoPaths []string) map[string]any {
-	localPath := sandbox.WorkspacePath(deps.WorkspaceRoot, task.ID)
-
+func (s *ContextLoadStep) gatherRepoContexts(ctx context.Context, repoPaths []contextSourceRoot) map[string]any {
 	result := map[string]any{}
 	gitLogs := map[string]string{}
 	currentBranches := map[string]string{}
@@ -91,29 +162,35 @@ func gatherRepoContexts(ctx context.Context, deps *Deps, task *models.Task, agen
 	architectures := map[string]string{}
 	contributings := map[string]string{}
 
-	for _, rp := range repoPaths {
-		rel, _ := filepath.Rel(localPath, rp)
-		if rel == "." {
-			rel = "root"
+	for _, root := range repoPaths {
+		rp := root.path
+		label := root.prefix
+		if label == "" {
+			label = "root"
 		}
-		containerPath := deps.ContainerPathForHostPath(task, rp, "")
+		pathPrefix := root.prefix
 
-		if gitLog := getSandboxGitOutput(ctx, deps, task, agent, rel, containerPath, "get_git_log", "log -5 --oneline"); gitLog != "" {
-			gitLogs[rel] = gitLog
-		}
-
-		if branch := getSandboxGitOutput(ctx, deps, task, agent, rel, containerPath, "get_git_branch", "rev-parse --abbrev-ref HEAD"); branch != "" {
-			currentBranches[rel] = branch
+		var containerPath string
+		if s.containerPath != nil {
+			containerPath = s.containerPath(s.rt.Task, rp, "")
 		}
 
-		testCommands = append(testCommands, detectTestCommands(rp, rel)...)
-		ciConfigs = append(ciConfigs, detectCIConfigs(rp, rel)...)
-		loadRepoDocs(rp, rel, conventions, architectures, contributings)
+		if gitLog := s.getSandboxGitOutput(ctx, label, containerPath, "get_git_log", "log -5 --oneline"); gitLog != "" {
+			gitLogs[label] = gitLog
+		}
+
+		if branch := s.getSandboxGitOutput(ctx, label, containerPath, "get_git_branch", "rev-parse --abbrev-ref HEAD"); branch != "" {
+			currentBranches[label] = branch
+		}
+
+		testCommands = append(testCommands, detectTestCommands(rp, label)...)
+		ciConfigs = append(ciConfigs, detectCIConfigs(rp, pathPrefix)...)
+		loadRepoDocs(rp, pathPrefix, conventions, architectures, contributings)
 	}
 
 	missingDoc := len(architectures) == 0 || len(contributings) == 0 || len(conventions) == 0
 	if missingDoc && len(repoPaths) > 0 {
-		ensureRepoProfile(ctx, deps, task, agent, repoPaths[0], architectures, conventions)
+		s.ensureRepoProfile(ctx, repoPaths[0].path, architectures, conventions)
 	}
 
 	result["git_logs"] = gitLogs
@@ -126,7 +203,7 @@ func gatherRepoContexts(ctx context.Context, deps *Deps, task *models.Task, agen
 
 	// Transfer build/lint script markers
 	if len(repoPaths) > 0 {
-		rp := repoPaths[0]
+		rp := repoPaths[0].path
 		if pJsonData, err := os.ReadFile(filepath.Join(rp, "package.json")); err == nil {
 			var pMap map[string]any
 			if err := json.Unmarshal(pJsonData, &pMap); err == nil {
@@ -145,81 +222,24 @@ func gatherRepoContexts(ctx context.Context, deps *Deps, task *models.Task, agen
 	return result
 }
 
-func detectTestCommands(rp, rel string) []string {
-	var cmds []string
-	if _, err := os.Stat(filepath.Join(rp, "Makefile")); err == nil {
-		cmds = append(cmds, fmt.Sprintf("make test (in %s)", rel))
-	}
-	if pJsonData, err := os.ReadFile(filepath.Join(rp, "package.json")); err == nil {
-		var pMap map[string]any
-		if err := json.Unmarshal(pJsonData, &pMap); err == nil {
-			if scripts, ok := pMap["scripts"].(map[string]any); ok {
-				if _, ok := scripts["test"]; ok {
-					cmds = append(cmds, fmt.Sprintf("npm test (in %s)", rel))
-				}
-			}
-		}
-	}
-	if _, err := os.Stat(filepath.Join(rp, "go.mod")); err == nil {
-		cmds = append(cmds, fmt.Sprintf("go test ./... (in %s)", rel))
-	}
-	if _, err := os.Stat(filepath.Join(rp, "requirements.txt")); err == nil {
-		cmds = append(cmds, fmt.Sprintf("pytest (in %s)", rel))
-	} else if _, err := os.Stat(filepath.Join(rp, "pyproject.toml")); err == nil {
-		cmds = append(cmds, fmt.Sprintf("pytest (in %s)", rel))
-	}
-	if _, err := os.Stat(filepath.Join(rp, "pom.xml")); err == nil {
-		cmds = append(cmds, fmt.Sprintf("mvn test (in %s)", rel))
-	}
-	return cmds
-}
-
-func detectCIConfigs(rp, rel string) []string {
-	var configs []string
-	if files, err := os.ReadDir(filepath.Join(rp, ".github", "workflows")); err == nil {
-		for _, f := range files {
-			if !f.IsDir() {
-				configs = append(configs, filepath.Join(rel, ".github", "workflows", f.Name()))
-			}
-		}
-	}
-	if _, err := os.Stat(filepath.Join(rp, ".gitlab-ci.yml")); err == nil {
-		configs = append(configs, filepath.Join(rel, ".gitlab-ci.yml"))
-	}
-	return configs
-}
-
-func loadRepoDocs(rp, rel string, conventions, architectures, contributings map[string]string) {
-	conventionFiles := []string{".editorconfig", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".golangci.yml"}
-	for _, file := range conventionFiles {
-		if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, file), 10000); err == nil {
-			conventions[filepath.Join(rel, file)] = data
-		}
-	}
-	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "ARCHITECTURE.md"), 10000); err == nil {
-		architectures[rel] = data
-	}
-	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "CONTRIBUTING.md"), 10000); err == nil {
-		contributings[rel] = data
-	}
-}
-
-func getSandboxGitOutput(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rel, containerPath, stepPrefix, gitCmd string) string {
+func (s *ContextLoadStep) getSandboxGitOutput(ctx context.Context, rel, containerPath, stepPrefix, gitCmd string) string {
 	cmd := fmt.Sprintf("git -C %s %s", orchestratorworkspace.QuoteShellArg(containerPath), gitCmd)
-	if diffOutput, err := deps.RunSandboxStep(ctx, task, agent, stepPrefix+"_"+rel, cmd); err == nil {
-		if stdout, ok := diffOutput["stdout"].(string); ok && stdout != "" {
-			return strings.TrimSpace(stdout)
+	if s.sandbox != nil {
+		if diffOutput, err := s.sandbox.RunCommand(ctx, s.rt.Task, s.rt.Agent, stepPrefix+"_"+rel, cmd); err == nil {
+			if stdout, ok := diffOutput["stdout"].(string); ok && stdout != "" {
+				return strings.TrimSpace(stdout)
+			}
 		}
 	}
 	return ""
 }
 
-func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rp string, architectures, conventions map[string]string) {
+func (s *ContextLoadStep) ensureRepoProfile(ctx context.Context, rp string, architectures, conventions map[string]string) {
 	var repoURL string
-	if task.RepositoryID != nil && deps.Repos != nil {
-		if repos, err := deps.Repos.ListByProjectID(ctx, task.ProjectID); err == nil {
+	if s.rt.Task.RepositoryID != nil && s.repos != nil {
+		if repos, err := s.repos.ListByProjectID(ctx, s.rt.Task.ProjectID); err == nil {
 			for _, r := range repos {
-				if r.ID == *task.RepositoryID {
+				if r.ID == *s.rt.Task.RepositoryID {
 					repoURL = r.URL
 					break
 				}
@@ -227,9 +247,12 @@ func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent
 		}
 	}
 
-	containerPath := deps.ContainerPathForHostPath(task, rp, "")
+	var containerPath string
+	if s.containerPath != nil {
+		containerPath = s.containerPath(s.rt.Task, rp, "")
+	}
 	if repoURL == "" {
-		repoURL = getSandboxGitOutput(ctx, deps, task, agent, "remote", containerPath, "get_git_remote_origin", "remote get-url origin")
+		repoURL = s.getSandboxGitOutput(ctx, "remote", containerPath, "get_git_remote_origin", "remote get-url origin")
 	}
 	if repoURL == "" {
 		repoURL = filepath.Base(rp)
@@ -237,9 +260,9 @@ func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent
 
 	repoURL = sanitizeRepoURL(repoURL)
 	repoHash := getRepoHash(repoURL)
-	currentCommit := getSandboxGitOutput(ctx, deps, task, agent, "commit", containerPath, "get_git_commit", "rev-parse HEAD")
+	currentCommit := s.getSandboxGitOutput(ctx, "commit", containerPath, "get_git_commit", "rev-parse HEAD")
 
-	cacheFile := filepath.Join(filepath.Dir(deps.WorkspaceRoot), "repositories", repoHash, "profile.json")
+	cacheFile := filepath.Join(filepath.Dir(s.workspaceRoot), "repositories", repoHash, "profile.json")
 	var profile RepoProfile
 	cacheHit := false
 
@@ -251,8 +274,8 @@ func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent
 		}
 	}
 
-	if !cacheHit && deps.LLM != nil {
-		profile, cacheHit = generateRepoProfile(ctx, deps, task, agent, rp, repoURL, currentCommit, cacheFile)
+	if !cacheHit && s.llm != nil {
+		profile, cacheHit = s.generateRepoProfile(ctx, rp, repoURL, currentCommit, cacheFile)
 	}
 
 	if cacheHit {
@@ -270,7 +293,7 @@ func ensureRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent
 	}
 }
 
-func generateRepoProfile(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, rp, repoURL, currentCommit, cacheFile string) (RepoProfile, bool) {
+func (s *ContextLoadStep) generateRepoProfile(ctx context.Context, rp, repoURL, currentCommit, cacheFile string) (RepoProfile, bool) {
 	var profile RepoProfile
 	treeStr := scanRepoDirectoryTree(rp, 3)
 	var configs []string
@@ -322,15 +345,15 @@ Return ONLY the raw JSON object. Do not include markdown code block formatting (
 
 	routeCtx := llm.WithRouteOptions(ctx, llm.RouteOptions{
 		Complexity: models.TaskComplexityEasy,
-		OrgID:      agent.OrgID,
-		ProjectID:  task.ProjectID,
-		AgentID:    agent.ID,
-		TaskID:     task.ID,
+		OrgID:      s.rt.Agent.OrgID,
+		ProjectID:  s.rt.Task.ProjectID,
+		AgentID:    s.rt.Agent.ID,
+		TaskID:     s.rt.Task.ID,
 		RouteName:  "profiler",
 	})
 
-	resp, err := deps.LLM.Chat(routeCtx, messages)
-	if err == nil {
+	resp, err := s.llm.Chat(routeCtx, messages)
+	if err == nil && resp != nil {
 		cleaned := cleanJSONResponse(resp.Content)
 		if errUnmarshal := json.Unmarshal([]byte(cleaned), &profile); errUnmarshal == nil {
 			if data, errMarshal := json.MarshalIndent(profile, "", "  "); errMarshal == nil {
@@ -442,3 +465,64 @@ func scanRepoDirectoryTree(root string, maxDepth int) string {
 	walk(root, 0)
 	return builder.String()
 }
+
+func detectTestCommands(rp, rel string) []string {
+	var cmds []string
+	if _, err := os.Stat(filepath.Join(rp, "Makefile")); err == nil {
+		cmds = append(cmds, fmt.Sprintf("make test (in %s)", rel))
+	}
+	if pJsonData, err := os.ReadFile(filepath.Join(rp, "package.json")); err == nil {
+		var pMap map[string]any
+		if err := json.Unmarshal(pJsonData, &pMap); err == nil {
+			if scripts, ok := pMap["scripts"].(map[string]any); ok {
+				if _, ok := scripts["test"]; ok {
+					cmds = append(cmds, fmt.Sprintf("npm test (in %s)", rel))
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rp, "go.mod")); err == nil {
+		cmds = append(cmds, fmt.Sprintf("go test ./... (in %s)", rel))
+	}
+	if _, err := os.Stat(filepath.Join(rp, "requirements.txt")); err == nil {
+		cmds = append(cmds, fmt.Sprintf("pytest (in %s)", rel))
+	} else if _, err := os.Stat(filepath.Join(rp, "pyproject.toml")); err == nil {
+		cmds = append(cmds, fmt.Sprintf("pytest (in %s)", rel))
+	}
+	if _, err := os.Stat(filepath.Join(rp, "pom.xml")); err == nil {
+		cmds = append(cmds, fmt.Sprintf("mvn test (in %s)", rel))
+	}
+	return cmds
+}
+
+func detectCIConfigs(rp, rel string) []string {
+	var configs []string
+	if files, err := os.ReadDir(filepath.Join(rp, ".github", "workflows")); err == nil {
+		for _, f := range files {
+			if !f.IsDir() {
+				configs = append(configs, filepath.Join(rel, ".github", "workflows", f.Name()))
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rp, ".gitlab-ci.yml")); err == nil {
+		configs = append(configs, filepath.Join(rel, ".gitlab-ci.yml"))
+	}
+	return configs
+}
+
+func loadRepoDocs(rp, rel string, conventions, architectures, contributings map[string]string) {
+	conventionFiles := []string{".editorconfig", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".golangci.yml"}
+	for _, file := range conventionFiles {
+		if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, file), 10000); err == nil {
+			conventions[filepath.Join(rel, file)] = data
+		}
+	}
+	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "ARCHITECTURE.md"), 10000); err == nil {
+		architectures[rel] = data
+	}
+	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "CONTRIBUTING.md"), 10000); err == nil {
+		contributings[rel] = data
+	}
+}
+
+

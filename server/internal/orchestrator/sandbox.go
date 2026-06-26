@@ -39,10 +39,11 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 }
 
 func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
+	o.initRepoutil()
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	hostWorkspacePath := localPath
 	if worktreeSuffix != "" {
-		hostWorkspacePath = o.hostWorktreePath(task, localPath, worktreeSuffix)
+		hostWorkspacePath = o.repoutil.HostWorktreePath(task, localPath, worktreeSuffix)
 	}
 
 	containerWorkDir := o.containerPathForHostPath(task, hostWorkspacePath, "")
@@ -74,10 +75,11 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 }
 
 func (o *Orchestrator) containerPathForHostPath(task *models.Task, hostPath string, worktreeSuffix string) string {
+	o.initRepoutil()
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	activeWorkspaceHostPath := localPath
 	if worktreeSuffix != "" {
-		activeWorkspaceHostPath = o.hostWorktreePath(task, localPath, worktreeSuffix)
+		activeWorkspaceHostPath = o.repoutil.HostWorktreePath(task, localPath, worktreeSuffix)
 	}
 	return orchestratorworkspace.ContainerPathForHostPath(localPath, activeWorkspaceHostPath, hostPath)
 }
@@ -97,7 +99,8 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 		}
 	}
 
-	ws, err := o.LoadTaskWorkspace(ctx, task)
+	o.initWkspace()
+	ws, err := o.wkspace.LoadTaskWorkspace(ctx, task)
 	if err != nil || ws == nil {
 		return "", false
 	}
@@ -118,9 +121,10 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 }
 
 func (o *Orchestrator) affectedFileRoots(ctx context.Context, task *models.Task, file string) []string {
+	o.initRepoutil()
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	roots := []string{localPath}
-	if repoHostPath, err := o.getTaskRepoHostPath(ctx, task); err == nil && repoHostPath != localPath {
+	if repoHostPath, err := o.repoutil.GetTaskRepoHostPath(ctx, task); err == nil && repoHostPath != localPath {
 		roots = append([]string{repoHostPath}, roots...)
 	}
 	return roots

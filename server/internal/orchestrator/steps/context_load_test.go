@@ -135,34 +135,40 @@ func TestStepContextLoad_Caching(t *testing.T) {
 		},
 	}
 
-	deps := &Deps{
-		WorkspaceRoot: workspaceRoot,
-		Tasks:         &mockTaskRepository{task: task},
-		LLM:           llmProvider,
-		RunSandboxStep: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
-			if strings.Contains(stepID, "get_git_commit") {
-				return map[string]any{"stdout": "abc123commit"}, nil
-			}
-			if strings.Contains(stepID, "get_git_remote_origin") {
-				return map[string]any{"stdout": ""}, nil
-			}
-			return map[string]any{"stdout": "mock output"}, nil
-		},
-		SaveArtifact: func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
-			return nil
-		},
-		UpdateTaskStatus: func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
-			return task, nil
-		},
-		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
-			return hostPath
-		},
+	buildStep := func() *ContextLoadStep {
+		return NewContextLoadStep(
+			StepRuntime{Task: task, Agent: agent, JobID: "job-123"},
+			workspaceRoot,
+			&mockTaskReader{task: task},
+			statusUpdaterAdapter{update: func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
+				return task, nil
+			}},
+			&mockStepWorkspaceLoader{},
+			sandboxRunnerAdapter{run: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
+				if strings.Contains(stepID, "get_git_commit") {
+					return map[string]any{"stdout": "abc123commit"}, nil
+				}
+				if strings.Contains(stepID, "get_git_remote_origin") {
+					return map[string]any{"stdout": ""}, nil
+				}
+				return map[string]any{"stdout": "mock output"}, nil
+			}},
+			llmProvider,
+			artifactSaverAdapter{save: func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
+				return nil
+			}},
+			&mockRepositoryLister{},
+			&mockLogger{},
+			func(task *models.Task, hostPath string, worktreeSuffix string) string {
+				return hostPath
+			},
+		)
 	}
 
 	// First execution (Cache Miss)
-	res, err := ExecuteContextLoad(context.Background(), deps, task, agent, "job-123", workflow.StepContext{})
+	res, err := buildStep().Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
-		t.Fatalf("ExecuteContextLoad failed: %v", err)
+		t.Fatalf("first Execute failed: %v", err)
 	}
 
 	if llmCallCount != 1 {
@@ -182,9 +188,9 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	}
 
 	// Second execution (Cache Hit)
-	res2, err := ExecuteContextLoad(context.Background(), deps, task, agent, "job-123", workflow.StepContext{})
+	res2, err := buildStep().Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
-		t.Fatalf("second ExecuteContextLoad failed: %v", err)
+		t.Fatalf("second Execute failed: %v", err)
 	}
 
 	if llmCallCount != 1 {
@@ -195,4 +201,20 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	if !ok || architectures2["cached_profile"] == "" {
 		t.Errorf("expected cached_profile in architectures on cache hit")
 	}
+}
+
+type statusUpdaterAdapter struct {
+	update func(ctx context.Context, taskID string, newStatus string) (*models.Task, error)
+}
+
+func (s statusUpdaterAdapter) UpdateTaskStatus(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
+	return s.update(ctx, taskID, newStatus)
+}
+
+type artifactSaverAdapter struct {
+	save func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error
+}
+
+func (a artifactSaverAdapter) SaveArtifact(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
+	return a.save(ctx, jobID, taskID, step, artType, payload)
 }

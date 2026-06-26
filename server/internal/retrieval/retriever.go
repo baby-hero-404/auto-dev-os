@@ -326,11 +326,25 @@ func shouldSkipDir(name, rel string) bool {
 	case ".git", ".next", ".turbo", ".cache", "node_modules", "vendor", "dist", "build", "coverage", "tmp":
 		return true
 	}
-	return strings.HasPrefix(rel, "server/tmp/") || strings.HasPrefix(rel, "web/.next/")
+	relClean := filepath.ToSlash(filepath.Clean(rel))
+	if relClean == "logs" || strings.HasPrefix(relClean, "logs/") ||
+		relClean == "artifacts" || strings.HasPrefix(relClean, "artifacts/") ||
+		relClean == "openspec" || strings.HasPrefix(relClean, "openspec/") {
+		return true
+	}
+	return strings.HasPrefix(relClean, "server/tmp/") || strings.HasPrefix(relClean, "web/.next/")
 }
 
 func isCodeFile(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
+	base := filepath.Base(path)
+	if base == "patch.diff" || base == "task.json" {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".rej" || ext == ".orig" {
+		return false
+	}
+	switch ext {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".sql", ".md", ".json", ".yaml", ".yml", ".css":
 		return true
 	default:

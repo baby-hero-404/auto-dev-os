@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"time"
 
@@ -94,6 +96,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 	var taskID string
 	var job *models.WorkflowJob
+	var assignedAgentID string
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -140,6 +143,12 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		o.fail(ctx, job, err)
 		return
 	}
+	assignedAgentID = agent.ID
+	defer func() {
+		if err := o.agents.Release(context.WithoutCancel(ctx), assignedAgentID); err != nil {
+			observability.Warn(ctx, "release agent failed", "error", err)
+		}
+	}()
 	if _, err := o.workflows.UpdateJob(ctx, job.ID, map[string]any{"agent_id": agent.ID, "step": models.WorkflowStepAssign}); err != nil {
 		o.fail(ctx, job, err)
 		return
@@ -171,11 +180,6 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		o.fail(ctx, job, err)
 		return
 	}
-	defer func() {
-		if err := o.agents.Release(context.WithoutCancel(ctx), agent.ID); err != nil {
-			observability.Warn(ctx, "release agent failed", "error", err)
-		}
-	}()
 
 	// Generate a unique session ID for this workflow run
 	sessionID := learning.NewSessionID()
@@ -412,5 +416,29 @@ func (o *Orchestrator) updateTaskStatus(ctx context.Context, taskID string, newS
 	if err := workflow.ValidateTaskTransition(task.Status, newStatus); err != nil {
 		return nil, fmt.Errorf("invalid task status transition from %q to %q: %w", task.Status, newStatus, err)
 	}
-	return o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &newStatus})
+	updated, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &newStatus})
+	if err != nil {
+		return nil, err
+	}
+
+	if o.wkspace != nil {
+		if ws, wsErr := o.wkspace.LoadTaskWorkspace(ctx, updated); wsErr == nil && ws != nil {
+			taskSnap := models.TaskStateSnapshot{
+				TaskID:      updated.ID,
+				ProjectID:   updated.ProjectID,
+				Title:       updated.Title,
+				Description: updated.Description,
+				Status:      updated.Status,
+				Complexity:  updated.Complexity,
+				SpecStatus:  updated.SpecStatus,
+				Labels:      updated.Labels,
+			}
+			taskJSONPath := filepath.Join(ws.Root, "task.json")
+			if taskBytes, err := json.MarshalIndent(taskSnap, "", "  "); err == nil {
+				_ = os.WriteFile(taskJSONPath, taskBytes, 0o644)
+			}
+		}
+	}
+
+	return updated, nil
 }

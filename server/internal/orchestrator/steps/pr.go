@@ -24,23 +24,82 @@ func extractRiskDomains(task *models.Task) []string {
 	return nil
 }
 
-func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, stepCtx workflow.StepContext) (map[string]any, error) {
-	if task.Status == models.TaskStatusPrReady || task.Status == models.TaskStatusHumanReview {
+
+// PRStep implements Step for the pull request generation phase.
+type PRStep struct {
+	rt            StepRuntime
+	tasks         TaskRepository
+	status        StatusUpdater
+	worktree      WorktreeManager
+	workspace     WorkspaceLoader
+	git           SandboxGitClient
+	diff          DiffCapturer
+	artifacts     ArtifactRepository
+	projects      ProjectReader
+	checkpoints   CheckpointLister
+	gitops        GitOpsClient
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+	log           Logger
+}
+
+func NewPRStep(
+	rt StepRuntime,
+	tasks TaskRepository,
+	status StatusUpdater,
+	worktree WorktreeManager,
+	workspace WorkspaceLoader,
+	git SandboxGitClient,
+	diff DiffCapturer,
+	artifacts ArtifactRepository,
+	projects ProjectReader,
+	checkpoints CheckpointLister,
+	gitops GitOpsClient,
+	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+	log Logger,
+) *PRStep {
+	return &PRStep{
+		rt:            rt,
+		tasks:         tasks,
+		status:        status,
+		worktree:      worktree,
+		workspace:     workspace,
+		git:           git,
+		diff:          diff,
+		artifacts:     artifacts,
+		projects:      projects,
+		checkpoints:   checkpoints,
+		gitops:        gitops,
+		containerPath: containerPath,
+		log:           log,
+	}
+}
+
+func (s *PRStep) ID() string                              { return workflow.StepPR }
+func (s *PRStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusHumanReview }
+
+func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	if s.rt.Task.Status == models.TaskStatusPrReady || s.rt.Task.Status == models.TaskStatusHumanReview {
 		return nil, workflow.ErrWaitingApproval
 	}
-	if deps.GitOps == nil {
+	if s.gitops == nil {
 		return nil, fmt.Errorf("gitops client is not configured")
 	}
-	targetRepos, err := deps.RepoUtil.LoadTargetRepositories(ctx, task)
-	if err != nil {
-		return nil, fmt.Errorf("list project repositories: %w", err)
+	var targetRepos []models.Repository
+	if s.worktree != nil {
+		var err error
+		targetRepos, err = s.worktree.LoadTargetRepositories(ctx, s.rt.Task)
+		if err != nil {
+			return nil, fmt.Errorf("list project repositories: %w", err)
+		}
 	}
 	if len(targetRepos) == 0 {
-		return nil, fmt.Errorf("no repository linked to project %s", task.ProjectID)
+		return nil, fmt.Errorf("no repository linked to project %s", s.rt.Task.ProjectID)
 	}
 
 	// Capture overall workspace diff to find changed files
-	_, _ = deps.RepoUtil.CaptureWorkspaceDiff(ctx, task, agent, workflow.StepPR, "")
+	if s.diff != nil {
+		_, _ = s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepPR, "")
+	}
 
 	// Get test results from previous step if available
 	var testOut map[string]any
@@ -55,8 +114,8 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 	var targetedFixPassed bool
 	var targetedFixRun bool
 
-	if deps.Artifacts != nil {
-		if arts, err := deps.Artifacts.ListByJobID(ctx, jobID); err == nil {
+	if s.artifacts != nil {
+		if arts, err := s.artifacts.ListByJobID(ctx, s.rt.JobID); err == nil {
 			for _, art := range arts {
 				if art.Type == "targeted_test" {
 					var payload map[string]any
@@ -103,37 +162,36 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 	var createdPRSummaries []models.PRSummary
 
 	var workspace *models.TaskWorkspace
-	if deps.Wkspace != nil {
-		ws, errWS := deps.Wkspace.LoadTaskWorkspace(ctx, task)
+	if s.workspace != nil {
+		ws, errWS := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
 		if errWS == nil {
 			workspace = ws
 		}
 	}
 
 	for _, repo := range targetRepos {
-		localPath := deps.RepoUtil.RepoHostPath(task, workspace, repo)
-
-		// Check if this specific repo has changes before creating branch
-		// For simplicity, we create branch anyway, if no changes commit will fail or we can skip.
-		// A better way is to run `git status --porcelain` in localPath.
-		containerLocalPath := deps.ContainerPathForHostPath(task, localPath, "")
-		repoChangedFiles, errSandbox := deps.SandboxGit.GetChangedFiles(ctx, task, agent, containerLocalPath)
+		var localPath string
+		if s.worktree != nil {
+			localPath = s.worktree.RepoHostPath(s.rt.Task, workspace, repo)
+		}
+		containerLocalPath := s.containerPath(s.rt.Task, localPath, "")
+		repoChangedFiles, errSandbox := s.git.GetChangedFiles(ctx, s.rt.Task, s.rt.Agent, containerLocalPath)
 		if errSandbox != nil {
 			continue // directory might not exist or not a git repo
 		}
-		if len(repoChangedFiles) == 0 && task.Complexity == models.TaskComplexityEasy {
+		if len(repoChangedFiles) == 0 && s.rt.Task.Complexity == models.TaskComplexityEasy {
 			continue // no changes in this repo for easy tasks
 		}
 
-		branchName := fmt.Sprintf("feature/%s", task.ID)
-		if err := deps.SandboxGit.CheckoutNewBranch(ctx, task, agent, containerLocalPath, branchName); err != nil {
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
+		branchName := fmt.Sprintf("feature/%s", s.rt.Task.ID)
+		if err := s.git.CheckoutNewBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, branchName); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
 			continue
 		}
 
-		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", task.ID, task.Title)
-		if err := deps.GitOps.CommitAndPush(ctx, localPath, repo.URL, branchName, commitMsg, nil, agent.Role); err != nil {
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
+		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)
+		if err := s.gitops.CommitAndPush(ctx, localPath, repo.URL, branchName, commitMsg, nil, s.rt.Agent.Role); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
 			continue
 		}
 
@@ -143,16 +201,19 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 		}
 
 		// Capture this specific repo's diff using baseBranch, fallback to master/HEAD~1/plain diff to avoid errors
-		repoDiffText, _ := deps.SandboxGit.GetPRDiff(ctx, task, agent, containerLocalPath, baseBranch)
+		repoDiffText, _ := s.git.GetPRDiff(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, baseBranch)
 
 		// Compute review limit exceeded flag
 		maxReviewFixCycles := 3
-		if deps.Projects != nil {
-			if p, err := deps.Projects.GetByID(ctx, task.ProjectID); err == nil && p.MaxReviewFixCycles > 0 {
+		if s.projects != nil {
+			if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil && p.MaxReviewFixCycles > 0 {
 				maxReviewFixCycles = p.MaxReviewFixCycles
 			}
 		}
-		checkpoints, _ := deps.Workflows.ListCheckpoints(ctx, task.ID)
+		var checkpoints []models.WorkflowCheckpoint
+		if s.checkpoints != nil {
+			checkpoints, _ = s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID)
+		}
 		rejectionCount := 0
 		for _, cp := range checkpoints {
 			if cp.Step == "pr_rejection" {
@@ -162,18 +223,18 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 		reviewLimitExceeded := rejectionCount >= maxReviewFixCycles-1
 
 		// Extract risk domains from task analysis
-		riskDomains := extractRiskDomains(task)
+		riskDomains := extractRiskDomains(s.rt.Task)
 
 		prGen := gitops.NewPRGenerator()
-		summary := prGen.GenerateSummary(ctx, task, agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded)
+		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded)
 
-		prURL, err := deps.GitOps.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
+		prURL, err := s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
 		if err != nil {
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
 			continue
 		}
 		if strings.TrimSpace(prURL) == "" {
-			deps.Log(ctx, task.ID, nil, "info", fmt.Sprintf("create PR returned no URL for %s; skipping", repo.URL))
+			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("create PR returned no URL for %s; skipping", repo.URL))
 			continue
 		}
 
@@ -186,11 +247,11 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 	if len(createdPRs) > 0 {
 		pqCreatedPRs := pq.StringArray(createdPRs)
 		prMetadataRaw, _ := json.Marshal(createdPRSummaries)
-		if _, err := deps.Tasks.Update(ctx, task.ID, models.UpdateTaskInput{
+		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
 			PRURLs:     &pqCreatedPRs,
 			PRMetadata: prMetadataRaw,
 		}); err != nil {
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata: %v", err))
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata: %v", err))
 		}
 	}
 
@@ -203,18 +264,20 @@ func ExecutePR(ctx context.Context, deps *Deps, task *models.Task, agent *models
 			Status: "no_changes",
 		}}
 		noChangesMetadata, _ := json.Marshal(noChangesSummaries)
-		if _, err := deps.Tasks.Update(ctx, task.ID, models.UpdateTaskInput{
+		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
 			PRMetadata: noChangesMetadata,
 		}); err != nil {
-			deps.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata for no-changes: %v", err))
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata for no-changes: %v", err))
 		}
 	}
-	if _, err := deps.UpdateTaskStatus(ctx, task.ID, status); err != nil {
-		return nil, err
+	if s.status != nil {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, status); err != nil {
+			return nil, err
+		}
 	}
 
 	if len(createdPRs) == 0 {
-		return map[string]any{
+		return StepResult{
 			"status":   "no_changes_detected",
 			"branches": createdBranches,
 			"pr_urls":  createdPRs,

@@ -58,6 +58,12 @@ func DeriveChangeName(task *models.Task) string {
 	return slug
 }
 
+func repoNameFromURL(repoURL string) string {
+	parts := strings.Split(repoURL, "/")
+	repoName := parts[len(parts)-1]
+	return strings.TrimSuffix(repoName, ".git")
+}
+
 func TaskReadyForExecution(task *models.Task) bool {
 	switch task.SpecStatus {
 	case models.TaskSpecStatusApproved, models.TaskSpecStatusAutoApproved:
@@ -74,14 +80,22 @@ func MatchAffectedFile(pattern, file string) bool {
 		return false
 	}
 
-	cleanPattern := filepath.Clean(pattern)
-	cleanFile := filepath.Clean(file)
+	cleanPattern := filepath.ToSlash(filepath.Clean(pattern))
+	cleanFile := filepath.ToSlash(filepath.Clean(file))
 
 	if cleanPattern == cleanFile {
 		return true
 	}
 
-	if strings.HasPrefix(cleanFile, cleanPattern+string(filepath.Separator)) {
+	if strings.HasPrefix(cleanFile, cleanPattern+"/") {
+		return true
+	}
+
+	if strings.HasSuffix(cleanFile, "/"+cleanPattern) {
+		return true
+	}
+
+	if !strings.Contains(cleanPattern, "/") && filepath.Base(cleanFile) == cleanPattern {
 		return true
 	}
 

@@ -13,7 +13,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -310,8 +309,7 @@ func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) 
 	}
 
 	if rejectionCount >= maxReviewFixCycles {
-		failed := models.TaskStatusFailed
-		_, _ = o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &failed})
+		_, _ = o.updateTaskStatus(ctx, taskID, models.TaskStatusFailed)
 		o.log(ctx, taskID, nil, "error", fmt.Sprintf("review loop limit exceeded (limit: %d). task marked as failed.", maxReviewFixCycles))
 		return fmt.Errorf("review loop limit of %d exceeded. task has failed", maxReviewFixCycles)
 	}
@@ -332,7 +330,10 @@ func (o *Orchestrator) initWkspace() {
 				Interval:  o.retention.Interval,
 			},
 			o.log,
-			o.applyPatch,
+			func(ctx context.Context, task *models.Task, agent *models.Agent, stepName string, patchText string, worktreeSuffix string) error {
+				o.initRepoutil()
+				return o.repoutil.ApplyPatch(ctx, task, agent, stepName, patchText, worktreeSuffix)
+			},
 		)
 	} else {
 		o.wkspace.Tasks = o.tasks
@@ -346,36 +347,6 @@ func (o *Orchestrator) initWkspace() {
 			Interval:  o.retention.Interval,
 		}
 	}
-}
-
-func (o *Orchestrator) GetTaskWorkspace(task *models.Task) *models.TaskWorkspace {
-	o.initWkspace()
-	return o.wkspace.GetTaskWorkspace(task)
-}
-
-func (o *Orchestrator) InitTaskWorkspace(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
-	o.initWkspace()
-	return o.wkspace.InitTaskWorkspace(ctx, task)
-}
-
-func (o *Orchestrator) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
-	o.initWkspace()
-	return o.wkspace.LoadTaskWorkspace(ctx, task)
-}
-
-func (o *Orchestrator) SaveTaskWorkspaceMetadata(task *models.Task, ws *models.TaskWorkspace) error {
-	o.initWkspace()
-	return o.wkspace.SaveTaskWorkspaceMetadata(task, ws)
-}
-
-func (o *Orchestrator) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task, path string) (*models.RepoWorkspace, error) {
-	o.initWkspace()
-	return o.wkspace.FindRepoWorkspaceByPath(ctx, task, path)
-}
-
-func (o *Orchestrator) RemoveWorkspace(taskID string) error {
-	o.initWkspace()
-	return o.wkspace.RemoveWorkspace(taskID)
 }
 
 func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
@@ -398,20 +369,16 @@ func (o *Orchestrator) cleanupWorkspaceAfterFinalState(ctx context.Context, task
 	o.wkspace.CleanupWorkspaceAfterFinalState(ctx, taskID)
 }
 
-func (o *Orchestrator) partialCleanupWorkspace(ctx context.Context, taskID string) error {
-	o.initWkspace()
-	return o.wkspace.PartialCleanupWorkspace(ctx, taskID)
-}
-
-func (o *Orchestrator) pruneWorkspaces(ctx context.Context) (int, error) {
-	o.initWkspace()
-	return o.wkspace.PruneWorkspaces(ctx)
-}
-
 func (o *Orchestrator) releaseWorkspaceLock(taskID string) {
 	o.initWkspace()
 	o.wkspace.ReleaseWorkspaceLock(taskID)
 }
+
+func (o *Orchestrator) RemoveWorkspace(taskID string) error {
+	o.initWkspace()
+	return o.wkspace.RemoveWorkspace(taskID)
+}
+
 
 func (o *Orchestrator) initCheckpoints() {
 	if o.checkpoints == nil {
@@ -426,32 +393,8 @@ func (o *Orchestrator) initCheckpoints() {
 	}
 }
 
-func (o *Orchestrator) getSuccessfulCheckpoint(ctx context.Context, taskID string, step string) (map[string]any, bool) {
-	o.initCheckpoints()
-	return o.checkpoints.GetSuccessful(ctx, taskID, step)
-}
-
-func (o *Orchestrator) countSuccessfulCheckpoints(ctx context.Context, taskID string, step string) int {
-	o.initCheckpoints()
-	return o.checkpoints.CountSuccessful(ctx, taskID, step)
-}
-
-func (o *Orchestrator) getSavedPatch(ctx context.Context, taskID string, step string) (string, error) {
-	o.initCheckpoints()
-	return o.checkpoints.GetSavedPatch(ctx, taskID, step)
-}
-
-func (o *Orchestrator) saveArtifact(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
-	o.initCheckpoints()
-	return o.checkpoints.SaveArtifact(ctx, jobID, taskID, step, artType, payload)
-}
-
-func (o *Orchestrator) withCheckpointRecovery(task *models.Task, agent *models.Agent, jobStep string, stepID string, runner workflow.StepFunc) workflow.StepFunc {
-	o.initCheckpoints()
-	return o.checkpoints.WithCheckpointRecovery(task, agent, jobStep, stepID, runner, o.applyPatch, o.updateTaskStatus)
-}
-
 func (o *Orchestrator) initRepoutil() {
+	o.initWkspace()
 	if o.repoutil == nil {
 		var listRepos func(ctx context.Context, projectID string) ([]models.Repository, error)
 		if o.repositories != nil {
@@ -470,10 +413,10 @@ func (o *Orchestrator) initRepoutil() {
 		o.repoutil = repoutil.NewManager(
 			o.workspaceRoot,
 			listRepos,
-			o.GetTaskWorkspace,
-			o.LoadTaskWorkspace,
-			o.SaveTaskWorkspaceMetadata,
-			o.FindRepoWorkspaceByPath,
+			o.wkspace.GetTaskWorkspace,
+			o.wkspace.LoadTaskWorkspace,
+			o.wkspace.SaveTaskWorkspaceMetadata,
+			o.wkspace.FindRepoWorkspaceByPath,
 			o.containerPathForHostPath,
 			o.runSandboxStep,
 			o.runSandboxStepInWorktree,
@@ -497,57 +440,3 @@ func (o *Orchestrator) initRepoutil() {
 	}
 }
 
-func (o *Orchestrator) getTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
-	o.initRepoutil()
-	return o.repoutil.GetTaskRepoHostPath(ctx, task)
-}
-
-func (o *Orchestrator) hostWorktreePath(task *models.Task, repoPath string, worktreeSuffix string) string {
-	o.initRepoutil()
-	return o.repoutil.HostWorktreePath(task, repoPath, worktreeSuffix)
-}
-
-func (o *Orchestrator) repoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string {
-	o.initRepoutil()
-	return o.repoutil.RepoHostPath(task, ws, repo)
-}
-
-func (o *Orchestrator) applyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
-	o.initRepoutil()
-	return o.repoutil.ApplyPatch(ctx, task, agent, stepID, patchText, worktreeSuffix)
-}
-
-func (o *Orchestrator) captureWorkspaceDiff(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
-	o.initRepoutil()
-	return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
-}
-
-func (o *Orchestrator) capturePRDiff(ctx context.Context, task *models.Task, agent *models.Agent, baseBranch string) (string, error) {
-	o.initRepoutil()
-	return o.repoutil.CapturePRDiff(ctx, task, agent, baseBranch)
-}
-
-func (o *Orchestrator) getChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, targetPath string, worktreeSuffix string) ([]string, error) {
-	o.initRepoutil()
-	return o.repoutil.GetChangedFiles(ctx, task, agent, targetPath, worktreeSuffix)
-}
-
-func (o *Orchestrator) loadTargetRepositories(ctx context.Context, task *models.Task) ([]models.Repository, error) {
-	o.initRepoutil()
-	return o.repoutil.LoadTargetRepositories(ctx, task)
-}
-
-func (o *Orchestrator) setupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
-	o.initRepoutil()
-	o.repoutil.SetupRoleBranches(ctx, task, agent, jobID, repos, ws)
-}
-
-func (o *Orchestrator) setupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
-	o.initRepoutil()
-	return o.repoutil.SetupRoleWorktrees(ctx, task, agent, repos, ws, roleName, roleLabel, worktreeSuffix)
-}
-
-func (o *Orchestrator) commitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
-	o.initRepoutil()
-	return o.repoutil.CommitRoleWorktrees(ctx, task, agent, repos, ws, roleName, roleLabel, worktreeSuffix)
-}

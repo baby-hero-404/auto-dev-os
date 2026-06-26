@@ -8,11 +8,18 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
+// ResumeStatusFunc returns the task status to restore when a step is
+// skipped during checkpoint recovery. It receives the cached checkpoint
+// output so that steps like review can choose between "testing" and
+// "fixing" based on findings. Return "" for no status transition.
+type ResumeStatusFunc func(output map[string]any) string
+
 func (s *Store) WithCheckpointRecovery(
+	stepID string,
+	statusOnResume ResumeStatusFunc,
 	task *models.Task,
 	agent *models.Agent,
 	jobStep string,
-	stepID string,
 	runner workflow.StepFunc,
 	applyPatch func(ctx context.Context, task *models.Task, agent *models.Agent, stepName string, patchText string, worktreeSuffix string) error,
 	updateTaskStatus func(ctx context.Context, taskID string, newStatus string) (*models.Task, error),
@@ -45,28 +52,9 @@ func (s *Store) WithCheckpointRecovery(
 					}
 				}
 
-				if updateTaskStatus != nil {
-					switch stepID {
-					case workflow.StepPlan:
-						_, _ = updateTaskStatus(ctx, task.ID, models.TaskStatusCoding)
-					case workflow.StepMerge:
-						_, _ = updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing)
-					case workflow.StepReview:
-						nextStatus := models.TaskStatusTesting
-						if parsed, ok := output["parsed"].(map[string]any); ok {
-							if findings, exists := parsed["findings"]; exists {
-								if slice, ok := findings.([]any); ok && len(slice) > 0 {
-									nextStatus = models.TaskStatusFixing
-								}
-							}
-						}
-						_, _ = updateTaskStatus(ctx, task.ID, nextStatus)
-					case workflow.StepFix:
-						_, _ = updateTaskStatus(ctx, task.ID, models.TaskStatusReviewing)
-					case workflow.StepTest:
-						_, _ = updateTaskStatus(ctx, task.ID, models.TaskStatusTesting)
-					case workflow.StepPR:
-						_, _ = updateTaskStatus(ctx, task.ID, models.TaskStatusHumanReview)
+				if updateTaskStatus != nil && statusOnResume != nil {
+					if resumeStatus := statusOnResume(output); resumeStatus != "" {
+						_, _ = updateTaskStatus(ctx, task.ID, resumeStatus)
 					}
 				}
 

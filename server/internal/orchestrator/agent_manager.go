@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -40,13 +41,10 @@ func (m *AgentManager) Assign(ctx context.Context, task *models.Task) (*models.A
 	return agent, nil
 }
 
-func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleReviewer)
+func (m *AgentManager) assignByRole(ctx context.Context, task *models.Task, targetRole string) (*models.Agent, error) {
+	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, targetRole)
 	if err != nil {
-		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("no available agent with role %s found for project %s: %w", targetRole, task.ProjectID, err)
 	}
 	status := models.AgentStatusAssigned
 	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
@@ -54,38 +52,18 @@ func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*
 	}
 	agent.Status = status
 	return agent, nil
+}
+
+func (m *AgentManager) AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error) {
+	return m.assignByRole(ctx, task, models.AgentRoleReviewer)
 }
 
 func (m *AgentManager) AssignBackendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleBackend)
-	if err != nil {
-		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	status := models.AgentStatusAssigned
-	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
-		return nil, err
-	}
-	agent.Status = status
-	return agent, nil
+	return m.assignByRole(ctx, task, models.AgentRoleBackend)
 }
 
 func (m *AgentManager) AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error) {
-	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, models.AgentRoleFrontend)
-	if err != nil {
-		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	status := models.AgentStatusAssigned
-	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
-		return nil, err
-	}
-	agent.Status = status
-	return agent, nil
+	return m.assignByRole(ctx, task, models.AgentRoleFrontend)
 }
 
 func (m *AgentManager) MarkRunning(ctx context.Context, agentID string) error {

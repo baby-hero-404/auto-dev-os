@@ -78,3 +78,30 @@ func writeTestFile(t *testing.T, root, rel, content string) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
+
+func TestShouldSkipDir(t *testing.T) {
+	tests := []struct {
+		name     string
+		rel      string
+		expected bool
+	}{
+		{"logs", "logs", true},
+		{"logs", "logs/call-1", true},
+		{"artifacts", "artifacts", true},
+		{"artifacts", "artifacts/findings", true},
+		{"openspec", "openspec", true},
+		{"openspec", "openspec/spec.md", true},
+		{"openspec", "code/repos/test/main/openspec", false},
+		{"logs", "code/repos/test/main/logs", false},
+		{"artifacts", "code/repos/test/main/artifacts", false},
+		{"node_modules", "node_modules", true},
+		{"node_modules", "code/repos/test/main/node_modules", true},
+	}
+
+	for _, tc := range tests {
+		got := shouldSkipDir(tc.name, tc.rel)
+		if got != tc.expected {
+			t.Errorf("shouldSkipDir(%q, %q) = %v; expected %v", tc.name, tc.rel, got, tc.expected)
+		}
+	}
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { GitBranch, Loader2, Plus, RefreshCw, ShieldCheck, Edit3, Check, X, Trash2, AlertTriangle } from "lucide-react";
 import type { Repository } from "@/lib/types";
 import { api } from "@/lib/api";
@@ -56,11 +56,11 @@ export function RepositoriesView({
   const [tokenOverride, setTokenOverride] = useState("");
   const [gitAccountID, setGitAccountID] = useState("");
 
-  useEffect(() => {
-    if (project?.default_branch) {
-      setBranch(project.default_branch);
-    }
-  }, [project?.default_branch]);
+  const [prevDefaultBranch, setPrevDefaultBranch] = useState(project?.default_branch);
+  if (project?.default_branch !== prevDefaultBranch) {
+    setPrevDefaultBranch(project?.default_branch);
+    setBranch(project?.default_branch || "main");
+  }
 
   // Branch fetching state
   const [fetchedBranches, setFetchedBranches] = useState<string[]>([]);

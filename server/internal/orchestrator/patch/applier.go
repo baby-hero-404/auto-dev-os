@@ -107,9 +107,30 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 	}
 
 	// Multi-repo: split patch by repository
+	var ws *models.TaskWorkspace
+	var errWS error
+	if r.LoadTaskWorkspace != nil {
+		ws, errWS = r.LoadTaskWorkspace(ctx, task)
+	}
 	repoPatches := SplitPatchByRepo(patchText)
 	for repoName, repoPatchText := range repoPatches {
-		repoHostPath := filepath.Join(localPath, repoName)
+		repoHostPath := ""
+		if errWS == nil && ws != nil {
+			for _, rWS := range ws.Repos {
+				if strings.EqualFold(rWS.Name, repoName) {
+					repoHostPath = filepath.Join(ws.Root, rWS.Paths.Main)
+					break
+				}
+			}
+		}
+		if repoHostPath == "" {
+			// Fallback to code/repos/repoName/main
+			repoHostPath = filepath.Join(localPath, "code", "repos", repoName, "main")
+			// Double fallback to localPath/repoName
+			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
+				repoHostPath = filepath.Join(localPath, repoName)
+			}
+		}
 		repoWorktreeHostPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 
 		fullPath := filepath.Join(repoWorktreeHostPath, "patch.diff")
@@ -173,7 +194,47 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 		return r.GetPRDiff(ctx, task, agent, containerTargetPath, baseBranch)
 	}
 
-	return "", fmt.Errorf("multi-repo PR diff not implemented")
+	if r.ListRepositories == nil {
+		return "", fmt.Errorf("multi-repo PR diff requires repository listing")
+	}
+	repos, err := r.ListRepositories(ctx, task.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	var ws *models.TaskWorkspace
+	var errWS error
+	if r.LoadTaskWorkspace != nil {
+		ws, errWS = r.LoadTaskWorkspace(ctx, task)
+	}
+
+	var diffOut []string
+	for _, repo := range repos {
+		repoHostPath := ""
+		if errWS == nil && ws != nil {
+			for _, rWS := range ws.Repos {
+				if rWS.RepoID == repo.ID {
+					repoHostPath = filepath.Join(ws.Root, rWS.Paths.Main)
+					break
+				}
+			}
+		}
+		if repoHostPath == "" {
+			repoName := repoNameFromURL(repo.URL)
+			repoHostPath = filepath.Join(localPath, "code", "repos", repoName, "main")
+			if stat, statErr := os.Stat(repoHostPath); statErr != nil || !stat.IsDir() {
+				repoHostPath = filepath.Join(localPath, repoName)
+			}
+		}
+		containerRepoPath := r.ContainerPathForHostPath(task, repoHostPath, "")
+		repoDiff, diffErr := r.GetPRDiff(ctx, task, agent, containerRepoPath, baseBranch)
+		if diffErr != nil {
+			return "", fmt.Errorf("capture PR diff for repo %s: %w", repo.URL, diffErr)
+		}
+		if strings.TrimSpace(repoDiff) != "" {
+			diffOut = append(diffOut, fmt.Sprintf("--- Repository: %s\n%s", repoNameFromURL(repo.URL), repoDiff))
+		}
+	}
+	return strings.Join(diffOut, "\n"), nil
 }
 
 func (r *Runner) GetChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, targetPath string, worktreeSuffix string) ([]string, error) {

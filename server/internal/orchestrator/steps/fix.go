@@ -10,20 +10,68 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *models.Agent, jobID string, stepCtx workflow.StepContext) (map[string]any, error) {
-	t, err := deps.Tasks.GetByID(ctx, task.ID)
+// FixStep implements Step for fixing findings/feedback from PR review.
+type FixStep struct {
+	rt          StepRuntime
+	tasks       TaskReader
+	checkpoints CheckpointLister
+	llm         LLMRunner
+	diff        DiffCapturer
+	artifacts   ArtifactSaver
+	patch       PatchApplier
+	tests       TestRunner
+	status      StatusUpdater
+	log         Logger
+}
+
+func NewFixStep(
+	rt StepRuntime,
+	tasks TaskReader,
+	checkpoints CheckpointLister,
+	llm LLMRunner,
+	diff DiffCapturer,
+	artifacts ArtifactSaver,
+	patch PatchApplier,
+	tests TestRunner,
+	status StatusUpdater,
+	log Logger,
+) *FixStep {
+	return &FixStep{
+		rt:          rt,
+		tasks:       tasks,
+		checkpoints: checkpoints,
+		llm:         llm,
+		diff:        diff,
+		artifacts:   artifacts,
+		patch:       patch,
+		tests:       tests,
+		status:      status,
+		log:         log,
+	}
+}
+
+func (s *FixStep) ID() string { return workflow.StepFix }
+
+func (s *FixStep) StatusOnResume(_ StepResult) string {
+	return models.TaskStatusReviewing
+}
+
+func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
 	if err == nil && t.Complexity == models.TaskComplexityEasy {
-		return map[string]any{"status": "skipped", "info": "skipped fix step for easy task"}, nil
+		return StepResult{"status": "skipped", "info": "skipped fix step for easy task"}, nil
 	}
 
 	var prFeedback string
-	if checkpoints, cpErr := deps.Workflows.ListCheckpoints(ctx, task.ID); cpErr == nil {
-		for _, cp := range checkpoints {
-			if cp.Step == "pr_rejection" {
-				var state map[string]any
-				if json.Unmarshal(cp.State, &state) == nil {
-					if f, _ := state["feedback"].(string); f != "" {
-						prFeedback = f
+	if s.checkpoints != nil {
+		if checkpoints, cpErr := s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID); cpErr == nil {
+			for _, cp := range checkpoints {
+				if cp.Step == "pr_rejection" {
+					var state map[string]any
+					if json.Unmarshal(cp.State, &state) == nil {
+						if f, _ := state["feedback"].(string); f != "" {
+							prFeedback = f
+						}
 					}
 				}
 			}
@@ -32,16 +80,17 @@ func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *model
 
 	if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
 		if limitReached, _ := reviewOut["cycle_limit_reached"].(bool); limitReached {
-			return map[string]any{
+			return StepResult{
 				"status": "skipped",
 				"info":   "review-fix cycle limit reached, skipping fix step",
 			}, nil
 		}
 		if prFeedback == "" {
 			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
-				if findings, exists := parsed["findings"]; exists {
-					if slice, ok := findings.([]any); ok && len(slice) == 0 {
-						return map[string]any{
+				findings := getReviewFindings(parsed)
+				if findings != nil {
+					if !hasActionableFindings(findings) {
+						return StepResult{
 							"status": "skipped",
 							"info":   "no review findings, skipped fix step",
 						}, nil
@@ -50,10 +99,25 @@ func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *model
 			}
 		}
 	}
-	if deps.LLM != nil {
+	if s.llm != nil {
 		var diffText string
-		if deps.RepoUtil != nil {
-			diffText, _ = deps.RepoUtil.CapturePRDiff(ctx, task, agent, "main")
+		if s.diff != nil {
+			var err error
+			diffText, err = s.diff.CapturePRDiff(ctx, s.rt.Task, s.rt.Agent, "main")
+			if err != nil || diffText == "" {
+				suffix := ""
+				if s.rt.Agent != nil {
+					if s.rt.Agent.Role == models.AgentRoleBackend {
+						suffix = "-be-worktree"
+					} else if s.rt.Agent.Role == models.AgentRoleFrontend {
+						suffix = "-fe-worktree"
+					}
+				}
+				diffText, _ = s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepFix, suffix)
+			}
+		}
+		if diffText == "" && s.log != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "no diff was provided to fix step")
 		}
 
 		instruction := "Fix review findings. Here is the current workspace diff:\n\n" + diffText + "\n\n"
@@ -61,7 +125,8 @@ func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *model
 		var findingsJSON string
 		if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
 			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
-				if findings, exists := parsed["findings"]; exists {
+				findings := getReviewFindings(parsed)
+				if findings != nil {
 					if findingsBytes, err := json.MarshalIndent(findings, "", "  "); err == nil {
 						findingsJSON = string(findingsBytes)
 					}
@@ -77,7 +142,7 @@ func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *model
 		instruction += "IMPORTANT: The diff above shows the current proposed changes. Your patch must apply to the files AS THEY ARE AFTER the diff is applied. DO NOT recreate files that the diff already creates. Generate an incremental patch that fixes ONLY the findings.\n\n"
 		instruction += "Return JSON with fixes_applied, files_changed, and patch text when available."
 
-		out, err := deps.RunLLMStep(ctx, task, agent, jobID, workflow.StepFix, instruction)
+		out, err := s.llm.RunLLMStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepFix, instruction)
 		if err != nil {
 			return nil, err
 		}
@@ -85,50 +150,54 @@ func ExecuteFix(ctx context.Context, deps *Deps, task *models.Task, agent *model
 		if parsed, ok := out["parsed"].(map[string]any); ok {
 			p := patch.ExtractPatch(parsed)
 			if p != "" {
-				_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepFix, "patch", p)
-				if deps.RepoUtil != nil {
-					if applyErr := deps.RepoUtil.ApplyPatch(ctx, task, agent, workflow.StepFix, p, ""); applyErr != nil {
+				if s.artifacts != nil {
+					_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepFix, "patch", p)
+				}
+				if s.patch != nil {
+					if applyErr := s.patch.ApplyPatch(ctx, s.rt.Task, s.rt.Agent, workflow.StepFix, p, ""); applyErr != nil {
 						return nil, fmt.Errorf("apply patch: %w", applyErr)
 					}
 				}
 				patchApplied = true
 			}
 		}
-		if deps.RepoUtil != nil {
-			if diffText, diffErr := deps.RepoUtil.CaptureWorkspaceDiff(ctx, task, agent, workflow.StepFix, ""); diffErr == nil && diffText != "" {
-				_ = deps.SaveArtifact(ctx, jobID, task.ID, workflow.StepFix, "diff", diffText)
+		if s.diff != nil {
+			if diffText, diffErr := s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepFix, ""); diffErr == nil && diffText != "" {
+				if s.artifacts != nil {
+					_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepFix, "diff", diffText)
+				}
 			}
 		}
 
 		if patchApplied {
 			var changedFiles []string
-			if deps.RepoUtil != nil {
-				repoHostPath, err := deps.RepoUtil.GetTaskRepoHostPath(ctx, task)
-				if err != nil {
+			if s.diff != nil {
+				repoHostPath, err := s.diff.GetTaskRepoHostPath(ctx, s.rt.Task)
+				if err == nil {
+					var diffErr error
+					changedFiles, diffErr = s.diff.GetChangedFiles(ctx, s.rt.Task, s.rt.Agent, repoHostPath, "")
+					if diffErr != nil && s.log != nil {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to get changed files: %v", diffErr))
+					}
+				}
+			}
+			if len(changedFiles) > 0 && s.tests != nil {
+				if _, errT := s.tests.RunTargetedTests(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, "fix_test", changedFiles, ""); errT != nil && s.log != nil {
+					s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("targeted tests failed: %v", errT))
+				}
+			}
+
+			if s.status != nil {
+				if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusReviewing); err != nil {
 					return nil, err
 				}
-
-				var diffErr error
-				changedFiles, diffErr = deps.RepoUtil.GetChangedFiles(ctx, task, agent, repoHostPath, "")
-				if diffErr != nil {
-					deps.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to get changed files: %v", diffErr))
-				}
-			}
-			if len(changedFiles) > 0 {
-				if _, errT := deps.RunTargetedTests(ctx, task, agent, jobID, "fix_test", changedFiles, ""); errT != nil {
-					deps.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("targeted tests failed: %v", errT))
-				}
-			}
-
-			if _, err := deps.UpdateTaskStatus(ctx, task.ID, models.TaskStatusReviewing); err != nil {
-				return nil, err
 			}
 			// We don't delete review & fix checkpoints here anymore; they are skipped when resuming
 			// using the job.Step filter in orchestrator_worker.go to preserve cycle counts in DB.
 			return nil, workflow.ErrReviewFixLoop
 		}
 
-		return map[string]any{
+		return StepResult{
 			"status": "success",
 			"info":   "no fixes applied",
 		}, nil

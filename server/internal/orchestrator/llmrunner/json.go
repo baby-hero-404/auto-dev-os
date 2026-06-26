@@ -23,6 +23,20 @@ func ParseJSONMarkdown(content string) (map[string]any, error) {
 	var res map[string]any
 
 	sanitized := SanitizeJSON(trimmed)
+	if strings.HasPrefix(sanitized, "[") {
+		var arr []any
+		if err := json.Unmarshal([]byte(sanitized), &arr); err == nil {
+			return map[string]any{"array": arr}, nil
+		}
+		start := strings.Index(sanitized, "[")
+		end := strings.LastIndex(sanitized, "]")
+		if start != -1 && end != -1 && end > start {
+			extracted := sanitized[start : end+1]
+			if err := json.Unmarshal([]byte(extracted), &arr); err == nil {
+				return map[string]any{"array": arr}, nil
+			}
+		}
+	}
 	if err := json.Unmarshal([]byte(sanitized), &res); err != nil {
 		start := strings.Index(sanitized, "{")
 		end := strings.LastIndex(sanitized, "}")

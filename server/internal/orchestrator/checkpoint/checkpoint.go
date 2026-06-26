@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -113,6 +114,20 @@ func (s *Store) SaveArtifact(ctx context.Context, jobID string, taskID string, s
 	if s.Artifacts == nil {
 		return nil
 	}
+
+	artifacts, err := s.Artifacts.ListByTaskID(ctx, taskID)
+	if err == nil {
+		count := 0
+		for _, a := range artifacts {
+			if (a.Step == step || strings.HasPrefix(a.Step, step+"_cycle_")) && a.Type == artType {
+				count++
+			}
+		}
+		if count > 0 {
+			step = fmt.Sprintf("%s_cycle_%d", step, count+1)
+		}
+	}
+
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err

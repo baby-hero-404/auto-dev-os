@@ -6,6 +6,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type AgentRepo struct{ db *gorm.DB }
@@ -177,6 +178,14 @@ func (r *AgentRepo) FindAvailableByRole(ctx context.Context, projectID, role str
 	return &agent, nil
 }
 
+func (r *AgentRepo) ClaimAvailableByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
+	agent, err := r.claimAvailable(ctx, projectID, &role)
+	if err != nil {
+		return nil, fmt.Errorf("claim available agent by role: %w", err)
+	}
+	return agent, nil
+}
+
 func (r *AgentRepo) FindByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
 	var agent models.Agent
 	err := r.db.WithContext(ctx).
@@ -205,6 +214,54 @@ func (r *AgentRepo) FindAnyAvailable(ctx context.Context, projectID string) (*mo
 		First(&agent).Error
 	if err != nil {
 		return nil, fmt.Errorf("find any available agent: %w", mapError(err))
+	}
+	return &agent, nil
+}
+
+func (r *AgentRepo) ClaimAnyAvailable(ctx context.Context, projectID string) (*models.Agent, error) {
+	agent, err := r.claimAvailable(ctx, projectID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("claim any available agent: %w", err)
+	}
+	return agent, nil
+}
+
+func (r *AgentRepo) claimAvailable(ctx context.Context, projectID string, role *string) (*models.Agent, error) {
+	var agent models.Agent
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.
+			Table("agents").
+			Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "agents"}, Options: "SKIP LOCKED"}).
+			Joins("JOIN projects ON projects.org_id = agents.org_id").
+			Where("projects.id = ?", projectID).
+			Where("agents.status IN ?", []string{models.AgentStatusIdle, ""}).
+			Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
+			Order("agents.created_at ASC")
+
+		if role != nil {
+			query = query.Where("agents.role = ?", *role)
+		}
+
+		if err := query.First(&agent).Error; err != nil {
+			return mapError(err)
+		}
+
+		result := tx.Model(&models.Agent{}).
+			Where("id = ?", agent.ID).
+			Where("status IN ?", []string{models.AgentStatusIdle, ""}).
+			Update("status", models.AgentStatusAssigned)
+		if result.Error != nil {
+			return mapError(result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return ErrConflict
+		}
+
+		agent.Status = models.AgentStatusAssigned
+		return nil
+	})
+	if err != nil {
+		return nil, mapError(err)
 	}
 	return &agent, nil
 }

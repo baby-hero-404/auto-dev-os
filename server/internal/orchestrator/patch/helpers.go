@@ -113,6 +113,19 @@ func CleanPatchPaths(patchText string) string {
 	return re.ReplaceAllString(patchText, "$1/")
 }
 
+func CleanRepoPrefix(block string, repoName string) string {
+	escapedRepo := regexp.QuoteMeta(repoName)
+	block = regexp.MustCompile(`^(a/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`( b/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(--- a/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(\+\+\+ b/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename from )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename to )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy from )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy to )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	return block
+}
+
 func SplitPatchByRepo(patchText string) map[string]string {
 	repos := make(map[string]string)
 	parts := strings.Split(patchText, "diff --git ")
@@ -131,11 +144,25 @@ func SplitPatchByRepo(patchText string) map[string]string {
 			repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
 		} else if strings.HasPrefix(block, "a/") {
 			sub := block[2:]
-			idx := strings.Index(sub, "/")
-			if idx != -1 {
-				repoName := sub[:idx]
-				if repoName != "code" {
-					repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+block)
+			sepIdx := strings.Index(sub, " b/")
+			if sepIdx != -1 {
+				firstPath := sub[:sepIdx]
+				idx := strings.Index(firstPath, "/")
+				if idx != -1 {
+					repoName := firstPath[:idx]
+					if repoName != "code" {
+						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+block)
+					}
+				} else {
+					repoBlocks[""] = append(repoBlocks[""], "diff --git "+block)
+				}
+			} else {
+				idx := strings.Index(sub, "/")
+				if idx != -1 {
+					repoName := sub[:idx]
+					if repoName != "code" {
+						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+block)
+					}
 				}
 			}
 		}

@@ -81,7 +81,7 @@ func (s *TestStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 		if s.checkpoints != nil {
 			reviewCycleCount = s.checkpoints.CountSuccessful(ctx, s.rt.Task.ID, workflow.StepReview)
 		}
-		if reviewCycleCount < maxCycles {
+		if s.rt.Task.Complexity != models.TaskComplexityEasy && reviewCycleCount < maxCycles {
 			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("tests failed, looping back to review-fix (cycle %d/%d): %v", reviewCycleCount+1, maxCycles, err))
 			if s.status != nil {
 				if _, statusErr := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusReviewing); statusErr != nil {

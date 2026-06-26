@@ -37,20 +37,28 @@ export function SetupChecklist() {
   const session = useSession();
   const orgID = session?.user.org_id ?? "";
 
-  const [dismissed, setDismissed] = useState(true); // start hidden, reveal after mount
+  const [dismissed, setDismissed] = useState(false);
   const [autoCompleted, setAutoCompleted] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [animatingId, setAnimatingId] = useState<string | null>(null);
   const prevDoneRef = useRef<Set<string>>(new Set());
 
-  // Hydrate dismiss state from localStorage after mount
   useEffect(() => {
-    const wasDismissed = localStorage.getItem(LS_DISMISSED_KEY) === "true";
-    const wasAutoCompleted = localStorage.getItem(LS_AUTO_COMPLETED_KEY) === "true";
     const timer = setTimeout(() => {
+      let wasDismissed = false;
+      let wasAutoCompleted = false;
+
+      try {
+        wasDismissed = localStorage.getItem(LS_DISMISSED_KEY) === "true";
+        wasAutoCompleted = localStorage.getItem(LS_AUTO_COMPLETED_KEY) === "true";
+      } catch {
+        // Keep first-run defaults when localStorage is unavailable.
+      }
+
       setDismissed(wasDismissed);
       setAutoCompleted(wasAutoCompleted);
     }, 0);
+
     return () => clearTimeout(timer);
   }, []);
 
@@ -183,10 +191,12 @@ export function SetupChecklist() {
   // ─── Auto-hide when all required pass ─────────────────────
   useEffect(() => {
     if (requiredAllDone && !autoCompleted && !isLoading) {
-      localStorage.setItem(LS_AUTO_COMPLETED_KEY, "true");
-      const timer = setTimeout(() => {
-        setAutoCompleted(true);
-      }, 0);
+      try {
+        localStorage.setItem(LS_AUTO_COMPLETED_KEY, "true");
+      } catch {
+        // Keep the in-memory state even when localStorage is unavailable.
+      }
+      const timer = setTimeout(() => setAutoCompleted(true), 0);
       return () => clearTimeout(timer);
     }
   }, [requiredAllDone, autoCompleted, isLoading]);
@@ -207,7 +217,11 @@ export function SetupChecklist() {
 
   // ─── Dismiss handler ──────────────────────────────────────
   function handleDismiss() {
-    localStorage.setItem(LS_DISMISSED_KEY, "true");
+    try {
+      localStorage.setItem(LS_DISMISSED_KEY, "true");
+    } catch {
+      // Dismiss for this session if localStorage cannot persist the preference.
+    }
     setDismissed(true);
   }
 

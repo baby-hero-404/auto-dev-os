@@ -89,7 +89,15 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 
 	frontendAgent := s.rt.Agent
 	assignedAgentID := ""
-	if assigner, ok := s.agents.(FrontendAgentAssigner); ok {
+	if frontendAgent == nil || frontendAgent.Role != models.AgentRoleFrontend {
+		assigner, ok := s.agents.(FrontendAgentAssigner)
+		if !ok {
+			roleStr := "nil"
+			if frontendAgent != nil {
+				roleStr = frontendAgent.Role
+			}
+			return nil, fmt.Errorf("frontend coding step requires a frontend agent, but got role %s", roleStr)
+		}
 		fg, err := assigner.AssignFrontendAgent(ctx, s.rt.Task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign frontend agent for frontend coding step: %w", err)

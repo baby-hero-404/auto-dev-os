@@ -90,19 +90,20 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		if err := os.WriteFile(fullPath, []byte(patchText), 0o644); err != nil {
 			return err
 		}
+		defer os.Remove(fullPath)
 
 		containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 		containerPatchPath := filepath.Join(containerTargetPath, "patch.diff")
 
-		cmd := fmt.Sprintf("git -C %[1]s apply --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R %[2]s || git -C %[1]s apply --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
 			workspace.QuoteShellArg(containerTargetPath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch", cmd, worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
 			return fmt.Errorf("git apply patch: %w", err)
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		return nil
 	}
 
@@ -131,6 +132,11 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 				repoHostPath = filepath.Join(localPath, repoName)
 			}
 		}
+		if ws != nil && len(ws.Repos) == 1 {
+			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
+				repoHostPath = filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
+			}
+		}
 		repoWorktreeHostPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 
 		fullPath := filepath.Join(repoWorktreeHostPath, "patch.diff")
@@ -140,20 +146,21 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		if err := os.WriteFile(fullPath, []byte(repoPatchText), 0o644); err != nil {
 			return err
 		}
+		defer os.Remove(fullPath)
 
 		containerRepoWorktreePath := r.ContainerPathForHostPath(task, repoWorktreeHostPath, "")
 		containerPatchPath := filepath.Join(containerRepoWorktreePath, "patch.diff")
 
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
-		cmd := fmt.Sprintf("git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R -p1 %[2]s || git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
 			workspace.QuoteShellArg(containerRepoWorktreePath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch_"+repoName, cmd, worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 	}
 	return nil
 }

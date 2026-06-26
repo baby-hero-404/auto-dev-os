@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,35 +23,28 @@ func (m *AgentManager) Assign(ctx context.Context, task *models.Task) (*models.A
 	var agent *models.Agent
 	var err error
 	for _, role := range rolesForTask(task) {
-		agent, err = m.repo.FindAvailableByRole(ctx, task.ProjectID, role)
+		agent, err = m.repo.ClaimAvailableByRole(ctx, task.ProjectID, role)
 		if err == nil {
 			break
 		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
 	}
 	if agent == nil {
-		agent, err = m.repo.FindAnyAvailable(ctx, task.ProjectID)
+		agent, err = m.repo.ClaimAnyAvailable(ctx, task.ProjectID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	status := models.AgentStatusAssigned
-	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
-		return nil, err
-	}
-	agent.Status = status
 	return agent, nil
 }
 
 func (m *AgentManager) assignByRole(ctx context.Context, task *models.Task, targetRole string) (*models.Agent, error) {
-	agent, err := m.repo.FindAvailableByRole(ctx, task.ProjectID, targetRole)
+	agent, err := m.repo.ClaimAvailableByRole(ctx, task.ProjectID, targetRole)
 	if err != nil {
 		return nil, fmt.Errorf("no available agent with role %s found for project %s: %w", targetRole, task.ProjectID, err)
 	}
-	status := models.AgentStatusAssigned
-	if err := m.repo.UpdateStatus(ctx, agent.ID, status); err != nil {
-		return nil, err
-	}
-	agent.Status = status
 	return agent, nil
 }
 

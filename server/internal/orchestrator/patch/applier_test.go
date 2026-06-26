@@ -61,3 +61,94 @@ func TestRunner_CapturePRDiff_MultiRepo(t *testing.T) {
 		t.Fatalf("expected combined repo headers, got:\n%s", diff)
 	}
 }
+
+func TestSplitPatchByRepo(t *testing.T) {
+	tests := []struct {
+		name     string
+		patch    string
+		expected map[string]string
+	}{
+		{
+			name: "single repo without prefix",
+			patch: `diff --git a/readme.md b/readme.md
+--- a/readme.md
++++ b/readme.md
+@@ -1,2 +1,2 @@
+-hello
++world`,
+			expected: map[string]string{
+				"": `diff --git a/readme.md b/readme.md
+--- a/readme.md
++++ b/readme.md
+@@ -1,2 +1,2 @@
+-hello
++world`,
+			},
+		},
+		{
+			name: "multi repo with prefix",
+			patch: `diff --git a/repo-a/src/main.go b/repo-a/src/main.go
+--- a/repo-a/src/main.go
++++ b/repo-a/src/main.go
+@@ -1,2 +1,2 @@
+-a
++b
+diff --git a/repo-b/index.js b/repo-b/index.js
+--- a/repo-b/index.js
++++ b/repo-b/index.js
+@@ -1,2 +1,2 @@
+-c
++d`,
+			expected: map[string]string{
+				"repo-a": `diff --git a/repo-a/src/main.go b/repo-a/src/main.go
+--- a/repo-a/src/main.go
++++ b/repo-a/src/main.go
+@@ -1,2 +1,2 @@
+-a
++b
+`,
+				"repo-b": `diff --git a/repo-b/index.js b/repo-b/index.js
+--- a/repo-b/index.js
++++ b/repo-b/index.js
+@@ -1,2 +1,2 @@
+-c
++d`,
+			},
+		},
+		{
+			name: "multi repo container prefix format",
+			patch: `diff --git a/code/repos/repo-a/main/src/main.go b/code/repos/repo-a/main/src/main.go
+--- a/code/repos/repo-a/main/src/main.go
++++ b/code/repos/repo-a/main/src/main.go
+@@ -1,2 +1,2 @@
+-1
++2`,
+			expected: map[string]string{
+				"repo-a": `diff --git a/src/main.go b/src/main.go
+--- a/src/main.go
++++ b/src/main.go
+@@ -1,2 +1,2 @@
+-1
++2`,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := SplitPatchByRepo(tc.patch)
+			if len(res) != len(tc.expected) {
+				t.Fatalf("expected %d split patches, got %d. Result: %#v", len(tc.expected), len(res), res)
+			}
+			for k, v := range tc.expected {
+				got, ok := res[k]
+				if !ok {
+					t.Fatalf("expected key %q in result, got result: %#v", k, res)
+				}
+				if strings.TrimSpace(got) != strings.TrimSpace(v) {
+					t.Errorf("key %q: expected:\n%q\ngot:\n%q", k, v, got)
+				}
+			}
+		})
+	}
+}

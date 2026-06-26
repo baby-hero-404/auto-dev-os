@@ -149,21 +149,26 @@ func (m *Manager) AcquireWorkspaceLock(ctx context.Context, task *models.Task, j
 }
 
 func (m *Manager) ReleaseWorkspaceLock(taskID string) {
+	weHoldLock := false
 	if cancelVal, loaded := m.LockCancels.LoadAndDelete(taskID); loaded {
+		weHoldLock = true
 		if cancel, ok := cancelVal.(context.CancelFunc); ok {
 			cancel()
 		}
 	}
 	if m.Workflows != nil {
 		if lockConn, loaded := m.LockConns.LoadAndDelete(taskID); loaded {
+			weHoldLock = true
 			if err := m.Workflows.ReleaseAdvisoryLock(context.Background(), lockConn, taskID); err != nil {
 				m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to release advisory lock: %v", err))
 			}
 		}
 	}
-	root := filepath.Join(m.WorkspaceRoot, taskID)
-	lockPath := filepath.Join(root, ".workspace.lock")
-	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
-		m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to remove workspace lock file: %v", err))
+	if weHoldLock {
+		root := filepath.Join(m.WorkspaceRoot, taskID)
+		lockPath := filepath.Join(root, ".workspace.lock")
+		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+			m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to remove workspace lock file: %v", err))
+		}
 	}
 }

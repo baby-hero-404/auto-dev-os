@@ -16,9 +16,12 @@ import (
 func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string) (map[string]any, error) {
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
 	defer span.End()
+	
+	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
 	result, err := o.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:      task.ID,
 		AgentID:     agent.ID,
+		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", command},
 		NetworkMode: sandbox.NetworkModeNone,
 		Timeout:     5 * time.Minute,
@@ -114,6 +117,17 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 				if content, readErr := orchestratorworkspace.ReadLimitedFile(safePath, 20_000); readErr == nil {
 					return content, true
 				}
+			}
+		}
+	}
+	// Fallback for single repository workspace if file does not have a repo prefix
+	if len(ws.Repos) == 1 {
+		repo := ws.Repos[0]
+		root := filepath.Join(ws.Root, repo.Paths.Main)
+		safePath, err := orchestratorworkspace.ResolveSafePath(root, file)
+		if err == nil {
+			if content, readErr := orchestratorworkspace.ReadLimitedFile(safePath, 20_000); readErr == nil {
+				return content, true
 			}
 		}
 	}

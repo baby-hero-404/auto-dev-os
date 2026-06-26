@@ -63,7 +63,15 @@ func (s *CodeBackendStep) StatusOnResume(_ StepResult) string { return models.Ta
 func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	backendAgent := s.rt.Agent
 	assignedAgentID := ""
-	if assigner, ok := s.agents.(BackendAgentAssigner); ok {
+	if backendAgent == nil || backendAgent.Role != models.AgentRoleBackend {
+		assigner, ok := s.agents.(BackendAgentAssigner)
+		if !ok {
+			roleStr := "nil"
+			if backendAgent != nil {
+				roleStr = backendAgent.Role
+			}
+			return nil, fmt.Errorf("backend coding step requires a backend agent, but got role %s", roleStr)
+		}
 		bg, err := assigner.AssignBackendAgent(ctx, s.rt.Task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign backend agent for backend coding step: %w", err)

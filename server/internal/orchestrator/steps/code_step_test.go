@@ -75,6 +75,7 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 		&mockStepWorkspaceLoader{},
 		artifactMock,
 		&mockTestRunner{},
+		nil,
 		&mockLogger{},
 	)
 
@@ -115,6 +116,7 @@ func TestCodeBackendStep_ReusesCurrentBackendAgent(t *testing.T) {
 		&mockStepWorkspaceLoader{},
 		&mockArtifactSaver{},
 		&mockTestRunner{},
+		nil,
 		&mockLogger{},
 	)
 
@@ -138,6 +140,7 @@ func TestCodeFrontendStep_SkipsOnEasyTask(t *testing.T) {
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleFrontend}, JobID: "j1"},
 		&mockTaskReader{task: task},
 		&mockLLMRunner{},
+		nil,
 		nil,
 		nil,
 		nil,
@@ -173,6 +176,7 @@ func TestCodeFrontendStep_SkipsOnNoFrontendFiles(t *testing.T) {
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleFrontend}, JobID: "j1"},
 		&mockTaskReader{task: task},
 		&mockLLMRunner{},
+		nil,
 		nil,
 		nil,
 		nil,
@@ -216,6 +220,7 @@ func TestCodeFrontendStep_ReleasesBorrowedAgent(t *testing.T) {
 		&mockStepWorkspaceLoader{},
 		&mockArtifactSaver{},
 		&mockTestRunner{},
+		nil,
 		&mockLogger{},
 	)
 
@@ -254,6 +259,7 @@ func TestCodeFrontendStep_ReusesCurrentFrontendAgent(t *testing.T) {
 		&mockStepWorkspaceLoader{},
 		&mockArtifactSaver{},
 		&mockTestRunner{},
+		nil,
 		&mockLogger{},
 	)
 

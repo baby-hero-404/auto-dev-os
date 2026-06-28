@@ -125,17 +125,25 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 			}
 		}
 		if repoHostPath == "" {
-			// Fallback to code/repos/repoName/main
-			repoHostPath = filepath.Join(localPath, "code", "repos", repoName, "main")
+			// Fallback to code/repos/repoName/<defaultBranch>
+			repoDir := filepath.Join(localPath, "code", "repos", repoName)
+			mainDirName := "main"
+			if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
+				for _, entry := range entries {
+					if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
+						mainDirName = entry.Name()
+						break
+					}
+				}
+			}
+			repoHostPath = filepath.Join(repoDir, mainDirName)
 			// Double fallback to localPath/repoName
 			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
 				repoHostPath = filepath.Join(localPath, repoName)
 			}
 		}
 		if ws != nil && len(ws.Repos) == 1 {
-			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
-				repoHostPath = filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
-			}
+			repoHostPath = filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
 		}
 		repoWorktreeHostPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 
@@ -190,6 +198,12 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 	targetPath := localPath
 	containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 
+	var ws *models.TaskWorkspace
+	var errWS error
+	if r.LoadTaskWorkspace != nil {
+		ws, errWS = r.LoadTaskWorkspace(ctx, task)
+	}
+
 	if task.RepositoryID != nil {
 		repoHostPath, err := r.GetTaskRepoHostPath(ctx, task)
 		if err != nil {
@@ -198,7 +212,17 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 		targetPath = r.HostWorktreePath(task, repoHostPath, "")
 		containerTargetPath = r.ContainerPathForHostPath(task, targetPath, "")
 
-		return r.GetPRDiff(ctx, task, agent, containerTargetPath, baseBranch)
+		resolvedBase := baseBranch
+		if errWS == nil && ws != nil {
+			for _, rWS := range ws.Repos {
+				if rWS.RepoID == *task.RepositoryID && rWS.DefaultBranch != "" {
+					resolvedBase = rWS.DefaultBranch
+					break
+				}
+			}
+		}
+
+		return r.GetPRDiff(ctx, task, agent, containerTargetPath, resolvedBase)
 	}
 
 	if r.ListRepositories == nil {
@@ -208,19 +232,18 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 	if err != nil {
 		return "", err
 	}
-	var ws *models.TaskWorkspace
-	var errWS error
-	if r.LoadTaskWorkspace != nil {
-		ws, errWS = r.LoadTaskWorkspace(ctx, task)
-	}
 
 	var diffOut []string
 	for _, repo := range repos {
 		repoHostPath := ""
+		resolvedBase := baseBranch
 		if errWS == nil && ws != nil {
 			for _, rWS := range ws.Repos {
 				if rWS.RepoID == repo.ID {
 					repoHostPath = filepath.Join(ws.Root, rWS.Paths.Main)
+					if rWS.DefaultBranch != "" {
+						resolvedBase = rWS.DefaultBranch
+					}
 					break
 				}
 			}
@@ -233,7 +256,7 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 			}
 		}
 		containerRepoPath := r.ContainerPathForHostPath(task, repoHostPath, "")
-		repoDiff, diffErr := r.GetPRDiff(ctx, task, agent, containerRepoPath, baseBranch)
+		repoDiff, diffErr := r.GetPRDiff(ctx, task, agent, containerRepoPath, resolvedBase)
 		if diffErr != nil {
 			return "", fmt.Errorf("capture PR diff for repo %s: %w", repo.URL, diffErr)
 		}

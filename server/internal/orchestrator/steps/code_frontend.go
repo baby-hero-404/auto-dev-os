@@ -18,17 +18,18 @@ type FrontendAgentAssigner interface {
 
 // CodeFrontendStep implements Step for the frontend coding track.
 type CodeFrontendStep struct {
-	rt        StepRuntime
-	tasks     TaskReader
-	llm       LLMRunner
-	agents    any
-	worktree  WorktreeManager
-	patcher   PatchApplier
-	diff      DiffCapturer
-	workspace WorkspaceLoader
-	artifacts ArtifactSaver
-	tester    TestRunner
-	log       Logger
+	rt          StepRuntime
+	tasks       TaskReader
+	llm         LLMRunner
+	agents      any
+	worktree    WorktreeManager
+	patcher     PatchApplier
+	diff        DiffCapturer
+	workspace   WorkspaceLoader
+	artifacts   ArtifactSaver
+	tester      TestRunner
+	checkpoints CheckpointLister
+	log         Logger
 }
 
 func NewCodeFrontendStep(
@@ -42,20 +43,22 @@ func NewCodeFrontendStep(
 	workspace WorkspaceLoader,
 	artifacts ArtifactSaver,
 	tester TestRunner,
+	checkpoints CheckpointLister,
 	log Logger,
 ) *CodeFrontendStep {
 	return &CodeFrontendStep{
-		rt:        rt,
-		tasks:     tasks,
-		llm:       llm,
-		agents:    agents,
-		worktree:  worktree,
-		patcher:   patcher,
-		diff:      diff,
-		workspace: workspace,
-		artifacts: artifacts,
-		tester:    tester,
-		log:       log,
+		rt:          rt,
+		tasks:       tasks,
+		llm:         llm,
+		agents:      agents,
+		worktree:    worktree,
+		patcher:     patcher,
+		diff:        diff,
+		workspace:   workspace,
+		artifacts:   artifacts,
+		tester:      tester,
+		checkpoints: checkpoints,
+		log:         log,
 	}
 }
 
@@ -141,11 +144,28 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		}
 	}
 
-	if s.llm == nil {
-		return nil, fmt.Errorf("llm provider is not configured")
+	var prFeedback string
+	if s.checkpoints != nil {
+		if checkpoints, cpErr := s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID); cpErr == nil {
+			for _, cp := range checkpoints {
+				if cp.Step == "pr_rejection" {
+					var state map[string]any
+					if json.Unmarshal(cp.State, &state) == nil {
+						if f, _ := state["feedback"].(string); f != "" {
+							prFeedback = f
+						}
+					}
+				}
+			}
+		}
 	}
 
-	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, workflow.StepCodeFrontend, "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.")
+	instruction := "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available."
+	if prFeedback != "" {
+		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
+	}
+
+	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, workflow.StepCodeFrontend, instruction)
 	if err != nil {
 		return nil, err
 	}

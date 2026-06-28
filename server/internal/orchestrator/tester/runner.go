@@ -76,7 +76,17 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 				}
 			}
 			if repoName != "" {
-				repoMainHostPath := filepath.Join(repoHostPath, "code", "repos", repoName, "main")
+				repoDir := filepath.Join(repoHostPath, "code", "repos", repoName)
+				mainDirName := "main"
+				if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
+					for _, entry := range entries {
+						if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
+							mainDirName = entry.Name()
+							break
+						}
+					}
+				}
+				repoMainHostPath := filepath.Join(repoDir, mainDirName)
 				fileMountedHostPath = r.HostWorktreePath(task, repoMainHostPath, worktreeSuffix)
 			} else {
 				fileMountedHostPath = repoHostPath

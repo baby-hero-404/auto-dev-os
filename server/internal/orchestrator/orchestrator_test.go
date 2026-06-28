@@ -517,17 +517,14 @@ func TestOrchestrator_StepPR_NoChangesMerged(t *testing.T) {
 		t.Fatal("missing PR step runner")
 	}
 
-	out, err := runner(context.Background(), workflow.StepContext{Inputs: map[string]map[string]any{
+	_, err := runner(context.Background(), workflow.StepContext{Inputs: map[string]map[string]any{
 		workflow.StepTest: map[string]any{"status": "passed"},
 	}})
-	if err != nil {
-		t.Fatalf("PR step failed: %v", err)
+	if !errors.Is(err, workflow.ErrWaitingApproval) {
+		t.Fatalf("expected workflow.ErrWaitingApproval, got: %v", err)
 	}
-	if status, _ := out["status"].(string); status != "no_changes_detected" {
-		t.Fatalf("expected no_changes_detected status, got %v", out["status"])
-	}
-	if task.Status != models.TaskStatusMerged {
-		t.Fatalf("expected task status merged, got %s", task.Status)
+	if task.Status != models.TaskStatusPrReady {
+		t.Fatalf("expected task status pr_ready, got %s", task.Status)
 	}
 	if len(taskRepo.updated) == 0 {
 		t.Fatal("expected task updates to be recorded")
@@ -536,8 +533,8 @@ func TestOrchestrator_StepPR_NoChangesMerged(t *testing.T) {
 		if update.PRURLs != nil {
 			t.Fatalf("expected no PR URL update when no changes are detected, got %v", []string(*update.PRURLs))
 		}
-		if update.Status != nil && *update.Status != models.TaskStatusMerged {
-			t.Fatalf("expected only merged status update, got %s", *update.Status)
+		if update.Status != nil && *update.Status != models.TaskStatusPrReady {
+			t.Fatalf("expected only pr_ready status update, got %s", *update.Status)
 		}
 	}
 }
@@ -1215,6 +1212,12 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 			URL: "https://github.com/test/repo.git",
 		},
 	}
+	workflowRepo.job = &models.WorkflowJob{
+		ID:     "job-paused-merge",
+		TaskID: task.ID,
+		Status: models.WorkflowJobStatusPaused,
+		Step:   models.WorkflowStepPR,
+	}
 	orchMatch := New(taskRepo, workflowRepo, nil, nil,
 		WithGitOpsClient(gitOps),
 		WithRepositoryRepository(reposRepoMatch),
@@ -1226,6 +1229,9 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 	}
 	if updated.Status != models.TaskStatusMerged {
 		t.Errorf("expected task status to transition to merged, got: %s", updated.Status)
+	}
+	if workflowRepo.job.Status != models.WorkflowJobStatusDone {
+		t.Errorf("expected paused workflow job to be marked done after merge approval, got: %s", workflowRepo.job.Status)
 	}
 }
 
@@ -1309,6 +1315,12 @@ index abc..def 100644
 	multiTask := &models.Task{
 		ID:           "task-2",
 		RepositoryID: nil,
+	}
+
+	multiRepoPathWithoutMetadata := orch.repoutil.RepoHostPath(multiTask, nil, repo)
+	expectedMultiRepoPathWithoutMetadata := filepath.Clean("/tmp/workspaces/task-2/code/repos/repo-a/main")
+	if filepath.Clean(multiRepoPathWithoutMetadata) != expectedMultiRepoPathWithoutMetadata {
+		t.Errorf("expected multi repo path without metadata: %s, got: %s", expectedMultiRepoPathWithoutMetadata, multiRepoPathWithoutMetadata)
 	}
 
 	multiLocalPath := "/tmp/workspaces/task-2"

@@ -598,15 +598,21 @@ export default function AnalyticsPage() {
                   </td>
                   <td className="px-4 py-3 capitalize">{agent.role}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${agent.status === "idle" ? "bg-slate-700/50 text-slate-300" :
-                      agent.status === "busy" || agent.status === "running" ? "bg-emerald-400/10 text-emerald-300" :
-                        "bg-slate-700/50 text-slate-400"
-                      }`}>
-                      <span className={`size-1.5 rounded-full ${agent.status === "idle" ? "bg-slate-400" :
-                        agent.status === "busy" || agent.status === "running" ? "bg-emerald-400 animate-pulse" :
-                          "bg-slate-500"
-                        }`} />
-                      {agent.status}
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                      agent.status === "idle" ? "bg-slate-700/20 text-slate-400 border-slate-700/30" :
+                      agent.status === "assigned" ? "bg-blue-500/10 text-blue-300 border-blue-500/20" :
+                      agent.status === "running" || agent.status === "busy" ? "bg-emerald-400/10 text-emerald-300 border-emerald-400/20" :
+                      agent.status === "offline" ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                      "bg-slate-700/20 text-slate-400 border-slate-700/30"
+                    }`}>
+                      <span className={`size-1.5 rounded-full ${
+                        agent.status === "idle" ? "bg-slate-500" :
+                        agent.status === "assigned" ? "bg-blue-400 animate-pulse" :
+                        agent.status === "running" || agent.status === "busy" ? "bg-emerald-400 animate-pulse" :
+                        agent.status === "offline" ? "bg-red-500" :
+                        "bg-slate-500"
+                      }`} />
+                      {agent.status || "idle"}
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono">{agent.task_count}</td>

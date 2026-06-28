@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -52,7 +53,8 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		b.WriteString("\n\n### Workspace Affected Files ###\n")
 		for _, file := range analysis.AffectedFiles {
 			if content, ok := r.ReadAffectedFileContent(ctx, task, file); ok {
-				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", file, content))
+				displayPath := workspace.WorkspaceToRepoRelative(file)
+				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", displayPath, content))
 			}
 		}
 		fullInstruction += b.String()

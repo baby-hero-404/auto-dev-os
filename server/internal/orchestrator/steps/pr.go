@@ -185,14 +185,14 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 
 		branchName := fmt.Sprintf("feature/%s", s.rt.Task.ID)
 		if err := s.git.CheckoutNewBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, branchName); err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
-			continue
+			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
+			return nil, fmt.Errorf("checkout branch failed for %s: %w", repo.URL, err)
 		}
 
 		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)
 		if err := s.gitops.CommitAndPush(ctx, localPath, repo.URL, branchName, commitMsg, nil, s.rt.Agent.Role); err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
-			continue
+			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
+			return nil, fmt.Errorf("commit and push failed for %s: %w", repo.URL, err)
 		}
 
 		baseBranch := repo.Branch
@@ -230,8 +230,8 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 
 		prURL, err := s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
 		if err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
-			continue
+			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
+			return nil, fmt.Errorf("create PR failed for %s: %w", repo.URL, err)
 		}
 		if strings.TrimSpace(prURL) == "" {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("create PR returned no URL for %s; skipping", repo.URL))
@@ -256,33 +256,43 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 	}
 
 	status := models.TaskStatusPrReady
-	if len(createdPRs) == 0 {
-		status = models.TaskStatusMerged
-		noChangesSummaries := []models.PRSummary{{
-			Title:  "No changes detected",
-			Body:   "No code modifications were required.",
-			Status: "no_changes",
-		}}
-		noChangesMetadata, _ := json.Marshal(noChangesSummaries)
-		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
-			PRMetadata: noChangesMetadata,
-		}); err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata for no-changes: %v", err))
+	var shouldWait bool
+	if len(createdPRs) > 0 {
+		shouldWait = true
+	} else {
+		if len(s.rt.Task.PRURLs) > 0 {
+			status = models.TaskStatusPrReady
+			shouldWait = true
+		} else {
+			status = models.TaskStatusPrReady
+			shouldWait = true
+			noChangesSummaries := []models.PRSummary{{
+				Title:  "No changes detected",
+				Body:   "No code modifications were required.",
+				Status: "no_changes",
+			}}
+			noChangesMetadata, _ := json.Marshal(noChangesSummaries)
+			if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+				PRMetadata: noChangesMetadata,
+			}); err != nil {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save PR metadata for no-changes: %v", err))
+			}
 		}
 	}
+
 	if s.status != nil {
 		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, status); err != nil {
 			return nil, err
 		}
 	}
 
-	if len(createdPRs) == 0 {
-		return StepResult{
-			"status":   "no_changes_detected",
-			"branches": createdBranches,
-			"pr_urls":  createdPRs,
-		}, nil
+	if shouldWait {
+		return nil, workflow.ErrWaitingApproval
 	}
 
-	return nil, workflow.ErrWaitingApproval
+	return StepResult{
+		"status":   "no_changes_detected",
+		"branches": createdBranches,
+		"pr_urls":  createdPRs,
+	}, nil
 }

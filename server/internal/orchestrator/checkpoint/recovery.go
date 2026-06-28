@@ -37,10 +37,12 @@ func (s *Store) WithCheckpointRecovery(
 						s.Log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: re-applying saved patch to workspace", stepID))
 
 						worktreeSuffix := ""
-						if stepID == workflow.StepCodeBackend {
-							worktreeSuffix = "-be-worktree"
-						} else if stepID == workflow.StepCodeFrontend {
-							worktreeSuffix = "-fe-worktree"
+						if task.Complexity != models.TaskComplexityEasy {
+							if stepID == workflow.StepCodeBackend {
+								worktreeSuffix = "-be-worktree"
+							} else if stepID == workflow.StepCodeFrontend {
+								worktreeSuffix = "-fe-worktree"
+							}
 						}
 
 						if applyPatch != nil {
@@ -54,7 +56,9 @@ func (s *Store) WithCheckpointRecovery(
 
 				if updateTaskStatus != nil && statusOnResume != nil {
 					if resumeStatus := statusOnResume(output); resumeStatus != "" {
-						_, _ = updateTaskStatus(ctx, task.ID, resumeStatus)
+						if _, err := updateTaskStatus(ctx, task.ID, resumeStatus); err != nil && s.Log != nil {
+							s.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("step %s: failed to restore status %s on resume: %v", stepID, resumeStatus, err))
+						}
 					}
 				}
 

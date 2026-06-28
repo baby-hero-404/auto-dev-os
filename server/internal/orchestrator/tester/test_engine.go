@@ -134,10 +134,14 @@ is_test_project_dir() {
 }
 
 found_repos=0
-for d in code/repos/*/main ; do
-	if [ -d "$d" ]; then
-		(run_verification "$d") || exit 1
-		found_repos=1
+for r in code/repos/* ; do
+	if [ -d "$r" ]; then
+		for d in "$r"/* ; do
+			if [ -d "$d" ] && [ "$(basename "$d")" != "worktrees" ]; then
+				(run_verification "$d") || exit 1
+				found_repos=1
+			fi
+		done
 	fi
 done
 

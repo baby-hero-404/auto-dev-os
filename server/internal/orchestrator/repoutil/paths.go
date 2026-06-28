@@ -26,10 +26,11 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 			}
 		}
 	}
-	if task.RepositoryID == nil {
-		return filepath.Join(localPath, RepoNameFromURL(repo.URL))
+	branch := repo.Branch
+	if branch == "" {
+		branch = "main"
 	}
-	return filepath.Join(localPath, "code", "repos", RepoNameFromURL(repo.URL), "main")
+	return filepath.Join(localPath, "code", "repos", RepoNameFromURL(repo.URL), branch)
 }
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {

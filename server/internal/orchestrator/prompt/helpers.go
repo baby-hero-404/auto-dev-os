@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -30,9 +31,10 @@ func formatMemories(memories []models.EpisodicMemory) string {
 func formatContextSnippets(snippets []models.ContextSnippet) string {
 	var b strings.Builder
 	for i, snippet := range snippets {
-		b.WriteString(fmt.Sprintf("### Snippet %d: %s:%d-%d (score %.2f, %s)\n", i+1, snippet.Path, snippet.StartLine, snippet.EndLine, snippet.Relevance, snippet.Retriever))
+		displayPath := workspace.WorkspaceToRepoRelative(snippet.Path)
+		b.WriteString(fmt.Sprintf("### Snippet %d: %s:%d-%d (score %.2f, %s)\n", i+1, displayPath, snippet.StartLine, snippet.EndLine, snippet.Relevance, snippet.Retriever))
 		b.WriteString("```")
-		b.WriteString(snippet.Path)
+		b.WriteString(displayPath)
 		b.WriteString("\n")
 		b.WriteString(snippet.Content)
 		if !strings.HasSuffix(snippet.Content, "\n") {

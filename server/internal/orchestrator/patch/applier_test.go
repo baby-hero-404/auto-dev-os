@@ -132,6 +132,23 @@ diff --git a/repo-b/index.js b/repo-b/index.js
 +2`,
 			},
 		},
+		{
+			name: "multi repo container prefix format with master branch",
+			patch: `diff --git a/code/repos/repo-a/master/src/main.go b/code/repos/repo-a/master/src/main.go
+--- a/code/repos/repo-a/master/src/main.go
++++ b/code/repos/repo-a/master/src/main.go
+@@ -1,2 +1,2 @@
+-1
++2`,
+			expected: map[string]string{
+				"repo-a": `diff --git a/src/main.go b/src/main.go
+--- a/src/main.go
++++ b/src/main.go
+@@ -1,2 +1,2 @@
+-1
++2`,
+			},
+		},
 	}
 
 	for _, tc := range tests {

@@ -65,6 +65,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.wkspace, // WorkspaceLoader
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			testerRunnerAdapter{run: o.runTargetedTests}, // TestRunner
+			o.workflows, // CheckpointLister
 			loggerAdapter{log: o.log}, // Logger
 		),
 		steps.NewCodeFrontendStep(
@@ -78,6 +79,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.wkspace, // WorkspaceLoader
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			testerRunnerAdapter{run: o.runTargetedTests}, // TestRunner
+			o.workflows, // CheckpointLister
 			loggerAdapter{log: o.log}, // Logger
 		),
 		steps.NewMergeStep(

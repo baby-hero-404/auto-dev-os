@@ -25,8 +25,11 @@ const colorMap: Record<string, string> = {
   strict: "bg-emerald-400/10 text-emerald-300",
   advisory: "bg-amber-400/10 text-amber-300",
   active: "bg-emerald-400/10 text-emerald-300",
-  idle: "bg-panel text-content-muted",
-  busy: "bg-cyan-400/10 text-cyan-300",
+  idle: "bg-panel text-content-muted border-stroke",
+  busy: "bg-cyan-400/10 text-cyan-300 border-cyan-400/20",
+  assigned: "bg-blue-400/10 text-blue-300 border-blue-400/20",
+  running: "bg-amber-400/10 text-amber-300 border-amber-400/20",
+  offline: "bg-panel text-content-muted border-stroke",
 };
 
 const fallback = "bg-panel text-content";

@@ -62,17 +62,22 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 		repoName := parts[len(parts)-1]
 		repoName = strings.TrimSuffix(repoName, ".git")
 
+		defaultBranch := pr.Branch
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+
 		repoWS := models.RepoWorkspace{
 			RepoID:        pr.ID,
 			Name:          repoName,
 			URL:           pr.URL,
-			DefaultBranch: pr.Branch,
+			DefaultBranch: defaultBranch,
 			Status: models.RepoWorkspaceStatus{
 				MergeStatus: models.MergeStatusPending,
 				TestStatus:  models.TestStatusPending,
 			},
 			Paths: models.RepoWorkspacePaths{
-				Main:      filepath.Join("code", "repos", repoName, "main"),
+				Main:      filepath.Join("code", "repos", repoName, defaultBranch),
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{
@@ -252,8 +257,12 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 			if err := os.MkdirAll(filepath.Dir(repoAbsPath), 0o755); err != nil {
 				return fmt.Errorf("create repo parent dir: %w", err)
 			}
-			if _, err := m.GitOps.CloneForTask(ctx, rWS.URL, rWS.DefaultBranch, repoAbsPath); err != nil {
+			clonedBranch, err := m.GitOps.CloneForTask(ctx, rWS.URL, rWS.DefaultBranch, repoAbsPath)
+			if err != nil {
 				return fmt.Errorf("clone repo %s: %w", rWS.Name, err)
+			}
+			if clonedBranch != "" {
+				ws.Repos[i].DefaultBranch = clonedBranch
 			}
 			workspaceRestored = true
 		}
@@ -329,7 +338,18 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			continue
 		}
 
-		mainAbs := filepath.Join(codeDir, repoName, "main")
+		var mainAbs string
+		if repoEntries, errEntries := os.ReadDir(filepath.Join(codeDir, repoName)); errEntries == nil {
+			for _, re := range repoEntries {
+				if re.IsDir() && re.Name() != "worktrees" {
+					mainAbs = filepath.Join(codeDir, repoName, re.Name())
+					break
+				}
+			}
+		}
+		if mainAbs == "" {
+			mainAbs = filepath.Join(codeDir, repoName, "main")
+		}
 
 		for _, wtEntry := range worktrees {
 			if !wtEntry.IsDir() {

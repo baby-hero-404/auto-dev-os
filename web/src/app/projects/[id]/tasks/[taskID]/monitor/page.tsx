@@ -53,7 +53,10 @@ function getWorkflowSteps(complexity: string | undefined): StepItem[] {
   if (complexity === "easy") {
     return EASY_STEPS;
   }
-  return STANDARD_STEPS;
+  if (complexity === "medium" || complexity === "hard") {
+    return STANDARD_STEPS;
+  }
+  return EASY_STEPS.slice(0, 2);
 }
 
 function stepStatus(

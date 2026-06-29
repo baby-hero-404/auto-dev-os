@@ -115,8 +115,9 @@ func (r *WorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, ste
 }
 
 func (r *WorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	staleBefore := time.Now().Add(-10 * time.Minute)
 	err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).
-		Where("status = ?", models.WorkflowJobStatusRunning).
+		Where("status = ? AND updated_at < ?", models.WorkflowJobStatusRunning, staleBefore).
 		Update("status", models.WorkflowJobStatusQueued).Error
 	if err != nil {
 		return fmt.Errorf("reset stuck jobs: %w", err)

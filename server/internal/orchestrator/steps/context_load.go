@@ -524,5 +524,3 @@ func loadRepoDocs(rp, rel string, conventions, architectures, contributings map[
 		contributings[rel] = data
 	}
 }
-
-

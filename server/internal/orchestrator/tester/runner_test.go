@@ -11,7 +11,7 @@ import (
 
 func TestRunner_RunTargetedTests_PathParsing(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create repo-a main worktree with go.mod
 	repoABePath := filepath.Join(tmpDir, "code/repos/repo-a/main-be")
 	if err := os.MkdirAll(repoABePath, 0o755); err != nil {

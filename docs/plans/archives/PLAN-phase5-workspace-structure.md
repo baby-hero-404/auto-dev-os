@@ -124,7 +124,7 @@ Persist redacted per-call LLM request/response traces for every workflow step.
 
 ### Output Layout
 ```text
-logs/llm/{step}/call-{n}/
+logs/llm/call-{nnn}-{step}/
   request.json
   response.json
   prompt.md
@@ -135,7 +135,7 @@ logs/llm/{step}/call-{n}/
 
 ### Steps
 1. [x] Capture raw request/response payloads at the `llm.Provider` or gateway layer, but delegate the actual trace writing to an orchestrator trace service (e.g., inside `runLLMStep`) where full `task_id`, `step`, and parsed output contexts are available.
-2. [x] Allocate `call-{n}` deterministically by scanning existing `logs/llm/{step}/call-*` directories before each call (or by using a persisted trace index), ensuring counters do not collide after worker restarts or checkpoint resumes.
+2. [x] Allocate `call-{nnn}-{step}` deterministically by scanning existing `logs/llm/call-*` directories before each call, ensuring global chronological ordering across all steps and cycles without colliding after worker restarts.
 3. [x] Render raw AI prompts into `prompt.md` and raw outputs into `output.md` for human readability and exact formatting preservation.
 4. [x] Redact sensitive values (API keys, env vars) explicitly during the trace write sequence before persisting to disk.
 5. [x] Record telemetry such as token usage, duration, retry count, and runtime errors in `metadata.json`, ensuring failures and retries are logged identically to successful executions.

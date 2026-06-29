@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -52,11 +53,12 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 		} else {
 			repoName := ""
 			relFile = file
-			if strings.HasPrefix(file, "code/repos/") {
-				parts := strings.SplitN(file[len("code/repos/"):], "/", 3)
+			reposPrefix := workspace.ReposPrefix()
+			if strings.HasPrefix(file, reposPrefix) {
+				parts := strings.SplitN(file[len(reposPrefix):], "/", 3)
 				if len(parts) >= 3 {
 					if parts[1] == "worktrees" {
-						subparts := strings.SplitN(file[len("code/repos/"):], "/", 4)
+						subparts := strings.SplitN(file[len(reposPrefix):], "/", 4)
 						if len(subparts) == 4 && subparts[1] == "worktrees" {
 							repoName = subparts[0]
 							relFile = subparts[3]
@@ -76,7 +78,17 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 				}
 			}
 			if repoName != "" {
-				repoMainHostPath := filepath.Join(repoHostPath, "code", "repos", repoName, "main")
+				repoDir := filepath.Join(repoHostPath, workspace.ReposDirName, repoName)
+				mainDirName := "main"
+				if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
+					for _, entry := range entries {
+						if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
+							mainDirName = entry.Name()
+							break
+						}
+					}
+				}
+				repoMainHostPath := filepath.Join(repoDir, mainDirName)
 				fileMountedHostPath = r.HostWorktreePath(task, repoMainHostPath, worktreeSuffix)
 			} else {
 				fileMountedHostPath = repoHostPath

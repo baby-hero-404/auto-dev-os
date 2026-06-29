@@ -90,19 +90,20 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		if err := os.WriteFile(fullPath, []byte(patchText), 0o644); err != nil {
 			return err
 		}
+		defer os.Remove(fullPath)
 
 		containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 		containerPatchPath := filepath.Join(containerTargetPath, "patch.diff")
 
-		cmd := fmt.Sprintf("git -C %[1]s apply --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R %[2]s || git -C %[1]s apply --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
 			workspace.QuoteShellArg(containerTargetPath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch", cmd, worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
 			return fmt.Errorf("git apply patch: %w", err)
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		return nil
 	}
 
@@ -124,11 +125,27 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 			}
 		}
 		if repoHostPath == "" {
-			// Fallback to code/repos/repoName/main
-			repoHostPath = filepath.Join(localPath, "code", "repos", repoName, "main")
+			// Fallback to ReposPrefix + repoName/<defaultBranch>
+			repoDir := filepath.Join(localPath, workspace.ReposDirName, repoName)
+			mainDirName := "main"
+			if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
+				for _, entry := range entries {
+					if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
+						mainDirName = entry.Name()
+						break
+					}
+				}
+			}
+			repoHostPath = filepath.Join(repoDir, mainDirName)
 			// Double fallback to localPath/repoName
 			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
 				repoHostPath = filepath.Join(localPath, repoName)
+			}
+		}
+		if ws != nil && len(ws.Repos) == 1 {
+			repoHostPath = filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
+			if repoName == "" {
+				repoName = ws.Repos[0].Name
 			}
 		}
 		repoWorktreeHostPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
@@ -140,20 +157,21 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		if err := os.WriteFile(fullPath, []byte(repoPatchText), 0o644); err != nil {
 			return err
 		}
+		defer os.Remove(fullPath)
 
 		containerRepoWorktreePath := r.ContainerPathForHostPath(task, repoWorktreeHostPath, "")
 		containerPatchPath := filepath.Join(containerRepoWorktreePath, "patch.diff")
 
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
-		cmd := fmt.Sprintf("git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R -p1 %[2]s || git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
 			workspace.QuoteShellArg(containerRepoWorktreePath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch_"+repoName, cmd, worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 	}
 	return nil
 }
@@ -183,6 +201,12 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 	targetPath := localPath
 	containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 
+	var ws *models.TaskWorkspace
+	var errWS error
+	if r.LoadTaskWorkspace != nil {
+		ws, errWS = r.LoadTaskWorkspace(ctx, task)
+	}
+
 	if task.RepositoryID != nil {
 		repoHostPath, err := r.GetTaskRepoHostPath(ctx, task)
 		if err != nil {
@@ -191,7 +215,17 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 		targetPath = r.HostWorktreePath(task, repoHostPath, "")
 		containerTargetPath = r.ContainerPathForHostPath(task, targetPath, "")
 
-		return r.GetPRDiff(ctx, task, agent, containerTargetPath, baseBranch)
+		resolvedBase := baseBranch
+		if errWS == nil && ws != nil {
+			for _, rWS := range ws.Repos {
+				if rWS.RepoID == *task.RepositoryID && rWS.DefaultBranch != "" {
+					resolvedBase = rWS.DefaultBranch
+					break
+				}
+			}
+		}
+
+		return r.GetPRDiff(ctx, task, agent, containerTargetPath, resolvedBase)
 	}
 
 	if r.ListRepositories == nil {
@@ -201,19 +235,18 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 	if err != nil {
 		return "", err
 	}
-	var ws *models.TaskWorkspace
-	var errWS error
-	if r.LoadTaskWorkspace != nil {
-		ws, errWS = r.LoadTaskWorkspace(ctx, task)
-	}
 
 	var diffOut []string
 	for _, repo := range repos {
 		repoHostPath := ""
+		resolvedBase := baseBranch
 		if errWS == nil && ws != nil {
 			for _, rWS := range ws.Repos {
 				if rWS.RepoID == repo.ID {
 					repoHostPath = filepath.Join(ws.Root, rWS.Paths.Main)
+					if rWS.DefaultBranch != "" {
+						resolvedBase = rWS.DefaultBranch
+					}
 					break
 				}
 			}
@@ -226,7 +259,7 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 			}
 		}
 		containerRepoPath := r.ContainerPathForHostPath(task, repoHostPath, "")
-		repoDiff, diffErr := r.GetPRDiff(ctx, task, agent, containerRepoPath, baseBranch)
+		repoDiff, diffErr := r.GetPRDiff(ctx, task, agent, containerRepoPath, resolvedBase)
 		if diffErr != nil {
 			return "", fmt.Errorf("capture PR diff for repo %s: %w", repo.URL, diffErr)
 		}

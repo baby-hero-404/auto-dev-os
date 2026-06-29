@@ -234,4 +234,3 @@ func (s *AnalyzeStep) runAnalyzeSandboxCommand(ctx context.Context, command stri
 	}
 	return stdout, nil
 }
-

@@ -67,7 +67,12 @@ export function TaskDiffViewer({
   }, [diffText]);
 
   const activeFileDiff = useMemo(() => {
-    return parsedDiffs.find((d) => d.filename === activeSelectedFile);
+    if (!activeSelectedFile) return null;
+    return parsedDiffs.find((d) => {
+      const df = d.filename.replace(/\\/g, "/");
+      const sf = activeSelectedFile.replace(/\\/g, "/");
+      return df === sf || df.endsWith("/" + sf) || sf.endsWith("/" + df);
+    });
   }, [parsedDiffs, activeSelectedFile]);
 
   return (

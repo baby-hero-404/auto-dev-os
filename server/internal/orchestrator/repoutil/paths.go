@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -18,7 +19,6 @@ func RepoNameFromURL(repoURL string) string {
 }
 
 func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string {
-	localPath := sandbox.WorkspacePath(m.WorkspaceRoot, task.ID)
 	if ws != nil {
 		for i := range ws.Repos {
 			if ws.Repos[i].RepoID == repo.ID {
@@ -26,10 +26,12 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 			}
 		}
 	}
-	if task.RepositoryID == nil {
-		return filepath.Join(localPath, RepoNameFromURL(repo.URL))
+	branch := repo.Branch
+	if branch == "" {
+		branch = "main"
 	}
-	return filepath.Join(localPath, "code", "repos", RepoNameFromURL(repo.URL), "main")
+	pm := workspace.NewPathManager(m.WorkspaceRoot)
+	return pm.RepoMain(task.ID, RepoNameFromURL(repo.URL), branch)
 }
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
@@ -94,7 +96,8 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 		return filepath.Join(ws.Root, path)
 	}
 
-	relPath := filepath.Join("code", "repos", rWS.Name, "worktrees", role)
+	pm := workspace.NewPathManager(m.WorkspaceRoot)
+	relPath := pm.RepoWorktreeRelative(rWS.Name, role)
 	rWS.Paths.Worktrees[role] = relPath
 	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, role)
 

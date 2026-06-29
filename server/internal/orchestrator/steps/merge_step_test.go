@@ -95,7 +95,8 @@ func TestMergeStep_ExecutesSuccessfully(t *testing.T) {
 	}
 
 	worktreeMock := &mockWorktreeManager{
-		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {},
+		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+		},
 	}
 
 	artifactMock := &mockArtifactSaver{}
@@ -140,7 +141,8 @@ func TestMergeStep_PauseOnErrorOnConflicts(t *testing.T) {
 	}
 
 	worktreeMock := &mockWorktreeManager{
-		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {},
+		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+		},
 	}
 
 	artifactMock := &mockArtifactSaver{}

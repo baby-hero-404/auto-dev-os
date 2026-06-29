@@ -9,7 +9,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-
 // MergeStep implements Step for the merge phase.
 type MergeStep struct {
 	rt            StepRuntime
@@ -47,8 +46,8 @@ func NewMergeStep(
 	}
 }
 
-func (s *MergeStep) ID() string                              { return workflow.StepMerge }
-func (s *MergeStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusReviewing }
+func (s *MergeStep) ID() string                         { return workflow.StepMerge }
+func (s *MergeStep) StatusOnResume(_ StepResult) string { return models.TaskStatusReviewing }
 
 func (s *MergeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)

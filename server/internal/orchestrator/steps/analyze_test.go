@@ -70,7 +70,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		Repos: []models.RepoWorkspace{{
 			RepoID: repoID,
 			Name:   "repo-a",
-			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
+			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-a", "main")},
 		}},
 	}
 	repoRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
@@ -125,7 +125,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 	if !strings.Contains(files, "src/main.go") {
 		t.Fatalf("expected source file in analyze list, got: %s", files)
 	}
-	if strings.Contains(files, "logs/llm.txt") || strings.Contains(files, "code/repos") {
+	if strings.Contains(files, "logs/llm.txt") || strings.Contains(files, "repos") {
 		t.Fatalf("analyze list should not expose generated workspace paths, got: %s", files)
 	}
 
@@ -163,12 +163,12 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 			{
 				RepoID: "repo-a",
 				Name:   "repo-a",
-				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
+				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-a", "main")},
 			},
 			{
 				RepoID: "repo-b",
 				Name:   "repo-b",
-				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-b", "main")},
+				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-b", "main")},
 			},
 		},
 	}

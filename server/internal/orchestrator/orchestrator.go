@@ -212,7 +212,15 @@ func (o *Orchestrator) SavePRRejectionFeedback(ctx context.Context, taskID strin
 
 // ClearCheckpointsForRepair clears downstream checkpoints for repair on PR rejection.
 func (o *Orchestrator) ClearCheckpointsForRepair(ctx context.Context, taskID string) error {
-	return o.workflows.DeleteCheckpoints(ctx, taskID, []string{"review", "fix", "test", "pr"})
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	steps := []string{"review", "fix", "test", "pr"}
+	if task.Complexity == models.TaskComplexityEasy {
+		steps = append(steps, "code_backend", "code_frontend")
+	}
+	return o.workflows.DeleteCheckpoints(ctx, taskID, steps)
 }
 
 func (o *Orchestrator) WorkflowStatus(ctx context.Context, taskID string) (*models.WorkflowStatus, error) {
@@ -242,25 +250,26 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 	}
 	if len(task.PRURLs) > 0 && o.gitOps != nil {
 		repos, err := o.repositories.ListByProjectID(ctx, task.ProjectID)
-		if err == nil {
-			for _, prURL := range task.PRURLs {
-				var matchRepo string
-				for _, r := range repos {
-					baseRepo := strings.TrimSuffix(r.URL, ".git")
-					if strings.Contains(prURL, baseRepo) {
-						matchRepo = r.URL
-						break
-					}
+		if err != nil {
+			return nil, fmt.Errorf("failed to list project repositories: %w", err)
+		}
+		for _, prURL := range task.PRURLs {
+			var matchRepo string
+			for _, r := range repos {
+				baseRepo := strings.TrimSuffix(r.URL, ".git")
+				if strings.Contains(prURL, baseRepo) {
+					matchRepo = r.URL
+					break
 				}
-				if matchRepo == "" {
-					return nil, fmt.Errorf("no matching repository found for PR URL: %s", prURL)
-				}
-				if err := o.gitOps.MergePullRequest(ctx, matchRepo, prURL); err != nil {
-					o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to merge PR %s: %v", prURL, err))
-					return nil, fmt.Errorf("failed to merge PR %s: %w", prURL, err)
-				} else {
-					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("successfully merged PR: %s", prURL))
-				}
+			}
+			if matchRepo == "" {
+				return nil, fmt.Errorf("no matching repository found for PR URL: %s", prURL)
+			}
+			if err := o.gitOps.MergePullRequest(ctx, matchRepo, prURL); err != nil {
+				o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to merge PR %s: %v", prURL, err))
+				return nil, fmt.Errorf("failed to merge PR %s: %w", prURL, err)
+			} else {
+				o.log(ctx, task.ID, nil, "info", fmt.Sprintf("successfully merged PR: %s", prURL))
 			}
 		}
 	}
@@ -268,6 +277,14 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 	updated, err := o.updateTaskStatus(ctx, taskID, models.TaskStatusMerged)
 	if err != nil {
 		return nil, err
+	}
+	if job, err := o.workflows.LatestByTaskID(ctx, taskID); err == nil && job != nil && job.Status == models.WorkflowJobStatusPaused {
+		_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
+			"status":     models.WorkflowJobStatusDone,
+			"step":       models.WorkflowStepDone,
+			"last_error": "",
+		})
+		_ = o.checkpoint(ctx, taskID, &job.ID, models.WorkflowStepDone, map[string]any{"status": models.WorkflowJobStatusDone})
 	}
 	o.log(ctx, taskID, nil, "info", "human approved workflow for merge")
 	return updated, nil
@@ -379,7 +396,6 @@ func (o *Orchestrator) RemoveWorkspace(taskID string) error {
 	return o.wkspace.RemoveWorkspace(taskID)
 }
 
-
 func (o *Orchestrator) initCheckpoints() {
 	if o.checkpoints == nil {
 		o.checkpoints = checkpoint.NewStore(
@@ -439,4 +455,3 @@ func (o *Orchestrator) initRepoutil() {
 		}
 	}
 }
-

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -109,33 +110,117 @@ func MatchAffectedFile(pattern, file string) bool {
 }
 
 func CleanPatchPaths(patchText string) string {
-	re := regexp.MustCompile(`([ab])/code/repos/[^/]+/(?:main|worktrees/[^/]+)/`)
+	re := regexp.MustCompile(`([ab])/` + regexp.QuoteMeta(workspace.ReposDirName) + `/[^/]+/(?:worktrees/[^/]+|[^/]+)/`)
 	return re.ReplaceAllString(patchText, "$1/")
+}
+
+func CleanRepoPrefix(block string, repoName string) string {
+	escapedRepo := regexp.QuoteMeta(repoName)
+	block = regexp.MustCompile(`^(a/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`( b/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(--- a/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(\+\+\+ b/)`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename from )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename to )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy from )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy to )`+escapedRepo+`/`).ReplaceAllString(block, "${1}")
+	return block
 }
 
 func SplitPatchByRepo(patchText string) map[string]string {
 	repos := make(map[string]string)
 	parts := strings.Split(patchText, "diff --git ")
-	if len(parts) == 0 {
+	if len(parts) <= 1 || (len(parts) == 2 && parts[0] == "" && !strings.Contains(patchText, "diff --git ")) {
+		trimmed := strings.TrimSpace(patchText)
+		if trimmed == "" {
+			return repos
+		}
+		lines := strings.Split(trimmed, "\n")
+		repoName := ""
+		for _, line := range lines {
+			var path string
+			if strings.HasPrefix(line, "--- a/") {
+				path = line[len("--- a/"):]
+			} else if strings.HasPrefix(line, "+++ b/") {
+				path = line[len("+++ b/"):]
+			} else {
+				continue
+			}
+			path = strings.ReplaceAll(path, "\\", "/")
+			path = strings.TrimSpace(path)
+
+			codeReposPrefix := workspace.ReposPrefix()
+			if strings.HasPrefix(path, codeReposPrefix) {
+				after := path[len(codeReposPrefix):]
+				idx := strings.Index(after, "/")
+				if idx != -1 {
+					repoName = after[:idx]
+					break
+				}
+			} else {
+				idx := strings.Index(path, "/")
+				if idx != -1 {
+					repoName = path[:idx]
+					break
+				}
+			}
+		}
+		if repoName != "" {
+			cleanPatch := trimmed
+			reposPrefix := workspace.ReposPrefix()
+			if strings.Contains(cleanPatch, reposPrefix) {
+				cleanPatch = regexp.MustCompile(`([ab])/`+regexp.QuoteMeta(reposPrefix)+regexp.QuoteMeta(repoName)+`/(?:worktrees/[^/]+|[^/]+)/`).ReplaceAllString(cleanPatch, "$1/")
+			} else {
+				cleanPatch = CleanRepoPrefix(cleanPatch, repoName)
+			}
+			repos[repoName] = cleanPatch
+		} else {
+			hasDiffHeader := false
+			for _, line := range lines {
+				if strings.HasPrefix(line, "--- a/") || strings.HasPrefix(line, "+++ b/") {
+					hasDiffHeader = true
+					break
+				}
+			}
+			if hasDiffHeader {
+				repos[""] = trimmed
+			}
+		}
 		return repos
 	}
 	header := parts[0]
 
-	re := regexp.MustCompile(`^a/code/repos/([^/]+)/(?:main|worktrees/[^/]+)/`)
+	re := regexp.MustCompile(`^a/` + regexp.QuoteMeta(workspace.ReposPrefix()) + `([^/]+)/(?:worktrees/[^/]+|[^/]+)/`)
 	repoBlocks := make(map[string][]string)
 	for i := 1; i < len(parts); i++ {
 		block := parts[i]
 		if matches := re.FindStringSubmatch(block); len(matches) > 1 {
 			repoName := matches[1]
-			cleanBlock := regexp.MustCompile(`([ab])/code/repos/`+regexp.QuoteMeta(repoName)+`/(?:main|worktrees/[^/]+)/`).ReplaceAllString(block, "$1/")
+			cleanBlock := regexp.MustCompile(`([ab])/`+regexp.QuoteMeta(workspace.ReposPrefix())+regexp.QuoteMeta(repoName)+`/(?:worktrees/[^/]+|[^/]+)/`).ReplaceAllString(block, "$1/")
 			repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
 		} else if strings.HasPrefix(block, "a/") {
 			sub := block[2:]
-			idx := strings.Index(sub, "/")
-			if idx != -1 {
-				repoName := sub[:idx]
-				if repoName != "code" {
-					repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+block)
+			sepIdx := strings.Index(sub, " b/")
+			if sepIdx != -1 {
+				firstPath := sub[:sepIdx]
+				idx := strings.Index(firstPath, "/")
+				if idx != -1 {
+					repoName := firstPath[:idx]
+					if repoName != workspace.ReposDirName {
+						cleanBlock := CleanRepoPrefix(block, repoName)
+						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
+					}
+				} else {
+					repoBlocks[""] = append(repoBlocks[""], "diff --git "+block)
+				}
+			} else {
+				idx := strings.Index(sub, "/")
+				if idx != -1 {
+					repoName := sub[:idx]
+					if repoName != workspace.ReposDirName {
+						cleanBlock := CleanRepoPrefix(block, repoName)
+						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
+					}
 				}
 			}
 		}

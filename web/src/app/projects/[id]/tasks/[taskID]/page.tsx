@@ -158,7 +158,10 @@ export default function ProjectTaskDetailPage({
     if (task?.complexity === "easy") {
       return EASY_STEPS;
     }
-    return STANDARD_STEPS;
+    if (task?.complexity === "medium" || task?.complexity === "hard") {
+      return STANDARD_STEPS;
+    }
+    return ["context_load", "analyze"];
   }, [task?.complexity]);
 
   const workflowCompletion = useMemo(() => {

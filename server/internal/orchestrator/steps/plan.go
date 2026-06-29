@@ -8,7 +8,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-
 // PlanStep implements Step for the execution planning phase.
 type PlanStep struct {
 	rt        StepRuntime
@@ -40,8 +39,8 @@ func NewPlanStep(
 	}
 }
 
-func (s *PlanStep) ID() string                              { return workflow.StepPlan }
-func (s *PlanStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusCoding }
+func (s *PlanStep) ID() string                         { return workflow.StepPlan }
+func (s *PlanStep) StatusOnResume(_ StepResult) string { return models.TaskStatusCoding }
 
 func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
@@ -90,4 +89,3 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 	}
 	return out, nil
 }
-

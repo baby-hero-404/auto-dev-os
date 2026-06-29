@@ -72,7 +72,7 @@ func DetectProjectKindNear(root string, relFile string) (ProjectKind, []string) 
 }
 
 func FullVerificationScript() string {
-	return `
+	script := `
 run_verification() {
 	local dir="$1"
 	echo "Verifying repository in $dir..."
@@ -134,10 +134,14 @@ is_test_project_dir() {
 }
 
 found_repos=0
-for d in code/repos/*/main ; do
-	if [ -d "$d" ]; then
-		(run_verification "$d") || exit 1
-		found_repos=1
+for r in REPOS_DIR/* ; do
+	if [ -d "$r" ]; then
+		for d in "$r"/* ; do
+			if [ -d "$d" ] && [ "$(basename "$d")" != "worktrees" ]; then
+				(run_verification "$d") || exit 1
+				found_repos=1
+			fi
+		done
 	fi
 done
 
@@ -154,6 +158,7 @@ if [ $found_repos -eq 0 ]; then
 	fi
 fi
 `
+	return strings.ReplaceAll(script, "REPOS_DIR", workspace.ReposDirName)
 }
 
 func TargetedTestCommand(kind ProjectKind, containerModPath string, files []string, goPackages map[string]bool) (string, bool) {

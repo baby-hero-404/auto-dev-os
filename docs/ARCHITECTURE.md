@@ -322,3 +322,17 @@ auto_code_os/
 | Developer Portal     | Backstage                                    |
 | Skills/Tools         | LangChain / Flowise                          |
 | Agent Memory         | AgentMemory / Hermes Agent                   |
+
+## 9. Workspace Path Management & Option B Structure
+
+To enable robust multi-repository agent workspaces and prevent leaking underlying host-sandbox paths, the platform adheres to a strict path transformation contract:
+
+### 9.1 Path Source of Truth (`workspace.PathManager`)
+- **Strict Delegation:** All workspace/host-sandbox path translations and cleanups **must** use `workspace.PathManager` to avoid hardcoded directory assumptions.
+- **Repository Location:** Repository content is checked out to `code/repos/{repo_name}/{branch_name}/`.
+- **Option B Path Translation:** Diff outputs, patch headers, and files exposed to LLM agents are standardized to the relative `Option B` format: `{repo_name}/{filepath}` (e.g. `repo-a/src/main.go`).
+- **Patch Sanitization:** Diff/patch headers undergo regex sanitization (`CleanRepoPrefix`) to strip directory prefixes, ensuring `git apply -p1` executes cleanly relative to the repository worktree root.
+
+### 9.2 Sandbox & Worktree Lifecycle
+- **Worktree Isolation:** For medium/hard complexity tasks, parallel branch execution is isolated in separate Git worktree subdirectories (e.g. `code/repos/repo-a/worktrees/{task_id}-be-worktree`).
+- **Pruning & Cleanup:** Worktree directories are monitored and cleaned up automatically on task success/failure by the workspace pruner. Periodic audits of sandbox disk usage verify that orphaned worktrees do not leak space.

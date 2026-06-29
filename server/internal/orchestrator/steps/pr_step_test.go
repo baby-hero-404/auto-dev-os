@@ -10,9 +10,9 @@ import (
 )
 
 type mockGitOpsClient struct {
-	commitAndPushErr    error
+	commitAndPushErr     error
 	createPullRequestErr error
-	prURL               string
+	prURL                string
 }
 
 func (m *mockGitOpsClient) CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error {
@@ -53,7 +53,8 @@ func TestPRStep_ExecutesSuccessfullyAndCreatesPR(t *testing.T) {
 	}
 
 	worktreeMock := &mockWorktreeManager{
-		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {},
+		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+		},
 	}
 
 	taskRepoMock := &mockTaskRepository{task: task}

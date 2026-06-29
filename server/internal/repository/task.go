@@ -104,12 +104,29 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
-	result := r.db.WithContext(ctx).Delete(&models.Task{}, "id = ?", id)
-	if result.Error != nil {
-		return fmt.Errorf("delete task: %w", mapError(result.Error))
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("delete task: %w", ErrNotFound)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task models.Task
+		if err := tx.Select("agent_id").First(&task, "id = ?", id).Error; err != nil {
+			return err
+		}
+
+		if task.AgentID != nil && *task.AgentID != "" {
+			if err := tx.Model(&models.Agent{}).Where("id = ?", *task.AgentID).Update("status", models.AgentStatusIdle).Error; err != nil {
+				return err
+			}
+		}
+
+		result := tx.Delete(&models.Task{}, "id = ?", id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("delete task: %w", mapError(err))
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package gitops
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,24 +39,23 @@ func NewGitHubProvider(baseURL string) *GitHubProvider {
 }
 
 func (p *GitHubProvider) CloneRepo(ctx context.Context, repoURL, token, branch, localPath string) (string, error) {
-	cloneURL := repoURL
+	var authArgs []string
 	if token != "" {
-		withToken, err := githubURLWithToken(repoURL, token)
-		if err != nil {
-			return "", err
-		}
-		cloneURL = withToken
+		b64 := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+		authArgs = append(authArgs, "-c", "http.extraHeader=AUTHORIZATION: basic "+b64)
 	}
 
 	var cloneCmd *exec.Cmd
 	if branch != "" {
-		cloneCmd = gitCommand(ctx, "clone", "--branch", branch, "--single-branch", cloneURL, localPath)
+		args := append(authArgs, "clone", "--branch", branch, "--single-branch", repoURL, localPath)
+		cloneCmd = gitCommand(ctx, args...)
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			outStr := string(output)
 			if strings.Contains(outStr, "Remote branch") || strings.Contains(outStr, "Could not find remote branch") {
 				// Retry with the default branch
 				os.RemoveAll(localPath)
-				fallbackCmd := gitCommand(ctx, "clone", "--single-branch", cloneURL, localPath)
+				fallbackArgs := append(authArgs, "clone", "--single-branch", repoURL, localPath)
+				fallbackCmd := gitCommand(ctx, fallbackArgs...)
 				if fallbackOutput, fallbackErr := fallbackCmd.CombinedOutput(); fallbackErr != nil {
 					return "", fmt.Errorf("git clone: %w: %s (fallback failed: %s)", err, sanitizeToken(outStr, token), sanitizeToken(string(fallbackOutput), token))
 				}
@@ -64,7 +64,8 @@ func (p *GitHubProvider) CloneRepo(ctx context.Context, repoURL, token, branch, 
 			}
 		}
 	} else {
-		cloneCmd = gitCommand(ctx, "clone", "--single-branch", cloneURL, localPath)
+		args := append(authArgs, "clone", "--single-branch", repoURL, localPath)
+		cloneCmd = gitCommand(ctx, args...)
 		if output, err := cloneCmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("git clone: %w: %s", err, sanitizeToken(string(output), token))
 		}
@@ -136,7 +137,14 @@ func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, 
 	}
 
 	// Always force-push origin HEAD to ensure the remote branch is created or updated.
-	pushCmd := gitCommand(ctx, "-C", localPath, "push", "-f", "origin", "HEAD")
+	var pushArgs []string
+	pushArgs = append(pushArgs, "-C", localPath)
+	if token != "" {
+		b64 := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+		pushArgs = append(pushArgs, "-c", "http.extraHeader=AUTHORIZATION: basic "+b64)
+	}
+	pushArgs = append(pushArgs, "push", "-f", "origin", "HEAD")
+	pushCmd := gitCommand(ctx, pushArgs...)
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push: %w: %s", err, sanitizeToken(string(output), token))
 	}

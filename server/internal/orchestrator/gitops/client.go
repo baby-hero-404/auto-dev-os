@@ -243,7 +243,7 @@ for repo in meta.get("repos", []):
         if res.returncode == 0:
             for line in res.stdout.splitlines():
                 if len(line) > 2:
-                    files_out.append(f"repos/{name}/{line[3:].strip()}")
+                    files_out.append(f"{rel_path}/{line[3:].strip()}")
 print("\n".join(files_out))`
 
 	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",

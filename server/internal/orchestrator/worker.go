@@ -117,6 +117,18 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				_, _ = o.workflows.UpdateJob(cleanupCtx, jobID, map[string]any{"status": models.WorkflowJobStatusFailed, "last_error": err.Error()})
 			}
 		}
+
+		// Guarantee agent release on ALL exit paths (including early returns and panics).
+		if assignedAgentID != "" {
+			if err := o.agents.Release(context.WithoutCancel(context.Background()), assignedAgentID); err != nil {
+				observability.Warn(context.Background(), "release agent failed", "error", err)
+			}
+		}
+
+		// Guarantee workspace lock release on ALL exit paths.
+		if taskID != "" {
+			o.releaseWorkspaceLock(taskID)
+		}
 	}()
 
 	var err error
@@ -144,11 +156,6 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		return
 	}
 	assignedAgentID = agent.ID
-	defer func() {
-		if err := o.agents.Release(context.WithoutCancel(ctx), assignedAgentID); err != nil {
-			observability.Warn(ctx, "release agent failed", "error", err)
-		}
-	}()
 	if _, err := o.workflows.UpdateJob(ctx, job.ID, map[string]any{"agent_id": agent.ID, "step": models.WorkflowStepAssign}); err != nil {
 		o.fail(ctx, job, err)
 		return
@@ -164,10 +171,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		o.fail(ctx, job, fmt.Errorf("workspace clone failed: %w", err))
 		return
 	}
-	// Guarantee lock release on ALL exit paths (loopback, pause, success, failure).
-	// releaseWorkspaceLock is idempotent (uses sync.Map.LoadAndDelete), so duplicate
-	// calls from cleanupWorkspaceAfterFinalState or o.fail are safe no-ops.
-	defer o.releaseWorkspaceLock(task.ID)
+	// Lock release is handled in the top-level defer
 
 	if task.Status == models.TaskStatusTodo || task.Status == models.TaskStatusFailed || task.Status == "" {
 		if _, err := o.updateTaskStatus(ctx, task.ID, models.TaskStatusContextLoading); err != nil {
@@ -224,6 +228,26 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				return err
 			}
 			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("step %s %s", event.StepID, event.Status))
+
+			// Write to workflow_timeline.jsonl
+			if ws := o.wkspace.GetTaskWorkspace(task); ws != nil {
+				timelineFile := filepath.Join(ws.Root, "artifacts", "workflow_timeline.jsonl")
+				timelineEvent := map[string]any{
+					"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+					"step":      event.StepID,
+					"status":    event.Status,
+				}
+				if event.Error != "" {
+					timelineEvent["error"] = event.Error
+				}
+				if b, err := json.Marshal(timelineEvent); err == nil {
+					f, err := os.OpenFile(timelineFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+					if err == nil {
+						f.Write(append(b, '\n'))
+						f.Close()
+					}
+				}
+			}
 
 			// Record step observation memory
 			if o.memHooks != nil {

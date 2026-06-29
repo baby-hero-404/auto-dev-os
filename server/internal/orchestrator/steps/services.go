@@ -40,9 +40,10 @@ type LLMChatter interface {
 	ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error)
 }
 
-// PatchApplier applies a unified diff patch. Used by: code_be, code_fe, fix.
+// PatchApplier applies and validates code patches. Used by: code_be, code_fe, fix.
 type PatchApplier interface {
-	ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error
+	Validate(ctx context.Context, task *models.Task, patchData string, worktreeSuffix string) []error
+	ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchData string, worktreeSuffix string) error
 }
 
 // DiffCapturer captures workspace diffs. Used by: code_be, code_fe, fix, merge, pr.

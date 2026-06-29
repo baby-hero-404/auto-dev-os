@@ -62,17 +62,22 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 		repoName := parts[len(parts)-1]
 		repoName = strings.TrimSuffix(repoName, ".git")
 
+		defaultBranch := pr.Branch
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+
 		repoWS := models.RepoWorkspace{
 			RepoID:        pr.ID,
 			Name:          repoName,
 			URL:           pr.URL,
-			DefaultBranch: pr.Branch,
+			DefaultBranch: defaultBranch,
 			Status: models.RepoWorkspaceStatus{
 				MergeStatus: models.MergeStatusPending,
 				TestStatus:  models.TestStatusPending,
 			},
 			Paths: models.RepoWorkspacePaths{
-				Main:      filepath.Join("code", "repos", repoName, "main"),
+				Main:      orchestratorworkspace.NewPathManager("").RepoMainRelative(repoName, defaultBranch),
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{
@@ -181,7 +186,7 @@ func (m *Manager) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task
 				return rWS, nil
 			}
 		}
-		repoRootAbs := filepath.Join(ws.Root, "code", "repos", rWS.Name)
+		repoRootAbs := orchestratorworkspace.NewPathManager(m.WorkspaceRoot).RepoRoot(task.ID, rWS.Name)
 		if rel, errRel := filepath.Rel(repoRootAbs, absPath); errRel == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return rWS, nil
 		}
@@ -252,8 +257,12 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 			if err := os.MkdirAll(filepath.Dir(repoAbsPath), 0o755); err != nil {
 				return fmt.Errorf("create repo parent dir: %w", err)
 			}
-			if _, err := m.GitOps.CloneForTask(ctx, rWS.URL, rWS.DefaultBranch, repoAbsPath); err != nil {
+			clonedBranch, err := m.GitOps.CloneForTask(ctx, rWS.URL, rWS.DefaultBranch, repoAbsPath)
+			if err != nil {
 				return fmt.Errorf("clone repo %s: %w", rWS.Name, err)
+			}
+			if clonedBranch != "" {
+				ws.Repos[i].DefaultBranch = clonedBranch
 			}
 			workspaceRestored = true
 		}
@@ -308,7 +317,8 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 	m.ReleaseWorkspaceLock(taskID)
 
 	root := sandbox.WorkspacePath(m.WorkspaceRoot, taskID)
-	codeDir := filepath.Join(root, "code", "repos")
+	pm := orchestratorworkspace.NewPathManager(m.WorkspaceRoot)
+	codeDir := pm.CodeRoot(taskID)
 
 	repos, err := os.ReadDir(codeDir)
 	if err != nil {
@@ -323,13 +333,25 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			continue
 		}
 		repoName := rEntry.Name()
-		wtParentDir := filepath.Join(codeDir, repoName, "worktrees")
+		wtParentDir := filepath.Join(pm.RepoRoot(taskID, repoName), "worktrees")
 		worktrees, err := os.ReadDir(wtParentDir)
 		if err != nil {
 			continue
 		}
 
-		mainAbs := filepath.Join(codeDir, repoName, "main")
+		var mainAbs string
+		repoRoot := pm.RepoRoot(taskID, repoName)
+		if repoEntries, errEntries := os.ReadDir(repoRoot); errEntries == nil {
+			for _, re := range repoEntries {
+				if re.IsDir() && re.Name() != "worktrees" {
+					mainAbs = filepath.Join(repoRoot, re.Name())
+					break
+				}
+			}
+		}
+		if mainAbs == "" {
+			mainAbs = pm.RepoMain(taskID, repoName, "main")
+		}
 
 		for _, wtEntry := range worktrees {
 			if !wtEntry.IsDir() {

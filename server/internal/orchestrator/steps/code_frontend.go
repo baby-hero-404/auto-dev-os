@@ -18,17 +18,18 @@ type FrontendAgentAssigner interface {
 
 // CodeFrontendStep implements Step for the frontend coding track.
 type CodeFrontendStep struct {
-	rt        StepRuntime
-	tasks     TaskReader
-	llm       LLMRunner
-	agents    any
-	worktree  WorktreeManager
-	patcher   PatchApplier
-	diff      DiffCapturer
-	workspace WorkspaceLoader
-	artifacts ArtifactSaver
-	tester    TestRunner
-	log       Logger
+	rt          StepRuntime
+	tasks       TaskReader
+	llm         LLMRunner
+	agents      any
+	worktree    WorktreeManager
+	patcher     PatchApplier
+	diff        DiffCapturer
+	workspace   WorkspaceLoader
+	artifacts   ArtifactSaver
+	tester      TestRunner
+	checkpoints CheckpointLister
+	log         Logger
 }
 
 func NewCodeFrontendStep(
@@ -42,20 +43,22 @@ func NewCodeFrontendStep(
 	workspace WorkspaceLoader,
 	artifacts ArtifactSaver,
 	tester TestRunner,
+	checkpoints CheckpointLister,
 	log Logger,
 ) *CodeFrontendStep {
 	return &CodeFrontendStep{
-		rt:        rt,
-		tasks:     tasks,
-		llm:       llm,
-		agents:    agents,
-		worktree:  worktree,
-		patcher:   patcher,
-		diff:      diff,
-		workspace: workspace,
-		artifacts: artifacts,
-		tester:    tester,
-		log:       log,
+		rt:          rt,
+		tasks:       tasks,
+		llm:         llm,
+		agents:      agents,
+		worktree:    worktree,
+		patcher:     patcher,
+		diff:        diff,
+		workspace:   workspace,
+		artifacts:   artifacts,
+		tester:      tester,
+		checkpoints: checkpoints,
+		log:         log,
 	}
 }
 
@@ -89,7 +92,15 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 
 	frontendAgent := s.rt.Agent
 	assignedAgentID := ""
-	if assigner, ok := s.agents.(FrontendAgentAssigner); ok {
+	if frontendAgent == nil || frontendAgent.Role != models.AgentRoleFrontend {
+		assigner, ok := s.agents.(FrontendAgentAssigner)
+		if !ok {
+			roleStr := "nil"
+			if frontendAgent != nil {
+				roleStr = frontendAgent.Role
+			}
+			return nil, fmt.Errorf("frontend coding step requires a frontend agent, but got role %s", roleStr)
+		}
 		fg, err := assigner.AssignFrontendAgent(ctx, s.rt.Task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign frontend agent for frontend coding step: %w", err)
@@ -133,25 +144,68 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		}
 	}
 
-	if s.llm == nil {
-		return nil, fmt.Errorf("llm provider is not configured")
-	}
-
-	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, workflow.StepCodeFrontend, "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.")
-	if err != nil {
-		return nil, err
-	}
-	if parsed, ok := out["parsed"].(map[string]any); ok {
-		p := patch.ExtractPatch(parsed)
-		if p != "" {
-			if s.artifacts != nil {
-				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeFrontend, "patch", p)
-			}
-			if s.patcher != nil {
-				if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, frontendAgent, workflow.StepCodeFrontend, p, worktreeSuffix); applyErr != nil {
-					return nil, fmt.Errorf("apply patch: %w", applyErr)
+	var prFeedback string
+	if s.checkpoints != nil {
+		if checkpoints, cpErr := s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID); cpErr == nil {
+			for _, cp := range checkpoints {
+				if cp.Step == "pr_rejection" {
+					var state map[string]any
+					if json.Unmarshal(cp.State, &state) == nil {
+						if f, _ := state["feedback"].(string); f != "" {
+							prFeedback = f
+						}
+					}
 				}
 			}
+		}
+	}
+
+	instruction := "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.\nIMPORTANT: For the patch text, you MUST generate a valid Unified Diff. Ensure that your hunk headers (@@) have the exact correct line counts matching the original file. Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath). DO NOT rewrite the entire file unless creating a new file."
+	if prFeedback != "" {
+		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
+	}
+
+	var out map[string]any
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		out, err = s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, workflow.StepCodeFrontend, instruction)
+		if err != nil {
+			return nil, err
+		}
+
+		retryNeeded := false
+		if parsed, ok := out["parsed"].(map[string]any); ok {
+			p := patch.ExtractPatch(parsed)
+			if p != "" && s.patcher != nil {
+				// Validate
+				validationErrs := s.patcher.Validate(ctx, s.rt.Task, p, worktreeSuffix)
+				if len(validationErrs) > 0 {
+					if attempt < maxRetries {
+						errMsg := ""
+						for _, ve := range validationErrs {
+							errMsg += "- " + ve.Error() + "\n"
+						}
+						instruction += fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Patch validation failed (attempt %d/%d). Retrying...", attempt, maxRetries))
+						retryNeeded = true
+					} else {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "Patch validation failed after max retries")
+						out["patch_apply_error"] = "Patch validation failed: " + validationErrs[0].Error()
+					}
+				} else {
+					// Validation passed, apply patch
+					if s.artifacts != nil {
+						_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeFrontend, "patch", p)
+					}
+					if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, frontendAgent, workflow.StepCodeFrontend, p, worktreeSuffix); applyErr != nil {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to apply patch generated by LLM: %v", applyErr))
+						out["patch_apply_error"] = applyErr.Error()
+					}
+				}
+			}
+		}
+		if !retryNeeded {
+			break
 		}
 	}
 	if s.diff != nil {

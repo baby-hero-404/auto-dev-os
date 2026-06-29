@@ -18,7 +18,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-
 // AnalyzeStep implements Step for the analysis phase.
 type AnalyzeStep struct {
 	rt            StepRuntime
@@ -71,8 +70,8 @@ func NewAnalyzeStep(
 	}
 }
 
-func (s *AnalyzeStep) ID() string                              { return workflow.StepAnalyze }
-func (s *AnalyzeStep) StatusOnResume(_ StepResult) string        { return models.TaskStatusAnalyzing }
+func (s *AnalyzeStep) ID() string                         { return workflow.StepAnalyze }
+func (s *AnalyzeStep) StatusOnResume(_ StepResult) string { return models.TaskStatusAnalyzing }
 
 func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
@@ -86,6 +85,20 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("assembled prompt with %d messages and %d tools", len(messages), len(tools)))
 	}
 	if patch.TaskReadyForExecution(s.rt.Task) {
+		if s.status != nil {
+			currentStatus := s.rt.Task.Status
+			if s.tasks != nil {
+				if latest, err := s.tasks.GetByID(ctx, s.rt.Task.ID); err == nil && latest != nil {
+					currentStatus = latest.Status
+				}
+			}
+			if currentStatus == models.TaskStatusContextLoading || currentStatus == models.TaskStatusAnalyzing || currentStatus == models.TaskStatusSpecReview {
+				if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusCoding); err != nil {
+					return nil, fmt.Errorf("update task status: %w", err)
+				}
+				s.rt.Task.Status = models.TaskStatusCoding
+			}
+		}
 		return StepResult{"complexity": s.rt.Task.Complexity, "spec_status": s.rt.Task.SpecStatus}, nil
 	}
 
@@ -567,4 +580,3 @@ func deriveWorkflowAnalysis(task *models.Task) models.TaskAnalysis {
 		ClarificationQuestions: questions,
 	}
 }
-

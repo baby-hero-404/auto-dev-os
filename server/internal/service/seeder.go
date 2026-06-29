@@ -112,5 +112,17 @@ func promptBaseRegistryPath() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("resolve runtime caller for seeder")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "resources", "prompt_base", "registry.min.json")), nil
+	localPath := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "resources", "prompt_base", "registry.min.json"))
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath, nil
+	}
+	// Fallback to global framework installation path ~/.gemini/registry.min.json
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		globalPath := filepath.Join(homeDir, ".gemini", "registry.min.json")
+		if _, err := os.Stat(globalPath); err == nil {
+			return globalPath, nil
+		}
+	}
+	return localPath, nil
 }

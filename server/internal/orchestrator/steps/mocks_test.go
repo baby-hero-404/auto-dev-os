@@ -200,8 +200,13 @@ func (m *mockCheckpointLister) ListCheckpoints(ctx context.Context, taskID strin
 }
 
 type mockPatchApplier struct {
-	called bool
-	err    error
+	called     bool
+	err        error
+	validation []error
+}
+
+func (m *mockPatchApplier) Validate(ctx context.Context, task *models.Task, patchData string, worktreeSuffix string) []error {
+	return m.validation
 }
 
 func (m *mockPatchApplier) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {

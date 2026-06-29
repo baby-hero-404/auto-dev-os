@@ -34,25 +34,28 @@ func redactSecrets(s string) string {
 func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any) {
 	o.initWkspace()
 	ws := o.wkspace.GetTaskWorkspace(task)
-	stepTraceDir := filepath.Join(ws.Root, "logs", "llm", stepID)
-	_ = os.MkdirAll(stepTraceDir, 0o755)
+	traceRoot := filepath.Join(ws.Root, "logs", "llm")
+	_ = os.MkdirAll(traceRoot, 0o755)
 
 	callNumber := 1
-	if files, err := os.ReadDir(stepTraceDir); err == nil {
+	if files, err := os.ReadDir(traceRoot); err == nil {
 		for _, f := range files {
 			if f.IsDir() && strings.HasPrefix(f.Name(), "call-") {
-				var n int
-				if _, errScan := fmt.Sscanf(f.Name(), "call-%d", &n); errScan == nil {
-					if n >= callNumber {
-						callNumber = n + 1
+				parts := strings.SplitN(f.Name(), "-", 3)
+				if len(parts) >= 2 {
+					var n int
+					if _, errScan := fmt.Sscanf(parts[1], "%d", &n); errScan == nil {
+						if n >= callNumber {
+							callNumber = n + 1
+						}
 					}
 				}
 			}
 		}
 	}
 
-	callDirName := fmt.Sprintf("call-%d", callNumber)
-	callPath := filepath.Join(stepTraceDir, callDirName)
+	callDirName := fmt.Sprintf("call-%03d-%s", callNumber, stepID)
+	callPath := filepath.Join(traceRoot, callDirName)
 	_ = os.MkdirAll(callPath, 0o755)
 
 	reqJSON, _ := json.MarshalIndent(messages, "", "  ")
@@ -76,6 +79,8 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 	}
 
 	type TraceMetadata struct {
+		Step         string    `json:"step"`
+		CallNumber   int       `json:"call_number"`
 		Model        string    `json:"model"`
 		PromptTokens int       `json:"prompt_tokens"`
 		OutputTokens int       `json:"output_tokens"`
@@ -85,6 +90,8 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 		Timestamp    time.Time `json:"timestamp"`
 	}
 	meta := TraceMetadata{
+		Step:         stepID,
+		CallNumber:   callNumber,
 		Model:        resp.Model,
 		PromptTokens: resp.PromptTokens,
 		OutputTokens: resp.OutputTokens,

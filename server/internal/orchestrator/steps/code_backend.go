@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
@@ -16,17 +17,18 @@ type BackendAgentAssigner interface {
 
 // CodeBackendStep implements Step for the backend coding track.
 type CodeBackendStep struct {
-	rt        StepRuntime
-	tasks     TaskReader
-	llm       LLMRunner
-	agents    any
-	worktree  WorktreeManager
-	patcher   PatchApplier
-	diff      DiffCapturer
-	workspace WorkspaceLoader
-	artifacts ArtifactSaver
-	tester    TestRunner
-	log       Logger
+	rt          StepRuntime
+	tasks       TaskReader
+	llm         LLMRunner
+	agents      any
+	worktree    WorktreeManager
+	patcher     PatchApplier
+	diff        DiffCapturer
+	workspace   WorkspaceLoader
+	artifacts   ArtifactSaver
+	tester      TestRunner
+	checkpoints CheckpointLister
+	log         Logger
 }
 
 func NewCodeBackendStep(
@@ -40,20 +42,22 @@ func NewCodeBackendStep(
 	workspace WorkspaceLoader,
 	artifacts ArtifactSaver,
 	tester TestRunner,
+	checkpoints CheckpointLister,
 	log Logger,
 ) *CodeBackendStep {
 	return &CodeBackendStep{
-		rt:        rt,
-		tasks:     tasks,
-		llm:       llm,
-		agents:    agents,
-		worktree:  worktree,
-		patcher:   patcher,
-		diff:      diff,
-		workspace: workspace,
-		artifacts: artifacts,
-		tester:    tester,
-		log:       log,
+		rt:          rt,
+		tasks:       tasks,
+		llm:         llm,
+		agents:      agents,
+		worktree:    worktree,
+		patcher:     patcher,
+		diff:        diff,
+		workspace:   workspace,
+		artifacts:   artifacts,
+		tester:      tester,
+		checkpoints: checkpoints,
+		log:         log,
 	}
 }
 
@@ -63,7 +67,15 @@ func (s *CodeBackendStep) StatusOnResume(_ StepResult) string { return models.Ta
 func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	backendAgent := s.rt.Agent
 	assignedAgentID := ""
-	if assigner, ok := s.agents.(BackendAgentAssigner); ok {
+	if backendAgent == nil || backendAgent.Role != models.AgentRoleBackend {
+		assigner, ok := s.agents.(BackendAgentAssigner)
+		if !ok {
+			roleStr := "nil"
+			if backendAgent != nil {
+				roleStr = backendAgent.Role
+			}
+			return nil, fmt.Errorf("backend coding step requires a backend agent, but got role %s", roleStr)
+		}
 		bg, err := assigner.AssignBackendAgent(ctx, s.rt.Task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign backend agent for backend coding step: %w", err)
@@ -111,25 +123,69 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		}
 	}
 
-	if s.llm == nil {
-		return nil, fmt.Errorf("llm provider is not configured")
-	}
-
-	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, backendAgent, s.rt.JobID, workflow.StepCodeBackend, "Implement the backend changes. Return JSON with files_changed, summary, and patch text when available.")
-	if err != nil {
-		return nil, err
-	}
-	if parsed, ok := out["parsed"].(map[string]any); ok {
-		p := patch.ExtractPatch(parsed)
-		if p != "" {
-			if s.artifacts != nil {
-				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeBackend, "patch", p)
-			}
-			if s.patcher != nil {
-				if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, backendAgent, workflow.StepCodeBackend, p, worktreeSuffix); applyErr != nil {
-					return nil, fmt.Errorf("apply patch: %w", applyErr)
+	var prFeedback string
+	if s.checkpoints != nil {
+		if checkpoints, cpErr := s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID); cpErr == nil {
+			for _, cp := range checkpoints {
+				if cp.Step == "pr_rejection" {
+					var state map[string]any
+					if json.Unmarshal(cp.State, &state) == nil {
+						if f, _ := state["feedback"].(string); f != "" {
+							prFeedback = f
+						}
+					}
 				}
 			}
+		}
+	}
+
+	instruction := "Implement the backend changes. Return JSON with files_changed, summary, and patch text when available.\nIMPORTANT: For the patch text, you MUST generate a valid Unified Diff. Ensure that your hunk headers (@@) have the exact correct line counts matching the original file. Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath). DO NOT rewrite the entire file unless creating a new file."
+	if prFeedback != "" {
+		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
+	}
+
+	var out map[string]any
+	var err error
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		out, err = s.llm.RunLLMStep(ctx, s.rt.Task, backendAgent, s.rt.JobID, workflow.StepCodeBackend, instruction)
+		if err != nil {
+			return nil, err
+		}
+
+		retryNeeded := false
+		if parsed, ok := out["parsed"].(map[string]any); ok {
+			p := patch.ExtractPatch(parsed)
+			if p != "" && s.patcher != nil {
+				// Validate
+				validationErrs := s.patcher.Validate(ctx, s.rt.Task, p, worktreeSuffix)
+				if len(validationErrs) > 0 {
+					if attempt < maxRetries {
+						errMsg := ""
+						for _, ve := range validationErrs {
+							errMsg += "- " + ve.Error() + "\n"
+						}
+						instruction += fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Patch validation failed (attempt %d/%d). Retrying...", attempt, maxRetries))
+						retryNeeded = true
+					} else {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "Patch validation failed after max retries")
+						out["patch_apply_error"] = "Patch validation failed: " + validationErrs[0].Error()
+					}
+				} else {
+					// Validation passed, apply patch
+					if s.artifacts != nil {
+						_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepCodeBackend, "patch", p)
+					}
+					if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, backendAgent, workflow.StepCodeBackend, p, worktreeSuffix); applyErr != nil {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to apply patch generated by LLM: %v", applyErr))
+						out["patch_apply_error"] = applyErr.Error()
+					}
+				}
+			}
+		}
+		if !retryNeeded {
+			break
 		}
 	}
 	if s.diff != nil {

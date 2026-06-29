@@ -21,35 +21,103 @@ func (s *Store) WithCheckpointRecovery(
 	agent *models.Agent,
 	jobStep string,
 	runner workflow.StepFunc,
-	applyPatch func(ctx context.Context, task *models.Task, agent *models.Agent, stepName string, patchText string, worktreeSuffix string) error,
-	updateTaskStatus func(ctx context.Context, taskID string, newStatus string) (*models.Task, error),
+	applyPatch func(
+		ctx context.Context,
+		task *models.Task,
+		agent *models.Agent,
+		stepName string,
+		patchText string,
+		worktreeSuffix string,
+	) error,
+	updateTaskStatus func(
+		ctx context.Context,
+		taskID string,
+		newStatus string,
+	) (*models.Task, error),
 ) workflow.StepFunc {
 	return func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
 		if stepID != workflow.StepAnalyze {
-			if jobStep == workflow.StepReview && (stepID == workflow.StepReview || stepID == workflow.StepFix) {
+			// Review and Fix should always run when the current job is Review.
+			if jobStep == workflow.StepReview &&
+				(stepID == workflow.StepReview || stepID == workflow.StepFix) {
 				return runner(ctx, sc)
 			}
-			if output, exists := s.GetSuccessful(ctx, task.ID, stepID); exists {
-				s.Log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: resuming from previous successful checkpoint", stepID))
 
-				if stepID == workflow.StepCodeBackend || stepID == workflow.StepCodeFrontend || stepID == workflow.StepFix {
+			if output, exists := s.GetSuccessful(ctx, task.ID, stepID); exists {
+				s.Log(
+					ctx,
+					task.ID,
+					nil,
+					"info",
+					fmt.Sprintf("step %s: resuming from previous successful checkpoint", stepID),
+				)
+
+				// Re-apply saved patches for code generation/fix steps.
+				if stepID == workflow.StepCodeBackend ||
+					stepID == workflow.StepCodeFrontend ||
+					stepID == workflow.StepFix {
+
 					if patch, err := s.GetSavedPatch(ctx, task.ID, stepID); err == nil && patch != "" {
-						s.Log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: re-applying saved patch to workspace", stepID))
+						s.Log(
+							ctx,
+							task.ID,
+							nil,
+							"info",
+							fmt.Sprintf("step %s: re-applying saved patch to workspace", stepID),
+						)
 
 						worktreeSuffix := ""
 						if task.Complexity != models.TaskComplexityEasy {
-							if stepID == workflow.StepCodeBackend {
+							switch stepID {
+							case workflow.StepCodeBackend:
 								worktreeSuffix = "-be-worktree"
-							} else if stepID == workflow.StepCodeFrontend {
+							case workflow.StepCodeFrontend:
 								worktreeSuffix = "-fe-worktree"
 							}
 						}
 
 						if applyPatch != nil {
-							if applyErr := applyPatch(ctx, task, agent, stepID, patch, worktreeSuffix); applyErr != nil {
-								s.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("step %s: failed to re-apply patch (%v), rerunning step", stepID, applyErr))
+							if err := applyPatch(
+								ctx,
+								task,
+								agent,
+								stepID,
+								patch,
+								worktreeSuffix,
+							); err != nil {
+								s.Log(
+									ctx,
+									task.ID,
+									nil,
+									"warn",
+									fmt.Sprintf(
+										"step %s: failed to re-apply patch (%v), rerunning step",
+										stepID,
+										err,
+									),
+								)
 								return runner(ctx, sc)
 							}
+						}
+					}
+				}
+
+				// Restore task status when resuming from a checkpoint.
+				if updateTaskStatus != nil && statusOnResume != nil {
+					if resumeStatus := statusOnResume(output); resumeStatus != "" {
+						if _, err := updateTaskStatus(ctx, task.ID, resumeStatus); err != nil {
+							s.Log(
+								ctx,
+								task.ID,
+								nil,
+								"warn",
+								fmt.Sprintf(
+									"step %s: failed to restore status %s on resume: %v",
+									stepID,
+									resumeStatus,
+									err,
+								),
+							)
 						}
 					}
 				}
@@ -57,6 +125,7 @@ func (s *Store) WithCheckpointRecovery(
 				return output, nil
 			}
 		}
+
 		return runner(ctx, sc)
 	}
 }

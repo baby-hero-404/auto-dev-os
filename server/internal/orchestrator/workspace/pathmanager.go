@@ -112,25 +112,36 @@ func WorkspaceToRepoRelative(path string) string {
 	path = strings.ReplaceAll(path, "\\", "/")
 	path = filepath.ToSlash(filepath.Clean(path))
 
-	prefix := ReposPrefix()
-	if !strings.HasPrefix(path, prefix) {
-		return path
+	prefix := "/code/repos/"
+	idx := strings.Index(path, prefix)
+	if idx == -1 {
+		if strings.HasPrefix(path, "code/repos/") {
+			idx = 0
+			path = "/" + path
+		} else {
+			return path
+		}
 	}
-	after := path[len(prefix):] // e.g. "test/main/readme.md" or "test/worktrees/backend/src/main.go"
+
+	after := path[idx+len(prefix):]
 	parts := strings.Split(after, "/")
-	if len(parts) < 3 {
-		return path
+	if len(parts) < 2 {
+		return strings.TrimPrefix(path, "/")
 	}
+
 	repoName := parts[0]
-	// parts[1] = main/default checkout or "worktrees"
-	if parts[1] == "worktrees" && len(parts) >= 4 {
-		// parts[2] = worktree role (e.g. "backend")
-		return repoName + "/" + strings.Join(parts[3:], "/")
+	if parts[1] == "worktrees" {
+		if len(parts) >= 4 {
+			return repoName + "/" + strings.Join(parts[3:], "/")
+		}
+		return strings.TrimPrefix(path, "/")
 	}
-	if parts[1] != "worktrees" {
+
+	if len(parts) >= 3 {
 		return repoName + "/" + strings.Join(parts[2:], "/")
 	}
-	return path
+
+	return strings.TrimPrefix(path, "/")
 }
 
 // RepoRelativeToWorkspace converts a repo-relative path (e.g. "readme.md" or "test/readme.md")

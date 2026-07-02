@@ -158,7 +158,11 @@ func (s *AgentService) prepareCreateInput(ctx context.Context, input models.Crea
 		}
 	}
 	if input.Goal == "" {
-		return input, ErrValidation("goal is required")
+		if input.Role == models.AgentRoleDocumentationWriter {
+			input.Goal = "Write and update high-quality project documentation, readme files, and user guides."
+		} else {
+			return input, ErrValidation("goal is required")
+		}
 	}
 	return input, nil
 }
@@ -171,10 +175,11 @@ func validateAgentRole(role string) error {
 		models.AgentRoleReviewer,
 		models.AgentRoleQA,
 		models.AgentRoleSecurityAuditor,
-		models.AgentRoleDBArchitect:
+		models.AgentRoleDBArchitect,
+		models.AgentRoleDocumentationWriter:
 		return nil
 	default:
-		return ErrValidation("role must be planner, backend, frontend, reviewer, qa, security-auditor, or db-architect")
+		return ErrValidation("role must be planner, backend, frontend, reviewer, qa, security-auditor, db-architect, or documentation-writer")
 	}
 }
 
@@ -209,7 +214,7 @@ func getDefaultModelLevelGroupForRole(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case models.AgentRolePlanner, models.AgentRoleDBArchitect:
 		return models.ModelLevelPowerful
-	case models.AgentRoleBackend, models.AgentRoleFrontend:
+	case models.AgentRoleBackend, models.AgentRoleFrontend, models.AgentRoleDocumentationWriter:
 		return models.ModelLevelBalanced
 	case models.AgentRoleReviewer:
 		return models.ModelLevelFast

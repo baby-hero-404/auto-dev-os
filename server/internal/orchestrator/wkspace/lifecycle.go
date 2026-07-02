@@ -298,13 +298,10 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 	return nil
 }
 
-// CleanupWorkspaceAfterFinalState releases locks and optionally prunes workspace.
+// CleanupWorkspaceAfterFinalState releases locks and prunes workspace repositories to save space.
 func (m *Manager) CleanupWorkspaceAfterFinalState(ctx context.Context, taskID string) {
 	m.ReleaseWorkspaceLock(taskID)
 
-	if m.Retention.Retention != 0 {
-		return
-	}
 	if err := m.PartialCleanupWorkspace(ctx, taskID); err != nil {
 		observability.Warn(ctx, "workspace partial cleanup failed", "task_id", taskID, "error", err)
 	} else {
@@ -312,7 +309,7 @@ func (m *Manager) CleanupWorkspaceAfterFinalState(ctx context.Context, taskID st
 	}
 }
 
-// PartialCleanupWorkspace removes worktrees while preserving diffs.
+// PartialCleanupWorkspace removes all cloned repositories under code/repos/ while preserving diffs and metadata.
 func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) error {
 	m.ReleaseWorkspaceLock(taskID)
 
@@ -335,63 +332,38 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 		repoName := rEntry.Name()
 		wtParentDir := filepath.Join(pm.RepoRoot(taskID, repoName), "worktrees")
 		worktrees, err := os.ReadDir(wtParentDir)
-		if err != nil {
-			continue
-		}
+		if err == nil {
+			for _, wtEntry := range worktrees {
+				if !wtEntry.IsDir() {
+					continue
+				}
+				role := wtEntry.Name()
+				wtAbs := filepath.Join(wtParentDir, role)
 
-		var mainAbs string
-		repoRoot := pm.RepoRoot(taskID, repoName)
-		if repoEntries, errEntries := os.ReadDir(repoRoot); errEntries == nil {
-			for _, re := range repoEntries {
-				if re.IsDir() && re.Name() != "worktrees" {
-					mainAbs = filepath.Join(repoRoot, re.Name())
-					break
+				// Check git status to see if there are uncommitted changes
+				statusCmd := exec.CommandContext(ctx, "git", "-C", wtAbs, "status", "--porcelain")
+				statusOut, statusErr := statusCmd.CombinedOutput()
+				if statusErr == nil && len(strings.TrimSpace(string(statusOut))) > 0 {
+					// Capture both staged and unstaged modifications
+					diffCmd := exec.CommandContext(ctx, "git", "-C", wtAbs, "diff", "HEAD")
+					diffOut, diffErr := diffCmd.CombinedOutput()
+					if diffErr == nil {
+						statusClean := strings.TrimSpace(string(statusOut))
+						fullDiffContent := []byte(fmt.Sprintf("=== Worktree Status ===\n%s\n\n=== Diffs ===\n%s", statusClean, string(diffOut)))
+
+						diffDir := filepath.Join(root, "artifacts", "diffs")
+						_ = os.MkdirAll(diffDir, 0o755)
+						diffPath := filepath.Join(diffDir, fmt.Sprintf("cleanup-%s-%s.diff", repoName, role))
+						_ = os.WriteFile(diffPath, fullDiffContent, 0o644)
+					}
 				}
 			}
 		}
-		if mainAbs == "" {
-			mainAbs = pm.RepoMain(taskID, repoName, "main")
-		}
 
-		for _, wtEntry := range worktrees {
-			if !wtEntry.IsDir() {
-				continue
-			}
-			role := wtEntry.Name()
-			wtAbs := filepath.Join(wtParentDir, role)
-
-			// Check git status to see if there are uncommitted changes
-			statusCmd := exec.CommandContext(ctx, "git", "-C", wtAbs, "status", "--porcelain")
-			statusOut, statusErr := statusCmd.CombinedOutput()
-			if statusErr == nil && len(strings.TrimSpace(string(statusOut))) > 0 {
-				// Capture both staged and unstaged modifications
-				diffCmd := exec.CommandContext(ctx, "git", "-C", wtAbs, "diff", "HEAD")
-				diffOut, diffErr := diffCmd.CombinedOutput()
-				if diffErr != nil {
-					return fmt.Errorf("failed to capture diff for worktree %s: %w", wtAbs, diffErr)
-				}
-
-				statusClean := strings.TrimSpace(string(statusOut))
-				fullDiffContent := []byte(fmt.Sprintf("=== Worktree Status ===\n%s\n\n=== Diffs ===\n%s", statusClean, string(diffOut)))
-
-				diffDir := filepath.Join(root, "artifacts", "diffs")
-				if err := os.MkdirAll(diffDir, 0o755); err != nil {
-					return fmt.Errorf("failed to create diff dir: %w", err)
-				}
-				diffPath := filepath.Join(diffDir, fmt.Sprintf("cleanup-%s-%s.diff", repoName, role))
-				if err := os.WriteFile(diffPath, fullDiffContent, 0o644); err != nil {
-					return fmt.Errorf("failed to write cleanup diff: %w", err)
-				}
-			}
-
-			// Prune worktree using git worktree remove
-			pruneCmd := exec.CommandContext(ctx, "git", "-C", mainAbs, "worktree", "remove", wtAbs, "--force")
-			if err := pruneCmd.Run(); err != nil {
-				// Fallback to manual removal if git worktree remove fails
-				if errRemove := os.RemoveAll(wtAbs); errRemove != nil {
-					return fmt.Errorf("failed to remove worktree path %s: %w", wtAbs, errRemove)
-				}
-			}
+		// Delete the entire repository directory (containing the main clone and worktrees)
+		repoPath := filepath.Join(codeDir, repoName)
+		if err := os.RemoveAll(repoPath); err != nil {
+			observability.Warn(ctx, "failed to remove repository during partial cleanup", "path", repoPath, "error", err)
 		}
 	}
 
@@ -417,6 +389,15 @@ func (m *Manager) RemoveWorkspace(taskID string) error {
 		return fmt.Errorf("task id is required")
 	}
 	m.ReleaseWorkspaceLock(taskID)
+
+	// Finding 8: DB Checkpoint & Artifact Pruning
+	if m.Workflows != nil {
+		_ = m.Workflows.DeleteByTaskID(context.Background(), taskID)
+	}
+	if m.Artifacts != nil {
+		_ = m.Artifacts.DeleteByTaskID(context.Background(), taskID)
+	}
+
 	root := m.WorkspaceRoot
 	if root == "" {
 		root = "/tmp/auto-code-os/workspaces"

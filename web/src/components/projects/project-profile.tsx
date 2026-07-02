@@ -128,7 +128,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
               >
                 <option value="fast">Fast</option>
                 <option value="balanced">Balanced</option>
-                <option value="deep">Deep</option>
+                <option value="powerful">Powerful</option>
               </select>
             </div>
             <div className="flex flex-col gap-1.5">

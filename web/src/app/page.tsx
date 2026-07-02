@@ -146,6 +146,7 @@ export default function Home() {
   );
 }
 
+// TO DO REMOVE THIS
 function DashboardHero() {
   const capabilities = [
     { label: "Gateway", detail: "Provider routing", icon: Cpu },

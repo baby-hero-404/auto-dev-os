@@ -80,6 +80,8 @@ func personaFile(role string) string {
 		return "security-auditor.md"
 	case models.AgentRoleQA:
 		return "test-engineer.md"
+	case models.AgentRoleDocumentationWriter:
+		return "documentation-writer.md"
 	default:
 		return "backend-specialist.md"
 	}

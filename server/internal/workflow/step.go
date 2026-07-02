@@ -5,7 +5,6 @@ const (
 	StepContextLoad  = "context_load"
 	StepAnalyze      = "analyze"
 	StepPlan         = "plan"
-	StepCode         = "code"
 	StepCodeBackend  = "code_backend"
 	StepCodeFrontend = "code_frontend"
 	StepMerge        = "merge"
@@ -86,15 +85,16 @@ func HardWorkflow(runners map[string]StepFunc) Definition {
 // DescribeStep returns a human-readable description for a step name.
 func DescribeStep(name string) string {
 	desc := map[string]string{
-		"context_load": "Load repository context and conventions",
-		"analyze":      "Analyze task complexity & scope",
-		"plan":         "Decompose into sub-tasks",
-		"code":         "Execute code changes in sandbox",
-		"merge":        "Merge parallel code & resolve conflicts",
-		"review":       "AI code review",
-		"fix":          "Fix review feedback",
-		"test":         "Run test suite",
-		"pr":           "Create pull request",
+		"context_load":  "Load repository context and conventions",
+		"analyze":       "Analyze task complexity & scope",
+		"plan":          "Decompose into sub-tasks",
+		"code_backend":  "Execute backend code changes in sandbox",
+		"code_frontend": "Execute frontend code changes in sandbox",
+		"merge":         "Merge parallel code & resolve conflicts",
+		"review":        "AI code review",
+		"fix":           "Fix review feedback",
+		"test":          "Run test suite",
+		"pr":            "Create pull request",
 	}
 	if d, ok := desc[name]; ok {
 		return d

@@ -32,6 +32,10 @@ func redactSecrets(s string) string {
 }
 
 func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any) {
+	if !o.llmTraceEnabled {
+		return
+	}
+
 	o.initWkspace()
 	ws := o.wkspace.GetTaskWorkspace(task)
 	traceRoot := filepath.Join(ws.Root, "logs", "llm")
@@ -58,26 +62,6 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 	callPath := filepath.Join(traceRoot, callDirName)
 	_ = os.MkdirAll(callPath, 0o755)
 
-	reqJSON, _ := json.MarshalIndent(messages, "", "  ")
-	_ = os.WriteFile(filepath.Join(callPath, "request.json"), []byte(redactSecrets(string(reqJSON))), 0o644)
-
-	resJSON, _ := json.MarshalIndent(resp, "", "  ")
-	_ = os.WriteFile(filepath.Join(callPath, "response.json"), []byte(redactSecrets(string(resJSON))), 0o644)
-
-	var promptBuilder strings.Builder
-	promptBuilder.WriteString("# LLM Request Prompt Reconstructed\n\n")
-	for _, msg := range messages {
-		promptBuilder.WriteString(fmt.Sprintf("## Role: %s\n\n%s\n\n---\n\n", msg.Role, msg.Content))
-	}
-	_ = os.WriteFile(filepath.Join(callPath, "prompt.md"), []byte(redactSecrets(promptBuilder.String())), 0o644)
-
-	_ = os.WriteFile(filepath.Join(callPath, "output.md"), []byte(redactSecrets(resp.Content)), 0o644)
-
-	if len(parsed) > 0 {
-		parsedJSON, _ := json.MarshalIndent(parsed, "", "  ")
-		_ = os.WriteFile(filepath.Join(callPath, "parsed.json"), []byte(redactSecrets(string(parsedJSON))), 0o644)
-	}
-
 	type TraceMetadata struct {
 		Step         string    `json:"step"`
 		CallNumber   int       `json:"call_number"`
@@ -102,4 +86,28 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")
 	_ = os.WriteFile(filepath.Join(callPath, "metadata.json"), metaJSON, 0o644)
+
+	if strings.ToLower(o.llmLogLevel) == "info" {
+		return
+	}
+
+	reqJSON, _ := json.MarshalIndent(messages, "", "  ")
+	_ = os.WriteFile(filepath.Join(callPath, "request.json"), []byte(redactSecrets(string(reqJSON))), 0o644)
+
+	resJSON, _ := json.MarshalIndent(resp, "", "  ")
+	_ = os.WriteFile(filepath.Join(callPath, "response.json"), []byte(redactSecrets(string(resJSON))), 0o644)
+
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("# LLM Request Prompt Reconstructed\n\n")
+	for _, msg := range messages {
+		promptBuilder.WriteString(fmt.Sprintf("## Role: %s\n\n%s\n\n---\n\n", msg.Role, msg.Content))
+	}
+	_ = os.WriteFile(filepath.Join(callPath, "prompt.md"), []byte(redactSecrets(promptBuilder.String())), 0o644)
+
+	_ = os.WriteFile(filepath.Join(callPath, "output.md"), []byte(redactSecrets(resp.Content)), 0o644)
+
+	if len(parsed) > 0 {
+		parsedJSON, _ := json.MarshalIndent(parsed, "", "  ")
+		_ = os.WriteFile(filepath.Join(callPath, "parsed.json"), []byte(redactSecrets(string(parsedJSON))), 0o644)
+	}
 }

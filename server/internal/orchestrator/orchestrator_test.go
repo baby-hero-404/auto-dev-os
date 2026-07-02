@@ -125,6 +125,10 @@ func (m *mockWorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any
 	return nil
 }
 
+func (m *mockWorkflowRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return nil
+}
+
 type mockAgentAssigner struct {
 	agent       *models.Agent
 	releasedIDs []string
@@ -309,6 +313,10 @@ func (m *mockArtifactRepo) ListByJobID(ctx context.Context, jobID string) ([]mod
 
 func (m *mockArtifactRepo) ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error) {
 	return m.artifacts, nil
+}
+
+func (m *mockArtifactRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return nil
 }
 
 type mockRepositoriesRepo struct {

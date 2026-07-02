@@ -55,6 +55,7 @@ type ArtifactRepository interface {
 	Create(ctx context.Context, artifact *models.WorkflowArtifact) error
 	ListByJobID(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error)
 	ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error)
+	DeleteByTaskID(ctx context.Context, taskID string) error
 }
 
 // RepositoryRepository lists source code repositories for a project.
@@ -82,6 +83,7 @@ type WorkflowRepository interface {
 	CreateCheckpoint(ctx context.Context, checkpoint models.WorkflowCheckpoint) error
 	ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error)
 	DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error
+	DeleteByTaskID(ctx context.Context, taskID string) error
 	CreateLog(ctx context.Context, log models.TaskLog) error
 	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
 	ResetStuckJobs(ctx context.Context) error

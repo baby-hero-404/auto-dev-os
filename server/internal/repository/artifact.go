@@ -38,3 +38,10 @@ func (r *ArtifactRepo) ListByTaskID(ctx context.Context, taskID string) ([]model
 	}
 	return artifacts, nil
 }
+
+func (r *ArtifactRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&models.WorkflowArtifact{}).Error; err != nil {
+		return fmt.Errorf("delete workflow artifacts by task: %w", mapError(err))
+	}
+	return nil
+}

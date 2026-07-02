@@ -7,13 +7,14 @@ import (
 
 // Agent roles.
 const (
-	AgentRolePlanner         = "planner"
-	AgentRoleBackend         = "backend"
-	AgentRoleFrontend        = "frontend"
-	AgentRoleReviewer        = "reviewer"
-	AgentRoleQA              = "qa"
-	AgentRoleSecurityAuditor = "security-auditor"
-	AgentRoleDBArchitect     = "db-architect"
+	AgentRolePlanner             = "planner"
+	AgentRoleBackend             = "backend"
+	AgentRoleFrontend            = "frontend"
+	AgentRoleReviewer            = "reviewer"
+	AgentRoleQA                  = "qa"
+	AgentRoleSecurityAuditor     = "security-auditor"
+	AgentRoleDBArchitect         = "db-architect"
+	AgentRoleDocumentationWriter = "documentation-writer"
 )
 
 // Agent statuses.

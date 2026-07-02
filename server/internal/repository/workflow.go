@@ -114,6 +114,13 @@ func (r *WorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, ste
 	return nil
 }
 
+func (r *WorkflowRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Delete(&models.WorkflowCheckpoint{}).Error; err != nil {
+		return fmt.Errorf("delete workflow checkpoints by task: %w", err)
+	}
+	return nil
+}
+
 func (r *WorkflowRepo) ResetStuckJobs(ctx context.Context) error {
 	staleBefore := time.Now().Add(-10 * time.Minute)
 	err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).

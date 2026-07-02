@@ -95,7 +95,7 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 		containerPatchPath := filepath.Join(containerTargetPath, "patch.diff")
 
-		cmd := fmt.Sprintf("git -C %[1]s apply --check -R %[2]s || git -C %[1]s apply --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R %[2]s 2>/dev/null || git -C %[1]s apply --recount --whitespace=nowarn %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s ; find %[1]s -type f \\( -name '*.orig' -o -name '*.rej' \\) -delete",
 			workspace.QuoteShellArg(containerTargetPath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
@@ -163,7 +163,7 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		containerPatchPath := filepath.Join(containerRepoWorktreePath, "patch.diff")
 
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
-		cmd := fmt.Sprintf("git -C %[1]s apply --check -R -p1 %[2]s || git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s || patch -d %[1]s -p1 < %[2]s || patch -d %[1]s -p0 < %[2]s",
+		cmd := fmt.Sprintf("git -C %[1]s apply --check -R -p1 %[2]s 2>/dev/null || git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s ; find %[1]s -type f \\( -name '*.orig' -o -name '*.rej' \\) -delete",
 			workspace.QuoteShellArg(containerRepoWorktreePath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)

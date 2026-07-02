@@ -119,7 +119,8 @@ func (m *Manager) AcquireWorkspaceLock(ctx context.Context, task *models.Task, j
 	}
 
 	// 4. Start heartbeat loop
-	hbCtx, hbCancel := context.WithCancel(context.Background())
+	// Finding 7: Align heartbeat lifecycle with actual task/job execution context
+	hbCtx, hbCancel := context.WithCancel(ctx)
 	m.LockCancels.Store(task.ID, hbCancel)
 
 	go func(tID string, lPath string) {

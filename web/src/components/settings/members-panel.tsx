@@ -69,6 +69,14 @@ const DEFAULT_FLEET = [
     autonomy_level: "supervised",
     assignment_strategy: "auto_join",
   },
+  {
+    name: "AI Documentation Writer",
+    role: "documentation-writer",
+    goal: "Write and update high-quality project documentation, readme files, and user guides.",
+    model_level_group: "balanced",
+    autonomy_level: "supervised",
+    assignment_strategy: "auto_join",
+  },
 ];
 
 export function MembersPanel() {

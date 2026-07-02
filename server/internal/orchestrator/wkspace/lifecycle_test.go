@@ -35,6 +35,9 @@ func (m *testMockWorkflowsRepo) AcquireAdvisoryLock(ctx context.Context, taskID 
 func (m *testMockWorkflowsRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error {
 	return nil
 }
+func (m *testMockWorkflowsRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return nil
+}
 
 func TestInitTaskWorkspace_SingleRepo(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "task-ws-single-*")

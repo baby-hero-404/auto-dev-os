@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -186,6 +187,12 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		}
 		instruction := "Review the proposed changes. Here is the current workspace diff:\n\n" + diffText + "\n\n" +
 			"Return JSON findings with severity, file, line, and recommendation."
+		if len(s.rt.Task.Analysis) > 0 {
+			var analysis models.TaskAnalysis
+			if err := json.Unmarshal(s.rt.Task.Analysis, &analysis); err == nil && analysis.TasksMD != "" {
+				instruction += "\n\nCRITICAL RUBRIC - You MUST verify that the following tasks have been completed correctly and accurately based on the diff. If any task is incomplete or not addressed, report a finding with 'requires_fix': true:\n\n" + analysis.TasksMD
+			}
+		}
 		out, err := s.llm.RunLLMStep(ctx, s.rt.Task, reviewerAgent, s.rt.JobID, workflow.StepReview, instruction)
 		if err != nil {
 			return nil, err

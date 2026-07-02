@@ -89,6 +89,8 @@ func rolesForTask(task *models.Task) []string {
 				primaryRole = models.AgentRoleQA
 			case "security":
 				primaryRole = models.AgentRoleSecurityAuditor
+			case "documentation", "readme", "markdown":
+				primaryRole = models.AgentRoleDocumentationWriter
 			}
 		}
 	}

@@ -35,6 +35,10 @@ func (m *mockArtifactRepo) ListByTaskID(ctx context.Context, taskID string) ([]m
 	return nil, nil
 }
 
+func (m *mockArtifactRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return nil
+}
+
 func TestWorkflowHandler_Artifacts(t *testing.T) {
 	repo := &mockArtifactRepo{
 		artifacts: []models.WorkflowArtifact{

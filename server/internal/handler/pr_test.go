@@ -114,6 +114,10 @@ func (m *testWorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any
 	return nil
 }
 
+func (m *testWorkflowRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	return nil
+}
+
 // Mock TaskService
 type mockTaskSvc struct {
 	TaskService

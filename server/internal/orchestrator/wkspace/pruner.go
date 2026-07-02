@@ -68,6 +68,17 @@ func (m *Manager) PruneWorkspaces(ctx context.Context) (int, error) {
 			continue
 		}
 		taskID := entry.Name()
+
+		// Finding 5: Enforce time-based retention cutoff for all workspaces
+		if info.ModTime().Before(cutoff) {
+			if err := m.RemoveWorkspace(taskID); err != nil {
+				observability.Warn(ctx, "workspace prune failed", "name", taskID, "error", err)
+				continue
+			}
+			removed++
+			continue
+		}
+
 		if m.Tasks != nil {
 			task, err := m.Tasks.GetByID(ctx, taskID)
 			if err != nil {
@@ -81,14 +92,6 @@ func (m *Manager) PruneWorkspaces(ctx context.Context) (int, error) {
 			if task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusFailed {
 				if err := m.PartialCleanupWorkspace(ctx, taskID); err != nil {
 					observability.Warn(ctx, "workspace prune failed", "name", taskID, "error", err)
-					continue
-				}
-				removed++
-			}
-		} else {
-			if info.ModTime().Before(cutoff) {
-				if err := m.RemoveWorkspace(entry.Name()); err != nil {
-					observability.Warn(ctx, "workspace prune failed", "name", entry.Name(), "error", err)
 					continue
 				}
 				removed++

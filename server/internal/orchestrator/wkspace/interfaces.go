@@ -20,10 +20,12 @@ type GitOpsClient interface {
 
 type ArtifactRepository interface {
 	ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error)
+	DeleteByTaskID(ctx context.Context, taskID string) error
 }
 
 type WorkflowRepository interface {
 	ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error)
 	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)
 	ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error
+	DeleteByTaskID(ctx context.Context, taskID string) error
 }

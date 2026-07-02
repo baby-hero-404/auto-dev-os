@@ -147,6 +147,7 @@ func run() error {
 			time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
 			time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
 		),
+		orchestrator.WithLLMTraceLogging(cfg.Logging.LLMTraceEnabled, cfg.Logging.LLMLogLevel),
 	}
 
 	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {

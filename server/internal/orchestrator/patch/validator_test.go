@@ -96,6 +96,13 @@ func TestValidateSearchReplace(t *testing.T) {
 			expectedErrs:  1,
 			expectedMatch: "does not exist", // Will match "does not exist" or "Cannot read file"
 		},
+		{
+			name: "File creation validation (Missing file, empty SEARCH)",
+			blocks: []EditBlock{
+				{Filepath: "newfile.txt", Search: "", Replace: "some content"},
+			},
+			expectedErrs: 0,
+		},
 	}
 
 	for _, tc := range tests {

@@ -46,16 +46,20 @@ export function Markdown({ content }: MarkdownProps) {
         li: ({ ...props }: ComponentProps<"li">) => (
           <li className="text-sm text-content-muted" {...props} />
         ),
-        code: ({ inline, children, ...props }: CodeComponentProps) => {
-          if (inline) {
+        code: ({ className, children, ...props }: any) => {
+          const match = /language-(\w+)/.exec(className || "");
+          // If there's no language match and no newlines, it's inline code
+          const isInline = !match && !String(children).includes("\n");
+          
+          if (isInline) {
             return (
-              <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono text-brand-primary border border-stroke" {...props}>
+              <code className="bg-surface px-1.5 py-0.5 rounded text-[11px] font-mono text-brand-primary border border-stroke/80 mx-0.5" {...props}>
                 {children}
               </code>
             );
           }
           return (
-            <code className="block text-slate-300 font-mono text-[11px]" {...props}>
+            <code className={`${className || ""} block text-slate-300 font-mono text-[11px]`} {...props}>
               {children}
             </code>
           );

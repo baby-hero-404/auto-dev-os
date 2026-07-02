@@ -613,19 +613,40 @@ export default function ProjectTaskDetailPage({
             </span>
           )}
         </div>
-        <div className="grid gap-2 md:grid-cols-5 xl:grid-cols-10">
+        <div className="relative flex w-full items-start justify-between gap-2 overflow-x-auto pb-4 pt-2 hide-scrollbar">
+          {/* Connector Line Background */}
+          <div className="absolute left-8 right-8 top-6 -z-10 h-[2px] -translate-y-1/2 bg-stroke/50" />
+          
           {workflowSteps.map((step, index) => {
             const status = latest.get(step) ?? "pending";
+            const isCompleted = status === "success" || status === "recorded";
+            const isRunning = status === "running";
+            const isFailed = status === "failed";
+            
             return (
-              <div key={step} className="rounded-lg border border-stroke bg-surface/30 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-content-muted">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <WorkflowDot status={status} />
+              <div key={step} className="group relative flex flex-col items-center justify-start gap-2.5 min-w-[70px] flex-1">
+                {/* Connecting Line Progress Overlay */}
+                {index > 0 && isCompleted && (
+                  <div className="absolute right-[50%] top-6 -z-10 h-[2px] w-full bg-brand-primary transition-all duration-500" />
+                )}
+                
+                <div className={`relative z-10 flex size-8 items-center justify-center rounded-full border-2 transition-all duration-300 shadow-sm ${
+                  isCompleted ? "border-brand-primary bg-brand-primary/10 text-brand-primary" : 
+                  isFailed ? "border-rose-500 bg-rose-500/10 text-rose-500" :
+                  isRunning ? "border-sky-500 bg-sky-500/10 text-sky-500 shadow-[0_0_12px_rgba(14,165,233,0.4)] animate-pulse" : 
+                  "border-stroke bg-card text-content-muted"
+                }`}>
+                  {isCompleted ? <Check size={14} strokeWidth={3} /> : <span className="font-mono text-[11px] font-bold">{index + 1}</span>}
                 </div>
-                <div className="mt-2 text-xs font-semibold capitalize text-foreground">{step.replace("_", " ")}</div>
-                <div className="mt-1 text-[10px] font-bold uppercase text-content-muted">{status}</div>
+                
+                <div className="text-center w-full px-1">
+                  <div className={`text-[10px] font-bold uppercase tracking-wider transition-colors line-clamp-2 leading-tight ${
+                    isCompleted || isRunning ? "text-foreground" : "text-content-muted"
+                  }`}>
+                    {step.replace("_", " ")}
+                  </div>
+                  <div className="mt-1 text-[9px] font-bold uppercase text-content-muted/70">{status}</div>
+                </div>
               </div>
             );
           })}
@@ -645,11 +666,11 @@ export default function ProjectTaskDetailPage({
                   </h2>
                 </div>
                 {(analysisData.proposal_md || analysisData.specs_md || analysisData.design_md || analysisData.tasks_md) && (
-                  <div className="flex gap-1 bg-surface p-1 rounded-md border border-stroke text-xs font-mono">
+                  <div className="flex gap-1.5 bg-surface/60 p-1.5 rounded-lg border border-stroke shadow-inner overflow-x-auto hide-scrollbar">
                     <button
                       onClick={() => setActiveSpecTab("summary")}
-                      className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                        activeSpecTab === "summary" ? "bg-brand-primary text-slate-950 font-semibold" : "text-content-muted hover:text-foreground"
+                      className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                        activeSpecTab === "summary" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                       }`}
                     >
                       Summary
@@ -657,41 +678,41 @@ export default function ProjectTaskDetailPage({
                     {analysisData.proposal_md && (
                       <button
                         onClick={() => setActiveSpecTab("proposal")}
-                        className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          activeSpecTab === "proposal" ? "bg-brand-primary text-slate-950 font-semibold" : "text-content-muted hover:text-foreground"
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                          activeSpecTab === "proposal" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                         }`}
                       >
-                        proposal.md
+                        Proposal
                       </button>
                     )}
                     {analysisData.specs_md && (
                       <button
                         onClick={() => setActiveSpecTab("specs")}
-                        className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          activeSpecTab === "specs" ? "bg-brand-primary text-slate-950 font-semibold" : "text-content-muted hover:text-foreground"
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                          activeSpecTab === "specs" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                         }`}
                       >
-                        specs.md
+                        Specs
                       </button>
                     )}
                     {analysisData.design_md && (
                       <button
                         onClick={() => setActiveSpecTab("design")}
-                        className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          activeSpecTab === "design" ? "bg-brand-primary text-slate-950 font-semibold" : "text-content-muted hover:text-foreground"
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                          activeSpecTab === "design" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                         }`}
                       >
-                        design.md
+                        Design
                       </button>
                     )}
                     {analysisData.tasks_md && (
                       <button
                         onClick={() => setActiveSpecTab("tasks")}
-                        className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          activeSpecTab === "tasks" ? "bg-brand-primary text-slate-950 font-semibold" : "text-content-muted hover:text-foreground"
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${
+                          activeSpecTab === "tasks" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                         }`}
                       >
-                        tasks.md
+                        Tasks
                       </button>
                     )}
                   </div>
@@ -774,25 +795,33 @@ export default function ProjectTaskDetailPage({
                           <Check size={14} className="text-brand-primary" />
                           Interactive Execution Plan
                         </h3>
-                        <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                        <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
                           {analysisData.execution_plan.map((step, idx) => {
                             const isDone = !!completedPlanSteps[idx];
                             return (
                               <label
                                 key={idx}
-                                className={`flex items-start gap-2.5 rounded-lg border p-2.5 transition cursor-pointer select-none ${
+                                className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-all duration-300 cursor-pointer select-none relative overflow-hidden ${
                                   isDone
-                                    ? "border-emerald-500/20 bg-emerald-500/5 text-content-muted line-through"
-                                    : "border-stroke bg-card hover:border-brand-primary/50 text-content"
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-content-muted shadow-sm"
+                                    : "border-stroke bg-surface hover:border-brand-primary/50 text-foreground hover:shadow-md hover:bg-surface/80"
                                 }`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={isDone}
                                   onChange={() => togglePlanStep(idx)}
-                                  className="mt-0.5 rounded border-stroke text-brand-primary focus:ring-brand-primary"
+                                  className="hidden"
                                 />
-                                <span className="text-xs leading-relaxed">{step}</span>
+                                <div className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-[6px] border transition-all duration-300 ${
+                                  isDone ? "bg-emerald-500 border-emerald-500 text-slate-950 scale-110" : "border-stroke/80 bg-background group-hover:border-brand-primary group-hover:bg-brand-primary/10"
+                                }`}>
+                                  {isDone && <Check size={14} strokeWidth={3.5} />}
+                                </div>
+                                <div className={`flex-1 text-sm leading-relaxed transition-all duration-300 [&_p]:mb-0 ${isDone ? "line-through opacity-70" : ""}`}>
+                                  <Markdown content={step} />
+                                </div>
+                                {isDone && <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 via-emerald-500/5 to-emerald-500/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />}
                               </label>
                             );
                           })}
@@ -871,18 +900,22 @@ export default function ProjectTaskDetailPage({
               <Clock size={16} className="text-brand-primary" />
               <h2 className="font-heading text-base font-bold text-foreground">Checkpoints</h2>
             </div>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+            <div className="relative space-y-4 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar pl-2 mt-2">
+              <div className="absolute left-3.5 top-2 bottom-2 w-[2px] bg-stroke/60 rounded-full" />
               {(workflow?.checkpoints ?? [])
                 .slice()
                 .reverse()
-                .map((checkpoint) => (
-                  <div key={checkpoint.id} className="rounded-lg border border-stroke bg-surface/20 p-3">
-                    <div className="font-mono text-xs font-bold text-brand-primary capitalize">{checkpoint.step.replace("_", " ")}</div>
-                    <div className="text-[10px] text-content-muted mt-0.5">{new Date(checkpoint.created_at).toLocaleString()}</div>
+                .map((checkpoint, index) => (
+                  <div key={checkpoint.id} className="relative pl-7 group">
+                    <div className="absolute left-[-2px] top-2.5 size-[11px] rounded-full border-2 border-card bg-brand-primary ring-2 ring-transparent group-hover:ring-brand-primary/30 transition-all" />
+                    <div className="rounded-lg border border-stroke bg-surface/40 p-2.5 hover:bg-surface/80 transition-colors shadow-sm">
+                      <div className="font-mono text-[11px] font-bold text-brand-primary capitalize tracking-wide">{checkpoint.step.replace("_", " ")}</div>
+                      <div className="text-[10px] text-content-muted mt-1 font-medium">{new Date(checkpoint.created_at).toLocaleString()}</div>
+                    </div>
                   </div>
                 ))}
               {(workflow?.checkpoints ?? []).length === 0 && (
-                <p className="text-xs text-content-muted italic">No checkpoints recorded.</p>
+                <p className="text-xs text-content-muted italic pl-6">No checkpoints recorded.</p>
               )}
             </div>
           </div>

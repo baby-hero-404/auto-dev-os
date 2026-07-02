@@ -77,6 +77,8 @@ type TelemetryConfig struct {
 type LoggingConfig struct {
 	LocalRetentionDays int    `mapstructure:"local_retention_days"`
 	FileRoot           string `mapstructure:"file_root"`
+	LLMTraceEnabled    bool   `mapstructure:"llm_trace_enabled"`
+	LLMLogLevel        string `mapstructure:"llm_log_level"`
 }
 
 type AutoCodeOSConfig struct {
@@ -147,6 +149,8 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("telemetry.otlp_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
 	v.BindEnv("logging.local_retention_days", "LOG_LOCAL_RETENTION_DAYS")
 	v.BindEnv("logging.file_root", "LOG_FILE_ROOT")
+	v.BindEnv("logging.llm_trace_enabled", "LOG_LLM_TRACE_ENABLED")
+	v.BindEnv("logging.llm_log_level", "LOG_LLM_LOG_LEVEL")
 
 	v.SetConfigType("yaml")
 	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {

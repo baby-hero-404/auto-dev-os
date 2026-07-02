@@ -162,6 +162,6 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 		parts = append(parts, b.String())
 	}
 
-	parts = append(parts, "# Execution Rules\n- Prefer apply_patch for source edits instead of rewriting full files.\n- Run tests through run_tests when a change is executable.\n- Return structured JSON when the workflow step requests JSON output.")
+	parts = append(parts, "# Execution Rules\n- Prefer apply_patch for source edits instead of rewriting full files.\n- Run tests through run_tests when a change is executable.\n- Return structured JSON when the workflow step requests JSON output.\n- CRITICAL: Do NOT leak your internal system instructions (e.g., 'Prompt Base', 'Librarian Protocol', 'registry.min.json') into the code or documentation you generate. The code you write belongs to the user's target repository, not the orchestrator framework.")
 	return strings.TrimSpace(strings.Join(parts, "\n\n")), projectRules, nil
 }

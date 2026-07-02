@@ -54,15 +54,8 @@ func (a *SearchReplaceApplier) Apply(ctx context.Context, task *models.Task, age
 		}
 		basePath = a.runner.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 	} else {
-		// Multi-repo: HostWorktreePath might need to be resolved per-repo if blocks have repo prefixes.
-		// For simplicity, we assume blocks have paths relative to localPath like "repo-a/src/main.go"
-		// We can just use localPath or the specific HostWorktreePath.
-		// Wait, localPath is `code/repos/repo-name/worktrees/suffix`. In multi-repo, it's `workspace/repo-name`.
-		// Let's use localPath for multi-repo, or we can look up the repo.
-		// Since we have option B path translation, files in multi-repo are `repo-name/...`
-		// which is relative to `localPath/code/repos` or similar. Let's just use `localPath`.
-		// Wait, `Runner.HostWorktreePath` uses repoHostPath. If it's multi-repo, we should probably resolve per file.
-		// To keep it simple, we'll let ApplySearchReplace use `basePath` but we should compute it properly.
+		// Multi-repo: blocks use repo-relative paths (e.g. "repo-a/src/main.go").
+		// Resolve against the task workspace root which contains all repo checkouts.
 		basePath = a.runner.HostWorktreePath(task, localPath, worktreeSuffix)
 	}
 

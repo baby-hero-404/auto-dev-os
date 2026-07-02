@@ -165,7 +165,7 @@ You must output ONLY a valid JSON object (or inside a ` + "```json" + ` block).
 The JSON object MUST have the following structure:
 {
   "complexity": "easy" | "medium" | "hard",
-  "primary_category": "frontend" | "backend" | "database" | "devops" | "qa" | "security",
+  "primary_category": "frontend" | "backend" | "database" | "devops" | "qa" | "security" | "documentation", // use 'documentation' if task is purely editing/creating documentation, READMEs, or markdown files
   "scope": "A clear, detailed description of the scope of the change",
   "affected_files": ["list", "of", "files", "expected", "to", "be", "modified"],
   "risks": ["list", "of", "potential", "risks", "and", "challenges"],

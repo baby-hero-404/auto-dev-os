@@ -41,6 +41,8 @@ type Orchestrator struct {
 	wkspace       *wkspace.Manager
 	checkpoints   *checkpoint.Store
 	repoutil      *repoutil.Manager
+	llmTraceEnabled bool
+	llmLogLevel     string
 }
 
 // WorkspaceRetention configures how long completed workspaces are kept.
@@ -97,6 +99,13 @@ func WithWorkspaceRoot(rootPath string) Option {
 	}
 }
 
+func WithLLMTraceLogging(enabled bool, logLevel string) Option {
+	return func(o *Orchestrator) {
+		o.llmTraceEnabled = enabled
+		o.llmLogLevel = logLevel
+	}
+}
+
 func WithWorkspaceRetention(retention, interval time.Duration) Option {
 	return func(o *Orchestrator) {
 		o.retention = WorkspaceRetention{Retention: retention, Interval: interval}
@@ -117,11 +126,13 @@ func WithPrompts(prompts PromptBuilder) Option {
 
 func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager AgentAssigner, runtime sandbox.Runtime, opts ...Option) *Orchestrator {
 	o := &Orchestrator{
-		tasks:     taskRepo,
-		workflows: workflowRepo,
-		agents:    agentManager,
-		runtime:   runtime,
-		retention: defaultWorkspaceRetention(),
+		tasks:           taskRepo,
+		workflows:       workflowRepo,
+		agents:          agentManager,
+		runtime:         runtime,
+		retention:       defaultWorkspaceRetention(),
+		llmTraceEnabled: true,
+		llmLogLevel:     "debug",
 	}
 	for _, opt := range opts {
 		opt(o)

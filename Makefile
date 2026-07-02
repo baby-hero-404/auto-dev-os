@@ -1,29 +1,72 @@
+# ── Auto Code OS Makefile ─────────────────────────────────────────────────────
+# A developer onboarding and workflow automation command center.
+
 -include .env
 export
+
+# Default port configurations
+SERVER_PORT ?= 8080
+WEB_PORT ?= 3000
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
 LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
 
-.PHONY: build run clean test api web dev dev-be dev-fe db-up db-down migrate db-clean clone-resource
+.PHONY: help init build run clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-resource
 
-# ── Build ────────────────────────────────────────────────
-build:
+# Default target displays the help menu
+.DEFAULT_GOAL := help
+
+# ── Setup & Initialization ───────────────────────────────────────────────
+
+init: ## Setup local environment (configs & deps)
+	@echo "==> Setting up environment..."
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "Created .env from .env.example"; \
+	else \
+		echo ".env already exists"; \
+	fi
+	@echo "==> Installing web dependencies..."
+	cd web && npm install
+	@echo "==> Initialization complete. Please update your .env file with necessary keys."
+
+clone-resource: ## Clone external test/skill resources
+	@echo "==> Cloning external resources..."
+	bash scripts/clone_resources.sh
+
+# ── Infrastructure & Database ────────────────────────────────────────────
+
+db-up: ## Start PostgreSQL database container
+	@echo "==> Starting database container..."
+	docker compose up -d postgres
+
+db-down: ## Stop and remove Docker compose containers
+	@echo "==> Stopping Docker containers..."
+	docker compose down
+
+db-clean: ## Destroy database volumes and containers
+	@echo "==> Destroying database volumes and containers..."
+	docker compose down -v
+
+migrate: db-up ## Run database migrations
+	@echo "==> Running database migrations..."
+	@sleep 2
+	cd server && go run ./cmd/migrate
+
+# ── Build & Sandbox ──────────────────────────────────────────────────────
+
+build: ## Build the CLI binary
+	@echo "==> Building CLI binary..."
 	cd server && go build $(LDFLAGS) -o ../bin/auto-code-os ./cmd/cli
 
-# ── Run (PoC) ────────────────────────────────────────────
-run:
-	cd server && go run $(LDFLAGS) ./cmd/cli $(ARGS)
+sandbox-build: ## Build the Docker sandbox image for agents
+	@echo "==> Building agent Docker sandbox image..."
+	docker build -t auto-code-os-sandbox:latest -f docker/Dockerfile.sandbox .
 
-# ── API Server ───────────────────────────────────────────
-api:
-	cd server && go run $(LDFLAGS) ./cmd/api
+# ── Running Development Servers (Host-Direct + Docker DB) ────────────────
 
-# ── Web UI ───────────────────────────────────────────────
-web:
-	cd web && NEXT_PUBLIC_API_URL=http://localhost:$(SERVER_PORT)/api/v1 PORT=$(WEB_PORT) npm run dev
-
-dev:
-	@echo "Clearing port conflicts..."
+port-clean:
+	@echo "==> Checking and clearing port conflicts on ports $(SERVER_PORT) and $(WEB_PORT)..."
 	-@for port in $(SERVER_PORT) $(WEB_PORT); do \
 		pids=$$(lsof -t -i :$$port 2>/dev/null); \
 		if [ ! -z "$$pids" ]; then \
@@ -42,59 +85,69 @@ dev:
 		fi; \
 	done
 	@sleep 1
-	make db-up
+
+dev: port-clean db-up migrate ## Start full stack locally (DB in Docker, API and Web on Host)
+	@echo "==> Starting full stack..."
 	$(MAKE) -j2 api web
 
-# ── Development targets ──────────────────────────────────
-dev-be: db-up
-	$(MAKE) migrate
-	$(MAKE) api
+dev-be: db-up migrate api ## Run database, apply migrations, and start Go API server
 
-dev-fe:
-	$(MAKE) web
+dev-fe: web ## Start Next.js web UI dev server only
 
-migrate: db-up
-	sleep 3
-	cd server && go run ./cmd/migrate
+api: ## Run Go API server on Host
+	@echo "==> Starting Go API server on port $(SERVER_PORT)..."
+	cd server && go run $(LDFLAGS) ./cmd/api
 
-# ── Database ─────────────────────────────────────────────
-db-up:
-	docker compose up -d postgres
+web: ## Run Next.js web app on Host
+	@echo "==> Starting Next.js Web dev server on port $(WEB_PORT)..."
+	cd web && NEXT_PUBLIC_API_URL=http://localhost:$(SERVER_PORT)/api/v1 PORT=$(WEB_PORT) npm run dev
 
-db-down:
-	docker compose down
+run: ## Run the CLI (PoC mode) with ARGS='--task "..."'
+	cd server && go run $(LDFLAGS) ./cmd/cli $(ARGS)
 
-db-clean:
-	docker compose down -v
+# ── Quality, Formatting & Testing ─────────────────────────────────────────
 
-# ── Test ─────────────────────────────────────────────────
-test:
+test: test-be test-fe ## Run Go backend tests and Playwright E2E frontend tests
+
+test-be: ## Run Go backend tests only
+	@echo "==> Running backend Go tests..."
 	cd server && go test ./... -v -count=1
+
+test-fe: ## Run Playwright frontend tests only
+	@echo "==> Running frontend Playwright tests..."
 	cd web && npx playwright test
 
-# ── Clean ────────────────────────────────────────────────
-clean: db-clean
+lint: ## Run backend and frontend linters
+	@echo "==> Running linters..."
+	cd server && go vet ./...
+	cd web && npm run lint
+
+fmt: ## Format Go and TypeScript/JS code
+	@echo "==> Formatting code..."
+	cd server && go fmt ./...
+
+# ── Clean Up ─────────────────────────────────────────────────────────────
+
+clean: db-clean ## Remove build binaries, logs, and database containers/volumes
+	@echo "==> Cleaning build artifacts and temporary files..."
 	rm -rf bin/
 	rm -rf .data/
 	rm -rf server/.data/
 
-# ── Resources ────────────────────────────────────────────
-clone-resource:
-	bash scripts/clone_resources.sh
+# ── Help ─────────────────────────────────────────────────────────────────
 
-# ── Help ─────────────────────────────────────────────────
-help:
+help: ## Display this help screen
+	@echo "Auto Code OS - Onboarding & Development Workflow Commands"
+	@echo ""
 	@echo "Usage:"
-	@echo "  make build                    Build the CLI binary"
-	@echo "  make run ARGS='--task \"...\"'  Run the CLI with arguments"
-	@echo "  make api                      Run the API server"
-	@echo "  make web                      Run the Next.js web UI"
-	@echo "  make dev                      Run database, API, and web UI"
-	@echo "  make dev-be                   Run database, run migrations, and run API server"
-	@echo "  make dev-fe                   Run Next.js web UI dev server"
-	@echo "  make migrate                  Run database migrations"
-	@echo "  make db-up                    Start PostgreSQL container"
-	@echo "  make db-down                  Stop and remove containers"
-	@echo "  make test                     Run all tests"
-	@echo "  make clean                    Remove build artifacts, database volumes, and on-disk data"
-	@echo "  make clone-resource           Clone external repositories into resources directory"
+	@echo "  make <target> [variables]"
+	@echo ""
+	@echo "Targets:"
+	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Manual Command Summary:"
+	@echo "  make init              - Copy environment template and install web dependencies"
+	@echo "  make sandbox-build     - Build the agent Docker sandbox container image"
+	@echo "  make dev               - Spin up DB in Docker, migrate, start backend and frontend on host"
+	@echo "  make test              - Run backend and frontend tests"
+	@echo "  make clean             - Stop and wipe database, and remove build/cache directories"

@@ -527,10 +527,10 @@ export default function AnalyticsPage() {
               </tr>
             </thead>
             <tbody>
-              {(recentFailures || []).map((failure) => (
+               {(recentFailures || []).map((failure) => (
                 <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                   <td className="px-4 py-3">
-                    <Link href={`/projects/${failure.project_id}/tasks/${failure.task_id}/monitor`} className="font-medium text-white hover:text-brand-primary">
+                    <Link href={`/projects/${failure.project_id}/tasks/${failure.task_id}`} className="font-medium text-white hover:text-brand-primary">
                       {failure.title}
                     </Link>
                   </td>

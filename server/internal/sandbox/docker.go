@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -93,6 +94,43 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	}
 
 	envMap := mergedEnv(req)
+
+	mounts := []mount.Mount{
+		{
+			Type:   mount.TypeBind,
+			Source: workspace,
+			Target: "/workspace",
+		},
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+		// Define common language cache mappings: host relative path -> container target path
+		cacheDirs := map[string]string{
+			filepath.Join("go", "pkg", "mod"):   "/go/pkg/mod",
+			".npm":                              "/root/.npm",
+			filepath.Join(".cache", "pip"):      "/root/.cache/pip",
+			".m2":                               "/root/.m2",
+			".gradle":                           "/root/.gradle",
+			filepath.Join(".cargo", "registry"): "/root/.cargo/registry",
+		}
+
+		for relHostPath, targetContainerPath := range cacheDirs {
+			absHostPath := filepath.Join(homeDir, relHostPath)
+			if stat, err := os.Stat(absHostPath); err == nil && stat.IsDir() {
+				mounts = append(mounts, mount.Mount{
+					Type:     mount.TypeBind,
+					Source:   absHostPath,
+					Target:   targetContainerPath,
+					ReadOnly: true,
+				})
+				// If we mounted Go cache, set GOPATH env var
+				if relHostPath == filepath.Join("go", "pkg", "mod") {
+					envMap["GOPATH"] = "/go"
+				}
+			}
+		}
+	}
+
 	env := make([]string, 0, len(envMap))
 	for key, value := range envMap {
 		env = append(env, key+"="+value)
@@ -114,13 +152,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 			Memory:   r.config.MemoryBytes,
 			NanoCPUs: r.config.NanoCPUs,
 		},
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: workspace,
-				Target: "/workspace",
-			},
-		},
+		Mounts: mounts,
 	}, nil, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("create docker container: %w", err)

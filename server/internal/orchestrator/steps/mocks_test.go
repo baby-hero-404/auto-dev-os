@@ -16,6 +16,13 @@ func (m *mockTaskReader) GetByID(ctx context.Context, id string) (*models.Task, 
 	return m.task, m.err
 }
 
+func (m *mockTaskReader) Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error) {
+	if input.Analysis != nil {
+		m.task.Analysis = input.Analysis
+	}
+	return m.task, m.err
+}
+
 type mockStatusUpdater struct {
 	called     bool
 	lastID     string
@@ -55,7 +62,7 @@ func (m *mockLLMRunner) RunLLMStep(ctx context.Context, task *models.Task, agent
 
 type mockWorktreeManager struct {
 	loadReposFunc  func(ctx context.Context, task *models.Task) ([]models.Repository, error)
-	setupBranch    func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace)
+	setupBranch    func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool)
 	loadReposError error
 	setupCalled    bool
 }
@@ -70,10 +77,10 @@ func (m *mockWorktreeManager) LoadTargetRepositories(ctx context.Context, task *
 	return []models.Repository{{ID: "repo1", DisplayName: "test-repo"}}, nil
 }
 
-func (m *mockWorktreeManager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+func (m *mockWorktreeManager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
 	m.setupCalled = true
 	if m.setupBranch != nil {
-		m.setupBranch(ctx, task, agent, jobID, repos, ws)
+		m.setupBranch(ctx, task, agent, jobID, repos, ws, skipFE)
 	}
 }
 

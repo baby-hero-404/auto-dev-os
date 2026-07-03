@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -143,6 +144,54 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 		if kind == ProjectUnknown {
 			kind = DetectProjectKind(absModDir)
 		}
+
+		if kind == ProjectGo {
+			r.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("running 'go mod tidy' on host in %s to resolve dependencies", absModDir))
+			cmdTidy := exec.Command("go", "mod", "tidy")
+			cmdTidy.Dir = absModDir
+			if tidyErr := cmdTidy.Run(); tidyErr != nil {
+				r.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to run 'go mod tidy' on host: %v", tidyErr))
+			}
+		} else if kind == ProjectJS {
+			pkgJson := filepath.Join(absModDir, "package.json")
+			if _, statErr := os.Stat(pkgJson); statErr == nil {
+				r.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("running 'npm install' on host in %s to resolve packages", absModDir))
+				cmdInstall := exec.Command("npm", "install", "--no-audit", "--no-fund")
+				cmdInstall.Dir = absModDir
+				if installErr := cmdInstall.Run(); installErr != nil {
+					r.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to run 'npm install' on host: %v", installErr))
+				}
+			}
+		} else if kind == ProjectPython {
+			reqsTxt := filepath.Join(absModDir, "requirements.txt")
+			if _, statErr := os.Stat(reqsTxt); statErr == nil {
+				r.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("running 'pip install -r requirements.txt' on host in %s to resolve packages", absModDir))
+				cmdPip := exec.Command("pip", "install", "-r", "requirements.txt")
+				cmdPip.Dir = absModDir
+				if pipErr := cmdPip.Run(); pipErr != nil {
+					r.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to run pip install on host: %v", pipErr))
+				}
+			}
+		} else if kind == ProjectJava {
+			pomXml := filepath.Join(absModDir, "pom.xml")
+			buildGradle := filepath.Join(absModDir, "build.gradle")
+			if _, statErr := os.Stat(pomXml); statErr == nil {
+				r.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("running 'mvn dependency:resolve' on host in %s to resolve packages", absModDir))
+				cmdMvn := exec.Command("mvn", "dependency:resolve")
+				cmdMvn.Dir = absModDir
+				if mvnErr := cmdMvn.Run(); mvnErr != nil {
+					r.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to run maven resolve on host: %v", mvnErr))
+				}
+			} else if _, statErr := os.Stat(buildGradle); statErr == nil {
+				r.Log(ctx, task.ID, &jobID, "info", fmt.Sprintf("running './gradlew compileJava' on host in %s to resolve packages", absModDir))
+				cmdGradle := exec.Command("./gradlew", "compileJava")
+				cmdGradle.Dir = absModDir
+				if gradleErr := cmdGradle.Run(); gradleErr != nil {
+					r.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to run gradlew on host: %v", gradleErr))
+				}
+			}
+		}
+
 		cmd, ok := TargetedTestCommand(kind, containerModPath, g.files, g.goPackages)
 		if !ok {
 			continue

@@ -2,6 +2,7 @@ package repoutil
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -21,6 +22,7 @@ type Manager struct {
 	SandboxGitGetWorkspaceDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, worktreeSuffix string) (string, error)
 	SandboxGitGetPRDiff        func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error)
 	Log                        func(ctx context.Context, taskID string, jobID *string, level string, message string)
+	UpdateTaskAnalysis         func(ctx context.Context, taskID string, analysis json.RawMessage) error
 }
 
 func NewManager(
@@ -38,6 +40,7 @@ func NewManager(
 	sandboxGitGetWorkspaceDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, worktreeSuffix string) (string, error),
 	sandboxGitGetPRDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error),
 	log func(ctx context.Context, taskID string, jobID *string, level string, message string),
+	updateTaskAnalysis func(ctx context.Context, taskID string, analysis json.RawMessage) error,
 ) *Manager {
 	return &Manager{
 		WorkspaceRoot:              workspaceRoot,
@@ -54,5 +57,6 @@ func NewManager(
 		SandboxGitGetWorkspaceDiff: sandboxGitGetWorkspaceDiff,
 		SandboxGitGetPRDiff:        sandboxGitGetPRDiff,
 		Log:                        log,
+		UpdateTaskAnalysis:         updateTaskAnalysis,
 	}
 }

@@ -54,6 +54,7 @@ type mockWorkflowRepo struct {
 	job            *models.WorkflowJob
 	checkpoint     *models.WorkflowCheckpoint
 	checkpoints    []models.WorkflowCheckpoint
+	deletedSteps   []string
 	agentUpdateErr error
 }
 
@@ -100,6 +101,7 @@ func (m *mockWorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) (
 }
 
 func (m *mockWorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
+	m.deletedSteps = append([]string{}, steps...)
 	m.checkpoint = nil
 	m.checkpoints = nil
 	return nil
@@ -110,6 +112,10 @@ func (m *mockWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) er
 }
 
 func (m *mockWorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockWorkflowRepo) ResetAllRunningJobs(ctx context.Context) error {
 	return nil
 }
 
@@ -1240,6 +1246,56 @@ func TestOrchestrator_ApproveMerge(t *testing.T) {
 	}
 	if workflowRepo.job.Status != models.WorkflowJobStatusDone {
 		t.Errorf("expected paused workflow job to be marked done after merge approval, got: %s", workflowRepo.job.Status)
+	}
+}
+
+func TestOrchestrator_ClearCheckpointsForRepair_PrunesDynamicSubsteps(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-repair-123",
+		ProjectID:  "proj-repair-123",
+		Complexity: models.TaskComplexityMedium,
+	}
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{}
+	orch := New(taskRepo, workflowRepo, nil, nil)
+
+	if err := orch.ClearCheckpointsForRepair(context.Background(), task.ID); err != nil {
+		t.Fatalf("ClearCheckpointsForRepair failed: %v", err)
+	}
+
+	expected := []string{"code_backend", "code_frontend", "review", "fix", "test", "pr"}
+	if len(workflowRepo.deletedSteps) != len(expected) {
+		t.Fatalf("unexpected deleted step count: got %v want %v", workflowRepo.deletedSteps, expected)
+	}
+	for i, step := range expected {
+		if workflowRepo.deletedSteps[i] != step {
+			t.Fatalf("unexpected deleted step at %d: got %q want %q", i, workflowRepo.deletedSteps[i], step)
+		}
+	}
+}
+
+func TestOrchestrator_ClearCheckpointsForRepair_EasyClearsCodingSteps(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-repair-456",
+		ProjectID:  "proj-repair-456",
+		Complexity: models.TaskComplexityEasy,
+	}
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{}
+	orch := New(taskRepo, workflowRepo, nil, nil)
+
+	if err := orch.ClearCheckpointsForRepair(context.Background(), task.ID); err != nil {
+		t.Fatalf("ClearCheckpointsForRepair failed: %v", err)
+	}
+
+	expected := []string{"code_backend", "code_frontend", "review", "fix", "test", "pr"}
+	if len(workflowRepo.deletedSteps) != len(expected) {
+		t.Fatalf("unexpected deleted step count: got %v want %v", workflowRepo.deletedSteps, expected)
+	}
+	for i, step := range expected {
+		if workflowRepo.deletedSteps[i] != step {
+			t.Fatalf("unexpected deleted step at %d: got %q want %q", i, workflowRepo.deletedSteps[i], step)
+		}
 	}
 }
 

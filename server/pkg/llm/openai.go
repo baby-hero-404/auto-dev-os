@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const openaiAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -23,7 +24,7 @@ func NewOpenAI(apiKey, model string) *OpenAI {
 	return &OpenAI{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

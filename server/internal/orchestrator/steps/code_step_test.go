@@ -59,7 +59,7 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 	}
 	artifactMock := &mockArtifactSaver{}
 	worktreeMock := &mockWorktreeManager{
-		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+		setupBranch: func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
 			// mock call
 		},
 	}

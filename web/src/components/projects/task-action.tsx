@@ -79,7 +79,7 @@ export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionP
 
       {showMonitor && (
         <Link
-          href={`/projects/${projectID}/tasks/${task.id}/monitor`}
+          href={`/projects/${projectID}/tasks/${task.id}`}
           className="inline-flex items-center gap-2 rounded-md border border-info/40 bg-info/10 px-3 py-2 text-sm font-medium text-info transition hover:bg-info/20"
         >
           <Activity size={15} /> Monitor
@@ -87,7 +87,7 @@ export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionP
       )}
 
       {/* Secondary action: Details is only shown if no other primary link to the same page exists */}
-      {!isPendingSpecReview && task.status !== "human_review" && task.status !== "failed" && (
+      {!isPendingSpecReview && task.status !== "human_review" && task.status !== "failed" && !showMonitor && (
         <Link
           className="inline-flex items-center gap-2 rounded-md border border-stroke bg-panel text-foreground px-3 py-2 text-sm transition hover:bg-surface"
           href={`/projects/${projectID}/tasks/${task.id}`}

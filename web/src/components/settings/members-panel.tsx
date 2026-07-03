@@ -302,7 +302,21 @@ export function MembersPanel() {
                         <Bot size={20} />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="truncate font-semibold text-foreground">{agent.name}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate font-semibold text-foreground">{agent.name}</h3>
+                          <span className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide border ${
+                            agent.status === "offline"
+                              ? "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                              : ["busy", "assigned", "running"].includes(agent.status)
+                              ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                              : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${
+                              agent.status === "offline" ? "bg-slate-400" : ["busy", "assigned", "running"].includes(agent.status) ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                            }`} />
+                            {agent.status === "offline" ? "Offline" : ["busy", "assigned", "running"].includes(agent.status) ? "Working" : "Free"}
+                          </span>
+                        </div>
                         <div className="mt-1 flex items-center gap-1.5">
                           <span className="text-xs text-content-muted capitalize">{agent.role}</span>
                           <span className="text-xs text-content-muted/60">·</span>
@@ -334,7 +348,6 @@ export function MembersPanel() {
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <Badge value={agent.role} />
-                    <Badge value={agent.status || "idle"} />
                     <Badge value={agent.autonomy_level} />
                     <span className="rounded border border-stroke bg-surface px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted">
                       {isAutoJoin ? "auto join" : "manual"}

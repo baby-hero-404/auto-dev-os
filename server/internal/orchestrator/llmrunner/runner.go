@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
@@ -37,6 +39,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 	}
 	localPath := sandbox.WorkspacePath(r.WorkspaceRoot, task.ID)
 	ctx = context.WithValue(ctx, retrieval.WorkspaceRootKey, localPath)
+	ctx = context.WithValue(ctx, prompt.StepIDCtxKey, stepID)
 
 	messages, err := r.initialMessages(ctx, task, agent)
 	if err != nil {
@@ -83,7 +86,18 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		var chatErr error
-		resp, chatErr = r.Provider.Chat(ctx, messages)
+		for chatAttempt := 1; chatAttempt <= 3; chatAttempt++ {
+			resp, chatErr = r.Provider.Chat(ctx, messages)
+			if chatErr == nil {
+				break
+			}
+			if isTransientError(chatErr) && chatAttempt < 3 {
+				r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
+				time.Sleep(time.Duration(chatAttempt) * 2 * time.Second)
+				continue
+			}
+			break
+		}
 		if chatErr != nil {
 			return nil, fmt.Errorf("llm call failed: %w", chatErr)
 		}
@@ -159,22 +173,41 @@ func (r Runner) log(ctx context.Context, taskID string, jobID *string, level, me
 }
 
 func shouldIncludeAffectedFiles(stepID string) bool {
-	return stepID == workflow.StepCodeBackend ||
-		stepID == workflow.StepCodeFrontend ||
+	return strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
+		strings.HasPrefix(stepID, workflow.StepCodeFrontend) ||
 		stepID == workflow.StepFix ||
 		stepID == workflow.StepReview
 }
 
 func requiresStrictJSON(stepID string) bool {
-	return stepID == workflow.StepCodeBackend ||
-		stepID == workflow.StepCodeFrontend ||
+	return strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
+		strings.HasPrefix(stepID, workflow.StepCodeFrontend) ||
 		stepID == workflow.StepFix ||
 		stepID == workflow.StepPlan ||
 		stepID == workflow.StepAnalyze
 }
 
 func requiresPatch(stepID string) bool {
-	return stepID == workflow.StepCodeBackend ||
-		stepID == workflow.StepCodeFrontend ||
+	return strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
+		strings.HasPrefix(stepID, workflow.StepCodeFrontend) ||
 		stepID == workflow.StepFix
+}
+
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") ||
+		strings.Contains(msg, "500") ||
+		strings.Contains(msg, "502") ||
+		strings.Contains(msg, "503") ||
+		strings.Contains(msg, "504") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "limit exceeded") ||
+		strings.Contains(msg, "resource exhausted") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "eof")
 }

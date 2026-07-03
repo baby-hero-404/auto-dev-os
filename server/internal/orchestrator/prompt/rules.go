@@ -81,6 +81,45 @@ func formatRules(rules []models.Rule) string {
 	return strings.Join(lines, "\n")
 }
 
+// codingStepExcludedRulePatterns lists phrases that indicate rules the LLM
+// cannot follow in a single-shot JSON coding step (no execution capability,
+// no user interaction, no skill loading).
+var codingStepExcludedRulePatterns = []string{
+	"run tests",
+	"run local tests",
+	"linting",
+	"Progressive Discovery",
+	"JIT Knowledge",
+	"Socratic Gate",
+	"ask the user",
+	"ask at least 3",
+	"Update ARCHITECTURE",
+	"Document architectural",
+}
+
+// filterRulesForStep removes rules that are impossible for the LLM to
+// follow during coding steps. For non-coding steps, all rules are kept.
+func filterRulesForStep(rules []models.Rule, stepID string) []models.Rule {
+	if !isCodingStep(stepID) {
+		return rules
+	}
+	var filtered []models.Rule
+	for _, r := range rules {
+		excluded := false
+		lower := strings.ToLower(r.Content)
+		for _, pattern := range codingStepExcludedRulePatterns {
+			if strings.Contains(lower, strings.ToLower(pattern)) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
 func (a *PromptAssembler) loadProjectDiskSkills(projectID string) ([]models.Skill, error) {
 	if a == nil || a.dataRoot == "" || projectID == "" {
 		return nil, nil

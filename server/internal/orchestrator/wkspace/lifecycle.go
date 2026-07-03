@@ -145,6 +145,36 @@ func (m *Manager) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 		return nil, fmt.Errorf("unmarshal metadata.json: %w", err)
 	}
 
+	if m.Repositories != nil {
+		projectRepos, err := m.Repositories.ListByProjectID(ctx, task.ProjectID)
+		if err == nil {
+			repoMap := make(map[string]models.Repository)
+			for _, r := range projectRepos {
+				repoMap[r.ID] = r
+			}
+
+			updated := false
+			for i, rWS := range meta.Repos {
+				if r, ok := repoMap[rWS.RepoID]; ok {
+					expectedBranch := r.Branch
+					if expectedBranch == "" {
+						expectedBranch = "main"
+					}
+					if rWS.DefaultBranch != expectedBranch {
+						meta.Repos[i].DefaultBranch = expectedBranch
+						meta.Repos[i].Paths.Main = orchestratorworkspace.NewPathManager("").RepoMainRelative(rWS.Name, expectedBranch)
+						updated = true
+					}
+				}
+			}
+			if updated {
+				if saveErr := m.SaveTaskWorkspaceMetadata(task, &models.TaskWorkspace{Root: ws.Root, Repos: meta.Repos}); saveErr != nil {
+					return nil, fmt.Errorf("failed to save reconciled workspace metadata: %w", saveErr)
+				}
+			}
+		}
+	}
+
 	ws.Repos = meta.Repos
 	return ws, nil
 }
@@ -266,6 +296,8 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 			}
 			workspaceRestored = true
 		}
+
+		m.populateGoModulesCache(ctx, task.ID, repoAbsPath)
 
 		ws.Repos[i].Branches.Integration = fmt.Sprintf("feature/%s", task.ID)
 	}
@@ -418,4 +450,22 @@ func (m *Manager) RemoveWorkspace(taskID string) error {
 		return fmt.Errorf("workspace path escapes root")
 	}
 	return os.RemoveAll(targetAbs)
+}
+
+func (m *Manager) populateGoModulesCache(ctx context.Context, taskID string, repoPath string) {
+	_ = filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.Name() == "go.mod" {
+			dir := filepath.Dir(path)
+			m.Log(ctx, taskID, nil, "info", fmt.Sprintf("Pre-downloading dependencies for Go module at %s on host...", dir))
+			cmd := exec.CommandContext(ctx, "go", "mod", "download")
+			cmd.Dir = dir
+			if err := cmd.Run(); err != nil {
+				m.Log(ctx, taskID, nil, "warn", fmt.Sprintf("go mod download failed on host for %s: %v", dir, err))
+			}
+		}
+		return nil
+	})
 }

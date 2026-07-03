@@ -109,9 +109,129 @@ func MatchAffectedFile(pattern, file string) bool {
 	return false
 }
 
+func IsUnderAffectedDir(file string, affectedFiles []string) bool {
+	file = strings.TrimSpace(file)
+	if file == "" {
+		return false
+	}
+
+	fileDir := filepath.ToSlash(filepath.Clean(filepath.Dir(file)))
+	for _, pattern := range affectedFiles {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		candidateDir := affectedPatternDir(pattern)
+		if candidateDir == "" {
+			continue
+		}
+		if fileDir == candidateDir || strings.HasPrefix(fileDir, candidateDir+"/") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func affectedPatternDir(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return ""
+	}
+
+	normalized := filepath.ToSlash(pattern)
+	if strings.HasSuffix(normalized, "/") {
+		dir := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(normalized)), "/")
+		if dir == "" {
+			return "."
+		}
+		return dir
+	}
+
+	if strings.ContainsAny(normalized, "*?[]") {
+		idx := strings.IndexAny(normalized, "*?[")
+		if idx == -1 {
+			idx = len(normalized)
+		}
+		base := strings.TrimSuffix(normalized[:idx], "/")
+		if base == "" {
+			return "."
+		}
+		return filepath.ToSlash(filepath.Clean(base))
+	}
+
+	dir := filepath.ToSlash(filepath.Clean(filepath.Dir(normalized)))
+	if dir == "" {
+		return "."
+	}
+	return dir
+}
+
 func CleanPatchPaths(patchText string) string {
 	re := regexp.MustCompile(`([ab])/` + regexp.QuoteMeta(workspace.ReposDirName) + `/[^/]+/(?:worktrees/[^/]+|[^/]+)/`)
 	return re.ReplaceAllString(patchText, "$1/")
+}
+
+func CleanJunkLines(patchText string) string {
+	lines := strings.Split(patchText, "\n")
+	var cleaned []string
+
+	validDiffHeaders := []string{
+		"diff --git ",
+		"index ",
+		"--- ",
+		"+++ ",
+		"@@ ",
+		"new file mode ",
+		"deleted file mode ",
+		"similarity index ",
+		"rename from ",
+		"rename to ",
+		"copy from ",
+		"copy to ",
+		"old mode ",
+		"new mode ",
+		"\\ No newline at end of file",
+	}
+
+	inHunk := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check if it's a valid diff header line
+		isHeader := false
+		for _, prefix := range validDiffHeaders {
+			if strings.HasPrefix(line, prefix) {
+				isHeader = true
+				break
+			}
+		}
+
+		if isHeader {
+			inHunk = false
+			if strings.HasPrefix(line, "@@ ") {
+				inHunk = true
+			}
+			cleaned = append(cleaned, line)
+			continue
+		}
+
+		if inHunk {
+			// In unified diff hunks, lines must start with '+', '-', ' ' (space), or be empty (sometimes LLMs omit the space)
+			if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") || line == "" {
+				cleaned = append(cleaned, line)
+			} else {
+				inHunk = false
+			}
+		} else {
+			// Outside of a hunk, we only preserve empty lines (or header lines which were already handled)
+			if trimmed == "" {
+				cleaned = append(cleaned, line)
+			}
+		}
+	}
+	return strings.Join(cleaned, "\n")
 }
 
 func CleanRepoPrefix(block string, repoName string) string {

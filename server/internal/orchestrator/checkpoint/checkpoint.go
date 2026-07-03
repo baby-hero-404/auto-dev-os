@@ -95,7 +95,7 @@ func (s *Store) GetSavedPatch(ctx context.Context, taskID string, step string) (
 	var latestPatch *models.WorkflowArtifact
 	for i := len(arts) - 1; i >= 0; i-- {
 		art := arts[i]
-		if art.Step == step && art.Type == "patch" {
+		if (art.Step == step || strings.HasPrefix(art.Step, step+"_cycle_")) && art.Type == "patch" {
 			latestPatch = &art
 			break
 		}

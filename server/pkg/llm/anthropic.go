@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
@@ -24,7 +25,7 @@ func NewAnthropic(apiKey, model string) *Anthropic {
 	return &Anthropic{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const geminiAPIURL = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
@@ -24,7 +25,9 @@ func NewGemini(apiKey, model string) *Gemini {
 	return &Gemini{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{},
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+		},
 	}
 }
 

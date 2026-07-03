@@ -29,13 +29,6 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 		concurrency = 1
 	}
 
-	// Recover stuck agents and jobs from previous crashes
-	if o.agents != nil {
-		if mgr, ok := o.agents.(*AgentManager); ok && mgr.repo != nil {
-			_ = mgr.repo.ResetAllStatuses(ctx)
-		}
-	}
-	_ = o.workflows.ResetStuckJobs(ctx)
 
 	sem := make(chan struct{}, concurrency)
 	ticker := time.NewTicker(interval)
@@ -82,6 +75,7 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			_ = o.workflows.ResetStuckJobs(ctx)
 		}
 	}
 }
@@ -253,8 +247,36 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if o.memHooks != nil {
 				o.memHooks.PostStepRecord(ctx, agent.ID, task, sessionID, event.StepID, string(event.Status), event.Output)
 			}
+			
+			if event.StepID == workflow.StepPlan && event.Status == workflow.StepStatusSuccess {
+				hasSubtasks := false
+				if subtasks, ok := event.Output["subtasks"].(map[string][]string); ok {
+					if len(subtasks["backend"]) > 0 || len(subtasks["frontend"]) > 0 {
+						hasSubtasks = true
+					}
+				} else if subtasksAny, ok := event.Output["subtasks"].(map[string]any); ok {
+					if be, ok := subtasksAny["backend"].([]any); ok && len(be) > 0 {
+						hasSubtasks = true
+					}
+					if fe, ok := subtasksAny["frontend"].([]any); ok && len(fe) > 0 {
+						hasSubtasks = true
+					}
+				}
+				if hasSubtasks {
+					return workflow.ErrGraphChanged
+				}
+			}
+			
 			return nil
 		},
+	}
+
+	var subtasks map[string][]string
+	if len(task.Analysis) > 0 {
+		var analysis models.TaskAnalysis
+		if json.Unmarshal(task.Analysis, &analysis) == nil {
+			subtasks = workflow.ParseTasksMD(analysis.TasksMD)
+		}
 	}
 
 	runners := o.stepRunners(task, agent, job.ID, job.Step)
@@ -263,9 +285,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	case models.TaskComplexityEasy:
 		def = workflow.EasyWorkflow(runners)
 	case models.TaskComplexityHard:
-		def = workflow.HardWorkflow(runners)
+		def = workflow.HardWorkflow(runners, subtasks)
 	default:
-		def = workflow.MediumWorkflow(runners)
+		def = workflow.MediumWorkflow(runners, subtasks)
 	}
 
 	// Load existing checkpoints to support resume-from-last-success.

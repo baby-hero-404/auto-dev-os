@@ -26,28 +26,36 @@ type Runner struct {
 	ListRepositories         func(ctx context.Context, projectID string) ([]models.Repository, error)
 	LoadTaskWorkspace        func(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error)
 	GetRoleFromSuffix        func(suffix string) string
+	UpdateTaskAnalysis       func(ctx context.Context, taskID string, analysis json.RawMessage) error
+	Log                      func(ctx context.Context, taskID string, level string, message string)
 }
 
 func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
 	if patchText == "" {
 		return nil
 	}
+	patchText = CleanJunkLines(patchText)
 
 	// Scan lines of patch to extract modified files
 	lines := strings.Split(patchText, "\n")
 	var modifiedFiles []string
+	isNewFile := make(map[string]bool)
+	allowedNewFiles := make(map[string]bool)
+	var currentOldFile string
 	for _, line := range lines {
-		if strings.HasPrefix(line, "+++ b/") {
-			file := strings.TrimPrefix(line, "+++ b/")
+		if strings.HasPrefix(line, "--- ") {
+			currentOldFile = strings.TrimPrefix(line, "--- ")
+			currentOldFile = strings.TrimSpace(currentOldFile)
+			currentOldFile = strings.TrimPrefix(currentOldFile, "a/")
+		} else if strings.HasPrefix(line, "+++ ") {
+			file := strings.TrimPrefix(line, "+++ ")
 			file = strings.TrimSpace(file)
-			if file != "/dev/null" {
+			file = strings.TrimPrefix(file, "b/")
+			if file != "/dev/null" && file != "" {
 				modifiedFiles = append(modifiedFiles, file)
-			}
-		} else if strings.HasPrefix(line, "--- a/") {
-			file := strings.TrimPrefix(line, "--- a/")
-			file = strings.TrimSpace(file)
-			if file != "/dev/null" {
-				modifiedFiles = append(modifiedFiles, file)
+				if currentOldFile == "/dev/null" || currentOldFile == "" {
+					isNewFile[file] = true
+				}
 			}
 		}
 	}
@@ -66,6 +74,13 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 					}
 				}
 				if !isAllowed {
+					if isNewFile[file] && IsSafeNewFilePath(file) && IsUnderAffectedDir(file, analysis.AffectedFiles) {
+						if r.Log != nil {
+							r.Log(ctx, task.ID, "warn", fmt.Sprintf("allowing new file %q under affected directory; this should be reviewed", file))
+						}
+						allowedNewFiles[file] = true
+						continue
+					}
 					return fmt.Errorf("security violation: patch attempts to modify file %q which is not in the approved affected_files spec %v", file, analysis.AffectedFiles)
 				}
 			}
@@ -81,7 +96,31 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 			return err
 		}
 
-		patchText = CleanPatchPaths(patchText)
+		repoName := ""
+		if r.LoadTaskWorkspace != nil {
+			if ws, errWS := r.LoadTaskWorkspace(ctx, task); errWS == nil && ws != nil {
+				for _, rWS := range ws.Repos {
+					if rWS.RepoID == *task.RepositoryID {
+						repoName = rWS.Name
+						break
+					}
+				}
+			}
+		}
+		if repoName == "" {
+			repoName = filepath.Base(filepath.Dir(repoHostPath))
+		}
+
+		cleanedPatch := patchText
+		if repoName != "" {
+			repoPatches := SplitPatchByRepo(patchText)
+			if p, ok := repoPatches[repoName]; ok && p != "" {
+				cleanedPatch = p
+			} else if p, ok := repoPatches[""]; ok && p != "" {
+				cleanedPatch = p
+			}
+		}
+		patchText = CleanPatchPaths(cleanedPatch)
 		targetPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 		fullPath := filepath.Join(targetPath, "patch.diff")
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -95,15 +134,60 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		containerTargetPath := r.ContainerPathForHostPath(task, targetPath, "")
 		containerPatchPath := filepath.Join(containerTargetPath, "patch.diff")
 
-		cmd := fmt.Sprintf("git -C %[1]s apply --check -R %[2]s 2>/dev/null || git -C %[1]s apply --recount --whitespace=nowarn %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s ; find %[1]s -type f \\( -name '*.orig' -o -name '*.rej' \\) -delete",
+		cmd := fmt.Sprintf(`
+ERR_LOG="%[1]s/patch_err.log"
+if git -C %[1]s apply --check -R %[2]s >/dev/null 2>&1; then
+	true
+elif git -C %[1]s apply --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+else
+	cat "$ERR_LOG" >&2
+	(exit 2)
+fi
+CODE=$?
+rm -f "$ERR_LOG"
+find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+exit $CODE`,
 			workspace.QuoteShellArg(containerTargetPath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch", cmd, worktreeSuffix)
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
+			revertCmd := fmt.Sprintf(`
+ERR_LOG="%[1]s/patch_err.log"
+if git -C %[1]s apply --reverse --check -R %[2]s >/dev/null 2>&1; then
+	true
+elif git -C %[1]s apply --reverse --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+else
+	cat "$ERR_LOG" >&2
+	(exit 2)
+fi
+CODE=$?
+rm -f "$ERR_LOG"
+find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+exit $CODE`,
+				workspace.QuoteShellArg(containerTargetPath),
+				workspace.QuoteShellArg(containerPatchPath),
+			)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch", revertCmd, worktreeSuffix)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch: %w", err)
 		}
+		if len(allowedNewFiles) > 0 {
+			if err := r.appendNewAffectedFiles(ctx, task, allowedNewFiles); err != nil && r.Log != nil {
+				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
+			}
+		}
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		return nil
 	}
 
@@ -163,14 +247,100 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		containerPatchPath := filepath.Join(containerRepoWorktreePath, "patch.diff")
 
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
-		cmd := fmt.Sprintf("git -C %[1]s apply --check -R -p1 %[2]s 2>/dev/null || git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s 2>/dev/null || patch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s ; find %[1]s -type f \\( -name '*.orig' -o -name '*.rej' \\) -delete",
+		cmd := fmt.Sprintf(`
+ERR_LOG="%[1]s/patch_err.log"
+if git -C %[1]s apply --check -R -p1 %[2]s >/dev/null 2>&1; then
+	true
+elif git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+else
+	cat "$ERR_LOG" >&2
+	(exit 2)
+fi
+CODE=$?
+rm -f "$ERR_LOG"
+find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+exit $CODE`,
 			workspace.QuoteShellArg(containerRepoWorktreePath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
 		_, err := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch_"+repoName, cmd, worktreeSuffix)
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		if err != nil {
+			revertCmd := fmt.Sprintf(`
+ERR_LOG="%[1]s/patch_err.log"
+if git -C %[1]s apply --reverse --check -R -p1 %[2]s >/dev/null 2>&1; then
+	true
+elif git -C %[1]s apply --reverse -p1 --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+	true
+else
+	cat "$ERR_LOG" >&2
+	(exit 2)
+fi
+CODE=$?
+rm -f "$ERR_LOG"
+find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+exit $CODE`,
+				workspace.QuoteShellArg(containerRepoWorktreePath),
+				workspace.QuoteShellArg(containerPatchPath),
+			)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch_"+repoName, revertCmd, worktreeSuffix)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
+		}
+		if len(allowedNewFiles) > 0 {
+			if err := r.appendNewAffectedFiles(ctx, task, allowedNewFiles); err != nil && r.Log != nil {
+				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
+			}
+		}
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
+	}
+	return nil
+}
+
+func (r *Runner) appendNewAffectedFiles(ctx context.Context, task *models.Task, files map[string]bool) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			return err
+		}
+	}
+
+	changed := false
+	existing := make(map[string]bool, len(analysis.AffectedFiles))
+	for _, file := range analysis.AffectedFiles {
+		existing[file] = true
+	}
+	for file := range files {
+		if !existing[file] {
+			analysis.AffectedFiles = append(analysis.AffectedFiles, file)
+			existing[file] = true
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	raw, err := json.Marshal(analysis)
+	if err != nil {
+		return err
+	}
+	task.Analysis = raw
+	if r.UpdateTaskAnalysis != nil {
+		if err := r.UpdateTaskAnalysis(ctx, task.ID, raw); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -337,4 +507,21 @@ func (r *Runner) GetChangedFiles(ctx context.Context, task *models.Task, agent *
 		}
 	}
 	return allChanged, nil
+}
+
+func IsSafeNewFilePath(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
+		return false
+	}
+	cleaned := filepath.Clean(path)
+	if strings.HasPrefix(cleaned, "..") || strings.Contains(cleaned, "../") || strings.Contains(cleaned, "..\\") {
+		return false
+	}
+	parts := strings.Split(cleaned, string(filepath.Separator))
+	for _, p := range parts {
+		if p == ".git" {
+			return false
+		}
+	}
+	return true
 }

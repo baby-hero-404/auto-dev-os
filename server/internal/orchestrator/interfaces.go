@@ -87,6 +87,7 @@ type WorkflowRepository interface {
 	CreateLog(ctx context.Context, log models.TaskLog) error
 	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
 	ResetStuckJobs(ctx context.Context) error
+	ResetAllRunningJobs(ctx context.Context) error
 	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)
 	ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error
 }

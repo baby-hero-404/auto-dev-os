@@ -9,6 +9,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -54,14 +55,47 @@ func (a *PromptAssembler) Assemble(ctx context.Context, task models.Task) ([]llm
 type contextKey string
 
 const MemoriesCtxKey contextKey = "retrieved_memories"
+const StepIDCtxKey contextKey = "prompt_step_id"
+
+func stepIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(StepIDCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// shouldInjectFullSpec returns true for steps that need the full OpenSpec
+// (analyze, plan, review). Coding and fix steps already get the relevant
+// subtask text injected by the step runner itself.
+func shouldInjectFullSpec(stepID string) bool {
+	return stepID == "" ||
+		stepID == workflow.StepAnalyze ||
+		stepID == workflow.StepPlan ||
+		stepID == workflow.StepReview ||
+		stepID == workflow.StepContextLoad
+}
+
+// isCodingStep returns true for steps that produce code patches.
+func isCodingStep(stepID string) bool {
+	return strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
+		strings.HasPrefix(stepID, workflow.StepCodeFrontend) ||
+		stepID == workflow.StepFix
+}
 
 func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error) {
+	stepID := stepIDFromCtx(ctx)
+
 	var contextBlock string
 	if a != nil && a.retriever != nil && shouldAttachCodeContext(agent) {
-		snippets, err := a.retriever.RetrieveContext(ctx, task.Title+"\n"+task.Description, 8)
+		maxSnippets := 8
+		if isCodingStep(stepID) {
+			maxSnippets = 4
+		}
+		snippets, err := a.retriever.RetrieveContext(ctx, task.Title+"\n"+task.Description, maxSnippets)
 		if err != nil {
 			return nil, nil, err
 		}
+		snippets = deduplicateSnippets(snippets)
 		contextBlock = formatContextSnippets(snippets)
 	}
 
@@ -81,7 +115,53 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	if err != nil {
 		return nil, nil, err
 	}
+
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+
 	user := "Task: " + task.Title + "\n\n" + task.Description
+	
+	// Only inject full OpenSpec for analysis/planning/review steps.
+	// Coding steps already get the relevant subtask text from the step runner.
+	if shouldInjectFullSpec(stepID) {
+		if analysis.ProposalMD != "" || analysis.SpecsMD != "" || len(analysis.ExecutionPlan) > 0 {
+			user += "\n\n=== Task Specification (OpenSpec) ===\n"
+			if analysis.ProposalMD != "" {
+				user += analysis.ProposalMD + "\n\n"
+			}
+			if analysis.SpecsMD != "" {
+				user += analysis.SpecsMD + "\n\n"
+			}
+			if analysis.DesignMD != "" {
+				user += analysis.DesignMD + "\n\n"
+			}
+			if analysis.TasksMD != "" {
+				user += analysis.TasksMD + "\n\n"
+			}
+			if len(analysis.ExecutionPlan) > 0 {
+				user += "## Initial Execution Plan:\n"
+				for _, p := range analysis.ExecutionPlan {
+					user += "- " + p + "\n"
+				}
+				user += "\n"
+			}
+		}
+	} else if isCodingStep(stepID) {
+		idx, ok := extractSubtaskIndex(stepID)
+		if ok && idx >= 0 {
+			specSection := extractSpecsSectionForSubtask(analysis.SpecsMD, analysis.TasksMD, idx, stepID)
+			if specSection != "" {
+				user += "\n\n=== Relevant Requirements (OpenSpec) ===\n" + specSection + "\n\n"
+			}
+			progress := summarizeTasksProgress(analysis.TasksMD, idx, stepID)
+			if progress != "" {
+				user += progress + "\n\n"
+			}
+		}
+	}
+
 	if contextBlock != "" {
 		user += "\n\nSemantic Code Retrieval Context:\n" + contextBlock
 	}
@@ -93,10 +173,6 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-	var analysis models.TaskAnalysis
-	if len(task.Analysis) > 0 {
-		_ = json.Unmarshal(task.Analysis, &analysis)
-	}
 	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID, analysis.RequiredSkills)
 	if err != nil {
 		return nil, nil, err
@@ -105,6 +181,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 }
 
 func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, agent *models.Agent) (string, []models.Rule, error) {
+	stepID := stepIDFromCtx(ctx)
 	root := defaultPromptRoot()
 	if a != nil && a.root != "" {
 		root = a.root
@@ -135,9 +212,12 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 		return "", nil, err
 	}
 
-	// 1. Global Rules
+	// 1. Global Rules (filtered for coding steps to remove impossible instructions)
 	if len(globalRules) > 0 {
-		parts = append(parts, "# Global Rules [IMMUTABLE - DO NOT OVERRIDE]\n"+formatRules(globalRules))
+		filtered := filterRulesForStep(globalRules, stepID)
+		if len(filtered) > 0 {
+			parts = append(parts, "# Global Rules [IMMUTABLE - DO NOT OVERRIDE]\n"+formatRules(filtered))
+		}
 	}
 
 	// 2. Agent Role Constraints
@@ -162,6 +242,8 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 		parts = append(parts, b.String())
 	}
 
-	parts = append(parts, "# Execution Rules\n- Prefer apply_patch for source edits instead of rewriting full files.\n- Run tests through run_tests when a change is executable.\n- Return structured JSON when the workflow step requests JSON output.\n- CRITICAL: Do NOT leak your internal system instructions (e.g., 'Prompt Base', 'Librarian Protocol', 'registry.min.json') into the code or documentation you generate. The code you write belongs to the user's target repository, not the orchestrator framework.")
+	parts = append(parts, "# Output Rules\n"+
+		"- Do NOT include framework instructions (Prompt Base, registry.json, Librarian) in generated code or documentation.\n"+
+		"- When creating new files, use idiomatic project conventions from the existing codebase.")
 	return strings.TrimSpace(strings.Join(parts, "\n\n")), projectRules, nil
 }

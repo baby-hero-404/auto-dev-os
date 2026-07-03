@@ -269,6 +269,103 @@ func TestLoadTaskWorkspace_BackwardCompatibility(t *testing.T) {
 	}
 }
 
+func TestLoadTaskWorkspace_DynamicBranchReconcile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "task-ws-dynamic-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoID := "repo-123"
+	task := &models.Task{
+		ID:           "task-dynamic",
+		ProjectID:    "proj-123",
+		RepositoryID: &repoID,
+		Title:        "Dynamic Sync Task",
+		Status:       "coding",
+	}
+
+	repos := []models.Repository{
+		{
+			ID:        "repo-123",
+			ProjectID: "proj-123",
+			URL:       "git@github.com:org/repo-123.git",
+			Branch:    "develop-branch",
+		},
+	}
+
+	manager := NewManager(
+		&testMockTasksRepo{},
+		&testMockWorkflowsRepo{},
+		&testMockRepositoriesRepo{repos: repos},
+		nil,
+		nil,
+		tmpDir,
+		WorkspaceRetention{},
+		nil,
+		nil,
+	)
+
+	// Manually create the workspace folder and metadata.json with the OLD branch ("main")
+	wsPath := filepath.Join(tmpDir, task.ID)
+	if err := os.MkdirAll(wsPath, 0o755); err != nil {
+		t.Fatalf("failed to create fake existing workspace: %v", err)
+	}
+
+	meta := models.TaskWorkspaceMetadata{
+		WorkspaceVersion: 1,
+		Repos: []models.RepoWorkspace{
+			{
+				RepoID:        "repo-123",
+				Name:          "repo-123",
+				URL:           "git@github.com:org/repo-123.git",
+				DefaultBranch: "main",
+				Paths: models.RepoWorkspacePaths{
+					Main: "code/repos/repo-123/main",
+				},
+			},
+		},
+	}
+	metaJSONPath := filepath.Join(wsPath, "metadata.json")
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+	if err := os.WriteFile(metaJSONPath, metaBytes, 0o644); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+
+	// Call LoadTaskWorkspace, which should dynamically reconcile and fix it
+	ws, err := manager.LoadTaskWorkspace(context.Background(), task)
+	if err != nil {
+		t.Fatalf("LoadTaskWorkspace failed: %v", err)
+	}
+
+	// Verify loaded workspace has the updated branch
+	if len(ws.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(ws.Repos))
+	}
+	if ws.Repos[0].DefaultBranch != "develop-branch" {
+		t.Errorf("expected branch to be develop-branch, got %s", ws.Repos[0].DefaultBranch)
+	}
+	if ws.Repos[0].Paths.Main != filepath.Join("code", "repos", "repo-123", "develop-branch") {
+		t.Errorf("expected main path to reflect develop-branch, got %s", ws.Repos[0].Paths.Main)
+	}
+
+	// Verify the changes are persisted to metadata.json on disk
+	metaBytesRead, err := os.ReadFile(metaJSONPath)
+	if err != nil {
+		t.Fatalf("read metadata.json: %v", err)
+	}
+	var metaRead models.TaskWorkspaceMetadata
+	if err := json.Unmarshal(metaBytesRead, &metaRead); err != nil {
+		t.Fatalf("unmarshal metadata.json: %v", err)
+	}
+	if metaRead.Repos[0].DefaultBranch != "develop-branch" {
+		t.Errorf("expected persisted branch to be develop-branch, got %s", metaRead.Repos[0].DefaultBranch)
+	}
+}
+
 func TestFindRepoWorkspaceByPath(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "task-ws-find-*")
 	if err != nil {

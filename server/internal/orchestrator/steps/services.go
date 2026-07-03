@@ -2,6 +2,9 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
+	"sync"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -57,7 +60,7 @@ type DiffCapturer interface {
 // WorktreeManager manages git worktrees for parallel coding. Used by: code_be, code_fe, plan.
 type WorktreeManager interface {
 	LoadTargetRepositories(ctx context.Context, task *models.Task) ([]models.Repository, error)
-	SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace)
+	SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool)
 	SetupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error
 	CommitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error
 	RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string
@@ -173,4 +176,107 @@ type ArtifactRepository interface {
 	Create(ctx context.Context, artifact *models.WorkflowArtifact) error
 	ListByJobID(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error)
 	ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error)
+}
+
+var analysisMu sync.Mutex
+
+// updateTaskAnalysis updates task.Analysis concurrently-safe.
+func updateTaskAnalysis(ctx context.Context, taskID string, tasks TaskRepository, rtTask *models.Task, updateFn func(*models.TaskAnalysis) bool) error {
+	analysisMu.Lock()
+	defer analysisMu.Unlock()
+
+	// 1. Fetch fresh task from DB
+	freshTask, err := tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Unmarshal Analysis
+	var analysis models.TaskAnalysis
+	if len(freshTask.Analysis) > 0 {
+		if err := json.Unmarshal(freshTask.Analysis, &analysis); err != nil {
+			return err
+		}
+	}
+
+	// 3. Apply the update
+	if !updateFn(&analysis) {
+		// No changes needed
+		return nil
+	}
+
+	// 4. Marshal and Update
+	newRaw, err := json.Marshal(analysis)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tasks.Update(ctx, taskID, models.UpdateTaskInput{
+		Analysis: newRaw,
+	}); err != nil {
+		return err
+	}
+
+	// 5. Update local cache
+	rtTask.Analysis = newRaw
+	return nil
+}
+
+func completeTaskSubtaskBlock(taskBlock string) (string, bool) {
+	taskBlock = strings.TrimSpace(taskBlock)
+	if taskBlock == "" {
+		return "", false
+	}
+
+	lines := strings.Split(taskBlock, "\n")
+	updated := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- [ ]") {
+			lines[i] = strings.Replace(line, "- [ ]", "- [x]", 1)
+			updated = true
+		}
+	}
+	if !updated {
+		return "", false
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+func updateTaskSubtaskMarkdown(tasksMD string, taskBlock string) (string, bool) {
+	taskBlock = strings.TrimSpace(taskBlock)
+	if taskBlock == "" {
+		return tasksMD, false
+	}
+	if !strings.Contains(taskBlock, "\n") && !strings.HasPrefix(taskBlock, "## ") {
+		return tasksMD, false
+	}
+	if strings.Count(tasksMD, taskBlock) != 1 {
+		return tasksMD, false
+	}
+
+	completedBlock, ok := completeTaskSubtaskBlock(taskBlock)
+	if !ok {
+		return tasksMD, false
+	}
+
+	if strings.Contains(tasksMD, taskBlock) {
+		return strings.Replace(tasksMD, taskBlock, completedBlock, 1), true
+	}
+
+	return tasksMD, false
+}
+
+func isFrontendFile(file string) bool {
+	return strings.HasPrefix(file, "web/") ||
+		strings.HasPrefix(file, "frontend/") ||
+		strings.HasPrefix(file, "src/") ||
+		strings.HasSuffix(file, ".tsx") ||
+		strings.HasSuffix(file, ".jsx") ||
+		strings.HasSuffix(file, ".css") ||
+		strings.HasSuffix(file, ".html") ||
+		strings.HasSuffix(file, ".vue") ||
+		strings.HasSuffix(file, ".scss") ||
+		strings.HasSuffix(file, ".sass") ||
+		strings.HasSuffix(file, ".svelte")
 }

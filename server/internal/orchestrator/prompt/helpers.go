@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
@@ -43,6 +45,52 @@ func formatContextSnippets(snippets []models.ContextSnippet) string {
 		b.WriteString("```\n")
 	}
 	return b.String()
+}
+
+// deduplicateSnippets removes snippets that overlap >50% with an
+// already-kept snippet from the same file. Keeps the first occurrence.
+func deduplicateSnippets(snippets []models.ContextSnippet) []models.ContextSnippet {
+	var result []models.ContextSnippet
+	for _, s := range snippets {
+		isDup := false
+		for _, kept := range result {
+			if kept.Path == s.Path && lineOverlap(kept, s) > 0.5 {
+				isDup = true
+				break
+			}
+		}
+		if !isDup {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// lineOverlap returns the fraction of the shorter snippet's line range
+// that overlaps with the other snippet.
+func lineOverlap(a, b models.ContextSnippet) float64 {
+	overlapStart := a.StartLine
+	if b.StartLine > overlapStart {
+		overlapStart = b.StartLine
+	}
+	overlapEnd := a.EndLine
+	if b.EndLine < overlapEnd {
+		overlapEnd = b.EndLine
+	}
+	if overlapStart >= overlapEnd {
+		return 0
+	}
+	overlap := float64(overlapEnd - overlapStart)
+	aLen := float64(a.EndLine - a.StartLine)
+	bLen := float64(b.EndLine - b.StartLine)
+	shorter := aLen
+	if bLen < shorter {
+		shorter = bLen
+	}
+	if shorter <= 0 {
+		return 0
+	}
+	return overlap / shorter
 }
 
 func TruncateHistory(history []llm.Message, maxChars int) []llm.Message {
@@ -104,4 +152,114 @@ func defaultPromptRoot() string {
 		return filepath.Clean(filepath.Join("..", "resources", "prompt_base"))
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "resources", "prompt_base"))
+}
+
+// extractSubtaskIndex extracts the numeric index from a step ID (e.g., "code_backend_2" -> 2)
+func extractSubtaskIndex(stepID string) (int, bool) {
+	parts := strings.Split(stepID, "_")
+	if len(parts) > 0 {
+		idx, err := strconv.Atoi(parts[len(parts)-1])
+		if err == nil {
+			return idx, true
+		}
+	}
+	return -1, false
+}
+
+// extractSpecsSectionForSubtask attempts to find the relevant section in SpecsMD
+// by matching the heading number corresponding to the current subtask.
+func extractSpecsSectionForSubtask(specsMD, tasksMD string, subtaskIndex int, stepID string) string {
+	if specsMD == "" || tasksMD == "" || subtaskIndex < 0 {
+		return ""
+	}
+	
+	// Determine role to find the correct heading in TasksMD
+	role := "backend"
+	if strings.Contains(stepID, "frontend") {
+		role = "frontend"
+	}
+	
+	// 1. Find the Nth heading for this role in TasksMD to extract its number
+	lines := strings.Split(tasksMD, "\n")
+	roleIdx := 0
+	headingNumber := ""
+	
+	// frontendSignals and backendSignals (simplified for matching)
+	isRole := func(heading string, targetRole string) bool {
+		lower := strings.ToLower(heading)
+		if targetRole == "frontend" && (strings.Contains(lower, "frontend") || strings.Contains(lower, "ui") || strings.Contains(lower, "giao diện")) {
+			return true
+		}
+		if targetRole == "backend" && (strings.Contains(lower, "backend") || strings.Contains(lower, "server") || strings.Contains(lower, "api") || strings.Contains(lower, "database")) {
+			return true
+		}
+		// If it doesn't strongly match frontend, assume backend as default in the original parser
+		if targetRole == "backend" && !strings.Contains(lower, "frontend") && !strings.Contains(lower, "ui") && !strings.Contains(lower, "giao diện") {
+			return true
+		}
+		return false
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			if isRole(trimmed, role) {
+				if roleIdx == subtaskIndex {
+					// Extract number from heading, e.g. "## 6. Thiết lập" -> "6"
+					re := regexp.MustCompile(`##\s*(\d+)[\.\s]`)
+					matches := re.FindStringSubmatch(trimmed)
+					if len(matches) > 1 {
+						headingNumber = matches[1]
+					}
+					break
+				}
+				roleIdx++
+			}
+		}
+	}
+	
+	if headingNumber == "" {
+		// Fallback: just use subtaskIndex + 1 if no explicit number found
+		headingNumber = strconv.Itoa(subtaskIndex + 1)
+	}
+	
+	// 2. Find the corresponding section in SpecsMD
+	// Look for a heading that contains this number
+	specsLines := strings.Split(specsMD, "\n")
+	var sectionBuilder strings.Builder
+	inTargetSection := false
+	
+	targetRe := regexp.MustCompile(`(?i)^#{2,4}\s*.*(?:requirement|yêu cầu)?:?\s*0*` + headingNumber + `[\.\s]`)
+	nextHeadingRe := regexp.MustCompile(`^#{2,4}\s`)
+	
+	for _, line := range specsLines {
+		trimmed := strings.TrimSpace(line)
+		isHeading := nextHeadingRe.MatchString(trimmed)
+		
+		if inTargetSection {
+			if isHeading {
+				// Stop if we hit a heading of the same or higher level
+				// (Simplified: stop at any new major heading)
+				break
+			}
+			sectionBuilder.WriteString(line + "\n")
+		} else if isHeading && targetRe.MatchString(trimmed) {
+			inTargetSection = true
+			sectionBuilder.WriteString(line + "\n")
+		}
+	}
+	
+	return strings.TrimSpace(sectionBuilder.String())
+}
+
+// summarizeTasksProgress creates a concise summary of workflow progress
+func summarizeTasksProgress(tasksMD string, subtaskIndex int, stepID string) string {
+	if tasksMD == "" {
+		return ""
+	}
+	role := "backend"
+	if strings.Contains(stepID, "frontend") {
+		role = "frontend"
+	}
+	return fmt.Sprintf("Progress: Completed %d %s subtask groups. Working on group %d.", subtaskIndex, role, subtaskIndex+1)
 }

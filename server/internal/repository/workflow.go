@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -108,7 +109,22 @@ func (r *WorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) ([]mo
 }
 
 func (r *WorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
-	if err := r.db.WithContext(ctx).Where("task_id = ? AND step IN ?", taskID, steps).Delete(&models.WorkflowCheckpoint{}).Error; err != nil {
+	if len(steps) == 0 {
+		return nil
+	}
+
+	query := r.db.WithContext(ctx).Where("task_id = ?", taskID)
+
+	var conditions []string
+	var args []any
+	for _, s := range steps {
+		conditions = append(conditions, "(step = ? OR step LIKE ?)")
+		args = append(args, s, s+"_%")
+	}
+
+	query = query.Where(strings.Join(conditions, " OR "), args...)
+
+	if err := query.Delete(&models.WorkflowCheckpoint{}).Error; err != nil {
 		return fmt.Errorf("delete workflow checkpoints: %w", err)
 	}
 	return nil
@@ -123,11 +139,50 @@ func (r *WorkflowRepo) DeleteByTaskID(ctx context.Context, taskID string) error 
 
 func (r *WorkflowRepo) ResetStuckJobs(ctx context.Context) error {
 	staleBefore := time.Now().Add(-10 * time.Minute)
-	err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).
-		Where("status = ? AND updated_at < ?", models.WorkflowJobStatusRunning, staleBefore).
-		Update("status", models.WorkflowJobStatusQueued).Error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stuckJobs []models.WorkflowJob
+		if err := tx.Where("status = ? AND updated_at < ?", models.WorkflowJobStatusRunning, staleBefore).Find(&stuckJobs).Error; err != nil {
+			return err
+		}
+		if len(stuckJobs) == 0 {
+			return nil
+		}
+
+		var agentIDs []string
+		var jobIDs []string
+		for _, job := range stuckJobs {
+			jobIDs = append(jobIDs, job.ID)
+			if job.AgentID != nil && *job.AgentID != "" {
+				agentIDs = append(agentIDs, *job.AgentID)
+			}
+		}
+
+		// Reset jobs to queued
+		if err := tx.Model(&models.WorkflowJob{}).Where("id IN ?", jobIDs).Update("status", models.WorkflowJobStatusQueued).Error; err != nil {
+			return err
+		}
+
+		// Reset agents to idle
+		if len(agentIDs) > 0 {
+			if err := tx.Table("agents").Where("id IN ?", agentIDs).Update("status", models.AgentStatusIdle).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("reset stuck jobs: %w", err)
+	}
+	return nil
+}
+
+func (r *WorkflowRepo) ResetAllRunningJobs(ctx context.Context) error {
+	err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).
+		Where("status = ?", models.WorkflowJobStatusRunning).
+		Update("status", models.WorkflowJobStatusQueued).Error
+	if err != nil {
+		return fmt.Errorf("reset all running jobs: %w", err)
 	}
 	return nil
 }

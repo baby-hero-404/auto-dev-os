@@ -158,6 +158,10 @@ func buildAnalyzeInstruction(stepCtx workflow.StepContext) string {
 	instruction := `Analyze this task and output the proposed specification as a valid JSON object.
 You have access to read-only native tools to retrieve more context about the workspace files before writing your final specification.
 
+CRITICAL LANGUAGE REQUIREMENT:
+You MUST write all the human-readable text and markdown fields in the JSON object (specifically "scope", "risks", "execution_plan", "clarification_questions", "proposal_md", "specs_md", "design_md", and "tasks_md") using the SAME language as the task title and description provided by the user. 
+For example, if the user's task description or title is in Vietnamese, all of these fields in your output JSON MUST be generated in Vietnamese. If the user's task description is in English, generate them in English. Do not mix languages.
+
 If you do not have enough context about the current workspace files (or if the task description is generic/vague), you MUST use the "list_files" tool first to inspect the repository structure, and then "read_file" to read the relevant source files before writing your specification or generating questions.
 Once you have gathered enough information and are ready to provide the final specification, output the final specification JSON matching the expected format.
 

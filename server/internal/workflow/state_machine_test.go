@@ -79,7 +79,7 @@ func TestComplexityWorkflowDefinitions(t *testing.T) {
 		t.Fatalf("unexpected easy workflow code step: %#v", easy.Steps[2])
 	}
 
-	hard := HardWorkflow(runners)
+	hard := HardWorkflow(runners, nil)
 	if len(hard.Steps) != 10 {
 		t.Fatalf("expected hard workflow to have 10 steps, got %d", len(hard.Steps))
 	}

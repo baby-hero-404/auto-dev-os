@@ -2,6 +2,7 @@ package patch
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,5 +230,163 @@ diff --git a/repo-b/index.js b/repo-b/index.js
 				}
 			}
 		})
+	}
+}
+
+func TestRunner_ApplyPatch_RejectsOutsideAffectedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Prepare input task with existing affected_files list
+	analysisJSON := []byte(`{"affected_files": ["pkg/scheduler/scheduler.go"]}`)
+	repoID := "repo-123"
+	task := &models.Task{
+		ID:           "task-123",
+		RepositoryID: &repoID,
+		Analysis:     analysisJSON,
+	}
+
+	patchText := `diff --git a/pkg/scheduler/scheduler.go b/pkg/scheduler/scheduler.go
+--- a/pkg/scheduler/scheduler.go
++++ b/pkg/scheduler/scheduler.go
+@@ -1,1 +1,2 @@
++// scheduler update
+diff --git a/tool_zentao/pkg/db/sqlite.go b/tool_zentao/pkg/db/sqlite.go
+--- a/tool_zentao/pkg/db/sqlite.go
++++ b/tool_zentao/pkg/db/sqlite.go
+@@ -1,1 +1,2 @@
++// sqlite update
+`
+
+	var applyCalled bool
+
+	runner := &Runner{
+		WorkspaceRoot: tempDir,
+		GetTaskRepoHostPath: func(ctx context.Context, task *models.Task) (string, error) {
+			return filepath.Join(tempDir, "repo-src"), nil
+		},
+		HostWorktreePath: func(task *models.Task, repoPath string, worktreeSuffix string) string {
+			return filepath.Join(tempDir, "repo-worktree")
+		},
+		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
+			return "/workspace"
+		},
+		RunSandboxStepInWorktree: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
+			applyCalled = true
+			return map[string]any{"exit_code": 0}, nil
+		},
+	}
+
+	err := runner.ApplyPatch(context.Background(), task, &models.Agent{}, "code_backend", patchText, "be")
+	if err == nil {
+		t.Fatalf("expected patch to be rejected")
+	}
+	if !strings.Contains(err.Error(), "security violation") {
+		t.Fatalf("expected security violation error, got: %v", err)
+	}
+	if applyCalled {
+		t.Fatalf("expected patch application to stop before sandbox execution")
+	}
+}
+
+func TestRunner_ApplyPatch_AllowsNewFileUnderAffectedDir(t *testing.T) {
+	tempDir := t.TempDir()
+
+	analysisJSON := []byte(`{"affected_files": ["pkg/scheduler/scheduler.go"]}`)
+	repoID := "repo-123"
+	task := &models.Task{
+		ID:           "task-124",
+		RepositoryID: &repoID,
+		Analysis:     analysisJSON,
+	}
+
+	patchText := `diff --git a/pkg/scheduler/helper.go b/pkg/scheduler/helper.go
+--- /dev/null
++++ b/pkg/scheduler/helper.go
+@@ -0,0 +1,2 @@
++package scheduler
++`
+
+	var applyCalled bool
+	var persistedAnalysis []byte
+
+	runner := &Runner{
+		WorkspaceRoot: tempDir,
+		GetTaskRepoHostPath: func(ctx context.Context, task *models.Task) (string, error) {
+			return filepath.Join(tempDir, "repo-src"), nil
+		},
+		HostWorktreePath: func(task *models.Task, repoPath string, worktreeSuffix string) string {
+			return filepath.Join(tempDir, "repo-worktree")
+		},
+		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
+			return "/workspace"
+		},
+		RunSandboxStepInWorktree: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
+			applyCalled = true
+			return map[string]any{"exit_code": 0}, nil
+		},
+		UpdateTaskAnalysis: func(ctx context.Context, taskID string, analysis json.RawMessage) error {
+			persistedAnalysis = append([]byte(nil), analysis...)
+			return nil
+		},
+	}
+
+	err := runner.ApplyPatch(context.Background(), task, &models.Agent{}, "code_backend", patchText, "be")
+	if err != nil {
+		t.Fatalf("expected patch to be allowed, got: %v", err)
+	}
+	if !applyCalled {
+		t.Fatalf("expected patch application to reach sandbox execution")
+	}
+	if len(persistedAnalysis) == 0 {
+		t.Fatalf("expected updated analysis to be persisted")
+	}
+	if !strings.Contains(string(persistedAnalysis), "pkg/scheduler/helper.go") {
+		t.Fatalf("expected new file to be appended to affected_files, got: %s", string(persistedAnalysis))
+	}
+}
+
+func TestCleanJunkLines(t *testing.T) {
+	patchWithJunk := `
+Some comment here
+diff --git a/tool_zentao/go.mod b/tool_zentao/go.mod
+new file mode 100644
+--- /dev/null
++++ b/tool_zentao/go.mod
+@@ -0,0 +1,5 @@
++module tool_zentao
++
++go 1.22
+submodule config
+diff --git a/tool_zentao/config/config.go b/tool_zentao/config/config.go
+new file mode 100644
+--- /dev/null
++++ b/tool_zentao/config/config.go
+@@ -0,0 +1,5 @@
++package config
++
++var X = 1
+`
+
+	expected := `
+diff --git a/tool_zentao/go.mod b/tool_zentao/go.mod
+new file mode 100644
+--- /dev/null
++++ b/tool_zentao/go.mod
+@@ -0,0 +1,5 @@
++module tool_zentao
++
++go 1.22
+diff --git a/tool_zentao/config/config.go b/tool_zentao/config/config.go
+new file mode 100644
+--- /dev/null
++++ b/tool_zentao/config/config.go
+@@ -0,0 +1,5 @@
++package config
++
++var X = 1`
+
+	got := CleanJunkLines(patchWithJunk)
+	if strings.TrimSpace(got) != strings.TrimSpace(expected) {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, got)
 	}
 }

@@ -1,5 +1,7 @@
 package workflow
 
+import "fmt"
+
 // Step ID constants — canonical names used across the workflow engine and orchestrator.
 const (
 	StepContextLoad  = "context_load"
@@ -36,7 +38,7 @@ func StepNameOrder() []string {
 // It accepts a map of step runners keyed by step ID constants.
 // The orchestrator provides these runners via its stepRunners method.
 func DefaultWorkflow(runners map[string]StepFunc) Definition {
-	return HardWorkflow(runners)
+	return HardWorkflow(runners, nil)
 }
 
 func EasyWorkflow(runners map[string]StepFunc) Definition {
@@ -55,7 +57,7 @@ func EasyWorkflow(runners map[string]StepFunc) Definition {
 	return Definition{Name: "auto-code-os-easy-workflow", Steps: steps}
 }
 
-func MediumWorkflow(runners map[string]StepFunc) Definition {
+func MediumWorkflow(runners map[string]StepFunc, subtasks map[string][]string) Definition {
 	statusSchema := Schema{Fields: map[string]FieldSchema{
 		"status": {Type: FieldString, Required: false},
 	}}
@@ -64,20 +66,63 @@ func MediumWorkflow(runners map[string]StepFunc) Definition {
 		{ID: StepContextLoad, Name: "Context", OutputSchema: statusSchema, Run: runners[StepContextLoad]},
 		{ID: StepAnalyze, Name: "Analyze", DependsOn: []string{StepContextLoad}, OutputSchema: statusSchema, Run: runners[StepAnalyze]},
 		{ID: StepPlan, Name: "Plan", DependsOn: []string{StepAnalyze}, OutputSchema: statusSchema, Run: runners[StepPlan]},
-		{ID: StepCodeBackend, Name: "Code Backend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]},
-		{ID: StepCodeFrontend, Name: "Code Frontend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeFrontend]},
-		{ID: StepMerge, Name: "Merge", DependsOn: []string{StepCodeBackend, StepCodeFrontend}, OutputSchema: statusSchema, Run: runners[StepMerge]},
+	}
+
+	var backendDependencies []string
+	if beTasks, ok := subtasks["backend"]; ok && len(beTasks) > 0 {
+		prev := StepPlan
+		for i := range beTasks {
+			id := fmt.Sprintf("%s_%d", StepCodeBackend, i)
+			steps = append(steps, StepDefinition{
+				ID:           id,
+				Name:         fmt.Sprintf("Code Backend %d", i+1),
+				DependsOn:    []string{prev},
+				OutputSchema: statusSchema,
+				Run:          runners[StepCodeBackend],
+			})
+			prev = id // Make them sequential
+		}
+		backendDependencies = []string{prev}
+	} else {
+		steps = append(steps, StepDefinition{ID: StepCodeBackend, Name: "Code Backend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]})
+		backendDependencies = []string{StepCodeBackend}
+	}
+
+	var frontendDependencies []string
+	if feTasks, ok := subtasks["frontend"]; ok && len(feTasks) > 0 {
+		prev := StepPlan
+		for i := range feTasks {
+			id := fmt.Sprintf("%s_%d", StepCodeFrontend, i)
+			steps = append(steps, StepDefinition{
+				ID:           id,
+				Name:         fmt.Sprintf("Code Frontend %d", i+1),
+				DependsOn:    []string{prev},
+				OutputSchema: statusSchema,
+				Run:          runners[StepCodeFrontend],
+			})
+			prev = id // Make them sequential
+		}
+		frontendDependencies = []string{prev}
+	} else {
+		steps = append(steps, StepDefinition{ID: StepCodeFrontend, Name: "Code Frontend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeFrontend]})
+		frontendDependencies = []string{StepCodeFrontend}
+	}
+
+	mergeDependsOn := append(backendDependencies, frontendDependencies...)
+
+	steps = append(steps, []StepDefinition{
+		{ID: StepMerge, Name: "Merge", DependsOn: mergeDependsOn, OutputSchema: statusSchema, Run: runners[StepMerge]},
 		{ID: StepReview, Name: "Review", DependsOn: []string{StepMerge}, OutputSchema: statusSchema, Run: runners[StepReview]},
 		{ID: StepFix, Name: "Fix", DependsOn: []string{StepReview}, OutputSchema: statusSchema, Run: runners[StepFix]},
 		{ID: StepTest, Name: "Test", DependsOn: []string{StepFix}, OutputSchema: statusSchema, Run: runners[StepTest]},
 		{ID: StepPR, Name: "PR", DependsOn: []string{StepTest}, OutputSchema: statusSchema, Run: runners[StepPR]},
-	}
+	}...)
 
 	return Definition{Name: "auto-code-os-medium-workflow", Steps: steps}
 }
 
-func HardWorkflow(runners map[string]StepFunc) Definition {
-	def := MediumWorkflow(runners)
+func HardWorkflow(runners map[string]StepFunc, subtasks map[string][]string) Definition {
+	def := MediumWorkflow(runners, subtasks)
 	def.Name = "auto-code-os-hard-workflow"
 	return def
 }
@@ -87,7 +132,7 @@ func DescribeStep(name string) string {
 	desc := map[string]string{
 		"context_load":  "Load repository context and conventions",
 		"analyze":       "Analyze task complexity & scope",
-		"plan":          "Decompose into sub-tasks",
+		"plan":          "Parse OpenSpec & prepare subtask assignments",
 		"code_backend":  "Execute backend code changes in sandbox",
 		"code_frontend": "Execute frontend code changes in sandbox",
 		"merge":         "Merge parallel code & resolve conflicts",

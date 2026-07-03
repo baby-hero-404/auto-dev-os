@@ -8,7 +8,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace) {
+func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
 	integrationBranch := fmt.Sprintf("feature/%s", task.ID)
 	beBranch := fmt.Sprintf("feature/%s-be", task.ID)
 	feBranch := fmt.Sprintf("feature/%s-fe", task.ID)
@@ -16,12 +16,21 @@ func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agen
 	for _, repo := range repos {
 		localPath := m.RepoHostPath(task, ws, repo)
 		containerLocalPath := m.ContainerPathForHostPath(task, localPath, "")
-		script := fmt.Sprintf(`
+		var script string
+		if skipFE {
+			script = fmt.Sprintf(`
+set -e
+git -C %[1]s show-ref --verify --quiet refs/heads/%[2]s || git -C %[1]s branch %[2]s
+git -C %[1]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[1]s branch %[3]s %[2]s
+`, orchestratorworkspace.QuoteShellArg(containerLocalPath), orchestratorworkspace.QuoteShellArg(integrationBranch), orchestratorworkspace.QuoteShellArg(beBranch))
+		} else {
+			script = fmt.Sprintf(`
 set -e
 git -C %[1]s show-ref --verify --quiet refs/heads/%[2]s || git -C %[1]s branch %[2]s
 git -C %[1]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[1]s branch %[3]s %[2]s
 git -C %[1]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[1]s branch %[4]s %[2]s
 `, orchestratorworkspace.QuoteShellArg(containerLocalPath), orchestratorworkspace.QuoteShellArg(integrationBranch), orchestratorworkspace.QuoteShellArg(beBranch), orchestratorworkspace.QuoteShellArg(feBranch))
+		}
 
 		if _, err := m.RunSandboxStep(ctx, task, agent, "create_role_branches", script); err != nil {
 			m.Log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to create role branches for %s: %v", repo.URL, err))
@@ -40,6 +49,8 @@ func (m *Manager) SetupRoleWorktrees(ctx context.Context, task *models.Task, age
 		containerLocalPath := m.ContainerPathForHostPath(task, localPath, "")
 		script := fmt.Sprintf(`
 set -e
+exec 9> %[2]s/.git/worktree_setup.lock
+flock -w 60 9
 git -C %[2]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[2]s branch %[4]s
 git -C %[2]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[2]s branch %[3]s %[4]s
 if [ -d %[1]s ] && grep -q '^gitdir:' %[1]s/.git 2>/dev/null; then
@@ -49,6 +60,7 @@ else
 	git -C %[2]s worktree prune
 	git -C %[2]s worktree add %[1]s %[3]s
 fi
+flock -u 9
 `,
 			orchestratorworkspace.QuoteShellArg(containerWorktreePath),
 			orchestratorworkspace.QuoteShellArg(containerLocalPath),

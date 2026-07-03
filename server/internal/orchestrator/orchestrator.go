@@ -20,27 +20,27 @@ import (
 // Orchestrator coordinates the end-to-end workflow for task execution:
 // agent assignment, workspace provisioning, step execution, and cleanup.
 type Orchestrator struct {
-	tasks         TaskRepository
-	workflows     WorkflowRepository
-	agents        AgentAssigner
-	runtime       sandbox.Runtime
-	prompts       PromptBuilder
-	llm           llm.Provider
-	memHooks      MemoryRecorder
-	learnEngine   LearningRecorder
-	gitOps        GitOpsClient
-	artifacts     ArtifactRepository
-	repositories  RepositoryRepository
-	projects      ProjectRepository
-	sandboxGit    gitops.SandboxGitClient
-	workspaceRoot string
-	retention     WorkspaceRetention
-	wg            sync.WaitGroup
-	lockCancels   sync.Map
-	lockConns     sync.Map
-	wkspace       *wkspace.Manager
-	checkpoints   *checkpoint.Store
-	repoutil      *repoutil.Manager
+	tasks           TaskRepository
+	workflows       WorkflowRepository
+	agents          AgentAssigner
+	runtime         sandbox.Runtime
+	prompts         PromptBuilder
+	llm             llm.Provider
+	memHooks        MemoryRecorder
+	learnEngine     LearningRecorder
+	gitOps          GitOpsClient
+	artifacts       ArtifactRepository
+	repositories    RepositoryRepository
+	projects        ProjectRepository
+	sandboxGit      gitops.SandboxGitClient
+	workspaceRoot   string
+	retention       WorkspaceRetention
+	wg              sync.WaitGroup
+	lockCancels     sync.Map
+	lockConns       sync.Map
+	wkspace         *wkspace.Manager
+	checkpoints     *checkpoint.Store
+	repoutil        *repoutil.Manager
 	llmTraceEnabled bool
 	llmLogLevel     string
 }
@@ -223,13 +223,11 @@ func (o *Orchestrator) SavePRRejectionFeedback(ctx context.Context, taskID strin
 
 // ClearCheckpointsForRepair clears downstream checkpoints for repair on PR rejection.
 func (o *Orchestrator) ClearCheckpointsForRepair(ctx context.Context, taskID string) error {
-	task, err := o.tasks.GetByID(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	steps := []string{"review", "fix", "test", "pr"}
-	if task.Complexity == models.TaskComplexityEasy {
-		steps = append(steps, "code_backend", "code_frontend")
+	steps := []string{"code_backend", "code_frontend", "review", "fix", "test", "pr"}
+	if o.tasks != nil {
+		if _, err := o.tasks.GetByID(ctx, taskID); err != nil {
+			return err
+		}
 	}
 	return o.workflows.DeleteCheckpoints(ctx, taskID, steps)
 }
@@ -452,9 +450,21 @@ func (o *Orchestrator) initRepoutil() {
 			getWorkspaceDiff,
 			getPRDiff,
 			o.log,
+			func(ctx context.Context, taskID string, analysis json.RawMessage) error {
+				_, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{
+					Analysis: analysis,
+				})
+				return err
+			},
 		)
 	} else {
 		o.repoutil.WorkspaceRoot = o.workspaceRoot
+		o.repoutil.UpdateTaskAnalysis = func(ctx context.Context, taskID string, analysis json.RawMessage) error {
+			_, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{
+				Analysis: analysis,
+			})
+			return err
+		}
 		if o.repositories != nil {
 			o.repoutil.ListRepositories = o.repositories.ListByProjectID
 		}

@@ -200,7 +200,21 @@ function AgentCard({
             {initials}
           </div>
           <div className="min-w-0">
-            <h4 className="truncate font-sans font-semibold text-foreground">{agent.name}</h4>
+            <div className="flex items-center gap-2">
+              <h4 className="truncate font-sans font-semibold text-foreground">{agent.name}</h4>
+              <span className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide border ${
+                agent.status === "offline"
+                  ? "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                  : ["busy", "assigned", "running"].includes(agent.status)
+                  ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                  : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+              }`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${
+                  agent.status === "offline" ? "bg-slate-400" : ["busy", "assigned", "running"].includes(agent.status) ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                }`} />
+                {agent.status === "offline" ? "Offline" : ["busy", "assigned", "running"].includes(agent.status) ? "Working" : "Free"}
+              </span>
+            </div>
             <div className="mt-1 flex items-center gap-1">
               <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                 agent.model_level_group === "fast"

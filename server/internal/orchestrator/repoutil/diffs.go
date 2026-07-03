@@ -18,6 +18,12 @@ func (m *Manager) getEngine() orchestratorpatch.PatchEngine {
 		RunSandboxStepInWorktree: m.RunSandboxStepInWorktree,
 		LoadTaskWorkspace:        m.LoadTaskWorkspace,
 		GetRoleFromSuffix:        wkspace.GetRoleFromSuffix,
+		UpdateTaskAnalysis:       m.UpdateTaskAnalysis,
+		Log: func(ctx context.Context, taskID string, level string, message string) {
+			if m.Log != nil {
+				m.Log(ctx, taskID, nil, level, message)
+			}
+		},
 	}
 	if m.ListRepositories != nil {
 		runner.ListRepositories = m.ListRepositories

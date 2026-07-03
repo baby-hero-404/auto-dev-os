@@ -195,6 +195,14 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		}
 
 		baseBranch := repo.Branch
+		if workspace != nil {
+			for _, rWS := range workspace.Repos {
+				if rWS.RepoID == repo.ID && rWS.DefaultBranch != "" {
+					baseBranch = rWS.DefaultBranch
+					break
+				}
+			}
+		}
 		if baseBranch == "" {
 			baseBranch = "main"
 		}

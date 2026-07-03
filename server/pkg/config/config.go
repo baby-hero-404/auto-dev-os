@@ -62,6 +62,7 @@ type SandboxConfig struct {
 	WorkspaceCleanupIntervalMinutes int    `mapstructure:"workspace_cleanup_interval_minutes"`
 	MemoryMB                        int64  `mapstructure:"memory_mb"`
 	NanoCPUs                        int64  `mapstructure:"nano_cpus"`
+	DisableNetworking               bool   `mapstructure:"disable_networking"`
 }
 
 type WorkerConfig struct {
@@ -151,6 +152,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("logging.file_root", "LOG_FILE_ROOT")
 	v.BindEnv("logging.llm_trace_enabled", "LOG_LLM_TRACE_ENABLED")
 	v.BindEnv("logging.llm_log_level", "LOG_LLM_LOG_LEVEL")
+	v.BindEnv("sandbox.disable_networking", "SANDBOX_DISABLE_NETWORKING")
 
 	v.SetConfigType("yaml")
 	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {

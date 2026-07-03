@@ -36,7 +36,11 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 		o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: %s", stepID, strings.TrimSpace(result.Stderr)))
 	}
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("%s failed with exit code %d", stepID, result.ExitCode)
+		errMsg := fmt.Sprintf("%s failed with exit code %d", stepID, result.ExitCode)
+		if strings.TrimSpace(result.Stderr) != "" {
+			errMsg += ": " + strings.TrimSpace(result.Stderr)
+		}
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 	return map[string]any{"status": "ok", "stdout": result.Stdout}, nil
 }
@@ -72,7 +76,11 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 		o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: %s", stepID, strings.TrimSpace(result.Stderr)))
 	}
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("%s failed with exit code %d", stepID, result.ExitCode)
+		errMsg := fmt.Sprintf("%s failed with exit code %d", stepID, result.ExitCode)
+		if strings.TrimSpace(result.Stderr) != "" {
+			errMsg += ": " + strings.TrimSpace(result.Stderr)
+		}
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 	return map[string]any{"status": "ok", "stdout": result.Stdout}, nil
 }

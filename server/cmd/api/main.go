@@ -315,7 +315,7 @@ func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {
 			WorkspaceRoot:     cfg.Sandbox.WorkspaceRoot,
 			MemoryBytes:       cfg.Sandbox.MemoryMB * 1024 * 1024,
 			NanoCPUs:          cfg.Sandbox.NanoCPUs,
-			DisableNetworking: true,
+			DisableNetworking: cfg.Sandbox.DisableNetworking,
 		})
 		if err != nil {
 			return nil, err

@@ -136,13 +136,13 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 
 		cmd := fmt.Sprintf(`
 ERR_LOG="%[1]s/patch_err.log"
-if git -C %[1]s apply --check -R %[2]s >/dev/null 2>&1; then
+if git -C %[2]s apply --check -R %[3]s >/dev/null 2>&1; then
 	true
-elif git -C %[1]s apply --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+elif git -C %[2]s apply --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
 else
 	cat "$ERR_LOG" >&2
@@ -150,8 +150,9 @@ else
 fi
 CODE=$?
 rm -f "$ERR_LOG"
-find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
+			containerTargetPath,
 			workspace.QuoteShellArg(containerTargetPath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
@@ -159,13 +160,13 @@ exit $CODE`,
 		if err != nil {
 			revertCmd := fmt.Sprintf(`
 ERR_LOG="%[1]s/patch_err.log"
-if git -C %[1]s apply --reverse --check -R %[2]s >/dev/null 2>&1; then
+if git -C %[2]s apply --reverse --check -R %[3]s >/dev/null 2>&1; then
 	true
-elif git -C %[1]s apply --reverse --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+elif git -C %[2]s apply --reverse --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
 else
 	cat "$ERR_LOG" >&2
@@ -173,8 +174,9 @@ else
 fi
 CODE=$?
 rm -f "$ERR_LOG"
-find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
+				containerTargetPath,
 				workspace.QuoteShellArg(containerTargetPath),
 				workspace.QuoteShellArg(containerPatchPath),
 			)
@@ -249,13 +251,13 @@ exit $CODE`,
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
 		cmd := fmt.Sprintf(`
 ERR_LOG="%[1]s/patch_err.log"
-if git -C %[1]s apply --check -R -p1 %[2]s >/dev/null 2>&1; then
+if git -C %[2]s apply --check -R -p1 %[3]s >/dev/null 2>&1; then
 	true
-elif git -C %[1]s apply -p1 --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+elif git -C %[2]s apply -p1 --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
 else
 	cat "$ERR_LOG" >&2
@@ -263,8 +265,9 @@ else
 fi
 CODE=$?
 rm -f "$ERR_LOG"
-find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
+			containerRepoWorktreePath,
 			workspace.QuoteShellArg(containerRepoWorktreePath),
 			workspace.QuoteShellArg(containerPatchPath),
 		)
@@ -272,13 +275,13 @@ exit $CODE`,
 		if err != nil {
 			revertCmd := fmt.Sprintf(`
 ERR_LOG="%[1]s/patch_err.log"
-if git -C %[1]s apply --reverse --check -R -p1 %[2]s >/dev/null 2>&1; then
+if git -C %[2]s apply --reverse --check -R -p1 %[3]s >/dev/null 2>&1; then
 	true
-elif git -C %[1]s apply --reverse -p1 --recount --whitespace=nowarn %[2]s >"$ERR_LOG" 2>&1; then
+elif git -C %[2]s apply --reverse -p1 --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p1 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[1]s -p0 < %[2]s >"$ERR_LOG" 2>&1; then
+elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
 else
 	cat "$ERR_LOG" >&2
@@ -286,8 +289,9 @@ else
 fi
 CODE=$?
 rm -f "$ERR_LOG"
-find %[1]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
+find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
+				containerRepoWorktreePath,
 				workspace.QuoteShellArg(containerRepoWorktreePath),
 				workspace.QuoteShellArg(containerPatchPath),
 			)

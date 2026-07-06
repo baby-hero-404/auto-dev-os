@@ -9,7 +9,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
-	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -38,7 +38,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		return nil, fmt.Errorf("llm provider is not configured")
 	}
 	localPath := sandbox.WorkspacePath(r.WorkspaceRoot, task.ID)
-	ctx = context.WithValue(ctx, retrieval.WorkspaceRootKey, localPath)
+	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 	ctx = context.WithValue(ctx, prompt.StepIDCtxKey, stepID)
 
 	messages, err := r.initialMessages(ctx, task, agent)

@@ -2,7 +2,6 @@ package steps
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,54 +36,7 @@ func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Me
 	return m.Chat(ctx, messages)
 }
 
-func TestSanitizeRepoURL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"https://github.com/org/repo.git", "https://github.com/org/repo.git"},
-		{"https://x-access-token:github_pat_12345@github.com/org/repo.git", "https://github.com/org/repo.git"},
-		{"http://user:password@gitlab.com/org/repo.git", "http://gitlab.com/org/repo.git"},
-		{"git@github.com:org/repo.git", "git@github.com:org/repo.git"},
-	}
-
-	for _, tc := range tests {
-		actual := sanitizeRepoURL(tc.input)
-		if actual != tc.expected {
-			t.Errorf("sanitizeRepoURL(%q) = %q, expected %q", tc.input, actual, tc.expected)
-		}
-	}
-}
-
-func TestNormalizeRepoURL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"https://github.com/org/repo.git", "github.com/org/repo"},
-		{"http://github.com/org/repo.git", "github.com/org/repo"},
-		{"git@github.com:org/repo.git", "github.com/org/repo"},
-		{"git@github.com:org/repo", "github.com/org/repo"},
-		{"https://token@github.com/org/repo.git", "github.com/org/repo"},
-	}
-
-	for _, tc := range tests {
-		actual := normalizeRepoURL(tc.input)
-		if actual != tc.expected {
-			t.Errorf("normalizeRepoURL(%q) = %q, expected %q", tc.input, actual, tc.expected)
-		}
-	}
-}
-
-func TestGetRepoHash(t *testing.T) {
-	h1 := getRepoHash("https://github.com/org/repo.git")
-	h2 := getRepoHash("git@github.com:org/repo")
-	if h1 != h2 {
-		t.Errorf("expected same hash for equivalent URLs, got %q vs %q", h1, h2)
-	}
-}
-
-func TestStepContextLoad_Caching(t *testing.T) {
+func TestStepContextLoad_Execute(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-load-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -105,24 +57,12 @@ func TestStepContextLoad_Caching(t *testing.T) {
 	if err := os.MkdirAll(taskWorkspace, 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	mockProfile := RepoProfile{
-		RepoURL:     "github.com/org/repo",
-		GeneratedAt: "2026-06-24T15:40:00Z",
-		CommitHash:  "abc123commit",
-		Architecture: RepoArchitecture{
-			Summary: "Mock Architecture Summary",
-			DirectoryStructure: map[string]string{
-				"server": "Go server backend",
-			},
-		},
-		Conventions: RepoConventions{
-			Language:    "Go",
-			Naming:      "camelCase",
-			LinterRules: "golangci-lint default",
-		},
+	if err := os.WriteFile(filepath.Join(taskWorkspace, "main.go"), []byte("package main"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	profileBytes, _ := json.Marshal(mockProfile)
+	if err := os.WriteFile(filepath.Join(taskWorkspace, "go.mod"), []byte("module test"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	llmCallCount := 0
 	llmProvider := &mockLLMProvider{
@@ -130,7 +70,7 @@ func TestStepContextLoad_Caching(t *testing.T) {
 			llmCallCount++
 			return &llm.Response{
 				Model:   "mock-model",
-				Content: string(profileBytes),
+				Content: `{}`,
 			}, nil
 		},
 	}
@@ -165,41 +105,30 @@ func TestStepContextLoad_Caching(t *testing.T) {
 		)
 	}
 
-	// First execution (Cache Miss)
 	res, err := buildStep().Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
-		t.Fatalf("first Execute failed: %v", err)
+		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if llmCallCount != 1 {
-		t.Errorf("expected 1 LLM call on cache miss, got %d", llmCallCount)
+	// Verify NO LLM calls were made during context load step
+	if llmCallCount != 0 {
+		t.Errorf("expected 0 LLM calls, got %d", llmCallCount)
 	}
 
-	architectures, ok := res["architectures"].(map[string]string)
-	if !ok || architectures["cached_profile"] == "" {
-		t.Errorf("expected cached_profile in architectures, got: %v", res["architectures"])
+	// Verify git logs, current branches and test commands are loaded correctly
+	gitLogs, ok := res["git_logs"].(map[string]string)
+	if !ok || gitLogs["root"] != "mock output" {
+		t.Errorf("expected git_logs root to be 'mock output', got: %v", res["git_logs"])
 	}
 
-	// Verify cache file was written to correct location
-	repoHash := getRepoHash(filepath.Base(taskWorkspace))
-	cacheFile := filepath.Join(filepath.Dir(workspaceRoot), "repositories", repoHash, "profile.json")
-	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
-		t.Errorf("expected cache file at %q, but not found", cacheFile)
+	currentBranches, ok := res["current_branches"].(map[string]string)
+	if !ok || currentBranches["root"] != "mock output" {
+		t.Errorf("expected current_branches root to be 'mock output', got: %v", res["current_branches"])
 	}
 
-	// Second execution (Cache Hit)
-	res2, err := buildStep().Execute(context.Background(), workflow.StepContext{})
-	if err != nil {
-		t.Fatalf("second Execute failed: %v", err)
-	}
-
-	if llmCallCount != 1 {
-		t.Errorf("expected NO extra LLM call on cache hit, got count %d", llmCallCount)
-	}
-
-	architectures2, ok := res2["architectures"].(map[string]string)
-	if !ok || architectures2["cached_profile"] == "" {
-		t.Errorf("expected cached_profile in architectures on cache hit")
+	testCommands, ok := res["test_commands"].([]string)
+	if !ok || len(testCommands) == 0 {
+		t.Errorf("expected detected test commands, got: %v", res["test_commands"])
 	}
 }
 

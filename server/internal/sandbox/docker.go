@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -104,18 +105,32 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	}
 
 	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
-		// Define common language cache mappings: host relative path -> container target path
-		cacheDirs := map[string]string{
-			filepath.Join("go", "pkg", "mod"):   "/go/pkg/mod",
-			".npm":                              "/root/.npm",
-			filepath.Join(".cache", "pip"):      "/root/.cache/pip",
-			".m2":                               "/root/.m2",
-			".gradle":                           "/root/.gradle",
-			filepath.Join(".cargo", "registry"): "/root/.cargo/registry",
+		goModCachePath := filepath.Join(homeDir, "go", "pkg", "mod")
+		if gopath := os.Getenv("GOPATH"); gopath != "" {
+			first := strings.Split(gopath, string(os.PathListSeparator))[0]
+			goModCachePath = filepath.Join(first, "pkg", "mod")
+		} else {
+			cmd := exec.Command("go", "env", "GOPATH")
+			if out, err := cmd.Output(); err == nil {
+				gopathVal := strings.TrimSpace(string(out))
+				if gopathVal != "" {
+					first := strings.Split(gopathVal, string(os.PathListSeparator))[0]
+					goModCachePath = filepath.Join(first, "pkg", "mod")
+				}
+			}
 		}
 
-		for relHostPath, targetContainerPath := range cacheDirs {
-			absHostPath := filepath.Join(homeDir, relHostPath)
+		// Define common language cache mappings: host absolute path -> container target path
+		cacheDirs := map[string]string{
+			goModCachePath:                          "/go/pkg/mod",
+			filepath.Join(homeDir, ".npm"):          "/root/.npm",
+			filepath.Join(homeDir, ".cache", "pip"): "/root/.cache/pip",
+			filepath.Join(homeDir, ".m2"):           "/root/.m2",
+			filepath.Join(homeDir, ".gradle"):       "/root/.gradle",
+			filepath.Join(homeDir, ".cargo", "registry"): "/root/.cargo/registry",
+		}
+
+		for absHostPath, targetContainerPath := range cacheDirs {
 			if stat, err := os.Stat(absHostPath); err == nil && stat.IsDir() {
 				mounts = append(mounts, mount.Mount{
 					Type:     mount.TypeBind,
@@ -124,7 +139,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 					ReadOnly: true,
 				})
 				// If we mounted Go cache, set GOPATH env var
-				if relHostPath == filepath.Join("go", "pkg", "mod") {
+				if targetContainerPath == "/go/pkg/mod" {
 					envMap["GOPATH"] = "/go"
 				}
 			}

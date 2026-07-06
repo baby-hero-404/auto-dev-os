@@ -31,21 +31,31 @@ func testBaseTools() []llm.ToolDefinition {
 	}
 }
 
-type fakeContextRetriever struct {
-	called bool
-}
-
-func (r *fakeContextRetriever) RetrieveContext(_ context.Context, _ string, limit int) ([]models.ContextSnippet, error) {
-	r.called = true
+func (m *MockContextEngine) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
+	m.called = true
 	return []models.ContextSnippet{{
 		Path:      "server/internal/service/task.go",
 		StartLine: 10,
 		EndLine:   20,
 		Content:   "func AnalyzeTask() {}",
 		Relevance: 9.5,
-		Retriever: "semantic_file",
+		Retriever: "ast_context_engine",
 	}}, nil
 }
+
+type MockContextEngine struct{
+	called bool
+}
+
+func (m *MockContextEngine) GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error) {
+	return "main.go:\n  def Main", nil
+}
+
+func (m *MockContextEngine) Close() error {
+	return nil
+}
+
+
 
 func TestDetectRuleConflictsRejectsGlobalOverride(t *testing.T) {
 	err := DetectRuleConflicts(
@@ -71,7 +81,7 @@ func TestDetectRuleConflictsRejectsTaskOverride(t *testing.T) {
 }
 
 func TestPromptAssembler_AssembleForAgentWithTaskRules(t *testing.T) {
-	assembler := NewPromptAssembler(nil, testBaseTools())
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{})
 	task := models.Task{
 		ID:        "task-1",
 		ProjectID: "project-1",
@@ -98,8 +108,8 @@ func TestPromptAssembler_AssembleForAgentWithTaskRules(t *testing.T) {
 }
 
 func TestPromptAssembler_AttachesSemanticCodeContextForPlanner(t *testing.T) {
-	retriever := &fakeContextRetriever{}
-	assembler := NewPromptAssembler(retriever, testBaseTools())
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Improve task analysis", Description: "Use service code context."}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRolePlanner}
 
@@ -107,8 +117,8 @@ func TestPromptAssembler_AttachesSemanticCodeContextForPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
-	if !retriever.called {
-		t.Fatal("expected retriever to be called for planner")
+	if !engine.called {
+		t.Fatal("expected engine to be called for planner")
 	}
 	userMsg := messages[1].Content
 	if !strings.Contains(userMsg, "Semantic Code Retrieval Context:") {
@@ -120,8 +130,8 @@ func TestPromptAssembler_AttachesSemanticCodeContextForPlanner(t *testing.T) {
 }
 
 func TestPromptAssembler_AttachesSemanticCodeContextForBackend(t *testing.T) {
-	retriever := &fakeContextRetriever{}
-	assembler := NewPromptAssembler(retriever, testBaseTools())
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
 
@@ -129,8 +139,8 @@ func TestPromptAssembler_AttachesSemanticCodeContextForBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleForAgent returned error: %v", err)
 	}
-	if !retriever.called {
-		t.Fatal("expected retriever to be called for backend")
+	if !engine.called {
+		t.Fatal("expected engine to be called for backend")
 	}
 	if !strings.Contains(messages[1].Content, "Semantic Code Retrieval Context:") {
 		t.Fatal("expected context section for backend")
@@ -156,7 +166,7 @@ func TestTruncateHistoryKeepsRecentMessages(t *testing.T) {
 }
 
 func TestPromptAssembler_AssembleForAgentUsesRoleMatchedSkills(t *testing.T) {
-	assembler := NewPromptAssembler(nil, testBaseTools()).WithSkillLister(fakeAgentSkillLister{
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{
 		skills: []models.Skill{
 			{
 				Name:        "api-patterns",
@@ -186,7 +196,7 @@ func TestPromptAssembler_AssembleForAgentUsesRoleMatchedSkills(t *testing.T) {
 }
 
 func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsSafeDefaultTools(t *testing.T) {
-	assembler := NewPromptAssembler(nil, testBaseTools()).WithSkillLister(fakeAgentSkillLister{})
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{})
 	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleQA}
 
@@ -267,7 +277,7 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 	}
 
 	// Create prompt assembler
-	assembler := NewPromptAssembler(nil, testBaseTools()).WithDataRoot(tmpDir)
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithDataRoot(tmpDir)
 
 	task := models.Task{
 		ID:          "task-1",
@@ -300,5 +310,24 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 	// Assert tools list is loaded
 	if len(tools) == 0 {
 		t.Errorf("expected tools list, got empty")
+	}
+}
+
+func TestPromptAssembler_InjectsRepoMap(t *testing.T) {
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{})
+	task := models.Task{ID: "task-1"}
+	agent := &models.Agent{ID: "agent-1"}
+
+	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent failed: %v", err)
+	}
+
+	userMsg := messages[1].Content
+	if !strings.Contains(userMsg, "=== Repository Structure ===") {
+		t.Fatalf("expected user prompt to contain repo map header, got %s", userMsg)
+	}
+	if !strings.Contains(userMsg, "main.go:") {
+		t.Fatalf("expected user prompt to contain injected repo map, got %s", userMsg)
 	}
 }

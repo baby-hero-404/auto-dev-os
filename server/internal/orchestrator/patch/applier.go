@@ -135,7 +135,7 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 		containerPatchPath := filepath.Join(containerTargetPath, "patch.diff")
 
 		cmd := fmt.Sprintf(`
-ERR_LOG="%[1]s/patch_err.log"
+ERR_LOG="/tmp/patch_err.log"
 if git -C %[2]s apply --check -R %[3]s >/dev/null 2>&1; then
 	true
 elif git -C %[2]s apply --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
@@ -159,7 +159,7 @@ exit $CODE`,
 		_, err = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch", cmd, worktreeSuffix)
 		if err != nil {
 			revertCmd := fmt.Sprintf(`
-ERR_LOG="%[1]s/patch_err.log"
+ERR_LOG="/tmp/patch_err.log"
 if git -C %[2]s apply --reverse --check -R %[3]s >/dev/null 2>&1; then
 	true
 elif git -C %[2]s apply --reverse --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
@@ -250,7 +250,7 @@ exit $CODE`,
 
 		// Use -p1 because splitPatchByRepo strips the workspace/repo prefix.
 		cmd := fmt.Sprintf(`
-ERR_LOG="%[1]s/patch_err.log"
+ERR_LOG="/tmp/patch_err.log"
 if git -C %[2]s apply --check -R -p1 %[3]s >/dev/null 2>&1; then
 	true
 elif git -C %[2]s apply -p1 --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
@@ -274,7 +274,7 @@ exit $CODE`,
 		_, err := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch_"+repoName, cmd, worktreeSuffix)
 		if err != nil {
 			revertCmd := fmt.Sprintf(`
-ERR_LOG="%[1]s/patch_err.log"
+ERR_LOG="/tmp/patch_err.log"
 if git -C %[2]s apply --reverse --check -R -p1 %[3]s >/dev/null 2>&1; then
 	true
 elif git -C %[2]s apply --reverse -p1 --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then

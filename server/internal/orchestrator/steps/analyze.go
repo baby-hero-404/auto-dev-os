@@ -11,7 +11,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
-	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -75,7 +75,7 @@ func (s *AnalyzeStep) StatusOnResume(_ StepResult) string { return models.TaskSt
 
 func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
-	ctx = context.WithValue(ctx, retrieval.WorkspaceRootKey, localPath)
+	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 
 	if s.prompts != nil {
 		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil)

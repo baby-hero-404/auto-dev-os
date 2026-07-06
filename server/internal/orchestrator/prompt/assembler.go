@@ -8,34 +8,34 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
-	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 type PromptAssembler struct {
-	retriever retrieval.ContextRetriever
 	rules     *repository.RuleRepo
 	skills    SkillLister
 	baseTools []llm.ToolDefinition
 	root      string
 	dataRoot  string
+	ctxEngine provider.ContextEngine
 }
 
 type SkillLister interface {
 	List(context.Context) ([]models.Skill, error)
 }
 
-func NewPromptAssembler(retriever retrieval.ContextRetriever, baseTools []llm.ToolDefinition) *PromptAssembler {
-	return &PromptAssembler{retriever: retriever, baseTools: baseTools, root: defaultPromptRoot()}
+func NewPromptAssembler(baseTools []llm.ToolDefinition, ctxEngine provider.ContextEngine) *PromptAssembler {
+	return &PromptAssembler{baseTools: baseTools, root: defaultPromptRoot(), ctxEngine: ctxEngine}
 }
 
-func NewPromptAssemblerWithRules(retriever retrieval.ContextRetriever, rules *repository.RuleRepo, baseTools []llm.ToolDefinition, root string) *PromptAssembler {
+func NewPromptAssemblerWithRules(rules *repository.RuleRepo, baseTools []llm.ToolDefinition, root string, ctxEngine provider.ContextEngine) *PromptAssembler {
 	if root == "" {
 		root = defaultPromptRoot()
 	}
-	return &PromptAssembler{retriever: retriever, rules: rules, baseTools: baseTools, root: root}
+	return &PromptAssembler{rules: rules, baseTools: baseTools, root: root, ctxEngine: ctxEngine}
 }
 
 func (a *PromptAssembler) WithSkillLister(skills SkillLister) *PromptAssembler {
@@ -86,17 +86,22 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	stepID := stepIDFromCtx(ctx)
 
 	var contextBlock string
-	if a != nil && a.retriever != nil && shouldAttachCodeContext(agent) {
+	var activeFiles []string
+	if a != nil && a.ctxEngine != nil && shouldAttachCodeContext(agent) {
 		maxSnippets := 8
 		if isCodingStep(stepID) {
 			maxSnippets = 4
 		}
-		snippets, err := a.retriever.RetrieveContext(ctx, task.Title+"\n"+task.Description, maxSnippets)
+		snippets, err := a.ctxEngine.RetrieveContext(ctx, task.Title+"\n"+task.Description, maxSnippets)
 		if err != nil {
 			return nil, nil, err
 		}
 		snippets = deduplicateSnippets(snippets)
 		contextBlock = formatContextSnippets(snippets)
+		
+		for _, s := range snippets {
+			activeFiles = append(activeFiles, s.Path)
+		}
 	}
 
 	// Inject Project Knowledge Base Docs (Planned 5.5)
@@ -120,6 +125,31 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	if len(task.Analysis) > 0 {
 		_ = json.Unmarshal(task.Analysis, &analysis)
 	}
+
+	// Extract active targets safely from structured ExecutionPlan
+	if len(analysis.ExecutionPlan) > 0 {
+		for _, step := range analysis.ExecutionPlan {
+			words := strings.Fields(step)
+			for _, w := range words {
+				cleanWord := strings.Trim(w, "`,.\":")
+				// Simple heuristic to catch file paths
+				if strings.Contains(cleanWord, ".") && !strings.HasSuffix(cleanWord, ".") {
+					activeFiles = append(activeFiles, cleanWord)
+				}
+			}
+		}
+	}
+	
+	// Deduplicate activeFiles
+	seenFiles := make(map[string]bool)
+	var uniqueActiveFiles []string
+	for _, f := range activeFiles {
+		if !seenFiles[f] {
+			seenFiles[f] = true
+			uniqueActiveFiles = append(uniqueActiveFiles, f)
+		}
+	}
+	activeFiles = uniqueActiveFiles
 
 	user := "Task: " + task.Title + "\n\n" + task.Description
 	
@@ -167,6 +197,25 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	}
 	if memories, ok := ctx.Value(MemoriesCtxKey).([]models.EpisodicMemory); ok && len(memories) > 0 {
 		user += "\n\nRetrieved Memories:\n" + formatMemories(memories)
+	}
+
+	// TOKEN BUDGET ARBITRATION
+	if a != nil && a.ctxEngine != nil {
+		// Heuristic: 1 token ~= 4 chars
+		usedTokens := len(user) / 4
+		totalBudget := 8192 // Target system budget
+		maxMapTokens := totalBudget - usedTokens
+		
+		if maxMapTokens > 2048 {
+			maxMapTokens = 2048
+		} else if maxMapTokens < 256 {
+			maxMapTokens = 256 // Fallback minimum
+		}
+		
+		repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
+		if err == nil && repoMap != "" {
+			user = "=== Repository Structure ===\n" + repoMap + "\n\n" + user
+		}
 	}
 	messages := []llm.Message{
 		{Role: "system", Content: system},

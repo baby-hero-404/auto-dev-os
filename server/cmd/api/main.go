@@ -23,10 +23,10 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/skills"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
-	"github.com/auto-code-os/auto-code-os/server/internal/retrieval"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 )
 
@@ -125,11 +125,19 @@ func run() error {
 	}()
 	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, cfg.Sandbox.SkillsRoot)
 	agentManager := orchestrator.NewAgentManager(agentRepo)
+	
+	cacheDbPath := filepath.Join(cfg.AutoCodeOS.DataRoot, "cache.db")
+	ctxEngine, err := provider.NewProvider(cfg.Sandbox.WorkspaceRoot, cacheDbPath)
+	if err != nil {
+		return fmt.Errorf("init context engine: %w", err)
+	}
+	defer ctxEngine.Close()
+
 	promptAssembler := prompt.NewPromptAssemblerWithRules(
-		retrieval.NewSimpleFileRetriever("."),
 		ruleRepo,
 		skills.BuiltinToolDefinitions(),
 		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
+		ctxEngine,
 	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	artifactRepo := repository.NewArtifactRepo(db)
 	gitProvider := gitops.NewGitHubProvider("")

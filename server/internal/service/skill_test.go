@@ -12,6 +12,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -67,7 +68,7 @@ func TestSkillService_GitSync(t *testing.T) {
 
 	sourceRepo := repository.NewSkillSourceRepo(gormDB)
 	tempDir := t.TempDir()
-	svc := NewSkillService(nil, sourceRepo, tempDir)
+	svc := NewSkillService(nil, sourceRepo, paths.NewOSSkillPaths(tempDir), paths.NewOSFileSystem())
 
 	sourceID := "source-uuid-123"
 	sourceURL := "file://" + filepath.ToSlash(gitSourceDir)
@@ -159,7 +160,7 @@ func TestSkillService_ListFiles_And_GetContent(t *testing.T) {
 	}
 
 	sourceRepo := repository.NewSkillSourceRepo(gormDB)
-	svc := NewSkillService(nil, sourceRepo, tempDir)
+	svc := NewSkillService(nil, sourceRepo, paths.NewOSSkillPaths(tempDir), paths.NewOSFileSystem())
 
 	sourceID := "source-uuid-123"
 	sourceURL := "https://github.com/org/test-repo.git"
@@ -207,7 +208,7 @@ func TestSkillService_ListFiles_And_GetContent(t *testing.T) {
 }
 
 func TestSkillService_AddSource_ValidatesRepoURL(t *testing.T) {
-	svc := NewSkillService(nil, nil, t.TempDir())
+	svc := NewSkillService(nil, nil, paths.NewOSSkillPaths(t.TempDir()), paths.NewOSFileSystem())
 
 	_, err := svc.AddSource(context.Background(), models.CreateSkillSourceInput{URL: "not-a-repo"})
 	if err == nil {

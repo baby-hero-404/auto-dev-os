@@ -13,7 +13,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -186,7 +186,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	if o.memHooks != nil {
 		memories, err := o.memHooks.SessionStart(ctx, agent.ID, task)
 		if err == nil && len(memories) > 0 {
-			ctx = context.WithValue(ctx, prompt.MemoriesCtxKey, memories)
+			ctx = context.WithValue(ctx, prompts.MemoriesCtxKey, memories)
 		}
 	}
 
@@ -217,6 +217,14 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			}
 			if event.Error != "" {
 				state["error"] = event.Error
+			}
+			
+			// Attach current SpecHash to the checkpoint state to ensure immutable contract resuming
+			if len(task.Analysis) > 0 {
+				var analysis models.TaskAnalysis
+				if json.Unmarshal(task.Analysis, &analysis) == nil && analysis.SpecHash != "" {
+					state["spec_hash"] = analysis.SpecHash
+				}
 			}
 			if err := o.checkpoint(ctx, task.ID, &job.ID, event.StepID, state); err != nil {
 				return err
@@ -281,22 +289,45 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 	runners := o.stepRunners(task, agent, job.ID, job.Step)
 	var def workflow.Definition
-	switch task.Complexity {
-	case models.TaskComplexityEasy:
-		def = workflow.EasyWorkflow(runners)
-	case models.TaskComplexityHard:
-		def = workflow.HardWorkflow(runners, subtasks)
-	default:
-		def = workflow.MediumWorkflow(runners, subtasks)
+	if len(task.Analysis) > 0 {
+		var analysis models.TaskAnalysis
+		if json.Unmarshal(task.Analysis, &analysis) == nil && len(analysis.ExecutionUnits) > 0 {
+			def = workflow.DynamicDAGWorkflow(runners, analysis.ExecutionUnits)
+		}
+	}
+
+	if def.Name == "" {
+		switch task.Complexity {
+		case models.TaskComplexityEasy:
+			def = workflow.EasyWorkflow(runners)
+		case models.TaskComplexityHard:
+			def = workflow.HardWorkflow(runners, subtasks)
+		default:
+			def = workflow.MediumWorkflow(runners, subtasks)
+		}
 	}
 
 	// Load existing checkpoints to support resume-from-last-success.
 	var resumedStepID string
 	if checkpoints, cpErr := o.workflows.ListCheckpoints(ctx, task.ID); cpErr == nil && len(checkpoints) > 0 {
+		var currentSpecHash string
+		if len(task.Analysis) > 0 {
+			var analysis models.TaskAnalysis
+			if json.Unmarshal(task.Analysis, &analysis) == nil {
+				currentSpecHash = analysis.SpecHash
+			}
+		}
+
 		completed := make(map[string]map[string]any)
 		for _, cp := range checkpoints {
 			var state map[string]any
 			if json.Unmarshal(cp.State, &state) == nil {
+				// Validate SpecHash: if the contract changed, throw away the checkpoint
+				if cpHash, ok := state["spec_hash"].(string); ok && cpHash != "" && currentSpecHash != "" && cpHash != currentSpecHash {
+					o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("SpecHash mismatch at step %s. Discarding checkpoint to force re-execution.", cp.Step))
+					continue
+				}
+
 				if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 					if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
 						continue
@@ -325,10 +356,11 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 	var result workflow.Result
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		attemptCtx := context.WithValue(ctx, "workflow_attempt", attempt)
 		if resumedStepID != "" {
-			result, err = engine.Resume(ctx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID}, resumedStepID)
+			result, err = engine.Resume(attemptCtx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID}, resumedStepID)
 		} else {
-			result, err = engine.Run(ctx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID})
+			result, err = engine.Run(attemptCtx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID})
 		}
 		if errors.Is(err, workflow.ErrReviewFixLoop) {
 			o.log(ctx, task.ID, &job.ID, "info", "Review findings detected. Looping back to review step.")
@@ -440,6 +472,17 @@ func (o *Orchestrator) checkpoint(ctx context.Context, taskID string, jobID *str
 }
 
 func (o *Orchestrator) log(ctx context.Context, taskID string, jobID *string, level, message string) {
+	stepID, hasStep := ctx.Value("workflow_step_id").(string)
+	attempt, hasAttempt := ctx.Value("workflow_attempt").(int)
+	if hasStep && stepID != "" {
+		if hasAttempt {
+			message = fmt.Sprintf("[%s #%d] %s", stepID, attempt, message)
+		} else {
+			message = fmt.Sprintf("[%s] %s", stepID, message)
+		}
+	} else if hasAttempt {
+		message = fmt.Sprintf("[#%d] %s", attempt, message)
+	}
 	message = redactSecrets(message)
 	if err := o.workflows.CreateLog(ctx, models.TaskLog{TaskID: taskID, JobID: jobID, Level: level, Message: message}); err != nil {
 		slog.Warn("persist workflow log failed", observability.LogAttrs(ctx, "task_id", taskID, "job_id", jobID, "level", level, "error", err)...)

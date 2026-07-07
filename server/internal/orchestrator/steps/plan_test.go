@@ -61,7 +61,7 @@ func TestShouldSkipFrontend_BackendCategory_WithSubtasks_KeepsFrontend(t *testin
 func TestShouldSkipFrontend_NoSubtasksButFrontendFiles(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		PrimaryCategory: "",
-		AffectedFiles:   []string{"web/src/App.tsx", "server/main.go"},
+		AffectedFiles:   []models.AffectedFile{{File: "web/src/App.tsx"}, {File: "server/main.go"}},
 	}
 	subtasks := map[string][]string{"backend": {"be task"}}
 	if shouldSkipFrontend(analysis, subtasks) {
@@ -72,7 +72,7 @@ func TestShouldSkipFrontend_NoSubtasksButFrontendFiles(t *testing.T) {
 func TestShouldSkipFrontend_NoSubtasksNoFiles(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		PrimaryCategory: "",
-		AffectedFiles:   []string{"server/main.go", "internal/repo.go"},
+		AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}, {File: "internal/repo.go"}},
 	}
 	subtasks := map[string][]string{"backend": {"be task"}}
 	if !shouldSkipFrontend(analysis, subtasks) {
@@ -83,7 +83,7 @@ func TestShouldSkipFrontend_NoSubtasksNoFiles(t *testing.T) {
 func TestShouldSkipFrontend_UnknownCategory_NoSubtasks_Skips(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		PrimaryCategory: "mobile",
-		AffectedFiles:   []string{"server/main.go"},
+		AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}},
 	}
 	subtasks := map[string][]string{}
 	if !shouldSkipFrontend(analysis, subtasks) {
@@ -95,8 +95,7 @@ func TestPlanStep_NoLLMCall(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		Complexity:      "medium",
 		PrimaryCategory: "backend",
-		TasksMD:         "## Backend\n- [ ] Task 1\n",
-		ExecutionPlan:   []string{"step1", "step2"},
+		ExecutionPhases:   []models.ExecutionPhase{{Phase: "Backend", Tasks: []string{"Task 1"}}},
 	}
 	analysisJSON, _ := json.Marshal(analysis)
 
@@ -114,6 +113,8 @@ func TestPlanStep_NoLLMCall(t *testing.T) {
 		nil,
 		&mockStatusUpdater{},
 		log,
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -138,7 +139,7 @@ func TestPlanStep_NoLLMCall(t *testing.T) {
 }
 
 func TestPlanStep_BranchSetup(t *testing.T) {
-	analysis := models.TaskAnalysis{Complexity: "medium", TasksMD: "## Backend\n- [ ] t1\n"}
+	analysis := models.TaskAnalysis{Complexity: "medium", ExecutionPhases: []models.ExecutionPhase{{Phase: "Backend", Tasks: []string{"t1"}}}}
 	analysisJSON, _ := json.Marshal(analysis)
 	task := &models.Task{
 		ID:         "task-2",
@@ -154,6 +155,8 @@ func TestPlanStep_BranchSetup(t *testing.T) {
 		&mockStepWorkspaceLoader{},
 		&mockStatusUpdater{},
 		&mockLogger{},
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -176,8 +179,10 @@ func TestPlanStep_OutputStructure(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		Complexity:      "medium",
 		PrimaryCategory: "frontend",
-		TasksMD:         "## Backend\n- [ ] be1\n## UI Components\n- [ ] fe1\n- [ ] fe2\n",
-		ExecutionPlan:   []string{"plan step 1"},
+		ExecutionPhases: []models.ExecutionPhase{
+			{Phase: "Backend", Tasks: []string{"be1"}},
+			{Phase: "UI Components", Tasks: []string{"fe1", "fe2"}},
+		},
 	}
 	analysisJSON, _ := json.Marshal(analysis)
 	task := &models.Task{
@@ -192,6 +197,8 @@ func TestPlanStep_OutputStructure(t *testing.T) {
 		nil, nil, nil,
 		&mockStatusUpdater{},
 		&mockLogger{},
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -213,13 +220,13 @@ func TestPlanStep_OutputStructure(t *testing.T) {
 		t.Error("expected skip_frontend=false for frontend category with frontend tasks")
 	}
 
-	// Check execution_plan propagated
-	plan, ok := result["execution_plan"].([]string)
+	// Check execution_phases propagated
+	plan, ok := result["execution_phases"].([]models.ExecutionPhase)
 	if !ok {
-		t.Fatalf("execution_plan wrong type: %T", result["execution_plan"])
+		t.Fatalf("execution_phases wrong type: %T", result["execution_phases"])
 	}
-	if len(plan) != 1 || plan[0] != "plan step 1" {
-		t.Errorf("unexpected execution_plan: %v", plan)
+	if len(plan) != 2 || len(plan[0].Tasks) != 1 || plan[0].Tasks[0] != "be1" {
+		t.Errorf("unexpected execution_phases: %v", plan)
 	}
 }
 
@@ -227,7 +234,7 @@ func TestPlanStep_EmitsLogs(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		Complexity:      "medium",
 		PrimaryCategory: "backend",
-		TasksMD:         "## Backend\n- [ ] t1\n",
+		ExecutionPhases: []models.ExecutionPhase{{Phase: "Backend", Tasks: []string{"t1"}}},
 	}
 	analysisJSON, _ := json.Marshal(analysis)
 	task := &models.Task{
@@ -242,6 +249,8 @@ func TestPlanStep_EmitsLogs(t *testing.T) {
 		nil, nil, nil,
 		&mockStatusUpdater{},
 		log,
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -250,8 +259,8 @@ func TestPlanStep_EmitsLogs(t *testing.T) {
 	}
 
 	expectedPhrases := []string{
-		"parsing tasks_md",
-		"backend subtasks",
+		"mapping ExecutionUnits",
+		"backend units",
 		"skip_frontend",
 		"setting up role branches",
 		"orchestration checkpoint complete",
@@ -281,6 +290,8 @@ func TestPlanStep_EasyTaskSkipped(t *testing.T) {
 		nil, nil, nil,
 		&mockStatusUpdater{}, // Need to add StatusUpdater to fix compilation (not really needed for skip though)
 		&mockLogger{},
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -305,6 +316,8 @@ func TestPlanStep_EmptyAnalysisFallback(t *testing.T) {
 		nil, nil, nil,
 		statusMock,
 		&mockLogger{},
+		&mockCheckpointLister{},
+		8.0,
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -321,5 +334,136 @@ func TestPlanStep_EmptyAnalysisFallback(t *testing.T) {
 	}
 	if statusMock.lastStatus != models.TaskStatusCoding {
 		t.Errorf("expected status transition to coding, got %s", statusMock.lastStatus)
+	}
+}
+
+func TestPlanStep_ValidationFailure_AutoRetry(t *testing.T) {
+	// A unit that violates Max Cost (> 8) or has a cycle.
+	// Let's create one with a cyclic dependency.
+	analysis := models.TaskAnalysis{
+		Complexity:      "medium",
+		PrimaryCategory: "backend",
+		TasksMD:         "## Backend\n- [ ] Task 1\n",
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID:           "unit1",
+				Objective:    "Loop 1",
+				Dependencies: []string{"unit2"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+			{
+				ID:           "unit2",
+				Objective:    "Loop 2",
+				Dependencies: []string{"unit1"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+		},
+		RetryCount: 0,
+	}
+	analysisJSON, _ := json.Marshal(analysis)
+	task := &models.Task{
+		ID:         "task-retry",
+		Complexity: models.TaskComplexityMedium,
+		Analysis:   analysisJSON,
+	}
+
+	mockRepo := &mockTaskReader{task: task}
+	mockCps := &mockCheckpointLister{}
+
+	step := NewPlanStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		mockRepo,
+		nil, nil, nil,
+		&mockStatusUpdater{},
+		&mockLogger{},
+		mockCps,
+		8.0,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error due to cycle validation failure")
+	}
+
+	// Should be ErrGraphChanged to trigger retry
+	if err != workflow.ErrGraphChanged {
+		t.Errorf("expected workflow.ErrGraphChanged, got %v", err)
+	}
+
+	// Verify retry count was incremented and saved
+	var updatedAnalysis models.TaskAnalysis
+	_ = json.Unmarshal(task.Analysis, &updatedAnalysis)
+	if updatedAnalysis.RetryCount != 1 {
+		t.Errorf("expected RetryCount to be 1, got %d", updatedAnalysis.RetryCount)
+	}
+}
+
+func TestPlanStep_ValidationFailure_ExceededPause(t *testing.T) {
+	// Cycle dependency and RetryCount already = 2 (max retries reached).
+	analysis := models.TaskAnalysis{
+		Complexity:      "medium",
+		PrimaryCategory: "backend",
+		TasksMD:         "## Backend\n- [ ] Task 1\n",
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID:           "unit1",
+				Objective:    "Loop 1",
+				Dependencies: []string{"unit2"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+			{
+				ID:           "unit2",
+				Objective:    "Loop 2",
+				Dependencies: []string{"unit1"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+		},
+		RetryCount: 2,
+	}
+	analysisJSON, _ := json.Marshal(analysis)
+	task := &models.Task{
+		ID:         "task-pause",
+		Complexity: models.TaskComplexityMedium,
+		Analysis:   analysisJSON,
+	}
+
+	mockRepo := &mockTaskReader{task: task}
+	mockCps := &mockCheckpointLister{}
+	statusMock := &mockStatusUpdater{}
+
+	step := NewPlanStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		mockRepo,
+		nil, nil, nil,
+		statusMock,
+		&mockLogger{},
+		mockCps,
+		8.0,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	// Should be workflow.ErrPaused
+	if !strings.Contains(err.Error(), "workflow paused") {
+		t.Errorf("expected paused error, got %v", err)
+	}
+
+	// Verify SpecStatus is updated to paused and Task Status to spec_review
+	if task.SpecStatus != "paused" {
+		t.Errorf("expected SpecStatus to be paused, got %v", task.SpecStatus)
+	}
+	if statusMock.lastStatus != models.TaskStatusSpecReview {
+		t.Errorf("expected task status to transition to spec_review, got %s", statusMock.lastStatus)
 	}
 }

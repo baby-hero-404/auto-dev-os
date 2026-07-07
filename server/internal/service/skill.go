@@ -14,19 +14,22 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type SkillService struct {
 	repo       *repository.SkillRepo
 	sourceRepo *repository.SkillSourceRepo
-	skillsRoot string
+	skillPaths paths.SkillPaths
+	fs         paths.FileSystem
 }
 
-func NewSkillService(repo *repository.SkillRepo, sourceRepo *repository.SkillSourceRepo, skillsRoot string) *SkillService {
+func NewSkillService(repo *repository.SkillRepo, sourceRepo *repository.SkillSourceRepo, skillPaths paths.SkillPaths, fs paths.FileSystem) *SkillService {
 	return &SkillService{
 		repo:       repo,
 		sourceRepo: sourceRepo,
-		skillsRoot: skillsRoot,
+		skillPaths: skillPaths,
+		fs:         fs,
 	}
 }
 
@@ -46,16 +49,16 @@ func (s *SkillService) loadRegistry() (skillRegistry, error) {
 	var reg skillRegistry
 	reg.Skills = make(map[string][]registrySkill)
 
-	regPath := filepath.Join(s.skillsRoot, "registry.json")
-	if _, err := os.Stat(regPath); os.IsNotExist(err) {
-		regPath = filepath.Join(s.skillsRoot, "registry.min.json")
+	regPath := s.skillPaths.GlobalRegistryPath(false)
+	if !s.fs.Exists(regPath) {
+		regPath = s.skillPaths.GlobalRegistryPath(true)
 	}
 
-	if _, err := os.Stat(regPath); os.IsNotExist(err) {
+	if !s.fs.Exists(regPath) {
 		return reg, nil
 	}
 
-	raw, err := os.ReadFile(regPath)
+	raw, err := s.fs.ReadFile(regPath)
 	if err != nil {
 		return reg, err
 	}
@@ -68,16 +71,15 @@ func (s *SkillService) loadRegistry() (skillRegistry, error) {
 }
 
 func (s *SkillService) saveRegistry(reg skillRegistry) error {
-	if err := os.MkdirAll(s.skillsRoot, 0755); err != nil {
+	if err := s.fs.EnsureDir(s.skillPaths.Root()); err != nil {
 		return err
 	}
-	pm := NewSkillPathManager(s.skillsRoot)
-	regPath := pm.GlobalRegistryPath(false)
+	regPath := s.skillPaths.GlobalRegistryPath(false)
 	raw, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(regPath, raw, 0644)
+	return s.fs.WriteFile(regPath, raw, 0644)
 }
 
 func (s *SkillService) getActiveRepoNames(ctx context.Context) (map[string]bool, error) {
@@ -187,21 +189,24 @@ func (s *SkillService) Test(ctx context.Context, id string, input map[string]any
 }
 
 func (s *SkillService) ListFiles(ctx context.Context, sourceID string, relativePath string) ([]models.FileItem, error) {
+	if strings.HasPrefix(filepath.Clean(relativePath), "..") {
+		return nil, fmt.Errorf("permission denied: path escapes boundary")
+	}
+
 	source, err := s.sourceRepo.GetByID(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
 
 	repoName := getRepoNameFromURL(source.URL)
-	repoRoot := filepath.Join(s.skillsRoot, "git", repoName)
+	repoRoot := s.skillPaths.GitRepoRoot(repoName)
+	targetDir := repoRoot.Child(relativePath)
 
-	targetDir := filepath.Join(repoRoot, relativePath)
-
-	absRepoRoot, err := filepath.Abs(repoRoot)
+	absRepoRoot, err := filepath.Abs(repoRoot.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid repository path: %w", err)
 	}
-	absTargetDir, err := filepath.Abs(targetDir)
+	absTargetDir, err := filepath.Abs(targetDir.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid target path: %w", err)
 	}
@@ -237,22 +242,24 @@ func (s *SkillService) ListFiles(ctx context.Context, sourceID string, relativeP
 }
 
 func (s *SkillService) GetFileContent(ctx context.Context, sourceID string, relativePath string) (*models.FileContent, error) {
+	if strings.HasPrefix(filepath.Clean(relativePath), "..") {
+		return nil, fmt.Errorf("permission denied: path escapes boundary")
+	}
+
 	source, err := s.sourceRepo.GetByID(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
 
 	repoName := getRepoNameFromURL(source.URL)
-	pm := NewSkillPathManager(s.skillsRoot)
-	repoRoot := pm.GitRepoRoot(repoName)
+	repoRoot := s.skillPaths.GitRepoRoot(repoName)
+	targetFile := repoRoot.File(relativePath)
 
-	targetFile := filepath.Join(repoRoot, relativePath)
-
-	absRepoRoot, err := filepath.Abs(repoRoot)
+	absRepoRoot, err := filepath.Abs(repoRoot.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid repository path: %w", err)
 	}
-	absTargetFile, err := filepath.Abs(targetFile)
+	absTargetFile, err := filepath.Abs(targetFile.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid target path: %w", err)
 	}
@@ -272,7 +279,7 @@ func (s *SkillService) GetFileContent(ctx context.Context, sourceID string, rela
 		return nil, fmt.Errorf("file exceeds 2MB limit")
 	}
 
-	raw, err := os.ReadFile(absTargetFile)
+	raw, err := s.fs.ReadFile(targetFile)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -342,17 +349,16 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 	_, _ = s.sourceRepo.Update(ctx, id, models.UpdateSkillSourceInput{Status: &statusSyncing})
 
 	repoName := getRepoNameFromURL(source.URL)
-	pm := NewSkillPathManager(s.skillsRoot)
-	targetDir := pm.GitRepoRoot(repoName)
+	targetDir := s.skillPaths.GitRepoRoot(repoName)
 
 	var cmd *exec.Cmd
-	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-		if err = os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
+	if !s.fs.Exists(targetDir) {
+		if err = s.fs.EnsureDir(s.skillPaths.GitSourceRoot()); err != nil {
 			return s.markSyncFailed(ctx, id, fmt.Errorf("mkdir: %w", err))
 		}
-		cmd = exec.CommandContext(ctx, "git", "clone", source.URL, targetDir)
+		cmd = exec.CommandContext(ctx, "git", "clone", source.URL, targetDir.String())
 	} else {
-		cmd = exec.CommandContext(ctx, "git", "-C", targetDir, "pull")
+		cmd = exec.CommandContext(ctx, "git", "-C", targetDir.String(), "pull")
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -360,16 +366,16 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 		return s.markSyncFailed(ctx, id, fmt.Errorf("git error: %s (err: %w)", string(output), err))
 	}
 
-	manifestPath := pm.GitRegistryPath(repoName, false)
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		manifestPath = pm.GitRegistryPath(repoName, true)
+	manifestPath := s.skillPaths.GitRegistryPath(repoName, false)
+	if !s.fs.Exists(manifestPath) {
+		manifestPath = s.skillPaths.GitRegistryPath(repoName, true)
 	}
 
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+	if !s.fs.Exists(manifestPath) {
 		return s.markSyncFailed(ctx, id, fmt.Errorf("git repo does not contain registry.json or registry.min.json"))
 	}
 
-	raw, err := os.ReadFile(manifestPath)
+	raw, err := s.fs.ReadFile(manifestPath)
 	if err != nil {
 		return s.markSyncFailed(ctx, id, fmt.Errorf("read git manifest: %w", err))
 	}
@@ -399,7 +405,7 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 				continue
 			}
 
-			mappedPath := filepath.ToSlash(filepath.Join("git", repoName, sk.Path))
+			mappedPath := s.skillPaths.GitSkillPathRelative(repoName, sk.Path)
 			schemaMap := map[string]any{
 				"source":   "git",
 				"repo":     repoName,

@@ -761,11 +761,16 @@ func TestOrchestrator_AutonomyLevel_StepAnalyze(t *testing.T) {
 	workflowRepo := &mockWorkflowRepo{job: &models.WorkflowJob{ID: "job-1"}}
 	llmResponses := map[string]any{
 		"complexity":              "medium",
+		"primary_category":        "backend",
 		"spec_status":             "approved",
 		"clarification_questions": []string{},
 		"affected_files":          []string{},
-		"execution_plan":          []string{},
+		"execution_phases":        []any{},
 		"system_prompt":           "mock",
+		"proposal_md":             "## Proposal",
+		"specs_md":                "## Specs",
+		"execution_boundaries":    map[string]any{"allowed": []string{"."}},
+		"acceptance_criteria":     []map[string]any{{"id": "AC-1", "expected": "ok"}},
 	}
 	rawBytes, _ := json.Marshal(llmResponses)
 	mockLLM := &mockLLMProvider{responses: map[string]string{
@@ -820,13 +825,15 @@ func TestOrchestrator_StepAnalyze_UsesNativeToolCalls(t *testing.T) {
 		"affected_files":          []string{"src/main.go"},
 		"risks":                   []string{},
 		"risk_domains":            []string{},
-		"execution_plan":          []string{"Read source files", "Implement changes"},
+		"execution_phases":        []map[string]any{{"phase": "Phase 1", "tasks": []string{"Read source files", "Implement changes"}}},
 		"clarification_questions": []string{},
 		"required_skills":         []string{},
 		"proposal_md":             "## Why\nNeed change.\n",
 		"specs_md":                "## ADDED Requirements\n### Requirement: Native tools\nThe analyzer SHALL use native tools.\n",
 		"design_md":               "## Context\nNative tools.\n",
 		"tasks_md":                "## 1. Work\n- [ ] 1.1 Implement\n",
+		"acceptance_criteria":     []any{map[string]any{"id": "AC-1", "expected": "ok"}},
+		"execution_boundaries":    map[string]any{"allowed": []string{"src/"}},
 	}
 	finalBytes, _ := json.Marshal(finalAnalysis)
 	mockLLM := &mockLLMProvider{responseQueue: []*llm.Response{
@@ -1505,30 +1512,21 @@ func TestOrchestrator_StepAnalyze_FallbackForcesReview(t *testing.T) {
 
 	res, err := analyzeRunner(context.Background(), workflow.StepContext{})
 	if err == nil {
-		t.Fatalf("expected PauseError, got nil")
+		t.Fatalf("expected error, got nil")
 	}
 
-	var pauseErr workflow.PauseError
-	if !errors.As(err, &pauseErr) {
-		t.Fatalf("expected workflow.PauseError, got %v", err)
+	if !strings.Contains(err.Error(), "analyze step failed: exceeded max iterations (6)") {
+		t.Fatalf("expected max iterations error, got %v", err)
 	}
 
-	if pauseErr.Step != workflow.StepAnalyze {
-		t.Errorf("expected PauseError step %s, got %s", workflow.StepAnalyze, pauseErr.Step)
+	if task.SpecStatus != models.TaskSpecStatusDraft {
+		t.Errorf("expected spec status Draft, got %s", task.SpecStatus)
 	}
-
-	if !strings.Contains(pauseErr.Reason, "fallback from malformed analyzer output") {
-		t.Errorf("expected PauseError reason to mention fallback, got: %s", pauseErr.Reason)
-	}
-
-	if task.SpecStatus != models.TaskSpecStatusPendingReview {
-		t.Errorf("expected spec status PendingReview, got %s", task.SpecStatus)
-	}
-	if task.Status != models.TaskStatusSpecReview {
-		t.Errorf("expected task status SpecReview, got %s", task.Status)
+	if task.Status != models.TaskStatusAnalyzing {
+		t.Errorf("expected task status Analyzing, got %s", task.Status)
 	}
 	if res != nil {
-		t.Errorf("expected nil result on pause error, got %v", res)
+		t.Errorf("expected nil result on error, got %v", res)
 	}
 }
 
@@ -1556,9 +1554,13 @@ func TestOrchestrator_StepAnalyze_ComplexityChangeTriggersGraphRebuild(t *testin
 			"affected_files": [],
 			"risks": [],
 			"risk_domains": [],
-			"execution_plan": [],
+			"execution_phases": [],
 			"clarification_questions": [],
-			"required_skills": []
+			"required_skills": [],
+			"proposal_md": "## Proposal",
+			"specs_md": "## Specs",
+			"acceptance_criteria": [{"id": "AC-1", "expected": "ok"}],
+			"execution_boundaries": {"allowed": ["src/"]}
 		}`,
 	}}
 	orch := New(taskRepo, workflowRepo, nil, nil, WithLLMProvider(mockLLM))

@@ -1,6 +1,11 @@
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+)
 
 // Step ID constants — canonical names used across the workflow engine and orchestrator.
 const (
@@ -119,6 +124,92 @@ func MediumWorkflow(runners map[string]StepFunc, subtasks map[string][]string) D
 	}...)
 
 	return Definition{Name: "auto-code-os-medium-workflow", Steps: steps}
+}
+
+func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUnit) Definition {
+	statusSchema := Schema{Fields: map[string]FieldSchema{
+		"status": {Type: FieldString, Required: false},
+	}}
+
+	steps := []StepDefinition{
+		{ID: StepContextLoad, Name: "Context", OutputSchema: statusSchema, Run: runners[StepContextLoad]},
+		{ID: StepAnalyze, Name: "Analyze", DependsOn: []string{StepContextLoad}, OutputSchema: statusSchema, Run: runners[StepAnalyze]},
+		{ID: StepPlan, Name: "Plan", DependsOn: []string{StepAnalyze}, OutputSchema: statusSchema, Run: runners[StepPlan]},
+	}
+
+	idToStepID := make(map[string]string)
+	var beCount, feCount int
+
+	for _, unit := range units {
+		agent := strings.ToLower(unit.ExecutionProfile.Agent)
+		if agent == "frontend" {
+			stepID := fmt.Sprintf("%s_%d", StepCodeFrontend, feCount)
+			idToStepID[unit.ID] = stepID
+			feCount++
+		} else {
+			stepID := fmt.Sprintf("%s_%d", StepCodeBackend, beCount)
+			idToStepID[unit.ID] = stepID
+			beCount++
+		}
+	}
+
+	var beIndex, feIndex int
+	var allStepIDs []string
+
+	for _, unit := range units {
+		agent := strings.ToLower(unit.ExecutionProfile.Agent)
+		var stepID string
+		var runFunc StepFunc
+		var name string
+
+		if agent == "frontend" {
+			stepID = fmt.Sprintf("%s_%d", StepCodeFrontend, feIndex)
+			runFunc = runners[StepCodeFrontend]
+			name = fmt.Sprintf("Code Frontend %d: %s", feIndex+1, unit.Objective)
+			feIndex++
+		} else {
+			stepID = fmt.Sprintf("%s_%d", StepCodeBackend, beIndex)
+			runFunc = runners[StepCodeBackend]
+			name = fmt.Sprintf("Code Backend %d: %s", beIndex+1, unit.Objective)
+			beIndex++
+		}
+
+		allStepIDs = append(allStepIDs, stepID)
+
+		var dependsOn []string
+		for _, dep := range unit.Dependencies {
+			if mapped, ok := idToStepID[dep]; ok {
+				dependsOn = append(dependsOn, mapped)
+			}
+		}
+		if len(dependsOn) == 0 {
+			dependsOn = []string{StepPlan}
+		}
+
+		steps = append(steps, StepDefinition{
+			ID:           stepID,
+			Name:         name,
+			DependsOn:    dependsOn,
+			OutputSchema: statusSchema,
+			Run:          runFunc,
+		})
+	}
+
+	if len(units) == 0 {
+		steps = append(steps, StepDefinition{ID: StepCodeBackend, Name: "Code Backend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeBackend]})
+		steps = append(steps, StepDefinition{ID: StepCodeFrontend, Name: "Code Frontend", DependsOn: []string{StepPlan}, OutputSchema: statusSchema, Run: runners[StepCodeFrontend]})
+		allStepIDs = []string{StepCodeBackend, StepCodeFrontend}
+	}
+
+	steps = append(steps, []StepDefinition{
+		{ID: StepMerge, Name: "Merge", DependsOn: allStepIDs, OutputSchema: statusSchema, Run: runners[StepMerge]},
+		{ID: StepReview, Name: "Review", DependsOn: []string{StepMerge}, OutputSchema: statusSchema, Run: runners[StepReview]},
+		{ID: StepFix, Name: "Fix", DependsOn: []string{StepReview}, OutputSchema: statusSchema, Run: runners[StepFix]},
+		{ID: StepTest, Name: "Test", DependsOn: []string{StepFix}, OutputSchema: statusSchema, Run: runners[StepTest]},
+		{ID: StepPR, Name: "PR", DependsOn: []string{StepTest}, OutputSchema: statusSchema, Run: runners[StepPR]},
+	}...)
+
+	return Definition{Name: "auto-code-os-dynamic-dag-workflow", Steps: steps}
 }
 
 func HardWorkflow(runners map[string]StepFunc, subtasks map[string][]string) Definition {

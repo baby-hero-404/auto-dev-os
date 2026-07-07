@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func analyzeToolDefinitions() []llm.ToolDefinition {
@@ -142,7 +142,7 @@ func (s *AnalyzeStep) listAnalyzeFiles(ctx context.Context) (string, error) {
 	var files []string
 	for _, root := range s.analyzeSourceRoots(ctx) {
 		containerRoot := s.getContainerRoot(root.path)
-		cmd := fmt.Sprintf("cd %s && find . \\( -name .git -o -name node_modules -o -name vendor -o -name dist -o -name artifacts -o -name logs -o -name specs -o -name openspec -o -name context -o -name pr \\) -prune -o -type f -print | sed 's#^\\\\./##'", orchestratorworkspace.QuoteShellArg(containerRoot))
+		cmd := fmt.Sprintf("cd %s && find . \\( -name .git -o -name node_modules -o -name vendor -o -name dist -o -name artifacts -o -name logs -o -name specs -o -name openspec -o -name context -o -name pr \\) -prune -o -type f -print | sed 's#^\\\\./##'", paths.QuoteShellArg(containerRoot))
 		out, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err != nil {
 			return "", err
@@ -172,14 +172,14 @@ func (s *AnalyzeStep) readAnalyzeFile(ctx context.Context, subPath string) (stri
 			}
 			relPath = strings.TrimPrefix(subPath, prefix)
 		}
-		if !orchestratorworkspace.IsSafeRelativeSourcePath(relPath) {
+		if !paths.IsSafeRelativeSourcePath(relPath) {
 			continue
 		}
 		containerRoot := s.getContainerRoot(root.path)
 		cmd := fmt.Sprintf("cd %s && if [ -f %s ]; then head -c 20000 %s; else exit 2; fi",
-			orchestratorworkspace.QuoteShellArg(containerRoot),
-			orchestratorworkspace.QuoteShellArg(relPath),
-			orchestratorworkspace.QuoteShellArg(relPath),
+			paths.QuoteShellArg(containerRoot),
+			paths.QuoteShellArg(relPath),
+			paths.QuoteShellArg(relPath),
 		)
 		content, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err == nil {
@@ -194,8 +194,8 @@ func (s *AnalyzeStep) grepAnalyzeFiles(ctx context.Context, query string) (strin
 	for _, root := range s.analyzeSourceRoots(ctx) {
 		containerRoot := s.getContainerRoot(root.path)
 		cmd := fmt.Sprintf("cd %s && grep -RIn --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=dist --exclude-dir=artifacts --exclude-dir=logs --exclude-dir=specs --exclude-dir=openspec --exclude-dir=context --exclude-dir=pr -- %s . || true",
-			orchestratorworkspace.QuoteShellArg(containerRoot),
-			orchestratorworkspace.QuoteShellArg(query),
+			paths.QuoteShellArg(containerRoot),
+			paths.QuoteShellArg(query),
 		)
 		result, err := s.runAnalyzeSandboxCommand(ctx, cmd)
 		if err != nil {

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/database"
 	aigateway "github.com/auto-code-os/auto-code-os/server/internal/gateway"
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
@@ -20,14 +21,14 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/skills"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
-	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func main() {
@@ -123,20 +124,31 @@ func run() error {
 			slog.Info("sandbox pre-warming completed successfully")
 		}
 	}()
-	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, cfg.Sandbox.SkillsRoot)
+	promptsRoot := "internal/prompts"
+	pathRegistry := paths.NewRegistry(
+		cfg.AutoCodeOS.DataRoot,
+		cfg.Sandbox.WorkspaceRoot,
+		cfg.Sandbox.SkillsRoot,
+		cfg.Logging.FileRoot,
+		promptsRoot,
+		"migration",
+	)
+
+	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, pathRegistry.Skill, pathRegistry.FS)
 	agentManager := orchestrator.NewAgentManager(agentRepo)
-	
-	cacheDbPath := filepath.Join(cfg.AutoCodeOS.DataRoot, "cache.db")
+
+	cacheDbPath := pathRegistry.Database.CacheDB().String()
 	ctxEngine, err := provider.NewProvider(cfg.Sandbox.WorkspaceRoot, cacheDbPath)
 	if err != nil {
 		return fmt.Errorf("init context engine: %w", err)
 	}
 	defer ctxEngine.Close()
 
-	promptAssembler := prompt.NewPromptAssemblerWithRules(
+	promptAssembler := prompts.NewPromptAssemblerWithRules(
 		ruleRepo,
 		skills.BuiltinToolDefinitions(),
-		filepath.Clean(filepath.Join("..", "prompts")),
+		pathRegistry.Prompt,
+		pathRegistry.FS,
 		ctxEngine,
 	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	artifactRepo := repository.NewArtifactRepo(db)
@@ -175,11 +187,12 @@ func run() error {
 	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
 	learningSvc.SetSkillService(skillSvc)
-	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "prompts")))
+	learningSvc.SetPromptRoot(filepath.Clean(promptsRoot))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
 	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo)
 
 	opts = append(opts, orchestrator.WithMemoryHooks(memoryHooks), orchestrator.WithLearningEngine(learningEngine))
+	opts = append(opts, orchestrator.WithMaxPhaseCost(cfg.Worker.MaxPhaseCost))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
@@ -189,7 +202,7 @@ func run() error {
 
 	deps := handler.Deps{
 		OrgSvc:             service.NewOrganizationService(orgRepo),
-		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo, skillRepo, cfg.Sandbox.SkillsRoot), cfg.AutoCodeOS.DataRoot),
+		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo), cfg.AutoCodeOS.DataRoot),
 		RepoSvc:            repoSvc,
 		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo),
 		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo),

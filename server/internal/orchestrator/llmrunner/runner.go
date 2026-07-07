@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/prompt"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type PromptAssembler func(context.Context, models.Task, *models.Agent, []llm.Message) ([]llm.Message, error)
@@ -39,7 +39,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 	}
 	localPath := sandbox.WorkspacePath(r.WorkspaceRoot, task.ID)
 	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
-	ctx = context.WithValue(ctx, prompt.StepIDCtxKey, stepID)
+	ctx = context.WithValue(ctx, prompts.StepIDCtxKey, stepID)
 
 	messages, err := r.initialMessages(ctx, task, agent)
 	if err != nil {
@@ -55,8 +55,8 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		var b strings.Builder
 		b.WriteString("\n\n### Workspace Affected Files ###\n")
 		for _, file := range analysis.AffectedFiles {
-			if content, ok := r.ReadAffectedFileContent(ctx, task, file); ok {
-				displayPath := workspace.WorkspaceToRepoRelative(file)
+			if content, ok := r.ReadAffectedFileContent(ctx, task, file.File); ok {
+				displayPath := paths.WorkspaceToRepoRelative(file.File)
 				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", displayPath, content))
 			}
 		}

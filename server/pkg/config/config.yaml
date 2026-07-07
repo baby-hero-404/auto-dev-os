@@ -54,6 +54,7 @@ worker:
   enabled: true
   interval_ms: 30000
   concurrency: 1
+  max_phase_cost: 30.0
 
 telemetry:
   otlp_endpoint: ""

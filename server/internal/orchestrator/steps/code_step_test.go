@@ -163,7 +163,7 @@ func TestCodeFrontendStep_SkipsOnEasyTask(t *testing.T) {
 
 func TestCodeFrontendStep_SkipsOnNoFrontendFiles(t *testing.T) {
 	analysis := models.TaskAnalysis{
-		AffectedFiles: []string{"backend/main.go", "db/schema.sql"},
+		AffectedFiles: []models.AffectedFile{{File: "backend/main.go"}, {File: "db/schema.sql"}},
 	}
 	analysisBytes, _ := json.Marshal(analysis)
 
@@ -199,7 +199,7 @@ func TestCodeFrontendStep_SkipsOnNoFrontendFiles(t *testing.T) {
 
 func TestCodeFrontendStep_ReleasesBorrowedAgent(t *testing.T) {
 	analysis := models.TaskAnalysis{
-		AffectedFiles: []string{"web/src/app/page.tsx"},
+		AffectedFiles: []models.AffectedFile{{File: "web/src/app/page.tsx"}},
 	}
 	analysisBytes, _ := json.Marshal(analysis)
 
@@ -238,7 +238,7 @@ func TestCodeFrontendStep_ReleasesBorrowedAgent(t *testing.T) {
 
 func TestCodeFrontendStep_ReusesCurrentFrontendAgent(t *testing.T) {
 	analysis := models.TaskAnalysis{
-		AffectedFiles: []string{"web/src/app/page.tsx"},
+		AffectedFiles: []models.AffectedFile{{File: "web/src/app/page.tsx"}},
 	}
 	analysisBytes, _ := json.Marshal(analysis)
 

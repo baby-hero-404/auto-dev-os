@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type Runner struct {
@@ -64,10 +64,33 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 	// Split patch by repository using the new normalized split helper
 	repoPatches := r.SplitPatchByRepoWithWorkspace(patchText, ws, role)
 
+	isRestore := strings.HasSuffix(stepID, "_restore")
 	allowedNewFiles := make(map[string]bool)
-	if task.Analysis != nil {
+	if task.Analysis != nil && !isRestore {
 		var analysis models.TaskAnalysis
-		if err := json.Unmarshal(task.Analysis, &analysis); err == nil && len(analysis.AffectedFiles) > 0 {
+		if err := json.Unmarshal(task.Analysis, &analysis); err == nil {
+			if len(analysis.ExecutionBoundaries) == 0 && len(analysis.AffectedFiles) > 0 {
+				// Convert AffectedFiles into temporary boundaries for backward compatibility
+				moduleMap := make(map[string]bool)
+				for _, af := range analysis.AffectedFiles {
+					dir := filepath.Dir(af.File)
+					if dir == "." || dir == "/" {
+						dir = ""
+					}
+					if !moduleMap[dir] {
+						analysis.ExecutionBoundaries = append(analysis.ExecutionBoundaries, models.ExecutionBoundary{
+							Module:       filepath.Base(dir),
+							Root:         dir,
+							Capabilities: []string{"modify_existing", "create_test", "create_helper"},
+						})
+						moduleMap[dir] = true
+					}
+				}
+			}
+
+			var errs []*PolicyViolationError
+			var expansions []models.ExpandedBoundary
+
 			for repoName, repoPatchText := range repoPatches {
 				lines := strings.Split(repoPatchText, "\n")
 				var currentOldFile string
@@ -89,25 +112,68 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 								repoRelPath = file
 							}
 
-							isAllowed := false
-							for _, pattern := range analysis.AffectedFiles {
-								if MatchAffectedFile(pattern, repoRelPath) {
-									isAllowed = true
-									break
+							dec := EvaluatePolicy(repoRelPath, currentOldFile, &analysis)
+							switch dec.Severity {
+							case SeverityCritical:
+								return &PolicyViolationError{
+									Severity:   SeverityCritical,
+									ErrorMsg:   dec.Reason,
+									Reason:     "critical_violation",
+									Violations: []string{repoRelPath},
 								}
-							}
-							if !isAllowed {
-								isNew := (currentOldFile == "/dev/null" || currentOldFile == "")
-								if isNew && IsSafeNewFilePath(repoRelPath) && IsUnderAffectedDir(repoRelPath, analysis.AffectedFiles) {
-									if r.Log != nil {
-										r.Log(ctx, task.ID, "warn", fmt.Sprintf("allowing new file %q under affected directory; this should be reviewed", repoRelPath))
-									}
-									allowedNewFiles[repoRelPath] = true
-									continue
+							case SeverityError:
+								var allowedRoots []string
+								for _, eb := range analysis.ExecutionBoundaries {
+									allowedRoots = append(allowedRoots, eb.Root)
 								}
-								return fmt.Errorf("security violation: patch attempts to modify file %q (resolved from %q in repo %q) which is not in the approved affected_files spec %v", repoRelPath, file, repoName, analysis.AffectedFiles)
+								errs = append(errs, &PolicyViolationError{
+									Severity:    SeverityError,
+									ErrorMsg:    dec.Reason,
+									Reason:      "outside_module",
+									AllowedRoot: strings.Join(allowedRoots, ", "),
+									Violations:  []string{repoRelPath},
+								})
+							case SeverityWarning, SeverityInfo:
+								expansions = append(expansions, models.ExpandedBoundary{
+									File:       repoRelPath,
+									Reason:     dec.Reason,
+									Capability: dec.Capability,
+									Risk:       dec.Risk,
+								})
+								if r.Log != nil {
+									r.Log(ctx, task.ID, "info", fmt.Sprintf("[%s] %s", dec.Severity, dec.Reason))
+								}
 							}
 						}
+					}
+				}
+			}
+
+			if len(errs) > 0 {
+				var allViolations []string
+				var allowedRoots []string
+				for _, eb := range analysis.ExecutionBoundaries {
+					allowedRoots = append(allowedRoots, eb.Root)
+				}
+				for _, e := range errs {
+					allViolations = append(allViolations, e.Violations...)
+				}
+				return &PolicyViolationError{
+					Severity:    SeverityError,
+					ErrorMsg:    fmt.Sprintf("unauthorized file modifications: %v", allViolations),
+					Reason:      "outside_module",
+					AllowedRoot: strings.Join(allowedRoots, ", "),
+					Violations:  allViolations,
+				}
+			}
+
+			if len(expansions) > 0 {
+				analysis.ExpandedBoundaries = append(analysis.ExpandedBoundaries, expansions...)
+				if r.UpdateTaskAnalysis != nil {
+					newAnalysisBytes, marshalErr := json.Marshal(analysis)
+					if marshalErr == nil {
+						_ = r.UpdateTaskAnalysis(ctx, task.ID, newAnalysisBytes)
+						task.Analysis = newAnalysisBytes
 					}
 				}
 			}
@@ -179,8 +245,8 @@ rm -f "$ERR_LOG"
 find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
 			containerTargetPath,
-			workspace.QuoteShellArg(containerTargetPath),
-			workspace.QuoteShellArg(containerPatchPath),
+			paths.QuoteShellArg(containerTargetPath),
+			paths.QuoteShellArg(containerPatchPath),
 		)
 		_, err = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch", cmd, worktreeSuffix)
 		if err != nil {
@@ -203,11 +269,11 @@ rm -f "$ERR_LOG"
 find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
 				containerTargetPath,
-				workspace.QuoteShellArg(containerTargetPath),
-				workspace.QuoteShellArg(containerPatchPath),
+				paths.QuoteShellArg(containerTargetPath),
+				paths.QuoteShellArg(containerPatchPath),
 			)
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch", revertCmd, worktreeSuffix)
-			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch: %w", err)
 		}
 		if len(allowedNewFiles) > 0 {
@@ -215,7 +281,7 @@ exit $CODE`,
 				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
 			}
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		return nil
 	}
 
@@ -232,16 +298,8 @@ exit $CODE`,
 		}
 		if repoHostPath == "" {
 			// Fallback to ReposPrefix + repoName/<defaultBranch>
-			repoDir := filepath.Join(localPath, workspace.ReposDirName, repoName)
-			mainDirName := "main"
-			if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
-				for _, entry := range entries {
-					if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
-						mainDirName = entry.Name()
-						break
-					}
-				}
-			}
+			repoDir := paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoRoot(task.ID, repoName).String()
+			mainDirName := paths.FindRepoMainBranchDir(repoDir)
 			repoHostPath = filepath.Join(repoDir, mainDirName)
 			// Double fallback to localPath/repoName
 			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
@@ -288,8 +346,8 @@ rm -f "$ERR_LOG"
 find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
 			containerRepoWorktreePath,
-			workspace.QuoteShellArg(containerRepoWorktreePath),
-			workspace.QuoteShellArg(containerPatchPath),
+			paths.QuoteShellArg(containerRepoWorktreePath),
+			paths.QuoteShellArg(containerPatchPath),
 		)
 		_, err := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_apply_patch_"+repoName, cmd, worktreeSuffix)
 		if err != nil {
@@ -312,11 +370,11 @@ rm -f "$ERR_LOG"
 find %[2]s -type f \( -name '*.orig' -o -name '*.rej' \) -delete
 exit $CODE`,
 				containerRepoWorktreePath,
-				workspace.QuoteShellArg(containerRepoWorktreePath),
-				workspace.QuoteShellArg(containerPatchPath),
+				paths.QuoteShellArg(containerRepoWorktreePath),
+				paths.QuoteShellArg(containerPatchPath),
 			)
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch_"+repoName, revertCmd, worktreeSuffix)
-			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
+			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
 		}
 		if len(allowedNewFiles) > 0 {
@@ -324,7 +382,7 @@ exit $CODE`,
 				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
 			}
 		}
-		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", workspace.QuoteShellArg(containerPatchPath)), worktreeSuffix)
+		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 	}
 	return nil
 }
@@ -344,11 +402,11 @@ func (r *Runner) appendNewAffectedFiles(ctx context.Context, task *models.Task, 
 	changed := false
 	existing := make(map[string]bool, len(analysis.AffectedFiles))
 	for _, file := range analysis.AffectedFiles {
-		existing[file] = true
+		existing[file.File] = true
 	}
 	for file := range files {
 		if !existing[file] {
-			analysis.AffectedFiles = append(analysis.AffectedFiles, file)
+			analysis.AffectedFiles = append(analysis.AffectedFiles, models.AffectedFile{File: file})
 			existing[file] = true
 			changed = true
 		}
@@ -447,7 +505,7 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 		}
 		if repoHostPath == "" {
 			repoName := repoNameFromURL(repo.URL)
-			repoHostPath = filepath.Join(localPath, "code", "repos", repoName, "main")
+			repoHostPath = paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoMain(task.ID, repoName, "").String()
 			if stat, statErr := os.Stat(repoHostPath); statErr != nil || !stat.IsDir() {
 				repoHostPath = filepath.Join(localPath, repoName)
 			}
@@ -551,10 +609,18 @@ func IsSafeNewFilePath(path string) bool {
 }
 
 func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, role string) (repoName string, repoRelPath string) {
+	if firstPath == "" {
+		return "", ""
+	}
 	// Clean and normalize separators
 	firstPath = strings.ReplaceAll(firstPath, "\\", "/")
 	firstPath = filepath.ToSlash(filepath.Clean(firstPath))
 	firstPath = strings.TrimPrefix(firstPath, "/")
+
+	// Strip git diff a/ or b/ prefixes if present
+	if strings.HasPrefix(firstPath, "a/") || strings.HasPrefix(firstPath, "b/") {
+		firstPath = firstPath[2:]
+	}
 
 	// Helper to check and strip prefix
 	stripPrefix := func(p string, prefix string) (string, bool) {
@@ -568,8 +634,7 @@ func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, 
 	}
 
 	// 1. Check if it starts with code/repos/ prefix
-	reposPrefix := "code/repos"
-	if rem, ok := stripPrefix(firstPath, reposPrefix); ok {
+	if rem, ok := stripPrefix(firstPath, paths.ReposDirName); ok {
 		firstPath = rem
 	}
 
@@ -577,7 +642,7 @@ func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, 
 	if ws != nil {
 		for _, repo := range ws.Repos {
 			if rem, ok := stripPrefix(firstPath, repo.Name); ok {
-				// Strip worktrees/<role> or worktrees/<any_role> or main if present
+				// Strip worktrees/<role> or worktrees/<any_role> or main branch dir if present
 				if rem2, ok2 := stripPrefix(rem, "worktrees/"+role); ok2 {
 					return repo.Name, rem2
 				}
@@ -587,8 +652,21 @@ func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, 
 						return repo.Name, strings.Join(parts[2:], "/")
 					}
 				}
-				if rem2, ok2 := stripPrefix(rem, "main"); ok2 {
+				
+				mainBranchDir := "main"
+				if repo.Paths.Main != "" {
+					mainBranchDir = filepath.Base(repo.Paths.Main)
+				} else if repo.DefaultBranch != "" {
+					mainBranchDir = repo.DefaultBranch
+				}
+
+				if rem2, ok2 := stripPrefix(rem, mainBranchDir); ok2 {
 					return repo.Name, rem2
+				}
+				if mainBranchDir != "main" {
+					if rem2, ok2 := stripPrefix(rem, "main"); ok2 {
+						return repo.Name, rem2
+					}
 				}
 				return repo.Name, rem
 			}
@@ -612,6 +690,22 @@ func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, 
 		if rem2, ok2 := stripPrefix(rem, role); ok2 {
 			return repo.Name, rem2
 		}
+
+		mainBranchDir := "main"
+		if repo.Paths.Main != "" {
+			mainBranchDir = filepath.Base(repo.Paths.Main)
+		} else if repo.DefaultBranch != "" {
+			mainBranchDir = repo.DefaultBranch
+		}
+		if rem2, ok2 := stripPrefix(rem, mainBranchDir); ok2 {
+			return repo.Name, rem2
+		}
+		if mainBranchDir != "main" {
+			if rem2, ok2 := stripPrefix(rem, "main"); ok2 {
+				return repo.Name, rem2
+			}
+		}
+
 		return repo.Name, rem
 	}
 
@@ -686,7 +780,7 @@ func (r *Runner) SplitPatchByRepoWithWorkspace(patchText string, ws *models.Task
 			lineEnd = len(block)
 		}
 		headerLine := block[:lineEnd]
-		
+
 		var firstPath string
 		if strings.HasPrefix(headerLine, "a/") {
 			sub := headerLine[2:]
@@ -695,7 +789,7 @@ func (r *Runner) SplitPatchByRepoWithWorkspace(patchText string, ws *models.Task
 				firstPath = sub[:sepIdx]
 			}
 		}
-		
+
 		if firstPath != "" {
 			repoName, repoRelPath := r.NormalizePatchPath(firstPath, ws, role)
 			if repoName != "" {

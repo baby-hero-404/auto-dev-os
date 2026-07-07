@@ -33,7 +33,7 @@ export function TaskClarificationForm({
     );
   }
 
-  if (!(clarificationQuestions.length > 0 && specStatus === "pending_review")) {
+  if (!(clarificationQuestions.length > 0 && (specStatus === "pending_review" || specStatus === "changes_requested"))) {
     return null;
   }
 
@@ -48,16 +48,23 @@ export function TaskClarificationForm({
       formattedText += `- **Q**: ${q}\n  **A**: ${ans || "No answer provided"}\n\n`;
     });
 
-    try {
-      await api.clarifyTask(taskID, token, formattedText.trim());
-      setAnswers({});
-      setSubmitted(true);
-      await onAnswersSubmitted();
-    } catch (err) {
-      setError((err as Error)?.message || "Failed to submit answers");
-    } finally {
-      setSubmittingAnswers(false);
-    }
+    // Optimistically update UI
+    setSubmittingAnswers(true);
+    setSubmitted(true);
+    
+    api.clarifyTask(taskID, token, formattedText.trim())
+      .then(() => api.retryTask(taskID, token))
+      .then(() => {
+        setAnswers({});
+        onAnswersSubmitted();
+      })
+      .catch((err) => {
+        setError((err as Error)?.message || "Failed to submit answers");
+        setSubmitted(false);
+      })
+      .finally(() => {
+        setSubmittingAnswers(false);
+      });
   };
 
   return (

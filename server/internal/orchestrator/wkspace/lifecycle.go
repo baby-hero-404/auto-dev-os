@@ -10,15 +10,23 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
-	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // GetTaskWorkspace returns the workspace layout for a task.
 func (m *Manager) GetTaskWorkspace(task *models.Task) *models.TaskWorkspace {
-	return orchestratorworkspace.GetTaskWorkspace(m.WorkspaceRoot, task)
+	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
+	return &models.TaskWorkspace{
+		Root:         wp.TaskRoot(task.ID).String(),
+		SpecsDir:     wp.SpecsDir(task.ID).String(),
+		ContextDir:   wp.ContextDir(task.ID).String(),
+		ArtifactsDir: wp.ArtifactsDir(task.ID).String(),
+		LogsDir:      wp.LogsDir(task.ID).String(),
+		PRDir:        wp.PRDir(task.ID).String(),
+	}
 }
 
 // InitTaskWorkspace creates the directory structure and metadata for a new task workspace.
@@ -77,7 +85,7 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 				TestStatus:  models.TestStatusPending,
 			},
 			Paths: models.RepoWorkspacePaths{
-				Main:      orchestratorworkspace.NewPathManager("").RepoMainRelative(repoName, defaultBranch),
+				Main:      paths.NewOSWorkspacePaths("").RepoMainRelative(repoName, defaultBranch),
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{
@@ -162,7 +170,7 @@ func (m *Manager) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 					}
 					if rWS.DefaultBranch != expectedBranch {
 						meta.Repos[i].DefaultBranch = expectedBranch
-						meta.Repos[i].Paths.Main = orchestratorworkspace.NewPathManager("").RepoMainRelative(rWS.Name, expectedBranch)
+						meta.Repos[i].Paths.Main = paths.NewOSWorkspacePaths("").RepoMainRelative(rWS.Name, expectedBranch)
 						updated = true
 					}
 				}
@@ -216,7 +224,7 @@ func (m *Manager) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task
 				return rWS, nil
 			}
 		}
-		repoRootAbs := orchestratorworkspace.NewPathManager(m.WorkspaceRoot).RepoRoot(task.ID, rWS.Name)
+		repoRootAbs := paths.NewOSWorkspacePaths(m.WorkspaceRoot).RepoRoot(task.ID, rWS.Name).String()
 		if rel, errRel := filepath.Rel(repoRootAbs, absPath); errRel == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return rWS, nil
 		}
@@ -346,8 +354,8 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 	m.ReleaseWorkspaceLock(taskID)
 
 	root := sandbox.WorkspacePath(m.WorkspaceRoot, taskID)
-	pm := orchestratorworkspace.NewPathManager(m.WorkspaceRoot)
-	codeDir := pm.CodeRoot(taskID)
+	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
+	codeDir := wp.CodeRoot(taskID).String()
 
 	repos, err := os.ReadDir(codeDir)
 	if err != nil {
@@ -362,7 +370,7 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			continue
 		}
 		repoName := rEntry.Name()
-		wtParentDir := filepath.Join(pm.RepoRoot(taskID, repoName), "worktrees")
+		wtParentDir := wp.RepoRoot(taskID, repoName).Child("worktrees").String()
 		worktrees, err := os.ReadDir(wtParentDir)
 		if err == nil {
 			for _, wtEntry := range worktrees {

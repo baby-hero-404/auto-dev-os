@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func RepoNameFromURL(repoURL string) string {
@@ -30,8 +30,8 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 	if branch == "" {
 		branch = "main"
 	}
-	pm := workspace.NewPathManager(m.WorkspaceRoot)
-	return pm.RepoMain(task.ID, RepoNameFromURL(repo.URL), branch)
+	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
+	return wp.RepoMain(task.ID, RepoNameFromURL(repo.URL), branch).String()
 }
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
@@ -96,8 +96,8 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 		return filepath.Join(ws.Root, path)
 	}
 
-	pm := workspace.NewPathManager(m.WorkspaceRoot)
-	relPath := pm.RepoWorktreeRelative(rWS.Name, role)
+	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
+	relPath := wp.RepoWorktreeRelative(rWS.Name, role)
 	rWS.Paths.Worktrees[role] = relPath
 	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, role)
 

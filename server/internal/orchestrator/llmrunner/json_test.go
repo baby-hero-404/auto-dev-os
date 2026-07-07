@@ -76,3 +76,24 @@ func TestParseJSONMarkdown_UserResponse(t *testing.T) {
 		t.Errorf("unexpected patch text: %s", patchText)
 	}
 }
+
+func TestParseJSONMarkdown_KeyQuoteInString(t *testing.T) {
+	content := `{
+  "files_changed": ["a.go"],
+  "summary": "testing key quote in string",
+  "patch": "req.Header.Set(\"Content-Type\", \"application/json\")\nand some other code",
+  "next_key": "next value"
+}`
+	res, err := ParseJSONMarkdown(content)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expectedPatch := `req.Header.Set("Content-Type", "application/json")` + "\n" + `and some other code`
+	if res["patch"] != expectedPatch {
+		t.Errorf("expected patch %q, got %q", expectedPatch, res["patch"])
+	}
+	if res["next_key"] != "next value" {
+		t.Errorf("expected next_key 'next value', got %q", res["next_key"])
+	}
+}

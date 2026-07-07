@@ -46,6 +46,7 @@ export const getRiskAssessment = (complexity: string, files: string[], riskDomai
   let hasMigration = false;
   let hasConfig = false;
   for (const f of files) {
+    if (typeof f !== "string") continue;
     const lower = f.toLowerCase();
     if (lower.includes("migration/") || lower.includes(".sql")) hasMigration = true;
     if (lower.includes("config") || lower.includes(".env") || lower.includes("docker")) hasConfig = true;

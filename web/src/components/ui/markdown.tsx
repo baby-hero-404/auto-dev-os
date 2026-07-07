@@ -46,7 +46,7 @@ export function Markdown({ content }: MarkdownProps) {
         li: ({ ...props }: ComponentProps<"li">) => (
           <li className="text-sm text-content-muted" {...props} />
         ),
-        code: ({ className, children, ...props }: any) => {
+        code: ({ className, children, ...props }: CodeComponentProps) => {
           const match = /language-(\w+)/.exec(className || "");
           // If there's no language match and no newlines, it's inline code
           const isInline = !match && !String(children).includes("\n");

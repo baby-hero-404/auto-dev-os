@@ -196,7 +196,29 @@ func extractString(content string, key string) (string, error) {
 			} else if strings.HasPrefix(rest, ",") {
 				restAfterComma := strings.TrimSpace(rest[1:])
 				if strings.HasPrefix(restAfterComma, `"`) || strings.HasPrefix(restAfterComma, `'`) {
-					isEnd = true
+					nextQuoteChar := restAfterComma[0]
+					foundColon := false
+					escaped := false
+					for k := 1; k < len(restAfterComma); k++ {
+						if escaped {
+							escaped = false
+							continue
+						}
+						if restAfterComma[k] == '\\' {
+							escaped = true
+							continue
+						}
+						if restAfterComma[k] == nextQuoteChar {
+							afterKey := strings.TrimSpace(restAfterComma[k+1:])
+							if strings.HasPrefix(afterKey, ":") {
+								foundColon = true
+							}
+							break
+						}
+					}
+					if foundColon {
+						isEnd = true
+					}
 				}
 			}
 			if isEnd {

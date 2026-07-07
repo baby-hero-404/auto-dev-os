@@ -17,13 +17,13 @@ export class ApiError extends Error {
 }
 
 let isRefreshing = false;
-let refreshSubscribers: ((token: string) => void)[] = [];
+let refreshSubscribers: ((token: string | null) => void)[] = [];
 
-function subscribeTokenRefresh(cb: (token: string) => void) {
+function subscribeTokenRefresh(cb: (token: string | null) => void) {
   refreshSubscribers.push(cb);
 }
 
-function onRefreshed(token: string) {
+function onRefreshed(token: string | null) {
   refreshSubscribers.forEach((cb) => cb(token));
   refreshSubscribers = [];
 }
@@ -87,18 +87,25 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
               } else {
                 isRefreshing = false;
                 useAuthStore.getState().clearSession();
+                onRefreshed(null);
                 throw new ApiError(response.status, message);
               }
-            } catch {
+            } catch (err) {
               isRefreshing = false;
               useAuthStore.getState().clearSession();
+              onRefreshed(null);
+              if (err instanceof ApiError) throw err;
               throw new ApiError(response.status, message);
             }
           }
 
-          const newToken = await new Promise<string>((resolve) => {
+          const newToken = await new Promise<string | null>((resolve) => {
             subscribeTokenRefresh((token) => resolve(token));
           });
+
+          if (!newToken) {
+            throw new ApiError(401, "Session expired");
+          }
 
           return request<T>(path, {
             ...options,

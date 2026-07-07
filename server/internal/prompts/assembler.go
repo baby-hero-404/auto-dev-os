@@ -1,26 +1,27 @@
-package prompt
+package prompts
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
-	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type PromptAssembler struct {
-	rules     *repository.RuleRepo
-	skills    SkillLister
-	baseTools []llm.ToolDefinition
-	root      string
-	dataRoot  string
-	ctxEngine provider.ContextEngine
+	rules       *repository.RuleRepo
+	skills      SkillLister
+	baseTools   []llm.ToolDefinition
+	promptPaths paths.PromptPaths
+	fs          paths.FileSystem
+	dataRoot    string
+	ctxEngine   provider.ContextEngine
 }
 
 type SkillLister interface {
@@ -28,14 +29,22 @@ type SkillLister interface {
 }
 
 func NewPromptAssembler(baseTools []llm.ToolDefinition, ctxEngine provider.ContextEngine) *PromptAssembler {
-	return &PromptAssembler{baseTools: baseTools, root: ".", ctxEngine: ctxEngine}
+	return &PromptAssembler{
+		baseTools:   baseTools,
+		promptPaths: paths.NewOSPromptPaths("."),
+		fs:          paths.NewOSFileSystem(),
+		ctxEngine:   ctxEngine,
+	}
 }
 
-func NewPromptAssemblerWithRules(rules *repository.RuleRepo, baseTools []llm.ToolDefinition, root string, ctxEngine provider.ContextEngine) *PromptAssembler {
-	if root == "" {
-		root = "."
+func NewPromptAssemblerWithRules(rules *repository.RuleRepo, baseTools []llm.ToolDefinition, promptPaths paths.PromptPaths, fs paths.FileSystem, ctxEngine provider.ContextEngine) *PromptAssembler {
+	return &PromptAssembler{
+		rules:       rules,
+		baseTools:   baseTools,
+		promptPaths: promptPaths,
+		fs:          fs,
+		ctxEngine:   ctxEngine,
 	}
-	return &PromptAssembler{rules: rules, baseTools: baseTools, root: root, ctxEngine: ctxEngine}
 }
 
 func (a *PromptAssembler) WithSkillLister(skills SkillLister) *PromptAssembler {
@@ -71,7 +80,6 @@ func shouldInjectFullSpec(stepID string) bool {
 	return stepID == "" ||
 		stepID == workflow.StepAnalyze ||
 		stepID == workflow.StepPlan ||
-		stepID == workflow.StepReview ||
 		stepID == workflow.StepContextLoad
 }
 
@@ -98,7 +106,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		}
 		snippets = deduplicateSnippets(snippets)
 		contextBlock = formatContextSnippets(snippets)
-		
+
 		for _, s := range snippets {
 			activeFiles = append(activeFiles, s.Path)
 		}
@@ -126,20 +134,22 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		_ = json.Unmarshal(task.Analysis, &analysis)
 	}
 
-	// Extract active targets safely from structured ExecutionPlan
-	if len(analysis.ExecutionPlan) > 0 {
-		for _, step := range analysis.ExecutionPlan {
-			words := strings.Fields(step)
-			for _, w := range words {
-				cleanWord := strings.Trim(w, "`,.\":")
-				// Simple heuristic to catch file paths
-				if strings.Contains(cleanWord, ".") && !strings.HasSuffix(cleanWord, ".") {
-					activeFiles = append(activeFiles, cleanWord)
+	// Extract active targets safely from structured ExecutionPhases
+	if len(analysis.ExecutionPhases) > 0 {
+		for _, phase := range analysis.ExecutionPhases {
+			for _, step := range phase.Tasks {
+				words := strings.Fields(step)
+				for _, w := range words {
+					cleanWord := strings.Trim(w, "`,.\":")
+					// Simple heuristic to catch file paths
+					if strings.Contains(cleanWord, ".") && !strings.HasSuffix(cleanWord, ".") {
+						activeFiles = append(activeFiles, cleanWord)
+					}
 				}
 			}
 		}
 	}
-	
+
 	// Deduplicate activeFiles
 	seenFiles := make(map[string]bool)
 	var uniqueActiveFiles []string
@@ -151,12 +161,21 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	}
 	activeFiles = uniqueActiveFiles
 
-	user := "Task: " + task.Title + "\n\n" + task.Description
-	
-	// Only inject full OpenSpec for analysis/planning/review steps.
-	// Coding steps already get the relevant subtask text from the step runner.
-	if shouldInjectFullSpec(stepID) {
-		if analysis.ProposalMD != "" || analysis.SpecsMD != "" || len(analysis.ExecutionPlan) > 0 {
+	user := "Task: " + task.Title + "\n\n"
+
+	useOriginalDescription := true
+	if (shouldInjectFullSpec(stepID) || isCodingStep(stepID) || stepID == workflow.StepReview || stepID == workflow.StepTest) && (analysis.SpecsMD != "" || analysis.ProposalMD != "") {
+		useOriginalDescription = false
+	}
+
+	if useOriginalDescription {
+		user += task.Description
+	} else {
+		user += "> [!IMPORTANT]\n> Original Task Description is omitted. Your evaluation MUST be based strictly on the execution contract and specific context provided in this prompt. Do NOT rely on prior assumptions.\n"
+	}
+
+	if shouldInjectFullSpec(stepID) || isCodingStep(stepID) {
+		if analysis.ProposalMD != "" || analysis.SpecsMD != "" || len(analysis.ExecutionPhases) > 0 {
 			user += "\n\n=== Task Specification (OpenSpec) ===\n"
 			if analysis.ProposalMD != "" {
 				user += analysis.ProposalMD + "\n\n"
@@ -167,25 +186,46 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 			if analysis.DesignMD != "" {
 				user += analysis.DesignMD + "\n\n"
 			}
-			if analysis.TasksMD != "" {
+			if len(analysis.Tasks) > 0 {
+				user += formatTasksMD(analysis.Tasks) + "\n\n"
+			} else if analysis.TasksMD != "" {
 				user += analysis.TasksMD + "\n\n"
 			}
-			if len(analysis.ExecutionPlan) > 0 {
-				user += "## Initial Execution Plan:\n"
-				for _, p := range analysis.ExecutionPlan {
-					user += "- " + p + "\n"
-				}
-				user += "\n"
+			
+			// Inject Execution Manifest (JSON)
+			manifest := map[string]any{
+				"affected_files": analysis.AffectedFiles,
+				"risks":          analysis.Risks,
+			}
+			if len(analysis.ExecutionPhases) > 0 {
+				manifest["execution_phases"] = analysis.ExecutionPhases
+			}
+			if len(analysis.Tasks) > 0 {
+				manifest["tasks"] = analysis.Tasks
+			}
+			if len(analysis.RiskDomains) > 0 {
+				manifest["risk_domains"] = analysis.RiskDomains
+			}
+			if len(analysis.AcceptanceCriteria) > 0 {
+				manifest["acceptance_criteria"] = analysis.AcceptanceCriteria
+			}
+			if len(analysis.ExecutionBoundaries) > 0 {
+				manifest["execution_boundaries"] = analysis.ExecutionBoundaries
+			}
+			if manifestJSON, err := json.MarshalIndent(manifest, "", "  "); err == nil {
+				user += "## Execution Manifest (JSON):\n```json\n" + string(manifestJSON) + "\n```\n\n"
 			}
 		}
-	} else if isCodingStep(stepID) {
+	}
+	
+	if isCodingStep(stepID) {
 		idx, ok := extractSubtaskIndex(stepID)
 		if ok && idx >= 0 {
-			specSection := extractSpecsSectionForSubtask(analysis.SpecsMD, analysis.TasksMD, idx, stepID)
+			specSection := extractSpecsSectionForSubtask(analysis.SpecsMD, formatTasksMD(analysis.Tasks), idx, stepID)
 			if specSection != "" {
 				user += "\n\n=== Relevant Requirements (OpenSpec) ===\n" + specSection + "\n\n"
 			}
-			progress := summarizeTasksProgress(analysis.TasksMD, idx, stepID)
+			progress := summarizeTasksProgress(formatTasksMD(analysis.Tasks), idx, stepID)
 			if progress != "" {
 				user += progress + "\n\n"
 			}
@@ -206,13 +246,13 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 			usedTokens := len(user) / 4
 			totalBudget := 8192 // Target system budget
 			maxMapTokens := totalBudget - usedTokens
-			
+
 			if maxMapTokens > 2048 {
 				maxMapTokens = 2048
 			} else if maxMapTokens < 256 {
 				maxMapTokens = 256 // Fallback minimum
 			}
-			
+
 			repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
 			if err == nil && repoMap != "" {
 				user = "=== Repository Structure ===\n" + repoMap + "\n\n" + user
@@ -224,7 +264,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID, analysis.RequiredSkills)
+	tools, err := a.toolDefinitionsForAgent(ctx, agent, task.ProjectID, analysis.RequiredSkills, analysis.RequiredSkillsMap)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,13 +273,13 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 
 func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, agent *models.Agent) (string, []models.Rule, error) {
 	stepID := stepIDFromCtx(ctx)
-	root := "."
-	if a != nil && a.root != "" {
-		root = a.root
-	}
 	parts := []string{}
-	if content, err := readOptional(filepath.Join(root, "core", "system_prompt.md")); err == nil && strings.TrimSpace(content) != "" {
-		parts = append(parts, "# Base System Prompt\n"+content)
+
+	if a.promptPaths != nil && a.fs != nil {
+		corePromptFile := a.promptPaths.CorePrompt("system_prompt.md")
+		if content, err := a.fs.ReadFile(corePromptFile); err == nil && strings.TrimSpace(string(content)) != "" {
+			parts = append(parts, "# Base System Prompt\n"+string(content))
+		}
 	}
 
 	globalRules, projectRules, err := a.loadRules(ctx, task.ProjectID)
@@ -263,24 +303,36 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 		return "", nil, err
 	}
 
-	// 1. Global Rules (filtered for coding steps to remove impossible instructions)
+	// 1. Global Rules
 	if len(globalRules) > 0 {
-		filtered := filterRulesForStep(globalRules, stepID)
+		filtered := filterRulesForAgent(globalRules, agent, stepID)
 		if len(filtered) > 0 {
 			parts = append(parts, "# Global Rules [IMMUTABLE - DO NOT OVERRIDE]\n"+formatRules(filtered))
 		}
 	}
 
 	// 2. Agent Role Constraints
-	if agent != nil {
-		if content, err := readOptional(filepath.Join(root, "roles", roleFile(agent.Role))); err == nil && strings.TrimSpace(content) != "" {
-			parts = append(parts, "# Agent Role Constraints\n"+content)
+	if agent != nil && a.promptPaths != nil && a.fs != nil {
+		rolePromptFile := a.promptPaths.RolePrompt(agent.Role)
+		if content, err := a.fs.ReadFile(rolePromptFile); err == nil && strings.TrimSpace(string(content)) != "" {
+			parts = append(parts, "# Agent Role Constraints\n"+string(content))
+		}
+	}
+
+	// Step-specific Instructions
+	if stepID != "" && a.promptPaths != nil && a.fs != nil {
+		stepPromptFile := a.promptPaths.StepPrompt(stepID)
+		if content, err := a.fs.ReadFile(stepPromptFile); err == nil && strings.TrimSpace(string(content)) != "" {
+			parts = append(parts, "# Step-specific Instructions\n"+string(content))
 		}
 	}
 
 	// 3. Project Rules
 	if len(projectRules) > 0 {
-		parts = append(parts, "# Project Rules\n"+formatRules(projectRules))
+		filtered := filterRulesForAgent(projectRules, agent, stepID)
+		if len(filtered) > 0 {
+			parts = append(parts, "# Project Rules\n"+formatRules(filtered))
+		}
 	}
 
 	// 4. Task Rules
@@ -294,12 +346,15 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 	}
 
 	// Output Rules
-	if content, err := readOptional(filepath.Join(root, "core", "output_rules.md")); err == nil && strings.TrimSpace(content) != "" {
-		parts = append(parts, content)
+	if a.promptPaths != nil && a.fs != nil {
+		outputRulesFile := a.promptPaths.CorePrompt("output_rules.md")
+		if content, err := a.fs.ReadFile(outputRulesFile); err == nil && strings.TrimSpace(string(content)) != "" {
+			parts = append(parts, string(content))
+		}
 	}
 
 	corePrompt := strings.TrimSpace(strings.Join(parts, "\n\n"))
-	
+
 	// Dynamic Metadata Injection (appendSystemPrompt)
 	metadata := map[string]any{
 		"project_id": task.ProjectID,
@@ -311,7 +366,7 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 	if len(analysis.TaskRules) > 0 {
 		metadata["task_rules"] = analysis.TaskRules
 	}
-	
+
 	finalSystemPrompt := appendSystemPrompt(corePrompt, metadata)
 	return finalSystemPrompt, projectRules, nil
 }

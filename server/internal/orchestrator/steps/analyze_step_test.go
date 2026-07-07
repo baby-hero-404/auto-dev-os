@@ -95,13 +95,20 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
   "affected_files": ["math.go"],
   "risks": [],
   "risk_domains": [],
-  "execution_plan": ["write code"],
+  "execution_phases": [
+    {
+      "phase": "Phase 1: Setup",
+      "tasks": ["write code"]
+    }
+  ],
   "clarification_questions": [],
   "required_skills": [],
   "proposal_md": "## Proposal",
   "specs_md": "## ADDED Requirements",
   "design_md": "## Design",
-  "tasks_md": "## Tasks"
+  "tasks_md": "## Tasks",
+  "execution_boundaries": {"allowed": ["."]},
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
 }`
 
 	chatter := &mockLLMChatter{

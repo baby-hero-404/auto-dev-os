@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+type WorkflowCheckpointRepo interface {
+	DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error
+}
 
 // PlanStep implements Step for the execution planning phase.
 // It acts as a deterministic orchestration checkpoint that reads the OpenSpec
@@ -16,21 +21,25 @@ import (
 // No LLM call is made — this step is pure logic.
 type PlanStep struct {
 	rt        StepRuntime
-	tasks     TaskReader
+	tasks     TaskRepository
 	worktree  WorktreeManager
 	workspace WorkspaceLoader
 	status    StatusUpdater
 	log       Logger
+	workflows WorkflowCheckpointRepo
+	maxCost   float64
 }
 
 func NewPlanStep(
 	rt StepRuntime,
-	tasks TaskReader,
+	tasks TaskRepository,
 	_ LLMRunner, // preserved for API compatibility; unused
 	worktree WorktreeManager,
 	workspace WorkspaceLoader,
 	status StatusUpdater,
 	log Logger,
+	workflows WorkflowCheckpointRepo,
+	maxCost float64,
 ) *PlanStep {
 	return &PlanStep{
 		rt:        rt,
@@ -39,11 +48,51 @@ func NewPlanStep(
 		workspace: workspace,
 		status:    status,
 		log:       log,
+		workflows: workflows,
+		maxCost:   maxCost,
 	}
 }
 
 func (s *PlanStep) ID() string                         { return workflow.StepPlan }
 func (s *PlanStep) StatusOnResume(_ StepResult) string { return models.TaskStatusCoding }
+
+func classifyHeadingLocal(heading string) string {
+	lower := strings.ToLower(heading)
+	frontendSignals := []string{"frontend", "ui", "component", "page", "view", "style", "css", "layout", "giao diện", "giao dien"}
+	for _, signal := range frontendSignals {
+		if strings.Contains(lower, signal) {
+			return "frontend"
+		}
+	}
+	return "backend"
+}
+
+func MapLegacyPhasesToUnits(analysis *models.TaskAnalysis) {
+	if len(analysis.ExecutionUnits) > 0 {
+		return
+	}
+	for i, phase := range analysis.ExecutionPhases {
+		unit := models.ExecutionUnit{
+			ID:        fmt.Sprintf("phase_%d", i),
+			Objective: phase.Phase,
+			Tasks:     phase.Tasks,
+			ExecutionProfile: models.ExecutionProfile{
+				Agent:  classifyHeadingLocal(phase.Phase),
+				Skills: []string{},
+			},
+			Constraints: models.ExecutionConstraints{
+				Parallelizable:  false,
+				MaxFiles:        4,
+				EstimatedTokens: 6000,
+				MaxRisk:         "low",
+			},
+		}
+		if i > 0 {
+			unit.Dependencies = []string{fmt.Sprintf("phase_%d", i-1)}
+		}
+		analysis.ExecutionUnits = append(analysis.ExecutionUnits, unit)
+	}
+}
 
 func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
 	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
@@ -57,9 +106,74 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 		_ = json.Unmarshal(t.Analysis, &analysis)
 	}
 
-	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", "Plan: parsing tasks_md into structured subtask list")
-	subtasks := workflow.ParseTasksMD(analysis.TasksMD)
-	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Plan: found %d backend subtasks, %d frontend subtasks", len(subtasks["backend"]), len(subtasks["frontend"])))
+	// Backward Compatibility: Map legacy phases to units
+	MapLegacyPhasesToUnits(&analysis)
+
+	// Validate ExecutionUnits DAG
+	maxCostThreshold := s.maxCost
+	if maxCostThreshold <= 0 {
+		maxCostThreshold = 8.0 // default
+	}
+
+	// Dynamic Scheduler Policy validation
+	if errVal := policy.ValidateDAG(analysis.ExecutionUnits, maxCostThreshold); errVal != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Plan validation failed: %v", errVal))
+
+		// Auto-split retry logic (up to 2 times)
+		if analysis.RetryCount < 2 {
+			analysis.RetryCount++
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Retrying Analyze step (Attempt %d/2) due to validation failure...", analysis.RetryCount))
+
+			// 1. Update retry count and reset spec status in DB
+			rawAnalysis, marshalErr := json.Marshal(analysis)
+			if marshalErr == nil {
+				emptyStatus := ""
+				_, _ = s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+					Analysis:   rawAnalysis,
+					SpecStatus: &emptyStatus,
+				})
+				s.rt.Task.Analysis = rawAnalysis
+				s.rt.Task.SpecStatus = emptyStatus
+			}
+
+			// 2. Clear checkpoints for analyze and plan so they re-execute
+			if s.workflows != nil {
+				_ = s.workflows.DeleteCheckpoints(ctx, s.rt.Task.ID, []string{"analyze", "plan"})
+			}
+
+			// 3. Return ErrGraphChanged to trigger re-running of analyze
+			return nil, workflow.ErrGraphChanged
+		}
+
+		// If exceeded 2 retries, pause the workflow and ask for Human Review
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", "Validation failed 2 times. Pausing workflow for Human Review.")
+
+		specStatus := "paused"
+		_, _ = s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+			SpecStatus: &specStatus,
+		})
+		if s.status != nil {
+			_, _ = s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusSpecReview)
+		}
+
+		return nil, fmt.Errorf("%w: %v", workflow.ErrPaused, errVal)
+	}
+
+	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", "Plan: mapping ExecutionUnits into structured subtask list")
+	subtasks := make(map[string][]string)
+	for _, unit := range analysis.ExecutionUnits {
+		agent := strings.ToLower(unit.ExecutionProfile.Agent)
+		if agent == "" {
+			agent = "backend" // default
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("## %s\n", unit.Objective))
+		for _, taskStr := range unit.Tasks {
+			sb.WriteString(fmt.Sprintf("- [ ] %s\n", taskStr))
+		}
+		subtasks[agent] = append(subtasks[agent], sb.String())
+	}
+	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Plan: mapped %d backend units, %d frontend units", len(subtasks["backend"]), len(subtasks["frontend"])))
 
 	// Phase 3: Decide whether to skip frontend
 	skipFE := shouldSkipFrontend(analysis, subtasks)
@@ -67,9 +181,9 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 
 	// Build output
 	out := StepResult{
-		"subtasks":       subtasks,
-		"skip_frontend":  skipFE,
-		"execution_plan": analysis.ExecutionPlan,
+		"subtasks":         subtasks,
+		"skip_frontend":    skipFE,
+		"execution_phases": analysis.ExecutionPhases,
 	}
 
 	// Setup branches (preserved from original)
@@ -130,7 +244,7 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 func shouldSkipFrontend(analysis models.TaskAnalysis, subtasks map[string][]string) bool {
 	// 1. If any affected files are frontend files, do NOT skip (file-path signal overrides category hint)
 	for _, file := range analysis.AffectedFiles {
-		if isFrontendFile(file) {
+		if isFrontendFile(file.File) {
 			return false
 		}
 	}

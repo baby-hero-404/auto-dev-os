@@ -68,7 +68,8 @@ type SandboxConfig struct {
 type WorkerConfig struct {
 	Enabled     bool `mapstructure:"enabled"`
 	IntervalMS  int  `mapstructure:"interval_ms"`
-	Concurrency int  `mapstructure:"concurrency"`
+	Concurrency  int     `mapstructure:"concurrency"`
+	MaxPhaseCost float64 `mapstructure:"max_phase_cost"`
 }
 
 type TelemetryConfig struct {
@@ -147,6 +148,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("worker.enabled", "QUEUE_WORKER_ENABLED")
 	v.BindEnv("worker.interval_ms", "QUEUE_WORKER_INTERVAL_MS")
 	v.BindEnv("worker.concurrency", "QUEUE_WORKER_CONCURRENCY")
+	v.BindEnv("worker.max_phase_cost", "MAX_PHASE_COST")
 	v.BindEnv("telemetry.otlp_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
 	v.BindEnv("logging.local_retention_days", "LOG_LOCAL_RETENTION_DAYS")
 	v.BindEnv("logging.file_root", "LOG_FILE_ROOT")
@@ -196,6 +198,11 @@ func normalize(cfg *Config) error {
 	if err := configureLLM(&cfg.LLM); err != nil {
 		return err
 	}
+
+	if cfg.Worker.MaxPhaseCost <= 0 {
+		cfg.Worker.MaxPhaseCost = 8.0
+	}
+
 	return nil
 }
 

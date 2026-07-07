@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 	"go.opentelemetry.io/otel"
 )
 
@@ -54,7 +54,7 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 	}
 
 	containerWorkDir := o.containerPathForHostPath(task, hostWorkspacePath, "")
-	wrappedCommand := fmt.Sprintf("cd %s && %s", orchestratorworkspace.QuoteShellArg(containerWorkDir), command)
+	wrappedCommand := fmt.Sprintf("cd %s && %s", paths.QuoteShellArg(containerWorkDir), command)
 
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
 	defer span.End()
@@ -92,7 +92,7 @@ func (o *Orchestrator) containerPathForHostPath(task *models.Task, hostPath stri
 	if worktreeSuffix != "" {
 		activeWorkspaceHostPath = o.repoutil.HostWorktreePath(task, localPath, worktreeSuffix)
 	}
-	return orchestratorworkspace.ContainerPathForHostPath(localPath, activeWorkspaceHostPath, hostPath)
+	return paths.ContainerPathForHostPath(localPath, activeWorkspaceHostPath, hostPath)
 }
 
 func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool) {
@@ -102,9 +102,9 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 	}
 
 	for _, root := range o.affectedFileRoots(ctx, task, file) {
-		safePath, err := orchestratorworkspace.ResolveSafePath(root, file)
+		safePath, err := paths.ResolveSafePath(root, file)
 		if err == nil {
-			if content, readErr := orchestratorworkspace.ReadLimitedFile(safePath, 20_000); readErr == nil {
+			if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
 				return content, true
 			}
 		}
@@ -120,9 +120,9 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 		if strings.HasPrefix(filepath.Clean(file), prefix) {
 			rel := strings.TrimPrefix(filepath.Clean(file), prefix)
 			root := filepath.Join(ws.Root, repo.Paths.Main)
-			safePath, err := orchestratorworkspace.ResolveSafePath(root, rel)
+			safePath, err := paths.ResolveSafePath(root, rel)
 			if err == nil {
-				if content, readErr := orchestratorworkspace.ReadLimitedFile(safePath, 20_000); readErr == nil {
+				if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
 					return content, true
 				}
 			}
@@ -132,9 +132,9 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 	if len(ws.Repos) == 1 {
 		repo := ws.Repos[0]
 		root := filepath.Join(ws.Root, repo.Paths.Main)
-		safePath, err := orchestratorworkspace.ResolveSafePath(root, file)
+		safePath, err := paths.ResolveSafePath(root, file)
 		if err == nil {
-			if content, readErr := orchestratorworkspace.ReadLimitedFile(safePath, 20_000); readErr == nil {
+			if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
 				return content, true
 			}
 		}

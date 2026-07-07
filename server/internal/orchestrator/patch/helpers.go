@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func ExtractPatch(parsed map[string]any) string {
@@ -88,6 +88,18 @@ func MatchAffectedFile(pattern, file string) bool {
 		return true
 	}
 
+	// Implicitly allow test files if the base file is affected
+	ext := filepath.Ext(cleanPattern)
+	baseNoExt := strings.TrimSuffix(cleanPattern, ext)
+	if ext == ".go" && cleanFile == baseNoExt+"_test.go" {
+		return true
+	}
+	if (ext == ".js" || ext == ".ts" || ext == ".jsx" || ext == ".tsx") {
+		if cleanFile == baseNoExt+".test"+ext || cleanFile == baseNoExt+".spec"+ext {
+			return true
+		}
+	}
+
 	if strings.HasPrefix(cleanFile, cleanPattern+"/") {
 		return true
 	}
@@ -109,7 +121,7 @@ func MatchAffectedFile(pattern, file string) bool {
 	return false
 }
 
-func IsUnderAffectedDir(file string, affectedFiles []string) bool {
+func IsUnderAffectedDir(file string, affectedFiles []models.AffectedFile) bool {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return false
@@ -117,12 +129,12 @@ func IsUnderAffectedDir(file string, affectedFiles []string) bool {
 
 	fileDir := filepath.ToSlash(filepath.Clean(filepath.Dir(file)))
 	for _, pattern := range affectedFiles {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
+		patternStr := strings.TrimSpace(pattern.File)
+		if patternStr == "" {
 			continue
 		}
 
-		candidateDir := affectedPatternDir(pattern)
+		candidateDir := affectedPatternDir(patternStr)
 		if candidateDir == "" {
 			continue
 		}
@@ -169,7 +181,7 @@ func affectedPatternDir(pattern string) string {
 }
 
 func CleanPatchPaths(patchText string) string {
-	re := regexp.MustCompile(`([ab])/` + regexp.QuoteMeta(workspace.ReposDirName) + `/[^/]+/(?:worktrees/[^/]+|[^/]+)/`)
+	re := regexp.MustCompile(`([ab])/` + regexp.QuoteMeta(paths.ReposDirName) + `/[^/]+/(?:worktrees/[^/]+|[^/]+)/`)
 	return re.ReplaceAllString(patchText, "$1/")
 }
 
@@ -269,7 +281,7 @@ func SplitPatchByRepo(patchText string) map[string]string {
 			path = strings.ReplaceAll(path, "\\", "/")
 			path = strings.TrimSpace(path)
 
-			codeReposPrefix := workspace.ReposPrefix()
+			codeReposPrefix := paths.ReposPrefix()
 			if strings.HasPrefix(path, codeReposPrefix) {
 				after := path[len(codeReposPrefix):]
 				idx := strings.Index(after, "/")
@@ -287,7 +299,7 @@ func SplitPatchByRepo(patchText string) map[string]string {
 		}
 		if repoName != "" {
 			cleanPatch := trimmed
-			reposPrefix := workspace.ReposPrefix()
+			reposPrefix := paths.ReposPrefix()
 			if strings.Contains(cleanPatch, reposPrefix) {
 				cleanPatch = regexp.MustCompile(`([ab])/`+regexp.QuoteMeta(reposPrefix)+regexp.QuoteMeta(repoName)+`/(?:worktrees/[^/]+|[^/]+)/`).ReplaceAllString(cleanPatch, "$1/")
 			} else {
@@ -310,13 +322,13 @@ func SplitPatchByRepo(patchText string) map[string]string {
 	}
 	header := parts[0]
 
-	re := regexp.MustCompile(`^a/` + regexp.QuoteMeta(workspace.ReposPrefix()) + `([^/]+)/(?:worktrees/[^/]+|[^/]+)/`)
+	re := regexp.MustCompile(`^a/` + regexp.QuoteMeta(paths.ReposPrefix()) + `([^/]+)/(?:worktrees/[^/]+|[^/]+)/`)
 	repoBlocks := make(map[string][]string)
 	for i := 1; i < len(parts); i++ {
 		block := parts[i]
 		if matches := re.FindStringSubmatch(block); len(matches) > 1 {
 			repoName := matches[1]
-			cleanBlock := regexp.MustCompile(`([ab])/`+regexp.QuoteMeta(workspace.ReposPrefix())+regexp.QuoteMeta(repoName)+`/(?:worktrees/[^/]+|[^/]+)/`).ReplaceAllString(block, "$1/")
+			cleanBlock := regexp.MustCompile(`([ab])/`+regexp.QuoteMeta(paths.ReposPrefix())+regexp.QuoteMeta(repoName)+`/(?:worktrees/[^/]+|[^/]+)/`).ReplaceAllString(block, "$1/")
 			repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
 		} else if strings.HasPrefix(block, "a/") {
 			sub := block[2:]
@@ -326,7 +338,7 @@ func SplitPatchByRepo(patchText string) map[string]string {
 				idx := strings.Index(firstPath, "/")
 				if idx != -1 {
 					repoName := firstPath[:idx]
-					if repoName != workspace.ReposDirName {
+					if repoName != paths.ReposDirName {
 						cleanBlock := CleanRepoPrefix(block, repoName)
 						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
 					}
@@ -337,7 +349,7 @@ func SplitPatchByRepo(patchText string) map[string]string {
 				idx := strings.Index(sub, "/")
 				if idx != -1 {
 					repoName := sub[:idx]
-					if repoName != workspace.ReposDirName {
+					if repoName != paths.ReposDirName {
 						cleanBlock := CleanRepoPrefix(block, repoName)
 						repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
 					}

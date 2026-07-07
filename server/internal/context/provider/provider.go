@@ -11,6 +11,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/context/source"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/symbol"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type ContextKey string
@@ -63,7 +64,8 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 
 	// Only scan under 'code/repos' if it exists to isolate repository files from task metadata.
 	scanDir := rootDir
-	reposDir := filepath.Join(rootDir, "code", "repos")
+	wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
+	reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
 	if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
 		scanDir = reposDir
 	}
@@ -121,7 +123,8 @@ func (p *Provider) IndexWorkspace(ctx context.Context) error {
 		return nil
 	}
 	scanDir := rootDir
-	reposDir := filepath.Join(rootDir, "code", "repos")
+	wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
+	reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
 	if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
 		scanDir = reposDir
 	}
@@ -212,4 +215,3 @@ func readLines(path string) ([]string, error) {
 	}
 	return lines, scanner.Err()
 }
-

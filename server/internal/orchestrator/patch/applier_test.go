@@ -237,7 +237,7 @@ func TestRunner_ApplyPatch_RejectsOutsideAffectedFiles(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Prepare input task with existing affected_files list
-	analysisJSON := []byte(`{"affected_files": ["pkg/scheduler/scheduler.go"]}`)
+	analysisJSON := []byte(`{"affected_files": [{"file": "pkg/scheduler/scheduler.go"}]}`)
 	repoID := "repo-123"
 	task := &models.Task{
 		ID:           "task-123",
@@ -280,8 +280,8 @@ diff --git a/tool_zentao/pkg/db/sqlite.go b/tool_zentao/pkg/db/sqlite.go
 	if err == nil {
 		t.Fatalf("expected patch to be rejected")
 	}
-	if !strings.Contains(err.Error(), "security violation") {
-		t.Fatalf("expected security violation error, got: %v", err)
+	if !strings.Contains(err.Error(), "policy_violation") {
+		t.Fatalf("expected policy_violation error, got: %v", err)
 	}
 	if applyCalled {
 		t.Fatalf("expected patch application to stop before sandbox execution")
@@ -291,7 +291,7 @@ diff --git a/tool_zentao/pkg/db/sqlite.go b/tool_zentao/pkg/db/sqlite.go
 func TestRunner_ApplyPatch_AllowsNewFileUnderAffectedDir(t *testing.T) {
 	tempDir := t.TempDir()
 
-	analysisJSON := []byte(`{"affected_files": ["pkg/scheduler/scheduler.go"]}`)
+	analysisJSON := []byte(`{"affected_files": [{"file": "pkg/scheduler/scheduler.go"}]}`)
 	repoID := "repo-123"
 	task := &models.Task{
 		ID:           "task-124",
@@ -341,7 +341,7 @@ func TestRunner_ApplyPatch_AllowsNewFileUnderAffectedDir(t *testing.T) {
 		t.Fatalf("expected updated analysis to be persisted")
 	}
 	if !strings.Contains(string(persistedAnalysis), "pkg/scheduler/helper.go") {
-		t.Fatalf("expected new file to be appended to affected_files, got: %s", string(persistedAnalysis))
+		t.Fatalf("expected new file to be appended to expanded_boundaries, got: %s", string(persistedAnalysis))
 	}
 }
 
@@ -430,6 +430,20 @@ func TestRunner_NormalizePatchPath(t *testing.T) {
 		{
 			name:            "Container prefix",
 			firstPath:       "code/repos/tool_zentao/worktrees/backend/config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+		{
+			name:            "Git prefix with container prefix",
+			firstPath:       "a/code/repos/tool_zentao/worktrees/backend/config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+		{
+			name:            "Git prefix without container prefix",
+			firstPath:       "b/tool_zentao/worktrees/backend/config/config.go",
 			role:            "backend",
 			expectedRepo:    "tool_zentao",
 			expectedRelPath: "config/config.go",

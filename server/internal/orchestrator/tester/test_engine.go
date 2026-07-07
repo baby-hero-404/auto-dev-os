@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type ProjectKind string
@@ -158,11 +158,11 @@ if [ $found_repos -eq 0 ]; then
 	fi
 fi
 `
-	return strings.ReplaceAll(script, "REPOS_DIR", workspace.ReposDirName)
+	return strings.ReplaceAll(script, "REPOS_DIR", paths.ReposDirName)
 }
 
 func TargetedTestCommand(kind ProjectKind, containerModPath string, files []string, goPackages map[string]bool) (string, bool) {
-	quotedModPath := workspace.QuoteShellArg(containerModPath)
+	quotedModPath := paths.QuoteShellArg(containerModPath)
 	switch kind {
 	case ProjectGo:
 		pkgs := []string{}
@@ -176,7 +176,7 @@ func TargetedTestCommand(kind ProjectKind, containerModPath string, files []stri
 	case ProjectJS:
 		var quotedFiles []string
 		for _, f := range files {
-			quotedFiles = append(quotedFiles, workspace.QuoteShellArg(f))
+			quotedFiles = append(quotedFiles, paths.QuoteShellArg(f))
 		}
 		return fmt.Sprintf("cd %s && (npm test -- --findRelatedTests %s || npm test -- %s || npm test)", quotedModPath, strings.Join(quotedFiles, " "), strings.Join(quotedFiles, " ")), true
 	case ProjectPython:

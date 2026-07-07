@@ -30,7 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 import { Markdown } from "@/components/ui/markdown";
-import { WorkflowArtifact } from "@/lib/types";
+import { WorkflowArtifact, TaskAnalysis, AffectedFile } from "@/lib/types";
 import { SpecReviewSection } from "@/components/projects/spec-review-section";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { getRiskAssessment, splitTaskDescription } from "@/lib/utils/task-utils";
@@ -304,24 +304,35 @@ export default function ProjectTaskDetailPage({
 
   // Parse task analysis
   const analysisData = useMemo(() => {
-    let data: {
-      complexity?: string;
-      scope?: string;
-      affected_files?: string[];
-      risks?: string[];
-      execution_plan?: string[];
-      clarification_questions?: string[];
-      risk_domains?: string[];
-      proposal_md?: string;
-      specs_md?: string;
-      design_md?: string;
-      tasks_md?: string;
-    } = {};
+    let data: Partial<TaskAnalysis> = {};
     try {
       if (task?.analysis) {
         data = typeof task.analysis === "string" ? JSON.parse(task.analysis) : task.analysis;
       }
     } catch { }
+
+    // Fallback default templates if spec_status is not "none" but markdown fields are empty
+    if (task && task.spec_status && task.spec_status !== "none") {
+      if (!data.proposal_md) {
+        data.proposal_md = `## Proposal for ${task.title}\n\n${task.description || ""}\n`;
+      }
+      if (!data.specs_md) {
+        data.specs_md = `## ADDED Requirements\n\n### Requirement: ${task.title}\n${task.description || ""}\n`;
+      }
+      if (!data.design_md) {
+        data.design_md = `## Design\n\nImplementation design details.\n`;
+      }
+      if (!data.tasks_md) {
+        let tasksContent = "## Tasks\n\n";
+        if (data.execution_plan && data.execution_plan.length > 0) {
+          tasksContent += data.execution_plan.map(step => `- [ ] ${step}`).join("\n") + "\n";
+        } else {
+          tasksContent += "- [ ] Implement changes\n";
+        }
+        data.tasks_md = tasksContent;
+      }
+    }
+
     return data;
   }, [task]);
 
@@ -375,18 +386,18 @@ export default function ProjectTaskDetailPage({
       const sortedCps = [...cps].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       const firstCp = sortedCps[0];
       const lastCp = sortedCps[sortedCps.length - 1];
-      
+
       let startMs = new Date(firstCp.created_at).getTime();
       // If the step was instantly recorded (e.g., recorded status) without a running checkpoint,
       // use the previous step's end time to capture the orchestrator prep time.
       if (sortedCps.length === 1 && firstCp.state?.status !== "running" && previousStepEnd !== null) {
         startMs = previousStepEnd;
       }
-      
+
       const isRunning = lastCp.state?.status === "running";
       const endMs = isRunning ? Date.now() : new Date(lastCp.created_at).getTime();
       previousStepEnd = endMs;
-      
+
       const durationSec = Math.max(0, Math.round((endMs - startMs) / 1000));
       if (durationSec < 60) {
         map.set(step, `${durationSec}s`);
@@ -451,13 +462,13 @@ export default function ProjectTaskDetailPage({
     return [];
   }, [task?.pr_metadata]);
 
-  // Prefer actual parsed diff files from git, fallback to analysis estimation
   const displayFiles = useMemo<string[]>(() => {
     if (prSummaries.length > 0 && prSummaries[0].changed_files) {
       return prSummaries[0].changed_files as string[];
     }
     const affectedFiles = analysisData.affected_files || [];
-    return parsedDiffFiles.length > 0 ? parsedDiffFiles : affectedFiles;
+    const mapped = affectedFiles.map((f: string | AffectedFile) => typeof f === "string" ? f : f.file || "");
+    return parsedDiffFiles.length > 0 ? parsedDiffFiles : mapped;
   }, [prSummaries, parsedDiffFiles, analysisData.affected_files]);
 
   const riskAssessment = useMemo(() => {
@@ -603,7 +614,7 @@ export default function ProjectTaskDetailPage({
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {task && <Badge value={task.status} />}
-                {task?.spec_status && <Badge value={task.spec_status} />}
+                {task?.spec_status && task.spec_status !== "none" && <Badge value={task.spec_status} />}
                 {workflow?.job && <Badge value={workflow.job.status} />}
                 {task && (
                   <span className="rounded border border-stroke bg-surface px-2 py-0.5 text-xs font-medium text-content-muted">
@@ -775,6 +786,7 @@ export default function ProjectTaskDetailPage({
 
         <SpecReviewSection
           specStatus={task?.spec_status}
+          hasUnansweredQuestions={clarificationQuestions.length > 0}
           onRequestChanges={requestSpecChanges}
           onApproveSpec={approveSpec}
         />
@@ -797,10 +809,10 @@ export default function ProjectTaskDetailPage({
               </div>
               <span
                 className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold font-sans uppercase border ${isPRMerged
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
-                    : task?.status === "pr_ready"
-                      ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25 animate-pulse"
-                      : "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/25 animate-pulse"
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                  : task?.status === "pr_ready"
+                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25 animate-pulse"
+                    : "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/25 animate-pulse"
                   }`}
               >
                 {isPRMerged ? "Merged" : task?.status === "pr_ready" ? "PR Ready" : "Awaiting Review"}
@@ -869,7 +881,7 @@ export default function ProjectTaskDetailPage({
               )}
             </div>
           </div>
-          
+
           <div className="relative flex w-full items-start gap-4 overflow-x-auto pb-6 pt-4 hide-scrollbar md:gap-5">
             {/* Connector Line Background */}
             <div className="absolute left-[52px] right-[52px] top-[39px] -z-10 h-[3px] bg-stroke/30 rounded-full" />
@@ -886,13 +898,12 @@ export default function ProjectTaskDetailPage({
 
               return (
                 <div key={step} className="group relative flex min-w-[128px] flex-col items-center justify-start gap-3 shrink-0 md:min-w-[140px]">
-                  
+
                   {/* Premium Hover Card / Tooltip */}
                   <div className="absolute bottom-full mb-3 hidden group-hover:flex flex-col items-start w-56 p-3 rounded-xl border border-stroke bg-card/95 backdrop-blur-md shadow-xl z-30 transition-all duration-300 animate-fade-in pointer-events-none">
                     <div className="flex items-center gap-2 border-b border-stroke/50 pb-1.5 w-full">
-                      <div className={`p-1 rounded bg-surface border border-stroke/50 ${
-                        isRunning ? "text-sky-500" : isCompleted ? "text-brand-primary" : isFailed ? "text-rose-500" : "text-content-muted"
-                      }`}>
+                      <div className={`p-1 rounded bg-surface border border-stroke/50 ${isRunning ? "text-sky-500" : isCompleted ? "text-brand-primary" : isFailed ? "text-rose-500" : "text-content-muted"
+                        }`}>
                         {getStepIcon(step)}
                       </div>
                       <div className="font-sans font-bold text-xs text-foreground capitalize leading-none">
@@ -920,22 +931,20 @@ export default function ProjectTaskDetailPage({
 
                   {/* Connecting Line Progress Overlay */}
                   {index > 0 && (
-                    <div className={`absolute right-[50%] top-[38px] -z-10 h-[3px] w-full transition-all duration-500 ${
-                      isCompleted ? "bg-brand-primary" :
-                      isRunning ? "bg-gradient-to-r from-brand-primary to-sky-500/30 animate-pulse" :
-                      "bg-transparent"
-                    }`} />
+                    <div className={`absolute right-[50%] top-[38px] -z-10 h-[3px] w-full transition-all duration-500 ${isCompleted ? "bg-brand-primary" :
+                        isRunning ? "bg-gradient-to-r from-brand-primary to-sky-500/30 animate-pulse" :
+                          "bg-transparent"
+                      }`} />
                   )}
 
                   {/* Node Circle */}
-                  <div className={`relative z-10 flex size-11 items-center justify-center rounded-full border-2 transition-all duration-300 shadow-sm cursor-pointer ${
-                    isCompleted ? "border-brand-primary bg-brand-primary/5 text-brand-primary hover:bg-brand-primary/10" : 
-                    isFailed ? "border-rose-500 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20" :
-                    isRunning ? "border-sky-500 bg-sky-500/10 text-sky-500 shadow-[0_0_12px_rgba(14,165,233,0.3)] animate-pulse" : 
-                    "border-stroke bg-card text-content-muted/80 hover:border-content-muted hover:text-foreground"
-                  }`}>
+                  <div className={`relative z-10 flex size-11 items-center justify-center rounded-full border-2 transition-all duration-300 shadow-sm cursor-pointer ${isCompleted ? "border-brand-primary bg-brand-primary/5 text-brand-primary hover:bg-brand-primary/10" :
+                      isFailed ? "border-rose-500 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20" :
+                        isRunning ? "border-sky-500 bg-sky-500/10 text-sky-500 shadow-[0_0_12px_rgba(14,165,233,0.3)] animate-pulse" :
+                          "border-stroke bg-card text-content-muted/80 hover:border-content-muted hover:text-foreground"
+                    }`}>
                     {getStepIcon(step)}
-                    
+
                     {/* Tiny Status Badges on the Circle */}
                     {isCompleted && (
                       <div className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand-primary text-card border border-card shadow-sm">
@@ -951,9 +960,8 @@ export default function ProjectTaskDetailPage({
 
                   {/* Label Details */}
                   <div className="w-full px-1 flex flex-col items-center text-center">
-                    <div className={`text-[10px] font-bold uppercase tracking-wider transition-colors line-clamp-1 leading-tight ${
-                      isCompleted || isRunning ? "text-foreground font-semibold" : "text-content-muted/80"
-                    }`}>
+                    <div className={`text-[10px] font-bold uppercase tracking-wider transition-colors line-clamp-1 leading-tight ${isCompleted || isRunning ? "text-foreground font-semibold" : "text-content-muted/80"
+                      }`}>
                       {formatStepName(step)}
                     </div>
                     {isRunning ? (
@@ -984,7 +992,7 @@ export default function ProjectTaskDetailPage({
         <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
           {/* Main Details and Spec Section */}
           <section className="space-y-6">
-            {task?.analysis && (
+            {task?.analysis && task?.spec_status && task.spec_status !== "none" && Object.keys(analysisData).length > 0 && (
               <div className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-stroke pb-3">
                   <div className="flex items-center gap-2">
@@ -1053,6 +1061,23 @@ export default function ProjectTaskDetailPage({
                       </div>
                     )}
 
+                    {analysisData.complexity_details && (
+                      <div className="grid grid-cols-3 gap-2 mt-3">
+                        <div className="rounded border border-stroke bg-surface p-2 flex flex-col">
+                          <span className="text-[9px] uppercase tracking-wider font-bold text-content-muted">Architecture</span>
+                          <span className="text-xs font-semibold capitalize">{analysisData.complexity_details.architecture}</span>
+                        </div>
+                        <div className={`rounded border p-2 flex flex-col ${analysisData.complexity_details.data_migration ? 'border-amber-500/30 bg-amber-500/10' : 'border-stroke bg-surface'}`}>
+                          <span className="text-[9px] uppercase tracking-wider font-bold text-content-muted">Data Migration</span>
+                          <span className={`text-xs font-semibold ${analysisData.complexity_details.data_migration ? 'text-amber-500' : 'text-content-muted'}`}>{analysisData.complexity_details.data_migration ? "Yes" : "No"}</span>
+                        </div>
+                        <div className={`rounded border p-2 flex flex-col ${analysisData.complexity_details.breaking_change ? 'border-rose-500/30 bg-rose-500/10' : 'border-stroke bg-surface'}`}>
+                          <span className="text-[9px] uppercase tracking-wider font-bold text-content-muted">Breaking Change</span>
+                          <span className={`text-xs font-semibold ${analysisData.complexity_details.breaking_change ? 'text-rose-500' : 'text-content-muted'}`}>{analysisData.complexity_details.breaking_change ? "Yes" : "No"}</span>
+                        </div>
+                      </div>
+                    )}
+
                     {analysisData.risk_domains && analysisData.risk_domains.length > 0 && (
                       <div>
                         <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
@@ -1095,21 +1120,6 @@ export default function ProjectTaskDetailPage({
                       </div>
                     )}
 
-                    {clarificationQuestions.length > 0 && task?.spec_status === "changes_requested" && (
-                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
-                        <div className="flex items-start gap-2">
-                          <Check size={14} className="mt-0.5 text-emerald-500" />
-                          <div>
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                              Clarification responses submitted
-                            </h3>
-                            <p className="mt-1 text-xs leading-relaxed text-content-muted">
-                              Your answers were recorded as change requests. The task now waits for a new spec review decision.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
 
                     <div className="grid md:grid-cols-2 gap-5 pt-2">
                       {analysisData.execution_plan && analysisData.execution_plan.length > 0 && (
@@ -1125,8 +1135,8 @@ export default function ProjectTaskDetailPage({
                                 <label
                                   key={idx}
                                   className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-all duration-300 cursor-pointer select-none relative overflow-hidden ${isDone
-                                      ? "border-emerald-500/30 bg-emerald-500/10 text-content-muted shadow-sm"
-                                      : "border-stroke bg-surface hover:border-brand-primary/50 text-foreground hover:shadow-md hover:bg-surface/80"
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-content-muted shadow-sm"
+                                    : "border-stroke bg-surface hover:border-brand-primary/50 text-foreground hover:shadow-md hover:bg-surface/80"
                                     }`}
                                 >
                                   <input
@@ -1151,7 +1161,28 @@ export default function ProjectTaskDetailPage({
                       )}
 
                       <div className="space-y-4">
-                        {analysisData.risks && analysisData.risks.length > 0 && (
+                        {analysisData.risks_details && analysisData.risks_details.length > 0 ? (
+                          <div>
+                            <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
+                              Risks Assessment
+                            </h3>
+                            <ul className="space-y-2">
+                              {analysisData.risks_details.map((risk, idx) => (
+                                <li key={idx} className="flex flex-col gap-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-xs">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-amber-600 dark:text-amber-400">{risk.risk}</span>
+                                    <div className="flex gap-1.5">
+                                      <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.probability} prob</span>
+                                      <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.severity} sev</span>
+                                    </div>
+                                  </div>
+                                  <div className="text-content-muted/80 mt-1"><span className="font-medium text-content-muted">Mitigation:</span> {risk.mitigation}</div>
+                                  <div className="text-[10px] font-mono text-brand-primary/70 mt-0.5">Owner: {risk.owner}</div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : analysisData.risks && analysisData.risks.length > 0 && (
                           <div>
                             <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                               Risks
@@ -1173,14 +1204,90 @@ export default function ProjectTaskDetailPage({
                               Estimated Affected Files
                             </h3>
                             <div className="flex flex-wrap gap-1.5">
-                              {analysisData.affected_files.map((file) => (
-                                <span
-                                  key={file}
-                                  className="rounded border border-stroke bg-surface px-2 py-0.5 font-mono text-[10px] text-content-muted"
-                                >
-                                  {file}
-                                </span>
+                              {analysisData.affected_files.map((fileObj, idx) => {
+                                const isString = typeof fileObj === "string";
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                const path = isString ? fileObj : (fileObj as any).file;
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                const repo = !isString && (fileObj as any).repo ? (fileObj as any).repo : null;
+                                return (
+                                  <span
+                                    key={idx}
+                                    className="rounded border border-stroke bg-surface px-2 py-0.5 font-mono text-[10px] text-content-muted flex items-center gap-1"
+                                  >
+                                    {repo && <span className="text-brand-primary/70">{repo}/</span>}
+                                    {path}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {analysisData.execution_boundaries && analysisData.execution_boundaries.length > 0 && (
+                          <div className="mt-4">
+                            <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
+                              Execution Boundaries
+                            </h3>
+                            <div className="space-y-2">
+                              {analysisData.execution_boundaries.map((boundary, idx) => (
+                                <div key={idx} className="rounded-lg border border-stroke bg-surface p-3 text-[11px]">
+                                  <div className="flex items-center justify-between font-mono font-bold text-content mb-1">
+                                    <span>
+                                      {boundary.repo_name && <span className="text-brand-primary/70">{boundary.repo_name}/</span>}
+                                      {boundary.root || "./"}
+                                    </span>
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary uppercase">
+                                      {boundary.module}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {boundary.capabilities.map((cap, cIdx) => (
+                                      <span key={cIdx} className="rounded bg-content/5 text-content-muted px-1.5 py-0.5 font-mono text-[9px]">
+                                        {cap}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
                               ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {analysisData.expanded_boundaries && analysisData.expanded_boundaries.length > 0 && (
+                          <div className="mt-4">
+                            <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
+                              JIT Expanded Boundaries (Audit Trail)
+                            </h3>
+                            <div className="space-y-2">
+                              {analysisData.expanded_boundaries.map((expanded, idx) => {
+                                const isHighRisk = expanded.risk === "HIGH" || expanded.risk === "CRITICAL";
+                                const isMediumRisk = expanded.risk === "MEDIUM";
+                                const riskColor = isHighRisk 
+                                  ? "bg-red-500/10 text-red-500 border-red-500/20" 
+                                  : isMediumRisk 
+                                    ? "bg-amber-500/10 text-amber-500 border-amber-500/20" 
+                                    : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                                return (
+                                  <div key={idx} className="rounded-lg border border-stroke bg-surface/50 p-2.5 text-[11px] flex flex-col gap-1.5">
+                                    <div className="flex items-start justify-between">
+                                      <span className="font-mono font-bold text-content break-all">{expanded.file}</span>
+                                      <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${riskColor}`}>
+                                        {expanded.risk || "LOW"}
+                                      </span>
+                                    </div>
+                                    <p className="text-content-muted italic text-[10px]">{expanded.reason}</p>
+                                    {expanded.capability && (
+                                      <div className="flex items-center gap-1 mt-0.5">
+                                        <span className="text-[9px] text-content-muted">Capability:</span>
+                                        <span className="rounded bg-content/5 px-1 py-0.5 font-mono text-[9px] text-content font-bold">
+                                          {expanded.capability}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}

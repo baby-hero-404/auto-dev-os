@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type SandboxGitClient interface {
@@ -36,35 +36,35 @@ func NewSandboxGitClient(runStep func(context.Context, *models.Task, *models.Age
 }
 
 func (c *DefaultSandboxGitClient) CheckoutBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) error {
-	cmd := fmt.Sprintf("git -C %s checkout %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(branch))
+	cmd := fmt.Sprintf("git -C %s checkout %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(branch))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_checkout_"+branch, cmd)
 	return err
 }
 
 func (c *DefaultSandboxGitClient) CheckoutNewBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) error {
-	cmd := fmt.Sprintf("git -C %s checkout -B %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(branch))
+	cmd := fmt.Sprintf("git -C %s checkout -B %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(branch))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_checkout_new_"+branch, cmd)
 	return err
 }
 
 func (c *DefaultSandboxGitClient) HasBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) bool {
-	cmd := fmt.Sprintf("git -C %s show-ref --verify --quiet refs/heads/%s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(branch))
+	cmd := fmt.Sprintf("git -C %s show-ref --verify --quiet refs/heads/%s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(branch))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_check_branch_"+branch, cmd)
 	return err == nil
 }
 
 func (c *DefaultSandboxGitClient) MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) (string, error) {
-	cmd := fmt.Sprintf("git -C %s merge --no-commit %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(branch))
+	cmd := fmt.Sprintf("git -C %s merge --no-commit %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(branch))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_merge_"+branch, cmd)
 	if err != nil {
-		conflictCheckCmd := fmt.Sprintf("git -C %s diff --name-only --diff-filter=U", workspace.QuoteShellArg(containerPath))
+		conflictCheckCmd := fmt.Sprintf("git -C %s diff --name-only --diff-filter=U", paths.QuoteShellArg(containerPath))
 		conflictCheck, errCC := c.RunSandboxStep(ctx, task, agent, "git_conflict_check_"+branch, conflictCheckCmd)
 		if errCC != nil {
 			c.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to run conflict check: %v", errCC))
 		}
 		conflictOut, _ := conflictCheck["stdout"].(string)
 		if strings.TrimSpace(conflictOut) != "" {
-			abortCmd := fmt.Sprintf("git -C %s merge --abort", workspace.QuoteShellArg(containerPath))
+			abortCmd := fmt.Sprintf("git -C %s merge --abort", paths.QuoteShellArg(containerPath))
 			if _, errAbort := c.RunSandboxStep(ctx, task, agent, "git_merge_abort_"+branch, abortCmd); errAbort != nil {
 				c.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to abort merge: %v", errAbort))
 			}
@@ -76,20 +76,20 @@ func (c *DefaultSandboxGitClient) MergeBranch(ctx context.Context, task *models.
 }
 
 func (c *DefaultSandboxGitClient) CommitChanges(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, message string) error {
-	cmdName := fmt.Sprintf("git -C %s config user.name %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(agent.Name))
+	cmdName := fmt.Sprintf("git -C %s config user.name %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(agent.Name))
 	if _, err := c.RunSandboxStep(ctx, task, agent, "git_config_name", cmdName); err != nil {
 		c.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to configure git user name: %v", err))
 	}
 
-	cmdEmail := fmt.Sprintf("git -C %s config user.email %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(fmt.Sprintf("%s@autocodeos.com", agent.Name)))
+	cmdEmail := fmt.Sprintf("git -C %s config user.email %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(fmt.Sprintf("%s@autocodeos.com", agent.Name)))
 	if _, err := c.RunSandboxStep(ctx, task, agent, "git_config_email", cmdEmail); err != nil {
 		c.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to configure git user email: %v", err))
 	}
 
-	cmdStatus := fmt.Sprintf("git -C %s diff --cached --quiet", workspace.QuoteShellArg(containerPath))
+	cmdStatus := fmt.Sprintf("git -C %s diff --cached --quiet", paths.QuoteShellArg(containerPath))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_diff_cached", cmdStatus)
 	if err != nil {
-		cmdCommit := fmt.Sprintf("git -C %s commit -m %s", workspace.QuoteShellArg(containerPath), workspace.QuoteShellArg(message))
+		cmdCommit := fmt.Sprintf("git -C %s commit -m %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(message))
 		_, errCommit := c.RunSandboxStep(ctx, task, agent, "git_commit", cmdCommit)
 		return errCommit
 	}
@@ -107,7 +107,7 @@ func getDiffPrefixes(containerPath string) string {
 
 func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
 	prefixes := getDiffPrefixes(containerPath)
-	cmd := fmt.Sprintf("git -C %s diff%s", workspace.QuoteShellArg(containerPath), prefixes)
+	cmd := fmt.Sprintf("git -C %s diff%s", paths.QuoteShellArg(containerPath), prefixes)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_diff", cmd)
 	if out != nil {
 		if stdout, ok := out["stdout"].(string); ok {
@@ -120,8 +120,8 @@ func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task
 func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, baseBranch string) (string, error) {
 	prefixes := getDiffPrefixes(containerPath)
 	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[3]s %[2]s...HEAD 2>/dev/null || git diff %[3]s master...HEAD 2>/dev/null || git diff %[3]s HEAD~1 2>/dev/null || git diff %[3]s)",
-		workspace.QuoteShellArg(containerPath),
-		workspace.QuoteShellArg(baseBranch),
+		paths.QuoteShellArg(containerPath),
+		paths.QuoteShellArg(baseBranch),
 		prefixes,
 	)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_pr_diff", diffCmd)
@@ -134,7 +134,7 @@ func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Ta
 }
 
 func (c *DefaultSandboxGitClient) GetChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) ([]string, error) {
-	cmd := fmt.Sprintf("cd %s && git status --porcelain", workspace.QuoteShellArg(containerPath))
+	cmd := fmt.Sprintf("cd %s && git status --porcelain", paths.QuoteShellArg(containerPath))
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_status", cmd)
 	if err != nil {
 		return nil, err
@@ -191,9 +191,9 @@ for repo in meta.get("repos", []):
 print("\n".join(diff_out))`
 
 	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",
-		workspace.QuoteShellArg(pyScript),
-		workspace.QuoteShellArg(containerPath),
-		workspace.QuoteShellArg(worktreeSuffix),
+		paths.QuoteShellArg(pyScript),
+		paths.QuoteShellArg(containerPath),
+		paths.QuoteShellArg(worktreeSuffix),
 	)
 
 	out, err := c.RunSandboxStep(ctx, task, agent, stepName, cmd)
@@ -247,9 +247,9 @@ for repo in meta.get("repos", []):
 print("\n".join(files_out))`
 
 	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",
-		workspace.QuoteShellArg(pyScript),
-		workspace.QuoteShellArg(containerPath),
-		workspace.QuoteShellArg(worktreeSuffix),
+		paths.QuoteShellArg(pyScript),
+		paths.QuoteShellArg(containerPath),
+		paths.QuoteShellArg(worktreeSuffix),
 	)
 
 	out, err := c.RunSandboxStep(ctx, task, agent, stepName, cmd)

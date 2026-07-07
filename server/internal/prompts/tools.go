@@ -1,4 +1,4 @@
-package prompt
+package prompts
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string, requiredSkills []string) ([]llm.ToolDefinition, error) {
+func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string, requiredSkills []string, requiredSkillsMap map[string][]string) ([]llm.ToolDefinition, error) {
 	if agent == nil || a == nil {
 		if a != nil && a.baseTools != nil {
 			return a.baseTools, nil
@@ -44,6 +44,14 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 	requiredMap := make(map[string]bool)
 	for _, req := range requiredSkills {
 		requiredMap[strings.ToLower(strings.TrimSpace(req))] = true
+	}
+
+	// Dynamic Planner Role-Skill Assignment (Phase 19)
+	if len(requiredSkillsMap) > 0 {
+		roleKey := strings.ToLower(agent.Role)
+		for _, req := range requiredSkillsMap[roleKey] {
+			requiredMap[strings.ToLower(strings.TrimSpace(req))] = true
+		}
 	}
 
 	skills := make([]models.Skill, 0, len(allSkills))

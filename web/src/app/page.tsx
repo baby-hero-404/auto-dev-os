@@ -74,8 +74,7 @@ export default function Home() {
     <DashboardLayout>
       <div className="mx-auto w-full max-w-6xl space-y-6">
         <Toaster richColors position="top-right" />
-        <DashboardHero />
-        <SetupChecklist />
+        <SetupChecklist onCreateProjectClick={openProjectModal} />
         <StatsCards stats={stats} />
 
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -143,46 +142,5 @@ export default function Home() {
         }}
       />
     </DashboardLayout>
-  );
-}
-
-// TO DO REMOVE THIS
-function DashboardHero() {
-  const capabilities = [
-    { label: "Gateway", detail: "Provider routing", icon: Cpu },
-    { label: "Rules", detail: "Org guardrails", icon: ShieldCheck },
-    { label: "Skills", detail: "JIT context", icon: Sparkles },
-    { label: "Workflow", detail: "Review gates", icon: Workflow },
-  ];
-
-  return (
-    <section className="rounded-lg border border-stroke bg-card p-5">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div className="max-w-2xl">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-stroke bg-surface px-2.5 py-1 text-xs font-medium text-content-muted">
-            <Workflow size={14} className="text-brand-primary" />
-            AI-native SDLC control plane
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            Coordinate tasks from spec to merged code.
-          </h1>
-          <p className="mt-2 max-w-xl text-sm text-content-muted">
-            Plan work, enforce rules, assign agents, route models through the gateway, and keep PRs visible for final review.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {capabilities.map((item) => (
-          <div key={item.label} className="rounded-md border border-stroke bg-background/50 p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <item.icon size={15} className="text-brand-primary" />
-              {item.label}
-            </div>
-            <div className="mt-1 text-xs text-content-muted">{item.detail}</div>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }

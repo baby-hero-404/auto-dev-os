@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type Runner struct {
@@ -52,44 +52,20 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 			fileMountedHostPath = mountedHostPath
 			relFile = file
 		} else {
+			repoRel := paths.WorkspaceToRepoRelative(file)
 			repoName := ""
-			relFile = file
-			reposPrefix := workspace.ReposPrefix()
-			if strings.HasPrefix(file, reposPrefix) {
-				parts := strings.SplitN(file[len(reposPrefix):], "/", 3)
-				if len(parts) >= 3 {
-					if parts[1] == "worktrees" {
-						subparts := strings.SplitN(file[len(reposPrefix):], "/", 4)
-						if len(subparts) == 4 && subparts[1] == "worktrees" {
-							repoName = subparts[0]
-							relFile = subparts[3]
-						} else {
-							repoName = parts[0]
-							relFile = parts[2]
-						}
-					} else {
-						repoName = parts[0]
-						relFile = parts[2]
-					}
-				}
-			} else {
-				if idx := strings.Index(file, "/"); idx != -1 {
-					repoName = file[:idx]
-					relFile = file[idx+1:]
-				}
+			relFile = repoRel
+			if idx := strings.Index(repoRel, "/"); idx != -1 {
+				repoName = repoRel[:idx]
+				relFile = repoRel[idx+1:]
 			}
 			if repoName != "" {
-				repoDir := filepath.Join(repoHostPath, workspace.ReposDirName, repoName)
-				mainDirName := "main"
-				if entries, errEntries := os.ReadDir(repoDir); errEntries == nil {
-					for _, entry := range entries {
-						if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
-							mainDirName = entry.Name()
-							break
-						}
-					}
-				}
-				repoMainHostPath := filepath.Join(repoDir, mainDirName)
+				workspaceRoot := filepath.Dir(repoHostPath)
+				taskDirName := filepath.Base(repoHostPath)
+				wp := paths.NewOSWorkspacePaths(workspaceRoot)
+				repoDir := wp.RepoRoot(taskDirName, repoName).String()
+				mainDirName := paths.FindRepoMainBranchDir(repoDir)
+				repoMainHostPath := wp.RepoMain(taskDirName, repoName, mainDirName).String()
 				fileMountedHostPath = r.HostWorktreePath(task, repoMainHostPath, worktreeSuffix)
 			} else {
 				fileMountedHostPath = repoHostPath

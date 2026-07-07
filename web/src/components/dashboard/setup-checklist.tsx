@@ -31,9 +31,14 @@ type CheckItem = {
   icon: typeof Key;
   required: boolean;
   done: boolean;
+  onClick?: () => void;
 };
 
-export function SetupChecklist() {
+export function SetupChecklist({
+  onCreateProjectClick,
+}: {
+  onCreateProjectClick?: () => void;
+} = {}) {
   const session = useSession();
   const orgID = session?.user.org_id ?? "";
 
@@ -171,6 +176,7 @@ export function SetupChecklist() {
         icon: FolderGit,
         required: true,
         done: hasProject,
+        onClick: onCreateProjectClick,
       },
       {
         id: "task",
@@ -320,9 +326,17 @@ function ChecklistItem({
 }) {
   const Icon = check.icon;
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (check.onClick) {
+      e.preventDefault();
+      check.onClick();
+    }
+  };
+
   return (
     <Link
       href={check.href}
+      onClick={handleClick}
       className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-surface ${
         check.done ? "opacity-70" : ""
       }`}

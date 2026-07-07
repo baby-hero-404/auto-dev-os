@@ -2,16 +2,18 @@ package steps
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
-	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -111,7 +113,7 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		analysis.Complexity = models.TaskComplexityEasy
 	}
 
-	s.writeOpenSpecFiles(ctx, localPath, analysis)
+	s.writeOpenSpecFiles(ctx, localPath, &analysis)
 
 	return s.applyAnalyzePolicy(ctx, analysis, fallbackUsed)
 }
@@ -129,8 +131,11 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 
 	parsedFinal, loopErr := s.runAnalyzeLLMLoop(ctx, messages)
 	if loopErr != nil || parsedFinal == nil {
-		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("agent failed to output a final spec JSON: %v, falling back to derived analysis", loopErr))
-		return deriveWorkflowAnalysis(s.rt.Task), true, nil
+		if loopErr == nil {
+			loopErr = fmt.Errorf("LLM returned empty or nil spec JSON")
+		}
+		s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("agent failed to output a final spec JSON: %v", loopErr))
+		return models.TaskAnalysis{}, false, fmt.Errorf("analyze step failed: %w", loopErr)
 	}
 
 	return parseAnalysisFinal(parsedFinal), false, nil
@@ -140,7 +145,8 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 	var messages []llm.Message
 	var err error
 	if s.prompts != nil {
-		messages, _, err = s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil)
+		stepCtx := context.WithValue(ctx, prompts.StepIDCtxKey, workflow.StepAnalyze)
+		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, s.rt.Agent, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -155,96 +161,7 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 }
 
 func buildAnalyzeInstruction(stepCtx workflow.StepContext) string {
-	instruction := `Analyze this task and output the proposed specification as a valid JSON object.
-You have access to read-only native tools to retrieve more context about the workspace files before writing your final specification.
-
-CRITICAL LANGUAGE REQUIREMENT:
-You MUST write all the human-readable text and markdown fields in the JSON object (specifically "scope", "risks", "execution_plan", "clarification_questions", "proposal_md", "specs_md", "design_md", and "tasks_md") using the SAME language as the task title and description provided by the user. 
-For example, if the user's task description or title is in Vietnamese, all of these fields in your output JSON MUST be generated in Vietnamese. If the user's task description is in English, generate them in English. Do not mix languages.
-
-If you do not have enough context about the current workspace files (or if the task description is generic/vague), you MUST use the "list_files" tool first to inspect the repository structure, and then "read_file" to read the relevant source files before writing your specification or generating questions.
-Once you have gathered enough information and are ready to provide the final specification, output the final specification JSON matching the expected format.
-
-You must output ONLY a valid JSON object (or inside a ` + "```json" + ` block).
-The JSON object MUST have the following structure:
-{
-  "complexity": "easy" | "medium" | "hard",
-  "primary_category": "frontend" | "backend" | "database" | "devops" | "qa" | "security" | "documentation", // use 'documentation' if task is purely editing/creating documentation, READMEs, or markdown files
-  "scope": "A clear, detailed description of the scope of the change",
-  "affected_files": ["list", "of", "files", "expected", "to", "be", "modified"],
-  "risks": ["list", "of", "potential", "risks", "and", "challenges"],
-  "risk_domains": ["list", "of", "risk", "domains", "touched", "(e.g., 'auth', 'payment', 'security', 'data_migration', 'infra', 'rbac', 'public_api')"],
-  "execution_plan": ["step-by-step", "plan", "to", "implement", "this", "task"],
-  "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
-  "required_skills": ["list", "of", "skill", "names", "required", "for", "this", "task", "(e.g., 'docker_expert', 'frontend_design')"],
-  "proposal_md": "Markdown for proposal.md (use the template below)",
-  "specs_md": "Markdown for specs.md (use the template below)",
-  "design_md": "Markdown for design.md (use the template below)",
-  "tasks_md": "Markdown for tasks.md (use the template below)"
-}
-
-=== OPENSPEC TEMPLATE: proposal.md ===
-## Why
-(1-2 sentences: what problem does this solve? Why now?)
-
-## What Changes
-(Bullet list of specific changes. Mark breaking changes with **BREAKING**.)
-
-## Capabilities
-### New Capabilities
-- ` + "`<name>`" + `: <brief description>
-
-### Modified Capabilities
-- ` + "`<existing-name>`" + `: <what requirement is changing>
-
-## Impact
-(Affected code, APIs, dependencies, systems)
-
-=== OPENSPEC TEMPLATE: specs.md ===
-Use delta operations as section headers:
-## ADDED Requirements
-### Requirement: <name>
-<Description using SHALL/MUST language>
-
-#### Scenario: <scenario name>
-- **WHEN** <condition>
-- **THEN** <expected outcome>
-
-## MODIFIED Requirements
-(Same format, include full updated content)
-
-## REMOVED Requirements
-### Requirement: <name>
-**Reason**: <why removed>
-**Migration**: <how to migrate>
-
-=== OPENSPEC TEMPLATE: design.md ===
-## Context
-(Background, current state, constraints)
-
-## Goals / Non-Goals
-**Goals:** ...
-**Non-Goals:** ...
-
-## Decisions
-(Key technical choices with rationale)
-
-## Risks / Trade-offs
-(Known limitations, format: [Risk] → Mitigation)
-
-## Open Questions
-(Outstanding decisions or unknowns)
-
-=== OPENSPEC TEMPLATE: tasks.md ===
-Group related tasks under numbered headings. Each task MUST be a checkbox.
-## 1. <Group Name>
-- [ ] 1.1 <Task description>
-- [ ] 1.2 <Task description>
-
-## 2. <Group Name>
-- [ ] 2.1 <Task description>
-`
-
+	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
 	var repoContext string
 	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
 		if contextJSON, err := json.Marshal(contextOut); err == nil {
@@ -353,6 +270,52 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 			continue
 		}
 
+		// Contract Validation Chặt Chẽ
+		var missingFields []string
+		if _, ok := parsedJSON["complexity"].(string); !ok {
+			missingFields = append(missingFields, "complexity")
+		}
+		if _, ok := parsedJSON["primary_category"].(string); !ok {
+			missingFields = append(missingFields, "primary_category")
+		}
+		if _, ok := parsedJSON["execution_phases"].([]any); !ok {
+			missingFields = append(missingFields, "execution_phases")
+		}
+		if _, ok := parsedJSON["affected_files"].([]any); !ok {
+			missingFields = append(missingFields, "affected_files")
+		}
+		if _, ok := parsedJSON["acceptance_criteria"].([]any); !ok {
+			missingFields = append(missingFields, "acceptance_criteria")
+		}
+		_, hasBoundariesArray := parsedJSON["execution_boundaries"].([]any)
+		_, hasBoundariesMap := parsedJSON["execution_boundaries"].(map[string]any)
+		if !hasBoundariesArray && !hasBoundariesMap {
+			missingFields = append(missingFields, "execution_boundaries")
+		}
+		if _, ok := parsedJSON["proposal_md"].(string); !ok {
+			missingFields = append(missingFields, "proposal_md")
+		}
+		if _, ok := parsedJSON["specs_md"].(string); !ok {
+			missingFields = append(missingFields, "specs_md")
+		}
+
+		if len(missingFields) > 0 {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output missing required fields: %v", i+1, missingFields))
+			content := resp.Content
+			if content == "" {
+				content = "(empty response)"
+			}
+			messages = append(messages, llm.Message{
+				Role:    "assistant",
+				Content: content,
+			})
+			messages = append(messages, llm.Message{
+				Role:    "user",
+				Content: fmt.Sprintf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", ")),
+			})
+			continue
+		}
+
 		return parsedJSON, nil
 	}
 
@@ -373,7 +336,18 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 	if aff, ok := parsedFinal["affected_files"].([]any); ok {
 		for _, item := range aff {
 			if s, ok := item.(string); ok {
-				analysis.AffectedFiles = append(analysis.AffectedFiles, s)
+				analysis.AffectedFiles = append(analysis.AffectedFiles, models.AffectedFile{File: s})
+			} else if m, ok := item.(map[string]any); ok {
+				repo, _ := m["repo"].(string)
+				file, _ := m["file"].(string)
+				conf, _ := m["confidence"].(float64)
+				reason, _ := m["reason"].(string)
+				analysis.AffectedFiles = append(analysis.AffectedFiles, models.AffectedFile{
+					Repo:       repo,
+					File:       file,
+					Confidence: conf,
+					Reason:     reason,
+				})
 			}
 		}
 	}
@@ -384,17 +358,135 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 			}
 		}
 	}
-	if execPlan, ok := parsedFinal["execution_plan"].([]any); ok {
-		for _, item := range execPlan {
-			if s, ok := item.(string); ok {
-				analysis.ExecutionPlan = append(analysis.ExecutionPlan, s)
+	if phases, ok := parsedFinal["execution_phases"].([]any); ok {
+		for _, phaseItem := range phases {
+			if pMap, ok := phaseItem.(map[string]any); ok {
+				phaseName, _ := pMap["phase"].(string)
+				var tasks []string
+				if tArr, ok := pMap["tasks"].([]any); ok {
+					for _, t := range tArr {
+						if ts, ok := t.(string); ok {
+							tasks = append(tasks, ts)
+						}
+					}
+				}
+				analysis.ExecutionPhases = append(analysis.ExecutionPhases, models.ExecutionPhase{
+					Phase: phaseName,
+					Tasks: tasks,
+				})
 			}
+		}
+	}
+	if units, ok := parsedFinal["execution_units"].([]any); ok {
+		for _, unitItem := range units {
+			if uMap, ok := unitItem.(map[string]any); ok {
+				var unit models.ExecutionUnit
+				unit.ID, _ = uMap["id"].(string)
+				unit.Objective, _ = uMap["objective"].(string)
+				if tArr, ok := uMap["tasks"].([]any); ok {
+					for _, t := range tArr {
+						if ts, ok := t.(string); ok {
+							unit.Tasks = append(unit.Tasks, ts)
+						}
+					}
+				}
+				if prof, ok := uMap["execution_profile"].(map[string]any); ok {
+					unit.ExecutionProfile.Agent, _ = prof["agent"].(string)
+					if sks, ok := prof["skills"].([]any); ok {
+						for _, sk := range sks {
+							if sksStr, ok := sk.(string); ok {
+								unit.ExecutionProfile.Skills = append(unit.ExecutionProfile.Skills, sksStr)
+							}
+						}
+					}
+				}
+				if cons, ok := uMap["constraints"].(map[string]any); ok {
+					unit.Constraints.Parallelizable, _ = cons["parallelizable"].(bool)
+					if mf, ok := cons["max_files"].(float64); ok {
+						unit.Constraints.MaxFiles = int(mf)
+					}
+					if et, ok := cons["estimated_tokens"].(float64); ok {
+						unit.Constraints.EstimatedTokens = int(et)
+					}
+					unit.Constraints.MaxRisk, _ = cons["max_risk"].(string)
+				}
+				if deps, ok := uMap["dependencies"].([]any); ok {
+					for _, dep := range deps {
+						if depStr, ok := dep.(string); ok {
+							unit.Dependencies = append(unit.Dependencies, depStr)
+						}
+					}
+				}
+				analysis.ExecutionUnits = append(analysis.ExecutionUnits, unit)
+			}
+		}
+	}
+	// Runtime Adapter: Map ExecutionUnits to ExecutionPhases for old UI compatibility
+	if len(analysis.ExecutionPhases) == 0 && len(analysis.ExecutionUnits) > 0 {
+		for _, unit := range analysis.ExecutionUnits {
+			analysis.ExecutionPhases = append(analysis.ExecutionPhases, models.ExecutionPhase{
+				Phase: fmt.Sprintf("%s (%s)", unit.Objective, unit.ExecutionProfile.Agent),
+				Tasks: unit.Tasks,
+			})
 		}
 	}
 	if questions, ok := parsedFinal["clarification_questions"].([]any); ok {
 		for _, item := range questions {
 			if s, ok := item.(string); ok {
 				analysis.ClarificationQuestions = append(analysis.ClarificationQuestions, s)
+			}
+		}
+	}
+	if boundaries, ok := parsedFinal["execution_boundaries"]; ok {
+		if arr, ok := boundaries.([]any); ok {
+			for _, b := range arr {
+				if bmap, ok := b.(map[string]any); ok {
+					var boundary models.ExecutionBoundary
+					if m, ok := bmap["module"].(string); ok {
+						boundary.Module = m
+					}
+					if r, ok := bmap["root"].(string); ok {
+						boundary.Root = r
+					}
+					if rn, ok := bmap["repo_name"].(string); ok {
+						boundary.RepoName = rn
+					}
+					if rid, ok := bmap["repository_id"].(string); ok {
+						boundary.RepositoryID = rid
+					}
+					if caps, ok := bmap["capabilities"].([]any); ok {
+						for _, cp := range caps {
+							if cps, ok := cp.(string); ok {
+								boundary.Capabilities = append(boundary.Capabilities, cps)
+							}
+						}
+					}
+					analysis.ExecutionBoundaries = append(analysis.ExecutionBoundaries, boundary)
+				}
+			}
+		} else if bmap, ok := boundaries.(map[string]any); ok {
+			// Backward compatibility: map[string][]string
+			for k, v := range bmap {
+				var boundary models.ExecutionBoundary
+				boundary.Module = k
+				if arr, ok := v.([]any); ok && len(arr) > 0 {
+					if firstPath, ok := arr[0].(string); ok {
+						boundary.Root = filepath.Dir(firstPath) + "/"
+					}
+					for _, p := range arr {
+						if _, ok := p.(string); ok {
+							boundary.Capabilities = []string{"modify_existing", "create_test"}
+						}
+					}
+				}
+				analysis.ExecutionBoundaries = append(analysis.ExecutionBoundaries, boundary)
+			}
+		}
+	}
+	if criteria, ok := parsedFinal["acceptance_criteria"].([]any); ok {
+		for _, c := range criteria {
+			if cmap, ok := c.(map[string]any); ok {
+				analysis.AcceptanceCriteria = append(analysis.AcceptanceCriteria, cmap)
 			}
 		}
 	}
@@ -427,7 +519,7 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 	return analysis
 }
 
-func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, analysis models.TaskAnalysis) {
+func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, analysis *models.TaskAnalysis) {
 	changeName := patch.DeriveChangeName(s.rt.Task)
 	changeDir := filepath.Join(localPath, "openspec", "changes", changeName)
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
@@ -435,42 +527,42 @@ func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, 
 		return
 	}
 
-	proposalContent := analysis.ProposalMD
-	if proposalContent == "" {
-		proposalContent = fmt.Sprintf("## Proposal for %s\n\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
+	if analysis.ProposalMD == "" {
+		analysis.ProposalMD = fmt.Sprintf("## Proposal for %s\n\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
 	}
-	specsContent := analysis.SpecsMD
-	if specsContent == "" {
-		specsContent = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
+	if analysis.SpecsMD == "" {
+		analysis.SpecsMD = fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", s.rt.Task.Title, s.rt.Task.Description)
 	}
-	designContent := analysis.DesignMD
-	if designContent == "" {
-		designContent = "## Design\n\nImplementation design details.\n"
+	if analysis.DesignMD == "" {
+		analysis.DesignMD = "## Design\n\nImplementation design details.\n"
 	}
-	tasksContent := analysis.TasksMD
-	if tasksContent == "" {
+	if analysis.TasksMD == "" {
 		var builder strings.Builder
 		builder.WriteString("## Tasks\n\n")
-		if len(analysis.ExecutionPlan) > 0 {
-			for _, step := range analysis.ExecutionPlan {
-				builder.WriteString(fmt.Sprintf("- [ ] %s\n", step))
+		if len(analysis.ExecutionPhases) > 0 {
+			for i, phase := range analysis.ExecutionPhases {
+				builder.WriteString(fmt.Sprintf("**%d. %s**\n\n", i+1, phase.Phase))
+				for _, task := range phase.Tasks {
+					builder.WriteString(fmt.Sprintf("- [ ] %s\n", task))
+				}
+				builder.WriteString("\n")
 			}
 		} else {
 			builder.WriteString("- [ ] Implement changes\n")
 		}
-		tasksContent = builder.String()
+		analysis.TasksMD = builder.String()
 	}
 
-	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposalContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(analysis.ProposalMD), 0o644); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save proposal.md: %v", err))
 	}
-	if err := os.WriteFile(filepath.Join(changeDir, "specs.md"), []byte(specsContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(changeDir, "specs.md"), []byte(analysis.SpecsMD), 0o644); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save specs.md: %v", err))
 	}
-	if err := os.WriteFile(filepath.Join(changeDir, "design.md"), []byte(designContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(changeDir, "design.md"), []byte(analysis.DesignMD), 0o644); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save design.md: %v", err))
 	}
-	if err := os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasksContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(analysis.TasksMD), 0o644); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save tasks.md: %v", err))
 	}
 
@@ -482,6 +574,12 @@ func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, 
 
 func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.TaskAnalysis, fallbackUsed bool) (StepResult, error) {
 	oldComplexity := s.rt.Task.Complexity
+	analysis.SpecHash = ""
+	rawBytes, _ := json.Marshal(analysis)
+	hash := sha256.Sum256(rawBytes)
+	specHashHex := fmt.Sprintf("%x", hash)
+	analysis.SpecHash = specHashHex
+
 	raw, err := json.Marshal(analysis)
 	if err != nil {
 		return nil, fmt.Errorf("marshal analysis: %w", err)
@@ -496,9 +594,14 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 		}
 	}
 
+	affectedFilesStrings := make([]string, len(analysis.AffectedFiles))
+	for i, f := range analysis.AffectedFiles {
+		affectedFilesStrings[i] = f.File
+	}
+
 	specStatus, status := policy.ShouldAutoApproveSpec(
 		analysis.Complexity,
-		analysis.AffectedFiles,
+		affectedFilesStrings,
 		analysis.RiskDomains,
 		s.rt.Agent.AutonomyLevel,
 		projectAutonomy,
@@ -532,6 +635,12 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 	s.rt.Task.Complexity = analysis.Complexity
 	s.rt.Task.SpecStatus = specStatus
 	s.rt.Task.Analysis = raw
+
+	if specStatus == models.TaskSpecStatusAutoApproved {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("OpenSpec auto-approved and frozen. SpecHash: %s", specHashHex))
+	} else if specStatus == models.TaskSpecStatusPendingReview {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("OpenSpec pending human review. SpecHash: %s", specHashHex))
+	}
 
 	if specStatus == models.TaskSpecStatusPendingReview || specStatus == models.TaskSpecStatusChangesRequested {
 		return nil, workflow.PauseError{Step: workflow.StepAnalyze, Reason: pauseReason}
@@ -573,13 +682,18 @@ func deriveWorkflowAnalysis(task *models.Task) models.TaskAnalysis {
 	return models.TaskAnalysis{
 		Complexity:    complexity,
 		Scope:         "Generated by the Phase 3b workflow analyze step.",
-		AffectedFiles: []string{},
+		AffectedFiles: []models.AffectedFile{},
 		Risks:         []string{"Workflow uses deterministic planning until full LLM step execution is enabled."},
-		ExecutionPlan: []string{
-			"Assemble prompt with role, rules, and retrieved context.",
-			"Decompose work into typed subtasks.",
-			"Run backend and frontend coding tracks in parallel sandboxes.",
-			"Merge, review, fix, test, and prepare PR approval checkpoint.",
+		ExecutionPhases: []models.ExecutionPhase{
+			{
+				Phase: "Automated Execution",
+				Tasks: []string{
+					"Assemble prompt with role, rules, and retrieved context.",
+					"Decompose work into typed subtasks.",
+					"Run backend and frontend coding tracks in parallel sandboxes.",
+					"Merge, review, fix, test, and prepare PR approval checkpoint.",
+				},
+			},
 		},
 		ClarificationQuestions: questions,
 	}

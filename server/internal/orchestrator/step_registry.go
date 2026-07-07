@@ -53,6 +53,8 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.wkspace,                           // WorkspaceLoader
 			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
 			loggerAdapter{log: o.log},                        // Logger
+			o.workflows,                         // WorkflowCheckpointRepo
+			o.maxPhaseCost,                      // maxCost
 		),
 		steps.NewCodeBackendStep(
 			rt,

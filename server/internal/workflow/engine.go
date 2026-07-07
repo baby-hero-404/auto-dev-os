@@ -132,7 +132,8 @@ func (e *Engine) runInternal(ctx context.Context, def Definition, initial map[st
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				output, err := runStep(ctx, def.Name, step, initial, result.Outputs)
+				stepCtx := context.WithValue(ctx, "workflow_step_id", step.ID)
+				output, err := runStep(stepCtx, def.Name, step, initial, result.Outputs)
 				ch <- stepRunResult{id: step.ID, output: output, err: err}
 			}()
 		}

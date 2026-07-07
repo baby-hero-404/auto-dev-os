@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
-	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // ContextLoadStep implements Step for context loading.
@@ -225,7 +225,7 @@ func (s *ContextLoadStep) gatherRepoContexts(ctx context.Context, repoPaths []co
 }
 
 func (s *ContextLoadStep) getSandboxGitOutput(ctx context.Context, rel, containerPath, stepPrefix, gitCmd string) string {
-	cmd := fmt.Sprintf("git -C %s %s", orchestratorworkspace.QuoteShellArg(containerPath), gitCmd)
+	cmd := fmt.Sprintf("git -C %s %s", paths.QuoteShellArg(containerPath), gitCmd)
 	if s.sandbox != nil {
 		if diffOutput, err := s.sandbox.RunCommand(ctx, s.rt.Task, s.rt.Agent, stepPrefix+"_"+rel, cmd); err == nil {
 			if stdout, ok := diffOutput["stdout"].(string); ok && stdout != "" {
@@ -284,14 +284,14 @@ func detectCIConfigs(rp, rel string) []string {
 func loadRepoDocs(rp, rel string, conventions, architectures, contributings map[string]string) {
 	conventionFiles := []string{".editorconfig", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".golangci.yml"}
 	for _, file := range conventionFiles {
-		if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, file), 10000); err == nil {
+		if data, err := paths.ReadLimitedFile(filepath.Join(rp, file), 10000); err == nil {
 			conventions[filepath.Join(rel, file)] = data
 		}
 	}
-	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "ARCHITECTURE.md"), 10000); err == nil {
+	if data, err := paths.ReadLimitedFile(filepath.Join(rp, "ARCHITECTURE.md"), 10000); err == nil {
 		architectures[rel] = data
 	}
-	if data, err := orchestratorworkspace.ReadLimitedFile(filepath.Join(rp, "CONTRIBUTING.md"), 10000); err == nil {
+	if data, err := paths.ReadLimitedFile(filepath.Join(rp, "CONTRIBUTING.md"), 10000); err == nil {
 		contributings[rel] = data
 	}
 }

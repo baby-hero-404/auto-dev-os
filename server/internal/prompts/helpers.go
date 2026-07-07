@@ -1,19 +1,27 @@
-package prompt
+package prompts
 
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
+
+func formatTasksMD(tasks []models.TaskDAG) string {
+	var b strings.Builder
+	for i, t := range tasks {
+		b.WriteString(fmt.Sprintf("## %d. %s\n", i+1, t.ID))
+		if t.Complexity != nil {
+			b.WriteString(fmt.Sprintf("- Complexity: Arch=%s, Mig=%v, Break=%v\n", t.Complexity.Architecture, t.Complexity.DataMigration, t.Complexity.BreakingChange))
+		}
+	}
+	return b.String()
+}
 
 func shouldAttachCodeContext(agent *models.Agent) bool {
 	return true
@@ -34,7 +42,7 @@ func formatMemories(memories []models.EpisodicMemory) string {
 func formatContextSnippets(snippets []models.ContextSnippet) string {
 	var b strings.Builder
 	for i, snippet := range snippets {
-		displayPath := workspace.WorkspaceToRepoRelative(snippet.Path)
+		displayPath := paths.WorkspaceToRepoRelative(snippet.Path)
 		b.WriteString(fmt.Sprintf("### Snippet %d: %s:%d-%d (score %.2f, %s)\n", i+1, displayPath, snippet.StartLine, snippet.EndLine, snippet.Relevance, snippet.Retriever))
 		b.WriteString("```")
 		b.WriteString(displayPath)
@@ -119,35 +127,6 @@ func TruncateHistory(history []llm.Message, maxChars int) []llm.Message {
 	return selected
 }
 
-func readOptional(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	return string(data), nil
-}
-
-
-func roleFile(role string) string {
-	switch strings.ToLower(role) {
-	case models.AgentRolePlanner:
-		return "planner.md"
-	case models.AgentRoleFrontend, models.AgentRoleBackend:
-		return "coder.md"
-	case models.AgentRoleReviewer:
-		return "reviewer.md"
-	case models.AgentRoleQA:
-		return "qa.md"
-	case models.AgentRoleDocumentationWriter:
-		return "docs.md"
-	default:
-		return "coder.md"
-	}
-}
-
 func appendSystemPrompt(core string, metadata map[string]any) string {
 	if len(metadata) == 0 {
 		return core
@@ -158,7 +137,6 @@ func appendSystemPrompt(core string, metadata map[string]any) string {
 	}
 	return fmt.Sprintf("%s\n\n=== Task Configuration ===\n```json\n%s\n```", core, string(metadataJSON))
 }
-
 
 // extractSubtaskIndex extracts the numeric index from a step ID (e.g., "code_backend_2" -> 2)
 func extractSubtaskIndex(stepID string) (int, bool) {
@@ -178,18 +156,18 @@ func extractSpecsSectionForSubtask(specsMD, tasksMD string, subtaskIndex int, st
 	if specsMD == "" || tasksMD == "" || subtaskIndex < 0 {
 		return ""
 	}
-	
+
 	// Determine role to find the correct heading in TasksMD
 	role := "backend"
 	if strings.Contains(stepID, "frontend") {
 		role = "frontend"
 	}
-	
+
 	// 1. Find the Nth heading for this role in TasksMD to extract its number
 	lines := strings.Split(tasksMD, "\n")
 	roleIdx := 0
 	headingNumber := ""
-	
+
 	// frontendSignals and backendSignals (simplified for matching)
 	isRole := func(heading string, targetRole string) bool {
 		lower := strings.ToLower(heading)
@@ -223,25 +201,25 @@ func extractSpecsSectionForSubtask(specsMD, tasksMD string, subtaskIndex int, st
 			}
 		}
 	}
-	
+
 	if headingNumber == "" {
 		// Fallback: just use subtaskIndex + 1 if no explicit number found
 		headingNumber = strconv.Itoa(subtaskIndex + 1)
 	}
-	
+
 	// 2. Find the corresponding section in SpecsMD
 	// Look for a heading that contains this number
 	specsLines := strings.Split(specsMD, "\n")
 	var sectionBuilder strings.Builder
 	inTargetSection := false
-	
+
 	targetRe := regexp.MustCompile(`(?i)^#{2,4}\s*.*(?:requirement|yêu cầu)?:?\s*0*` + headingNumber + `[\.\s]`)
 	nextHeadingRe := regexp.MustCompile(`^#{2,4}\s`)
-	
+
 	for _, line := range specsLines {
 		trimmed := strings.TrimSpace(line)
 		isHeading := nextHeadingRe.MatchString(trimmed)
-		
+
 		if inTargetSection {
 			if isHeading {
 				// Stop if we hit a heading of the same or higher level
@@ -254,7 +232,7 @@ func extractSpecsSectionForSubtask(specsMD, tasksMD string, subtaskIndex int, st
 			sectionBuilder.WriteString(line + "\n")
 		}
 	}
-	
+
 	return strings.TrimSpace(sectionBuilder.String())
 }
 

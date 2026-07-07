@@ -84,9 +84,14 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		return nil, fmt.Errorf("get project: %w", err)
 	}
 
+	affectedFilesStrings := make([]string, len(analysis.AffectedFiles))
+	for i, f := range analysis.AffectedFiles {
+		affectedFilesStrings[i] = f.File
+	}
+
 	specStatus, status := policy.ShouldAutoApproveSpec(
 		analysis.Complexity,
-		analysis.AffectedFiles,
+		affectedFilesStrings,
 		analysis.RiskDomains,
 		"", // no agent autonomy in this path
 		project.DefaultAutonomy,
@@ -118,10 +123,13 @@ func (s *TaskService) Clarify(ctx context.Context, id string, input models.Clari
 		return nil, err
 	}
 	description := strings.TrimSpace(task.Description + "\n\nClarification:\n" + input.Context)
-	if _, err := s.repo.Update(ctx, id, models.UpdateTaskInput{Description: &description}); err != nil {
-		return nil, err
-	}
-	return s.Analyze(ctx, id)
+	specStatus := models.TaskSpecStatusNone
+	status := models.TaskStatusAnalyzing
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{
+		Description: &description,
+		SpecStatus:  &specStatus,
+		Status:      &status,
+	})
 }
 
 func (s *TaskService) GetAnalysis(ctx context.Context, id string) (json.RawMessage, error) {
@@ -216,19 +224,24 @@ func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {
 	return models.TaskAnalysis{
 		Complexity:    complexity,
 		Scope:         "Derived from task title and description. Human review should refine this for Medium/Hard work.",
-		AffectedFiles: []string{},
+		AffectedFiles: []models.AffectedFile{},
 		Risks:         []string{"Analysis is heuristic until the Phase 3 planner agent is available."},
-		ExecutionPlan: []string{
-			"Confirm definition of ready.",
-			"Identify affected files.",
-			"Implement changes in an isolated worktree.",
-			"Run automated tests before PR creation.",
+		ExecutionPhases: []models.ExecutionPhase{
+			{
+				Phase: "Setup and Execution",
+				Tasks: []string{
+					"Confirm definition of ready.",
+					"Identify affected files.",
+					"Implement changes in an isolated worktree.",
+					"Run automated tests before PR creation.",
+				},
+			},
 		},
 		ClarificationQuestions: questions,
 		TaskRules:              []string{},
 		ProposalMD:             fmt.Sprintf("## Proposal for %s\n\n%s\n", task.Title, task.Description),
 		SpecsMD:                fmt.Sprintf("## ADDED Requirements\n\n### Requirement: %s\n%s\n", task.Title, task.Description),
 		DesignMD:               "## Design\n\nImplementation design placeholder.\n",
-		TasksMD:                "## Tasks\n\n- [ ] Task execution workflow step\n",
+		Tasks:                  []models.TaskDAG{{ID: "Task execution workflow step"}},
 	}
 }

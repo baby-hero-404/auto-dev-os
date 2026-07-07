@@ -1,27 +1,13 @@
-package workspace
+package paths
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func GetTaskWorkspace(workspaceRoot string, task *models.Task) *models.TaskWorkspace {
-	root := sandbox.WorkspacePath(workspaceRoot, task.ID)
-	return &models.TaskWorkspace{
-		Root:         root,
-		SpecsDir:     filepath.Join(root, "specs"),
-		ContextDir:   filepath.Join(root, "context"),
-		ArtifactsDir: filepath.Join(root, "artifacts"),
-		LogsDir:      filepath.Join(root, "logs"),
-		PRDir:        filepath.Join(root, "pr"),
-	}
-}
-
+// ContainerPathForHostPath resolves container path from host path.
 func ContainerPathForHostPath(localPath string, activeWorkspaceHostPath string, hostPath string) string {
 	relMain, errMain := filepath.Rel(localPath, hostPath)
 	if errMain == nil && relMain != ".." && !strings.HasPrefix(relMain, ".."+string(filepath.Separator)) {
@@ -42,10 +28,12 @@ func ContainerPathForHostPath(localPath string, activeWorkspaceHostPath string, 
 	return "/workspace"
 }
 
+// QuoteShellArg quotes a shell argument to make it safe for bash executions.
 func QuoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// ReadLimitedFile reads file with limited byte size.
 func ReadLimitedFile(path string, maxBytes int64) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -76,6 +64,7 @@ func ReadLimitedFile(path string, maxBytes int64) (string, error) {
 	return content, nil
 }
 
+// ResolveSafePath resolves a safe path preventing directory traversal.
 func ResolveSafePath(root, subPath string) (string, error) {
 	absRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -108,6 +97,7 @@ func ResolveSafePath(root, subPath string) (string, error) {
 	return absTarget, nil
 }
 
+// IsSafeRelativeSourcePath checks if path is safe and relative.
 func IsSafeRelativeSourcePath(path string) bool {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" || path == "." || filepath.IsAbs(path) {

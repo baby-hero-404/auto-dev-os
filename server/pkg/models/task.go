@@ -107,22 +107,100 @@ type UpdateTaskInput struct {
 	ParentTaskID *string         `json:"parent_task_id,omitempty"`
 }
 
+type ComplexityDetails struct {
+	Architecture   string `json:"architecture"`
+	DataMigration  bool   `json:"data_migration"`
+	BreakingChange bool   `json:"breaking_change"`
+}
+
+type RiskDetail struct {
+	Risk        string `json:"risk"`
+	Probability string `json:"probability"`
+	Severity    string `json:"severity"`
+	Owner       string `json:"owner"`
+	Mitigation  string `json:"mitigation"`
+}
+
+type AffectedFile struct {
+	Repo       string  `json:"repo"`
+	File       string  `json:"file"`
+	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}
+
+type TaskDAG struct {
+	ID         string             `json:"id"`
+	DependsOn  []string           `json:"depends_on"`
+	Complexity *ComplexityDetails `json:"complexity,omitempty"`
+}
+
+type ExecutionPhase struct {
+	Phase string   `json:"phase"`
+	Tasks []string `json:"tasks"`
+}
+
+type ExecutionProfile struct {
+	Agent  string   `json:"agent"`
+	Skills []string `json:"skills"`
+}
+
+type ExecutionConstraints struct {
+	Parallelizable  bool    `json:"parallelizable"`
+	MaxFiles        int     `json:"max_files"`
+	EstimatedTokens int     `json:"estimated_tokens"`
+	MaxRisk         string  `json:"max_risk"`
+	RiskMultiplier  float64 `json:"risk_multiplier,omitempty"`
+}
+
+type ExecutionUnit struct {
+	ID               string               `json:"id"`
+	Objective        string               `json:"objective"`
+	Tasks            []string             `json:"tasks"`
+	ExecutionProfile ExecutionProfile     `json:"execution_profile"`
+	Constraints      ExecutionConstraints `json:"constraints"`
+	Dependencies     []string             `json:"dependencies,omitempty"`
+}
+
+type ExecutionBoundary struct {
+	Module       string   `json:"module"`
+	Root         string   `json:"root"`
+	Capabilities []string `json:"capabilities"`
+	RepoName     string   `json:"repo_name,omitempty"`
+	RepositoryID string   `json:"repository_id,omitempty"`
+}
+
+type ExpandedBoundary struct {
+	File       string `json:"file"`
+	Reason     string `json:"reason"`
+	Capability string `json:"capability"`
+	Risk       string `json:"risk"` // LOW, MEDIUM, HIGH, CRITICAL
+}
+
 type TaskAnalysis struct {
-	Complexity string `json:"complexity"`
-	// PrimaryCategory classifies the task type (e.g., "feature", "bug", "docs").
-	PrimaryCategory        string   `json:"primary_category,omitempty"`
-	Scope                  string   `json:"scope"`
-	AffectedFiles          []string `json:"affected_files"`
-	Risks                  []string `json:"risks"`
-	ExecutionPlan          []string `json:"execution_plan"`
-	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
-	TaskRules              []string `json:"task_rules,omitempty"`
-	RequiredSkills         []string `json:"required_skills,omitempty"`
-	RiskDomains            []string `json:"risk_domains,omitempty"`
-	ProposalMD             string   `json:"proposal_md,omitempty"`
-	SpecsMD                string   `json:"specs_md,omitempty"`
-	DesignMD               string   `json:"design_md,omitempty"`
-	TasksMD                string   `json:"tasks_md,omitempty"`
+	Complexity             string              `json:"complexity"`
+	PrimaryCategory        string              `json:"primary_category,omitempty"`
+	SpecHash               string              `json:"spec_hash,omitempty"`
+	Scope                  string              `json:"scope"`
+	AffectedFiles          []AffectedFile      `json:"affected_files"`
+	Risks                  []string            `json:"risks"`
+	ExecutionPhases        []ExecutionPhase    `json:"execution_phases,omitempty"`
+	ExecutionUnits         []ExecutionUnit     `json:"execution_units,omitempty"`
+	ExecutionBoundaries    []ExecutionBoundary `json:"execution_boundaries,omitempty"`
+	ExpandedBoundaries     []ExpandedBoundary  `json:"expanded_boundaries,omitempty"`
+	AcceptanceCriteria     []map[string]any    `json:"acceptance_criteria,omitempty"`
+	ClarificationQuestions []string            `json:"clarification_questions,omitempty"`
+	TaskRules              []string            `json:"task_rules,omitempty"`
+	RequiredSkills         []string            `json:"required_skills,omitempty"`
+	RiskDomains            []string            `json:"risk_domains,omitempty"`
+	ProposalMD             string              `json:"proposal_md,omitempty"`
+	SpecsMD                string              `json:"specs_md,omitempty"`
+	DesignMD               string              `json:"design_md,omitempty"`
+	TasksMD                string              `json:"tasks_md,omitempty"`
+	Tasks                  []TaskDAG           `json:"tasks,omitempty"`
+	ComplexityDetails      *ComplexityDetails  `json:"complexity_details,omitempty"`
+	RisksDetails           []RiskDetail        `json:"risks_details,omitempty"`
+	RequiredSkillsMap      map[string][]string `json:"required_skills_map,omitempty"`
+	RetryCount             int                 `json:"retry_count,omitempty"`
 }
 
 type ClarifyTaskInput struct {

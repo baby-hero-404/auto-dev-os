@@ -20,6 +20,9 @@ func (m *mockTaskReader) Update(ctx context.Context, id string, input models.Upd
 	if input.Analysis != nil {
 		m.task.Analysis = input.Analysis
 	}
+	if input.SpecStatus != nil {
+		m.task.SpecStatus = *input.SpecStatus
+	}
 	return m.task, m.err
 }
 
@@ -204,6 +207,10 @@ type mockCheckpointLister struct {
 
 func (m *mockCheckpointLister) ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error) {
 	return m.cps, m.err
+}
+
+func (m *mockCheckpointLister) DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error {
+	return m.err
 }
 
 type mockPatchApplier struct {

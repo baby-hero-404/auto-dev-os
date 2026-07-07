@@ -45,6 +45,7 @@ type Orchestrator struct {
 	repoutil        *repoutil.Manager
 	llmTraceEnabled bool
 	llmLogLevel     string
+	maxPhaseCost    float64
 }
 
 // WorkspaceRetention configures how long completed workspaces are kept.
@@ -111,6 +112,12 @@ func WithLLMTraceLogging(enabled bool, logLevel string) Option {
 func WithWorkspaceRetention(retention, interval time.Duration) Option {
 	return func(o *Orchestrator) {
 		o.retention = WorkspaceRetention{Retention: retention, Interval: interval}
+	}
+}
+
+func WithMaxPhaseCost(cost float64) Option {
+	return func(o *Orchestrator) {
+		o.maxPhaseCost = cost
 	}
 }
 
@@ -199,8 +206,8 @@ func (o *Orchestrator) RetryFromLastStep(ctx context.Context, taskID string) (*m
 	if err != nil {
 		return nil, err
 	}
-	if task.Status != models.TaskStatusFailed {
-		return nil, fmt.Errorf("can only retry failed tasks (current status: %s)", task.Status)
+	if task.Status != models.TaskStatusFailed && task.Status != models.TaskStatusSpecReview && task.Status != models.TaskStatusAnalyzing {
+		return nil, fmt.Errorf("can only retry paused or failed tasks (current status: %s)", task.Status)
 	}
 
 	// Transition task back to analyzing so the workflow can start.

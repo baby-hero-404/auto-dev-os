@@ -1,4 +1,4 @@
-package prompt
+package prompts
 
 import (
 	"context"
@@ -10,7 +10,37 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"gopkg.in/yaml.v3"
 )
+
+type Frontmatter struct {
+	ID    string   `yaml:"id"`
+	Roles []string `yaml:"roles"`
+}
+
+func ParseRuleFrontmatter(r *models.Rule) {
+	content := strings.TrimSpace(r.Content)
+	if !strings.HasPrefix(content, "---") {
+		return
+	}
+	parts := strings.SplitN(content, "---", 3)
+	if len(parts) < 3 {
+		return
+	}
+	yamlBlock := parts[1]
+	bodyBlock := parts[2]
+
+	var fm Frontmatter
+	if err := yaml.Unmarshal([]byte(yamlBlock), &fm); err == nil {
+		if fm.ID != "" {
+			r.ID = fm.ID
+		}
+		if len(fm.Roles) > 0 {
+			r.Roles = fm.Roles
+		}
+		r.Content = strings.TrimSpace(bodyBlock)
+	}
+}
 
 func (a *PromptAssembler) loadRules(ctx context.Context, projectID string) ([]models.Rule, []models.Rule, error) {
 	globalRules := []models.Rule{}
@@ -22,6 +52,7 @@ func (a *PromptAssembler) loadRules(ctx context.Context, projectID string) ([]mo
 			return nil, nil, err
 		}
 		for _, rule := range rules {
+			ParseRuleFrontmatter(&rule)
 			switch rule.Scope {
 			case models.RuleScopeGlobal:
 				globalRules = append(globalRules, rule)
@@ -43,12 +74,14 @@ func (a *PromptAssembler) loadRules(ctx context.Context, projectID string) ([]mo
 				if err != nil || len(contentBytes) == 0 {
 					continue
 				}
-				projectRules = append(projectRules, models.Rule{
+				r := models.Rule{
 					ID:          fmt.Sprintf("disk-%s", entry.Name()),
 					Scope:       models.RuleScopeProject,
 					Content:     string(contentBytes),
 					Enforcement: models.RuleEnforcementStrict,
-				})
+				}
+				ParseRuleFrontmatter(&r)
+				projectRules = append(projectRules, r)
 			}
 		}
 	}
@@ -97,25 +130,45 @@ var codingStepExcludedRulePatterns = []string{
 	"Document architectural",
 }
 
-// filterRulesForStep removes rules that are impossible for the LLM to
-// follow during coding steps. For non-coding steps, all rules are kept.
-func filterRulesForStep(rules []models.Rule, stepID string) []models.Rule {
-	if !isCodingStep(stepID) {
-		return rules
-	}
+// filterRulesForAgent removes rules that are impossible for the LLM to
+// follow during coding steps, and filters rules by agent roles if specified.
+func filterRulesForAgent(rules []models.Rule, agent *models.Agent, stepID string) []models.Rule {
 	var filtered []models.Rule
 	for _, r := range rules {
-		excluded := false
-		lower := strings.ToLower(r.Content)
-		for _, pattern := range codingStepExcludedRulePatterns {
-			if strings.Contains(lower, strings.ToLower(pattern)) {
-				excluded = true
-				break
+		// 1. Check Role constraint if specified
+		if len(r.Roles) > 0 {
+			if agent == nil {
+				continue
+			}
+			matched := false
+			roleLower := strings.ToLower(agent.Role)
+			for _, role := range r.Roles {
+				if strings.ToLower(role) == roleLower {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
 			}
 		}
-		if !excluded {
-			filtered = append(filtered, r)
+
+		// 2. Check Step exclusion constraints (original logic)
+		if isCodingStep(stepID) {
+			excluded := false
+			lower := strings.ToLower(r.Content)
+			for _, pattern := range codingStepExcludedRulePatterns {
+				if strings.Contains(lower, strings.ToLower(pattern)) {
+					excluded = true
+					break
+				}
+			}
+			if excluded {
+				continue
+			}
 		}
+
+		filtered = append(filtered, r)
 	}
 	return filtered
 }

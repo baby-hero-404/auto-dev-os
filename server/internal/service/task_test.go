@@ -116,9 +116,9 @@ func TestTaskAnalysis_JSONRoundTrip(t *testing.T) {
 	original := models.TaskAnalysis{
 		Complexity:             models.TaskComplexityMedium,
 		Scope:                  "Test scope",
-		AffectedFiles:          []string{"a.go", "b.go"},
+		AffectedFiles:          []models.AffectedFile{{File: "a.go"}, {File: "b.go"}},
 		Risks:                  []string{"breaking change"},
-		ExecutionPlan:          []string{"step 1", "step 2"},
+		ExecutionPhases:        []models.ExecutionPhase{{Phase: "Phase 1", Tasks: []string{"step 1", "step 2"}}},
 		ClarificationQuestions: []string{"what about X?"},
 	}
 	data, err := json.Marshal(original)

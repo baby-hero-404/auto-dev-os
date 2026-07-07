@@ -82,18 +82,69 @@ export type Task = {
   updated_at: string;
 };
 
+export type AffectedFile = {
+  repo: string;
+  file: string;
+  confidence: number;
+  reason: string;
+};
+
+export type ComplexityDetails = {
+  architecture: string;
+  data_migration: boolean;
+  breaking_change: boolean;
+};
+
+export type RiskDetail = {
+  risk: string;
+  probability: string;
+  severity: string;
+  owner: string;
+  mitigation: string;
+};
+
+export type TaskDAG = {
+  id: string;
+  depends_on: string[];
+  complexity?: ComplexityDetails;
+};
+
+export type ExecutionBoundary = {
+  module: string;
+  root: string;
+  repo_name?: string;
+  repository_id?: string;
+  capabilities: string[];
+};
+
+export type ExpandedBoundary = {
+  file: string;
+  reason: string;
+  capability?: string;
+  risk?: string;
+};
+
 export type TaskAnalysis = {
   complexity: "easy" | "medium" | "hard";
+  primary_category?: string;
   scope: string;
-  affected_files: string[];
+  affected_files: string[] | AffectedFile[];
   risks: string[];
   execution_plan: string[];
   clarification_questions?: string[];
+  task_rules?: string[];
+  required_skills?: string[];
   risk_domains?: string[];
   proposal_md?: string;
   specs_md?: string;
   design_md?: string;
   tasks_md?: string;
+  tasks?: TaskDAG[];
+  complexity_details?: ComplexityDetails;
+  risks_details?: RiskDetail[];
+  required_skills_map?: Record<string, string[]>;
+  execution_boundaries?: ExecutionBoundary[];
+  expanded_boundaries?: ExpandedBoundary[];
 };
 
 export type WorkflowArtifact = {

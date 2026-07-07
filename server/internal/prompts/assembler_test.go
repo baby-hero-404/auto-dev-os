@@ -1,4 +1,4 @@
-package prompt
+package prompts
 
 import (
 	"context"
@@ -333,5 +333,62 @@ func TestPromptAssembler_InjectsRepoMap(t *testing.T) {
 	}
 	if !strings.Contains(userMsg, "main.go:") {
 		t.Fatalf("expected user prompt to contain injected repo map, got %s", userMsg)
+	}
+}
+
+func TestPromptAssembler_AssembleForAgentWithRequiredSkillsMap(t *testing.T) {
+	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{
+		skills: []models.Skill{
+			{
+				Name:        "dynamic-frontend-skill",
+				Description: "some frontend skill",
+				Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
+			},
+			{
+				Name:        "dynamic-backend-skill",
+				Description: "some backend skill",
+				Schema:      json.RawMessage(`{"allowed_tools":["apply_patch"]}`),
+			},
+		},
+	})
+	task := models.Task{
+		ID:        "task-1",
+		ProjectID: "project-1",
+		Title:     "Deploy app",
+		Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
+	}
+
+	// 1. Backend agent should get dynamic-backend-skill tools
+	agentBackend := &models.Agent{ID: "agent-1", Role: "backend"}
+	_, toolsBackend, err := assembler.AssembleForAgent(context.Background(), task, agentBackend, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent backend returned error: %v", err)
+	}
+	foundBackend := false
+	for _, tool := range toolsBackend {
+		if tool.Name == "apply_patch" {
+			foundBackend = true
+			break
+		}
+	}
+	if !foundBackend {
+		t.Error("expected to find tool 'apply_patch' from dynamic-backend-skill for backend agent")
+	}
+
+	// 2. Frontend agent should get dynamic-frontend-skill tools
+	agentFrontend := &models.Agent{ID: "agent-2", Role: "frontend"}
+	_, toolsFrontend, err := assembler.AssembleForAgent(context.Background(), task, agentFrontend, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent frontend returned error: %v", err)
+	}
+	foundFrontend := false
+	for _, tool := range toolsFrontend {
+		if tool.Name == "run_tests" {
+			foundFrontend = true
+			break
+		}
+	}
+	if !foundFrontend {
+		t.Error("expected to find tool 'run_tests' from dynamic-frontend-skill for frontend agent")
 	}
 }

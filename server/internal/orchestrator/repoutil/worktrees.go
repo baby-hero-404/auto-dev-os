@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
@@ -22,14 +22,14 @@ func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agen
 set -e
 git -C %[1]s show-ref --verify --quiet refs/heads/%[2]s || git -C %[1]s branch %[2]s
 git -C %[1]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[1]s branch %[3]s %[2]s
-`, orchestratorworkspace.QuoteShellArg(containerLocalPath), orchestratorworkspace.QuoteShellArg(integrationBranch), orchestratorworkspace.QuoteShellArg(beBranch))
+`, paths.QuoteShellArg(containerLocalPath), paths.QuoteShellArg(integrationBranch), paths.QuoteShellArg(beBranch))
 		} else {
 			script = fmt.Sprintf(`
 set -e
 git -C %[1]s show-ref --verify --quiet refs/heads/%[2]s || git -C %[1]s branch %[2]s
 git -C %[1]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[1]s branch %[3]s %[2]s
 git -C %[1]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[1]s branch %[4]s %[2]s
-`, orchestratorworkspace.QuoteShellArg(containerLocalPath), orchestratorworkspace.QuoteShellArg(integrationBranch), orchestratorworkspace.QuoteShellArg(beBranch), orchestratorworkspace.QuoteShellArg(feBranch))
+`, paths.QuoteShellArg(containerLocalPath), paths.QuoteShellArg(integrationBranch), paths.QuoteShellArg(beBranch), paths.QuoteShellArg(feBranch))
 		}
 
 		if _, err := m.RunSandboxStep(ctx, task, agent, "create_role_branches", script); err != nil {
@@ -62,10 +62,10 @@ else
 fi
 flock -u 9
 `,
-			orchestratorworkspace.QuoteShellArg(containerWorktreePath),
-			orchestratorworkspace.QuoteShellArg(containerLocalPath),
-			orchestratorworkspace.QuoteShellArg(roleBranch),
-			orchestratorworkspace.QuoteShellArg(integrationBranch),
+			paths.QuoteShellArg(containerWorktreePath),
+			paths.QuoteShellArg(containerLocalPath),
+			paths.QuoteShellArg(roleBranch),
+			paths.QuoteShellArg(integrationBranch),
 		)
 		if _, err := m.RunSandboxStep(ctx, task, agent, "worktree_"+roleName, script); err != nil {
 			return fmt.Errorf("failed to setup %s worktree for repo %s: %w", roleLabel, repo.URL, err)
@@ -98,10 +98,10 @@ if [ -n "$(git -C %[1]s status --porcelain)" ]; then
     git -C %[1]s add .
     git -C %[1]s commit -m %[2]s
 fi`,
-			orchestratorworkspace.QuoteShellArg(containerWorktreePath),
-			orchestratorworkspace.QuoteShellArg(commitMsg),
-			orchestratorworkspace.QuoteShellArg(userName),
-			orchestratorworkspace.QuoteShellArg(userEmail),
+			paths.QuoteShellArg(containerWorktreePath),
+			paths.QuoteShellArg(commitMsg),
+			paths.QuoteShellArg(userName),
+			paths.QuoteShellArg(userEmail),
 		)
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "commit_"+roleName, script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to commit changes for repo %s: %w", repo.URL, err)

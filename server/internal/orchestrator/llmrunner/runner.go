@@ -74,12 +74,13 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 	r.save(ctx, jobID, task.ID, stepID, "prompt", messages)
 
 	ctx = llm.WithRouteOptions(ctx, llm.RouteOptions{
-		Complexity: task.Complexity,
-		OrgID:      agent.OrgID,
-		ProjectID:  task.ProjectID,
-		AgentID:    agent.ID,
-		TaskID:     task.ID,
-		RouteName:  r.routeName(ctx, task, agent),
+		Complexity:      task.Complexity,
+		OrgID:           agent.OrgID,
+		ProjectID:       task.ProjectID,
+		AgentID:         agent.ID,
+		TaskID:          task.ID,
+		RouteName:       r.routeName(ctx, task, agent),
+		ExcludeModelID:  llm.ExcludeModelIDFromContext(ctx),
 	})
 	var resp *llm.Response
 	var parsed map[string]any

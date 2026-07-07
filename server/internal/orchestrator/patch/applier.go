@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
@@ -36,52 +37,78 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 	}
 	patchText = CleanJunkLines(patchText)
 
-	// Scan lines of patch to extract modified files
-	lines := strings.Split(patchText, "\n")
-	var modifiedFiles []string
-	isNewFile := make(map[string]bool)
-	allowedNewFiles := make(map[string]bool)
-	var currentOldFile string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "--- ") {
-			currentOldFile = strings.TrimPrefix(line, "--- ")
-			currentOldFile = strings.TrimSpace(currentOldFile)
-			currentOldFile = strings.TrimPrefix(currentOldFile, "a/")
-		} else if strings.HasPrefix(line, "+++ ") {
-			file := strings.TrimPrefix(line, "+++ ")
-			file = strings.TrimSpace(file)
-			file = strings.TrimPrefix(file, "b/")
-			if file != "/dev/null" && file != "" {
-				modifiedFiles = append(modifiedFiles, file)
-				if currentOldFile == "/dev/null" || currentOldFile == "" {
-					isNewFile[file] = true
-				}
-			}
+	var ws *models.TaskWorkspace
+	var errWS error
+	if r.LoadTaskWorkspace != nil {
+		ws, errWS = r.LoadTaskWorkspace(ctx, task)
+	}
+
+	role := ""
+	if r.GetRoleFromSuffix != nil {
+		role = r.GetRoleFromSuffix(worktreeSuffix)
+	} else {
+		s := strings.TrimPrefix(worktreeSuffix, "-")
+		s = strings.TrimSuffix(s, "-worktree")
+		switch s {
+		case "be", "backend":
+			role = "backend"
+		case "fe", "frontend":
+			role = "frontend"
+		case "fix":
+			role = "fix"
+		default:
+			role = s
 		}
 	}
 
-	// Enforce affected files if specified
+	// Split patch by repository using the new normalized split helper
+	repoPatches := r.SplitPatchByRepoWithWorkspace(patchText, ws, role)
+
+	allowedNewFiles := make(map[string]bool)
 	if task.Analysis != nil {
 		var analysis models.TaskAnalysis
 		if err := json.Unmarshal(task.Analysis, &analysis); err == nil && len(analysis.AffectedFiles) > 0 {
-			// Validate all files modified in the patch against the allowed pattern list
-			for _, file := range modifiedFiles {
-				isAllowed := false
-				for _, pattern := range analysis.AffectedFiles {
-					if MatchAffectedFile(pattern, file) {
-						isAllowed = true
-						break
-					}
-				}
-				if !isAllowed {
-					if isNewFile[file] && IsSafeNewFilePath(file) && IsUnderAffectedDir(file, analysis.AffectedFiles) {
-						if r.Log != nil {
-							r.Log(ctx, task.ID, "warn", fmt.Sprintf("allowing new file %q under affected directory; this should be reviewed", file))
+			for repoName, repoPatchText := range repoPatches {
+				lines := strings.Split(repoPatchText, "\n")
+				var currentOldFile string
+				for _, line := range lines {
+					if strings.HasPrefix(line, "--- ") {
+						currentOldFile = strings.TrimPrefix(line, "--- ")
+						currentOldFile = strings.TrimSpace(currentOldFile)
+						currentOldFile = strings.TrimPrefix(currentOldFile, "a/")
+					} else if strings.HasPrefix(line, "+++ ") {
+						file := strings.TrimPrefix(line, "+++ ")
+						file = strings.TrimSpace(file)
+						file = strings.TrimPrefix(file, "b/")
+						if file != "/dev/null" && file != "" {
+							// Construct the repo-relative path for validation
+							var repoRelPath string
+							if repoName != "" {
+								repoRelPath = repoName + "/" + file
+							} else {
+								repoRelPath = file
+							}
+
+							isAllowed := false
+							for _, pattern := range analysis.AffectedFiles {
+								if MatchAffectedFile(pattern, repoRelPath) {
+									isAllowed = true
+									break
+								}
+							}
+							if !isAllowed {
+								isNew := (currentOldFile == "/dev/null" || currentOldFile == "")
+								if isNew && IsSafeNewFilePath(repoRelPath) && IsUnderAffectedDir(repoRelPath, analysis.AffectedFiles) {
+									if r.Log != nil {
+										r.Log(ctx, task.ID, "warn", fmt.Sprintf("allowing new file %q under affected directory; this should be reviewed", repoRelPath))
+									}
+									allowedNewFiles[repoRelPath] = true
+									continue
+								}
+								return fmt.Errorf("security violation: patch attempts to modify file %q (resolved from %q in repo %q) which is not in the approved affected_files spec %v", repoRelPath, file, repoName, analysis.AffectedFiles)
+							}
 						}
-						allowedNewFiles[file] = true
-						continue
 					}
-					return fmt.Errorf("security violation: patch attempts to modify file %q which is not in the approved affected_files spec %v", file, analysis.AffectedFiles)
 				}
 			}
 		}
@@ -113,7 +140,6 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 
 		cleanedPatch := patchText
 		if repoName != "" {
-			repoPatches := SplitPatchByRepo(patchText)
 			if p, ok := repoPatches[repoName]; ok && p != "" {
 				cleanedPatch = p
 			} else if p, ok := repoPatches[""]; ok && p != "" {
@@ -194,12 +220,6 @@ exit $CODE`,
 	}
 
 	// Multi-repo: split patch by repository
-	var ws *models.TaskWorkspace
-	var errWS error
-	if r.LoadTaskWorkspace != nil {
-		ws, errWS = r.LoadTaskWorkspace(ctx, task)
-	}
-	repoPatches := SplitPatchByRepo(patchText)
 	for repoName, repoPatchText := range repoPatches {
 		repoHostPath := ""
 		if errWS == nil && ws != nil {
@@ -528,4 +548,169 @@ func IsSafeNewFilePath(path string) bool {
 		}
 	}
 	return true
+}
+
+func (r *Runner) NormalizePatchPath(firstPath string, ws *models.TaskWorkspace, role string) (repoName string, repoRelPath string) {
+	// Clean and normalize separators
+	firstPath = strings.ReplaceAll(firstPath, "\\", "/")
+	firstPath = filepath.ToSlash(filepath.Clean(firstPath))
+	firstPath = strings.TrimPrefix(firstPath, "/")
+
+	// Helper to check and strip prefix
+	stripPrefix := func(p string, prefix string) (string, bool) {
+		if p == prefix {
+			return "", true
+		}
+		if strings.HasPrefix(p, prefix+"/") {
+			return p[len(prefix)+1:], true
+		}
+		return "", false
+	}
+
+	// 1. Check if it starts with code/repos/ prefix
+	reposPrefix := "code/repos"
+	if rem, ok := stripPrefix(firstPath, reposPrefix); ok {
+		firstPath = rem
+	}
+
+	// 2. Try to match against workspace repository names
+	if ws != nil {
+		for _, repo := range ws.Repos {
+			if rem, ok := stripPrefix(firstPath, repo.Name); ok {
+				// Strip worktrees/<role> or worktrees/<any_role> or main if present
+				if rem2, ok2 := stripPrefix(rem, "worktrees/"+role); ok2 {
+					return repo.Name, rem2
+				}
+				if strings.HasPrefix(rem, "worktrees/") {
+					parts := strings.Split(rem, "/")
+					if len(parts) >= 3 {
+						return repo.Name, strings.Join(parts[2:], "/")
+					}
+				}
+				if rem2, ok2 := stripPrefix(rem, "main"); ok2 {
+					return repo.Name, rem2
+				}
+				return repo.Name, rem
+			}
+		}
+	}
+
+	// 3. Fallback: if we only have 1 repository in the workspace, it must belong to it!
+	if ws != nil && len(ws.Repos) == 1 {
+		repo := ws.Repos[0]
+		// Still check if the path starts with worktrees/role or role to clean it
+		rem := firstPath
+		if rem2, ok2 := stripPrefix(rem, "worktrees/"+role); ok2 {
+			return repo.Name, rem2
+		}
+		if strings.HasPrefix(rem, "worktrees/") {
+			parts := strings.Split(rem, "/")
+			if len(parts) >= 3 {
+				return repo.Name, strings.Join(parts[2:], "/")
+			}
+		}
+		if rem2, ok2 := stripPrefix(rem, role); ok2 {
+			return repo.Name, rem2
+		}
+		return repo.Name, rem
+	}
+
+	// 4. Fallback: parse first component as repoName
+	idx := strings.Index(firstPath, "/")
+	if idx != -1 {
+		return firstPath[:idx], firstPath[idx+1:]
+	}
+	return "", firstPath
+}
+
+func (r *Runner) CleanPatchBlock(block string, repoName string, repoRelPath string, rawFirstPath string) string {
+	if !strings.HasSuffix(rawFirstPath, repoRelPath) {
+		return CleanRepoPrefix(block, repoName)
+	}
+	prefixToStrip := rawFirstPath[:len(rawFirstPath)-len(repoRelPath)]
+	if prefixToStrip == "" {
+		return block
+	}
+
+	escapedPrefix := regexp.QuoteMeta(prefixToStrip)
+	block = regexp.MustCompile(`^(a/)`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`( b/)`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(--- a/)`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(\+\+\+ b/)`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename from )`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(rename to )`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy from )`+escapedPrefix).ReplaceAllString(block, "${1}")
+	block = regexp.MustCompile(`(?m)^(copy to )`+escapedPrefix).ReplaceAllString(block, "${1}")
+	return block
+}
+
+func (r *Runner) SplitPatchByRepoWithWorkspace(patchText string, ws *models.TaskWorkspace, role string) map[string]string {
+	repos := make(map[string]string)
+	parts := strings.Split(patchText, "diff --git ")
+	if len(parts) <= 1 || (len(parts) == 2 && parts[0] == "" && !strings.Contains(patchText, "diff --git ")) {
+		trimmed := strings.TrimSpace(patchText)
+		if trimmed == "" {
+			return repos
+		}
+		lines := strings.Split(trimmed, "\n")
+		var firstPath string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "--- a/") {
+				firstPath = line[len("--- a/"):]
+				break
+			} else if strings.HasPrefix(line, "+++ b/") {
+				firstPath = line[len("+++ b/"):]
+				break
+			}
+		}
+		if firstPath != "" {
+			repoName, repoRelPath := r.NormalizePatchPath(firstPath, ws, role)
+			if repoName != "" {
+				cleanPatch := r.CleanPatchBlock(trimmed, repoName, repoRelPath, firstPath)
+				repos[repoName] = cleanPatch
+			} else {
+				repos[""] = trimmed
+			}
+		} else {
+			repos[""] = trimmed
+		}
+		return repos
+	}
+
+	header := parts[0]
+	repoBlocks := make(map[string][]string)
+	for i := 1; i < len(parts); i++ {
+		block := parts[i]
+		lineEnd := strings.Index(block, "\n")
+		if lineEnd == -1 {
+			lineEnd = len(block)
+		}
+		headerLine := block[:lineEnd]
+		
+		var firstPath string
+		if strings.HasPrefix(headerLine, "a/") {
+			sub := headerLine[2:]
+			sepIdx := strings.Index(sub, " b/")
+			if sepIdx != -1 {
+				firstPath = sub[:sepIdx]
+			}
+		}
+		
+		if firstPath != "" {
+			repoName, repoRelPath := r.NormalizePatchPath(firstPath, ws, role)
+			if repoName != "" {
+				cleanBlock := r.CleanPatchBlock(block, repoName, repoRelPath, firstPath)
+				repoBlocks[repoName] = append(repoBlocks[repoName], "diff --git "+cleanBlock)
+			} else {
+				repoBlocks[""] = append(repoBlocks[""], "diff --git "+block)
+			}
+		} else {
+			repoBlocks[""] = append(repoBlocks[""], "diff --git "+block)
+		}
+	}
+
+	for repoName, blocks := range repoBlocks {
+		repos[repoName] = header + strings.Join(blocks, "")
+	}
+	return repos
 }

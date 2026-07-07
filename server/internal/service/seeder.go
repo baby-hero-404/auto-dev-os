@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -45,15 +44,9 @@ func (s *SeederService) SeedProject(ctx context.Context, projectID string) {
 }
 
 func loadPromptBaseSkills(skillsRoot string) ([]models.CreateSkillInput, error) {
-	var registryPath string
-	var err error
-	if skillsRoot != "" {
-		registryPath = filepath.Join(skillsRoot, "registry.min.json")
-	} else {
-		registryPath, err = promptBaseRegistryPath()
-		if err != nil {
-			return nil, err
-		}
+	registryPath, err := promptBaseRegistryPath(skillsRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	raw, err := os.ReadFile(registryPath)
@@ -107,22 +100,24 @@ func loadPromptBaseSkills(skillsRoot string) ([]models.CreateSkillInput, error) 
 	return defaults, nil
 }
 
-func promptBaseRegistryPath() (string, error) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("resolve runtime caller for seeder")
+func promptBaseRegistryPath(skillsRoot string) (string, error) {
+	if skillsRoot == "" {
+		return "", fmt.Errorf("skillsRoot is required to resolve git registry path")
 	}
-	localPath := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "resources", "prompt_base", "registry.min.json"))
+
+	pm := NewSkillPathManager(skillsRoot)
+
+	// Skills are cloned into [skillsRoot]/git/[repoName]
+	localPath := pm.GitRegistryPath("prompt_base", true)
 	if _, err := os.Stat(localPath); err == nil {
 		return localPath, nil
 	}
-	// Fallback to global framework installation path ~/.gemini/registry.min.json
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		globalPath := filepath.Join(homeDir, ".gemini", "registry.min.json")
-		if _, err := os.Stat(globalPath); err == nil {
-			return globalPath, nil
-		}
+
+	// Fallback to non-minified version if minified doesn't exist
+	localPath = pm.GitRegistryPath("prompt_base", false)
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath, nil
 	}
-	return localPath, nil
+
+	return "", fmt.Errorf("registry.json or registry.min.json not found in cloned prompt_base repo")
 }

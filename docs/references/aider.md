@@ -1,7 +1,7 @@
 # Phân Tích Cơ Chế Quản Lý Ngữ Cảnh (Context Management) của Aider
 
 ## 1. Source Snapshot
-- **Source Repository:** `resources/aider`
+- **Source Repository:** `references/aider`
 - **Reviewed Paths:** `aider/repomap.py`, `aider/queries/`
 - **Snapshot Date:** 2026-07-06
 - **Scope:** Phân tích cơ chế "Repo Map" - giải pháp tối ưu ngữ cảnh siêu nén của Aider.

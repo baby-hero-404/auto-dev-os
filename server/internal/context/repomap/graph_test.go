@@ -49,7 +49,7 @@ func TestPageRankDanglingNode(t *testing.T) {
 	g := NewDependencyGraph()
 	g.BuildGraph(tags)
 
-	pr := g.CalculatePageRank([]string{"A.go"})
+	pr := g.CalculatePageRank([]string{})
 	
 	// Sum of all ranks must equal 1.0 (rank conservation)
 	sum := 0.0

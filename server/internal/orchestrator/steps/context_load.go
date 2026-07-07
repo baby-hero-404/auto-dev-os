@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	orchestratorworkspace "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/workspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -22,7 +23,7 @@ type ContextLoadStep struct {
 	status        StatusUpdater
 	wkspace       WorkspaceLoader
 	sandbox       SandboxRunner
-	llm           LLMChatter
+	ctxEngine     provider.ContextEngine
 	artifacts     ArtifactSaver
 	repos         RepositoryLister
 	log           Logger
@@ -36,7 +37,7 @@ func NewContextLoadStep(
 	status StatusUpdater,
 	wkspace WorkspaceLoader,
 	sandbox SandboxRunner,
-	llm LLMChatter,
+	ctxEngine provider.ContextEngine,
 	artifacts ArtifactSaver,
 	repos RepositoryLister,
 	log Logger,
@@ -49,7 +50,7 @@ func NewContextLoadStep(
 		status:        status,
 		wkspace:       wkspace,
 		sandbox:       sandbox,
-		llm:           llm,
+		ctxEngine:     ctxEngine,
 		artifacts:     artifacts,
 		repos:         repos,
 		log:           log,
@@ -74,6 +75,15 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	repoPaths := s.resolveContextRepoPaths(ctx)
 	result := s.gatherRepoContexts(ctx, repoPaths)
+
+	// Pre-warm the SQLite AST cache.
+	if s.ctxEngine != nil {
+		if err := s.ctxEngine.IndexWorkspace(ctx); err != nil {
+			if s.log != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to index workspace: %v", err))
+			}
+		}
+	}
 
 	if s.artifacts != nil {
 		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepContextLoad, "context", result)

@@ -21,6 +21,7 @@ const WorkspaceRootKey ContextKey = "retriever_workspace_root"
 type ContextEngine interface {
 	GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error)
 	RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error)
+	IndexWorkspace(ctx context.Context) error
 	Close() error
 }
 
@@ -110,8 +111,8 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 	return result, nil
 }
 
-// ensureCachePopulated loads AST tags into SQLite.
-func (p *Provider) ensureCachePopulated(ctx context.Context) error {
+// IndexWorkspace loads AST tags into SQLite.
+func (p *Provider) IndexWorkspace(ctx context.Context) error {
 	rootDir := p.rootDir
 	if wsRoot, ok := ctx.Value(WorkspaceRootKey).(string); ok && wsRoot != "" {
 		rootDir = wsRoot
@@ -142,7 +143,7 @@ func (p *Provider) ensureCachePopulated(ctx context.Context) error {
 
 // RetrieveContext reads AST definitions matching the query and returns their source code bodies.
 func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
-	if err := p.ensureCachePopulated(ctx); err != nil {
+	if err := p.IndexWorkspace(ctx); err != nil {
 		return nil, err
 	}
 

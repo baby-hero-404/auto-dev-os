@@ -28,12 +28,12 @@ type SkillLister interface {
 }
 
 func NewPromptAssembler(baseTools []llm.ToolDefinition, ctxEngine provider.ContextEngine) *PromptAssembler {
-	return &PromptAssembler{baseTools: baseTools, root: defaultPromptRoot(), ctxEngine: ctxEngine}
+	return &PromptAssembler{baseTools: baseTools, root: ".", ctxEngine: ctxEngine}
 }
 
 func NewPromptAssemblerWithRules(rules *repository.RuleRepo, baseTools []llm.ToolDefinition, root string, ctxEngine provider.ContextEngine) *PromptAssembler {
 	if root == "" {
-		root = defaultPromptRoot()
+		root = "."
 	}
 	return &PromptAssembler{rules: rules, baseTools: baseTools, root: root, ctxEngine: ctxEngine}
 }
@@ -201,20 +201,22 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 
 	// TOKEN BUDGET ARBITRATION
 	if a != nil && a.ctxEngine != nil {
-		// Heuristic: 1 token ~= 4 chars
-		usedTokens := len(user) / 4
-		totalBudget := 8192 // Target system budget
-		maxMapTokens := totalBudget - usedTokens
-		
-		if maxMapTokens > 2048 {
-			maxMapTokens = 2048
-		} else if maxMapTokens < 256 {
-			maxMapTokens = 256 // Fallback minimum
-		}
-		
-		repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
-		if err == nil && repoMap != "" {
-			user = "=== Repository Structure ===\n" + repoMap + "\n\n" + user
+		if agent != nil && (agent.Role == models.AgentRoleBackend || agent.Role == models.AgentRoleFrontend || agent.Role == models.AgentRoleReviewer) {
+			// Heuristic: 1 token ~= 4 chars
+			usedTokens := len(user) / 4
+			totalBudget := 8192 // Target system budget
+			maxMapTokens := totalBudget - usedTokens
+			
+			if maxMapTokens > 2048 {
+				maxMapTokens = 2048
+			} else if maxMapTokens < 256 {
+				maxMapTokens = 256 // Fallback minimum
+			}
+			
+			repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
+			if err == nil && repoMap != "" {
+				user = "=== Repository Structure ===\n" + repoMap + "\n\n" + user
+			}
 		}
 	}
 	messages := []llm.Message{
@@ -231,7 +233,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 
 func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, agent *models.Agent) (string, []models.Rule, error) {
 	stepID := stepIDFromCtx(ctx)
-	root := defaultPromptRoot()
+	root := "."
 	if a != nil && a.root != "" {
 		root = a.root
 	}
@@ -271,7 +273,7 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 
 	// 2. Agent Role Constraints
 	if agent != nil {
-		if content, err := readOptional(filepath.Join(root, "antigravity", "agents", personaFile(agent.Role))); err == nil && strings.TrimSpace(content) != "" {
+		if content, err := readOptional(filepath.Join(root, "roles", roleFile(agent.Role))); err == nil && strings.TrimSpace(content) != "" {
 			parts = append(parts, "# Agent Role Constraints\n"+content)
 		}
 	}
@@ -291,8 +293,25 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 		parts = append(parts, b.String())
 	}
 
-	parts = append(parts, "# Output Rules\n"+
-		"- Do NOT include framework instructions (Prompt Base, registry.json, Librarian) in generated code or documentation.\n"+
-		"- When creating new files, use idiomatic project conventions from the existing codebase.")
-	return strings.TrimSpace(strings.Join(parts, "\n\n")), projectRules, nil
+	// Output Rules
+	if content, err := readOptional(filepath.Join(root, "core", "output_rules.md")); err == nil && strings.TrimSpace(content) != "" {
+		parts = append(parts, content)
+	}
+
+	corePrompt := strings.TrimSpace(strings.Join(parts, "\n\n"))
+	
+	// Dynamic Metadata Injection (appendSystemPrompt)
+	metadata := map[string]any{
+		"project_id": task.ProjectID,
+		"task_id":    task.ID,
+	}
+	if agent != nil {
+		metadata["assigned_role"] = agent.Role
+	}
+	if len(analysis.TaskRules) > 0 {
+		metadata["task_rules"] = analysis.TaskRules
+	}
+	
+	finalSystemPrompt := appendSystemPrompt(corePrompt, metadata)
+	return finalSystemPrompt, projectRules, nil
 }

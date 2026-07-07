@@ -390,3 +390,88 @@ new file mode 100644
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, got)
 	}
 }
+
+func TestRunner_NormalizePatchPath(t *testing.T) {
+	ws := &models.TaskWorkspace{
+		Repos: []models.RepoWorkspace{
+			{Name: "tool_zentao"},
+		},
+	}
+	runner := &Runner{}
+
+	tests := []struct {
+		name             string
+		firstPath        string
+		role             string
+		expectedRepo     string
+		expectedRelPath  string
+	}{
+		{
+			name:            "Full path with worktrees and role",
+			firstPath:       "tool_zentao/worktrees/backend/config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+		{
+			name:            "Direct role prefix",
+			firstPath:       "backend/config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+		{
+			name:            "No prefix but single repo fallback",
+			firstPath:       "config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+		{
+			name:            "Container prefix",
+			firstPath:       "code/repos/tool_zentao/worktrees/backend/config/config.go",
+			role:            "backend",
+			expectedRepo:    "tool_zentao",
+			expectedRelPath: "config/config.go",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, rel := runner.NormalizePatchPath(tc.firstPath, ws, tc.role)
+			if repo != tc.expectedRepo || rel != tc.expectedRelPath {
+				t.Errorf("expected (%q, %q), got (%q, %q)", tc.expectedRepo, tc.expectedRelPath, repo, rel)
+			}
+		})
+	}
+}
+
+func TestRunner_SplitPatchByRepoWithWorkspace(t *testing.T) {
+	ws := &models.TaskWorkspace{
+		Repos: []models.RepoWorkspace{
+			{Name: "tool_zentao"},
+		},
+	}
+	runner := &Runner{}
+
+	patchText := `diff --git a/backend/config/config.go b/backend/config/config.go
+--- a/backend/config/config.go
++++ b/backend/config/config.go
+@@ -1,1 +1,2 @@
++var Y = 2
+`
+
+	res := runner.SplitPatchByRepoWithWorkspace(patchText, ws, "backend")
+	if len(res) != 1 {
+		t.Fatalf("expected 1 repo patch, got %d", len(res))
+	}
+	cleaned, ok := res["tool_zentao"]
+	if !ok {
+		t.Fatalf("expected tool_zentao patch, got keys: %v", res)
+	}
+
+	if !strings.Contains(cleaned, "a/config/config.go") {
+		t.Errorf("expected cleaned paths, got:\n%s", cleaned)
+	}
+}
+

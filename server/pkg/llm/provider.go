@@ -12,6 +12,7 @@ import (
 type contextKey string
 
 const routeOptionsKey contextKey = "llm_route_options"
+const excludeModelIDKey contextKey = "llm_exclude_model_id"
 
 // Model level groups used by the gateway router.
 const (
@@ -87,6 +88,7 @@ type RouteOptions struct {
 	MaxInputTokens  int     `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`
 	MaxCostUSD      float64 `json:"max_cost_usd,omitempty"`
+	ExcludeModelID  string  `json:"exclude_model_id,omitempty"`
 }
 
 // WithRouteOptions annotates a request for gateway routing.
@@ -99,6 +101,19 @@ func WithRouteOptions(ctx context.Context, opts RouteOptions) context.Context {
 func RouteOptionsFromContext(ctx context.Context) (RouteOptions, bool) {
 	opts, ok := ctx.Value(routeOptionsKey).(RouteOptions)
 	return opts, ok
+}
+
+// WithExcludeModelID sets the exclude model ID in context for harness independence.
+func WithExcludeModelID(ctx context.Context, excludeID string) context.Context {
+	return context.WithValue(ctx, excludeModelIDKey, excludeID)
+}
+
+// ExcludeModelIDFromContext retrieves the excluded model ID from context.
+func ExcludeModelIDFromContext(ctx context.Context) string {
+	if val, ok := ctx.Value(excludeModelIDKey).(string); ok {
+		return val
+	}
+	return ""
 }
 
 // Provider is the interface that all LLM backends must implement.

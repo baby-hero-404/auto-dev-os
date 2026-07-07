@@ -136,7 +136,7 @@ func run() error {
 	promptAssembler := prompt.NewPromptAssemblerWithRules(
 		ruleRepo,
 		skills.BuiltinToolDefinitions(),
-		filepath.Clean(filepath.Join("..", "resources", "prompt_base")),
+		filepath.Clean(filepath.Join("..", "prompts")),
 		ctxEngine,
 	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	artifactRepo := repository.NewArtifactRepo(db)
@@ -156,6 +156,7 @@ func run() error {
 			time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
 		),
 		orchestrator.WithLLMTraceLogging(cfg.Logging.LLMTraceEnabled, cfg.Logging.LLMLogLevel),
+		orchestrator.WithContextEngine(ctxEngine),
 	}
 
 	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {
@@ -174,7 +175,7 @@ func run() error {
 	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
 	learningSvc.SetSkillService(skillSvc)
-	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "resources", "prompt_base")))
+	learningSvc.SetPromptRoot(filepath.Clean(filepath.Join("..", "prompts")))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
 	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo)
 

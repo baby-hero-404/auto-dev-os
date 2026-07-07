@@ -11,8 +11,8 @@ Tài liệu này trình bày một lộ trình chi tiết và các dự án mã 
 1. **Con người tạo tác vụ (task)** kèm mô tả chi tiết. → DB status: `todo`
 2. **Agent Planner phân tích và chia nhỏ tác vụ thành các task con** sử dụng định dạng OpenSpec. Bao gồm việc xác định Workflow cho tác vụ (ví dụ: task không có UI sẽ không cần FE join vào flow). Agent Planner quyết định luôn việc sử dụng Agent ở mức độ nào (Fast/Balanced/Powerful) và những nhóm kỹ năng (skills) nào là cần thiết để hoàn thành task. → DB status: `analyzing`
     - **Nếu thiếu thông tin:** Agent sẽ hỏi ngược lại nhà phát triển để bổ sung (ví dụ: "Task này ảnh hưởng đến module nào?", "Có yêu cầu backward compatibility không?", "File test nào cần cập nhật?"). Vòng lặp hỏi-đáp tiếp tục cho đến khi agent có đủ ngữ cảnh để phân tích chính xác.
-    - Tham khảo: `resources/OpenSpec/src/core/` — Trình xử lý xác thực (Validation) kết quả phân tích.
-    - Tham khảo: `resources/OpenSpec/schemas/spec-driven/schema.yaml` — Định nghĩa cấu trúc dữ liệu bắt buộc cho spec.
+    - Tham khảo: `references/OpenSpec/src/core/` — Trình xử lý xác thực (Validation) kết quả phân tích.
+    - Tham khảo: `references/OpenSpec/schemas/spec-driven/schema.yaml` — Định nghĩa cấu trúc dữ liệu bắt buộc cho spec.
 
 **↓ Tại đây, quy trình phân nhánh theo độ phức tạp:**
 
@@ -40,8 +40,8 @@ Tài liệu này trình bày một lộ trình chi tiết và các dự án mã 
     - **Nếu thiếu thông tin:** Reviewer yêu cầu nhà phát triển bổ sung hoặc tự bổ sung trực tiếp vào spec. Không chuyển sang bước 4 cho đến khi spec đầy đủ.
     - Kế hoạch thực thi (sub-tasks, thứ tự thực hiện) là hợp lý.
     - Các rủi ro đã được xác định và có phương án xử lý.
-    - Đọc thêm: `resources/OpenSpec/` — Cách sử dụng Schema (JSON/YAML) chuẩn để giao nhiệm vụ cho AI (Spec-driven Development).
-    - Tham khảo: `resources/OpenSpec/openspec-parallel-merge-plan.md` — Thiết kế tính năng chạy song song và merge.
+    - Đọc thêm: `references/OpenSpec/` — Cách sử dụng Schema (JSON/YAML) chuẩn để giao nhiệm vụ cho AI (Spec-driven Development).
+    - Tham khảo: `references/OpenSpec/openspec-parallel-merge-plan.md` — Thiết kế tính năng chạy song song và merge.
 4.  AI thực hiện viết mã nguồn (có thể chia sub-tasks song song cho nhiều agent). → DB status: `coding`
 5.  AI thực hiện đánh giá, sửa lỗi và kiểm thử mã nguồn. → DB status: `reviewing` ⟷ `fixing` → `testing`
 6.  AI tạo Pull Request (PR) hoặc Merge Request (MR). → DB status: `testing` (PR created)

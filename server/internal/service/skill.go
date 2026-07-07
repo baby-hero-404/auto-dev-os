@@ -71,7 +71,8 @@ func (s *SkillService) saveRegistry(reg skillRegistry) error {
 	if err := os.MkdirAll(s.skillsRoot, 0755); err != nil {
 		return err
 	}
-	regPath := filepath.Join(s.skillsRoot, "registry.json")
+	pm := NewSkillPathManager(s.skillsRoot)
+	regPath := pm.GlobalRegistryPath(false)
 	raw, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err
@@ -242,7 +243,8 @@ func (s *SkillService) GetFileContent(ctx context.Context, sourceID string, rela
 	}
 
 	repoName := getRepoNameFromURL(source.URL)
-	repoRoot := filepath.Join(s.skillsRoot, "git", repoName)
+	pm := NewSkillPathManager(s.skillsRoot)
+	repoRoot := pm.GitRepoRoot(repoName)
 
 	targetFile := filepath.Join(repoRoot, relativePath)
 
@@ -340,7 +342,8 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 	_, _ = s.sourceRepo.Update(ctx, id, models.UpdateSkillSourceInput{Status: &statusSyncing})
 
 	repoName := getRepoNameFromURL(source.URL)
-	targetDir := filepath.Join(s.skillsRoot, "git", repoName)
+	pm := NewSkillPathManager(s.skillsRoot)
+	targetDir := pm.GitRepoRoot(repoName)
 
 	var cmd *exec.Cmd
 	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
@@ -357,9 +360,9 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 		return s.markSyncFailed(ctx, id, fmt.Errorf("git error: %s (err: %w)", string(output), err))
 	}
 
-	manifestPath := filepath.Join(targetDir, "registry.json")
+	manifestPath := pm.GitRegistryPath(repoName, false)
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		manifestPath = filepath.Join(targetDir, "registry.min.json")
+		manifestPath = pm.GitRegistryPath(repoName, true)
 	}
 
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {

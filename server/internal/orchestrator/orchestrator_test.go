@@ -974,6 +974,7 @@ func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testi
 		artifactSaverAdapter{save: orch.checkpoints.SaveArtifact},
 		orch.agents,
 		orch.checkpoints,
+		orch.workflows,
 		statusUpdaterAdapter{update: orch.updateTaskStatus},
 		loggerAdapter{log: orch.log},
 	)

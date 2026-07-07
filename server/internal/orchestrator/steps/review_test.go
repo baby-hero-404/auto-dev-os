@@ -14,7 +14,7 @@ func TestReviewStep_SkipsEasyTask(t *testing.T) {
 	step := NewReviewStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestReviewStep_BypassedViaHumanReview(t *testing.T) {
 	step := NewReviewStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
@@ -46,7 +46,7 @@ func TestReviewStep_ErrWaitingApproval(t *testing.T) {
 	step := NewReviewStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
 	if !errors.Is(err, workflow.ErrWaitingApproval) {
@@ -69,6 +69,7 @@ func TestReviewStep_WithFindings(t *testing.T) {
 		artifactMock,
 		assigner,
 		&mockCheckpointReader{count: 0},
+		nil,
 		statusMock,
 		&mockLogger{},
 	)
@@ -109,6 +110,7 @@ func TestReviewStep_ExceedsCycleLimit(t *testing.T) {
 		&mockArtifactSaver{},
 		nil,
 		&mockCheckpointReader{count: 2}, // Already ran 2 cycles
+		nil,
 		statusMock,
 		&mockLogger{},
 	)
@@ -160,6 +162,7 @@ func TestReviewStep_NoActionableFindings(t *testing.T) {
 				&mockArtifactSaver{},
 				nil,
 				&mockCheckpointReader{count: 0},
+				nil,
 				statusMock,
 				&mockLogger{},
 			)
@@ -188,6 +191,7 @@ func TestReviewStep_SingleFindingFallback(t *testing.T) {
 		&mockArtifactSaver{},
 		nil,
 		&mockCheckpointReader{count: 0},
+		nil,
 		statusMock,
 		&mockLogger{},
 	)
@@ -212,6 +216,7 @@ func TestReviewStep_PRDiffFallbackUsesBackendWorktreeSuffix(t *testing.T) {
 		&mockArtifactSaver{},
 		nil,
 		&mockCheckpointReader{count: 0},
+		nil,
 		&mockStatusUpdater{},
 		&mockLogger{},
 	)

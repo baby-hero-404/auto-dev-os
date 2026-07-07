@@ -30,9 +30,9 @@ init: ## Setup local environment (configs & deps)
 	cd web && npm install
 	@echo "==> Initialization complete. Please update your .env file with necessary keys."
 
-clone-resource: ## Clone external test/skill resources
-	@echo "==> Cloning external resources..."
-	bash scripts/clone_resources.sh
+clone-references: ## Clone external test/skill references
+	@echo "==> Cloning external references..."
+	bash scripts/clone_references.sh
 
 # ── Infrastructure & Database ────────────────────────────────────────────
 

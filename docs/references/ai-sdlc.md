@@ -1,7 +1,7 @@
 # Phân Tích Kiến Trúc Hệ Thống AI-SDLC
 
 ## 1. Source Snapshot
-- **Source Repository:** `resources/ai-sdlc`
+- **Source Repository:** `references/ai-sdlc`
 - **Reviewed Paths:** `orchestrator/src/`, `mcp-advisor/`, `README.md`
 - **Snapshot Date:** 2026-07-06
 - **Scope:** Phân tích mã nguồn lõi của Orchestrator, cơ chế quản lý trạng thái, và các pipeline điều phối AI.

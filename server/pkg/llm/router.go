@@ -158,8 +158,16 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 	}
 
 	var failures []string
+	var excludedProvider Provider
 	for _, provider := range chain.Providers {
 		meta := metadataForProvider(provider)
+		
+		// Harness Independence isolation check
+		if opts.ExcludeModelID != "" && meta.Model == opts.ExcludeModelID {
+			excludedProvider = provider
+			continue
+		}
+
 		resp, latency, err := g.chatWithRetry(ctx, provider, messages, chatOpts)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s/%s: %v", provider.Name(), meta.Model, err))
@@ -176,6 +184,28 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 		}
 		g.record(ctx, opts, meta, resp, latency, "ok", "")
 		return resp, nil
+	}
+
+	// Graceful Fallback
+	if excludedProvider != nil {
+		fmt.Printf("WARNING: Harness Independence fallback: forcing review using the original coder model (%s)\n", opts.ExcludeModelID)
+		meta := metadataForProvider(excludedProvider)
+		resp, latency, err := g.chatWithRetry(ctx, excludedProvider, messages, chatOpts)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s/%s (fallback): %v", excludedProvider.Name(), meta.Model, err))
+			g.record(ctx, opts, meta, nil, latency, "fallback_failed", err.Error())
+		} else {
+			if resp.Model == "" {
+				resp.Model = meta.Model
+			}
+			cost := estimateCost(resp.PromptTokens, resp.OutputTokens, meta)
+			if err := g.checkActualUsage(resp, cost, opts); err != nil {
+				g.record(ctx, opts, meta, resp, latency, "fallback_blocked", err.Error())
+				return nil, err
+			}
+			g.record(ctx, opts, meta, resp, latency, "fallback_ok", "")
+			return resp, nil
+		}
 	}
 
 	return nil, fmt.Errorf("llm gateway exhausted fallbacks for level group %q: %s", levelGroup, strings.Join(failures, "; "))

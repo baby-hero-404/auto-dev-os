@@ -1,6 +1,6 @@
 # 📚 Danh Mục Tài Liệu Tham Khảo & Học Hỏi Từ Các Dự Án Mã Nguồn Mở
 
-Thư mục này chứa các phân tích chi tiết về 12 dự án mã nguồn mở và tài liệu kỹ thuật trong thư mục `resources/`, đóng vai trò định hình kiến trúc phát triển cho **Auto Code OS**.
+Thư mục này chứa các phân tích chi tiết về 12 dự án mã nguồn mở và tài liệu kỹ thuật trong thư mục `references/`, đóng vai trò định hình kiến trúc phát triển cho **Auto Code OS**.
 
 ## 📁 Sơ Đồ Cấu Trúc Restructure Mới (`docs/references/`)
 

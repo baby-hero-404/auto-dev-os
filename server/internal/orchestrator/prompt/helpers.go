@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,23 +119,6 @@ func TruncateHistory(history []llm.Message, maxChars int) []llm.Message {
 	return selected
 }
 
-func personaFile(role string) string {
-	switch strings.ToLower(role) {
-	case models.AgentRolePlanner:
-		return "project-planner.md"
-	case models.AgentRoleFrontend:
-		return "frontend-specialist.md"
-	case models.AgentRoleReviewer:
-		return "security-auditor.md"
-	case models.AgentRoleQA:
-		return "test-engineer.md"
-	case models.AgentRoleDocumentationWriter:
-		return "documentation-writer.md"
-	default:
-		return "backend-specialist.md"
-	}
-}
-
 func readOptional(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -146,13 +130,35 @@ func readOptional(path string) (string, error) {
 	return string(data), nil
 }
 
-func defaultPromptRoot() string {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return filepath.Clean(filepath.Join("..", "resources", "prompt_base"))
+
+func roleFile(role string) string {
+	switch strings.ToLower(role) {
+	case models.AgentRolePlanner:
+		return "planner.md"
+	case models.AgentRoleFrontend, models.AgentRoleBackend:
+		return "coder.md"
+	case models.AgentRoleReviewer:
+		return "reviewer.md"
+	case models.AgentRoleQA:
+		return "qa.md"
+	case models.AgentRoleDocumentationWriter:
+		return "docs.md"
+	default:
+		return "coder.md"
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "..", "resources", "prompt_base"))
 }
+
+func appendSystemPrompt(core string, metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return core
+	}
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return core
+	}
+	return fmt.Sprintf("%s\n\n=== Task Configuration ===\n```json\n%s\n```", core, string(metadataJSON))
+}
+
 
 // extractSubtaskIndex extracts the numeric index from a step ID (e.g., "code_backend_2" -> 2)
 func extractSubtaskIndex(stepID string) (int, bool) {

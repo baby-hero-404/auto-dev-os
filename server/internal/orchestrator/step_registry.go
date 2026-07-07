@@ -23,7 +23,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
 			o.wkspace, // WorkspaceLoader
 			sandboxRunnerAdapter{run: o.runSandboxStep}, // SandboxRunner
-			o.llm, // LLMChatter
+			o.ctxEngine, // ContextEngine
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			o.repositories,            // RepositoryLister
 			loggerAdapter{log: o.log}, // Logger
@@ -102,6 +102,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			o.agents,      // ReviewerAssigner
 			o.checkpoints, // CheckpointReader
+			o.workflows,   // CheckpointLister
 			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
 			loggerAdapter{log: o.log},                        // Logger
 		),

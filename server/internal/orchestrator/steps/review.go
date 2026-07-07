@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
+	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -54,6 +55,29 @@ func getReviewFindings(parsed map[string]any) any {
 	return nil
 }
 
+func getCoderModel(ctx context.Context, lister CheckpointLister, taskID string) string {
+	if lister == nil {
+		return ""
+	}
+	checkpoints, err := lister.ListCheckpoints(ctx, taskID)
+	if err != nil || len(checkpoints) == 0 {
+		return ""
+	}
+	// Search backwards for the most recent coding or fix step
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		cp := checkpoints[i]
+		if cp.Step == workflow.StepCodeBackend || cp.Step == workflow.StepCodeFrontend || cp.Step == workflow.StepFix {
+			var state map[string]any
+			if err := json.Unmarshal(cp.State, &state); err == nil {
+				if model, ok := state["model"].(string); ok && model != "" {
+					return model
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // ReviewStep implements Step for the automated review phase.
 type ReviewStep struct {
 	rt          StepRuntime
@@ -61,11 +85,12 @@ type ReviewStep struct {
 	projects    ProjectReader
 	llm         LLMRunner
 	diff        DiffCapturer
-	artifacts   ArtifactSaver
-	assigner    ReviewerAssigner
-	checkpoints CheckpointReader
-	status      StatusUpdater
-	log         Logger
+	artifacts        ArtifactSaver
+	assigner         ReviewerAssigner
+	checkpoints      CheckpointReader
+	checkpointLister CheckpointLister
+	status           StatusUpdater
+	log              Logger
 }
 
 func NewReviewStep(
@@ -77,20 +102,22 @@ func NewReviewStep(
 	artifacts ArtifactSaver,
 	assigner ReviewerAssigner,
 	checkpoints CheckpointReader,
+	checkpointLister CheckpointLister,
 	status StatusUpdater,
 	log Logger,
 ) *ReviewStep {
 	return &ReviewStep{
-		rt:          rt,
-		tasks:       tasks,
-		projects:    projects,
-		llm:         llm,
-		diff:        diff,
-		artifacts:   artifacts,
-		assigner:    assigner,
-		checkpoints: checkpoints,
-		status:      status,
-		log:         log,
+		rt:               rt,
+		tasks:            tasks,
+		projects:         projects,
+		llm:              llm,
+		diff:             diff,
+		artifacts:        artifacts,
+		assigner:         assigner,
+		checkpoints:      checkpoints,
+		checkpointLister: checkpointLister,
+		status:           status,
+		log:              log,
 	}
 }
 
@@ -193,6 +220,16 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 				instruction += "\n\nCRITICAL RUBRIC - You MUST verify that the following tasks have been completed correctly and accurately based on the diff. If any task is incomplete or not addressed, report a finding with 'requires_fix': true:\n\n" + analysis.TasksMD
 			}
 		}
+
+		// Harness Independence: Exclude the model used in the preceding coding step
+		coderModel := getCoderModel(ctx, s.checkpointLister, s.rt.Task.ID)
+		if coderModel != "" {
+			if s.log != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("harness independence: excluding coder model %s for review", coderModel))
+			}
+			ctx = llm.WithExcludeModelID(ctx, coderModel)
+		}
+
 		out, err := s.llm.RunLLMStep(ctx, s.rt.Task, reviewerAgent, s.rt.JobID, workflow.StepReview, instruction)
 		if err != nil {
 			return nil, err

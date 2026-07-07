@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -24,17 +23,26 @@ func (m *mockTaskRepository) Update(ctx context.Context, id string, input models
 	return m.task, nil
 }
 
-type mockLLMProvider struct {
-	chatFunc func(ctx context.Context, messages []llm.Message) (*llm.Response, error)
+type mockContextEngine struct {
+	indexFunc func(ctx context.Context) error
 }
 
-func (m *mockLLMProvider) Name() string { return "mock" }
-func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
-	return m.chatFunc(ctx, messages)
+func (m *mockContextEngine) GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error) {
+	return "", nil
 }
-func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
-	return m.Chat(ctx, messages)
+
+func (m *mockContextEngine) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
+	return nil, nil
 }
+
+func (m *mockContextEngine) IndexWorkspace(ctx context.Context) error {
+	if m.indexFunc != nil {
+		return m.indexFunc(ctx)
+	}
+	return nil
+}
+
+func (m *mockContextEngine) Close() error { return nil }
 
 func TestStepContextLoad_Execute(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-load-test-*")
@@ -64,14 +72,11 @@ func TestStepContextLoad_Execute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	llmCallCount := 0
-	llmProvider := &mockLLMProvider{
-		chatFunc: func(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
-			llmCallCount++
-			return &llm.Response{
-				Model:   "mock-model",
-				Content: `{}`,
-			}, nil
+	indexCallCount := 0
+	mockEngine := &mockContextEngine{
+		indexFunc: func(ctx context.Context) error {
+			indexCallCount++
+			return nil
 		},
 	}
 
@@ -93,7 +98,7 @@ func TestStepContextLoad_Execute(t *testing.T) {
 				}
 				return map[string]any{"stdout": "mock output"}, nil
 			}},
-			llmProvider,
+			mockEngine,
 			artifactSaverAdapter{save: func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
 				return nil
 			}},
@@ -110,9 +115,9 @@ func TestStepContextLoad_Execute(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Verify NO LLM calls were made during context load step
-	if llmCallCount != 0 {
-		t.Errorf("expected 0 LLM calls, got %d", llmCallCount)
+	// Verify IndexWorkspace was called exactly once
+	if indexCallCount != 1 {
+		t.Errorf("expected 1 call to IndexWorkspace, got %d", indexCallCount)
 	}
 
 	// Verify git logs, current branches and test commands are loaded correctly

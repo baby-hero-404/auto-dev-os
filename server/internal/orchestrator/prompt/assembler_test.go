@@ -51,6 +51,10 @@ func (m *MockContextEngine) GetRepoMap(ctx context.Context, activeFiles []string
 	return "main.go:\n  def Main", nil
 }
 
+func (m *MockContextEngine) IndexWorkspace(ctx context.Context) error {
+	return nil
+}
+
 func (m *MockContextEngine) Close() error {
 	return nil
 }
@@ -316,7 +320,7 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 func TestPromptAssembler_InjectsRepoMap(t *testing.T) {
 	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{})
 	task := models.Task{ID: "task-1"}
-	agent := &models.Agent{ID: "agent-1"}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
 
 	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
 	if err != nil {

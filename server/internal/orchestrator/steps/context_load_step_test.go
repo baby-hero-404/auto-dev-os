@@ -34,7 +34,7 @@ func TestContextLoadStep_TransitionsStatusAndGathersContext(t *testing.T) {
 		statusMock,
 		&mockStepWorkspaceLoader{},
 		sandboxMock,
-		&mockLLMChatter{},
+		&mockContextEngine{},
 		artifactMock,
 		&mockRepositoryLister{},
 		&mockLogger{},

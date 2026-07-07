@@ -95,3 +95,62 @@ func TestGateway_CircuitBreakerBlocksLargePrompt(t *testing.T) {
 		t.Fatalf("provider should not be called after preflight block")
 	}
 }
+
+func TestGateway_HarnessIndependence(t *testing.T) {
+	coderModel := &fakeProvider{
+		name: "primary",
+		meta: ProviderMetadata{Provider: "primary", Model: "coder-model", LevelGroup: LevelBalanced},
+		resp: &Response{Content: "coder output", Model: "coder-model", PromptTokens: 10, OutputTokens: 5},
+	}
+	reviewerModel := &fakeProvider{
+		name: "fallback",
+		meta: ProviderMetadata{Provider: "fallback", Model: "reviewer-model", LevelGroup: LevelBalanced},
+		resp: &Response{Content: "reviewer output", Model: "reviewer-model", PromptTokens: 10, OutputTokens: 5},
+	}
+
+	gateway, err := NewGateway([]FallbackChain{
+		newFallbackChain(LevelBalanced, []Provider{coderModel, reviewerModel}),
+	}, GatewayOptions{DefaultLevelGroup: LevelBalanced})
+	if err != nil {
+		t.Fatalf("NewGateway returned error: %v", err)
+	}
+
+	ctx := WithRouteOptions(context.Background(), RouteOptions{Complexity: "medium", ExcludeModelID: "coder-model"})
+	resp, err := gateway.Chat(ctx, []Message{{Role: "user", Content: "review this"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if resp.Model != "reviewer-model" {
+		t.Fatalf("Expected harness independence to skip coder-model and use reviewer-model, got %s", resp.Model)
+	}
+	if coderModel.calls != 0 || reviewerModel.calls != 1 {
+		t.Fatalf("unexpected call counts coder=%d reviewer=%d", coderModel.calls, reviewerModel.calls)
+	}
+}
+
+func TestGateway_HarnessIndependenceGracefulFallback(t *testing.T) {
+	onlyModel := &fakeProvider{
+		name: "primary",
+		meta: ProviderMetadata{Provider: "primary", Model: "only-model", LevelGroup: LevelBalanced},
+		resp: &Response{Content: "fallback output", Model: "only-model", PromptTokens: 10, OutputTokens: 5},
+	}
+
+	gateway, err := NewGateway([]FallbackChain{
+		newFallbackChain(LevelBalanced, []Provider{onlyModel}),
+	}, GatewayOptions{DefaultLevelGroup: LevelBalanced})
+	if err != nil {
+		t.Fatalf("NewGateway returned error: %v", err)
+	}
+
+	ctx := WithRouteOptions(context.Background(), RouteOptions{Complexity: "medium", ExcludeModelID: "only-model"})
+	resp, err := gateway.Chat(ctx, []Message{{Role: "user", Content: "review this"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if resp.Model != "only-model" {
+		t.Fatalf("Expected graceful fallback to use only-model despite exclusion, got %s", resp.Model)
+	}
+	if onlyModel.calls != 1 {
+		t.Fatalf("unexpected call counts onlyModel=%d", onlyModel.calls)
+	}
+}

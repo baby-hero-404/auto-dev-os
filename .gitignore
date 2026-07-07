@@ -43,7 +43,7 @@ Thumbs.db
 tmp/
 temp/
 
-# External cloned resources
-resources/
+# External cloned references
+references/
 
 .data/

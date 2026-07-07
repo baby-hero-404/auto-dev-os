@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/checkpoint"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
@@ -26,6 +27,7 @@ type Orchestrator struct {
 	runtime         sandbox.Runtime
 	prompts         PromptBuilder
 	llm             llm.Provider
+	ctxEngine       provider.ContextEngine
 	memHooks        MemoryRecorder
 	learnEngine     LearningRecorder
 	gitOps          GitOpsClient
@@ -115,6 +117,12 @@ func WithWorkspaceRetention(retention, interval time.Duration) Option {
 func WithLLMProvider(provider llm.Provider) Option {
 	return func(o *Orchestrator) {
 		o.llm = provider
+	}
+}
+
+func WithContextEngine(engine provider.ContextEngine) Option {
+	return func(o *Orchestrator) {
+		o.ctxEngine = engine
 	}
 }
 

@@ -68,7 +68,7 @@ auto_code_os/
 │   ├── features/           # Feature-specific documentation (§5.1-§5.11)
 │   └── references/         # Learning reports & external project analysis
 │
-├── resources/              # Open-source reference projects (git cloned)
+├── references/              # Open-source reference projects (git cloned)
 │
 ├── docker-compose.yml      # Local dev environment
 ├── .env.example            # Environment variables template
@@ -308,7 +308,7 @@ auto_code_os/
 
 ## 8. Reference Projects
 
-> See `resources/` directory and `docs/ROADMAP.md` for full details.
+> See `references/` directory and `docs/ROADMAP.md` for full details.
 
 | Layer                | Reference Projects                           |
 | :------------------- | :------------------------------------------- |

@@ -184,3 +184,55 @@ func MyActualLogic() {
 	}
 }
 
+func TestGetRepoMapTokenPruningAndBuffing(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheDb := filepath.Join(tmpDir, "cache.db")
+	taskWS := filepath.Join(tmpDir, "task1")
+	codeRepoDir := filepath.Join(taskWS, "code", "repos", "app")
+	err := os.MkdirAll(codeRepoDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create 10 files
+	for i := 0; i < 10; i++ {
+		content := fmt.Sprintf("package main\n\nfunc Function%d() {}\n", i)
+		err := os.WriteFile(filepath.Join(codeRepoDir, fmt.Sprintf("file_%d.go", i)), []byte(content), 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	provider, err := NewProvider(tmpDir, cacheDb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	ctx := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
+
+	// Test 1: Restrict budget to very small tokens, should return minimal string
+	maxTokensSmall := 20
+	repoMapSmall, err := provider.GetRepoMap(ctx, []string{}, maxTokensSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repoMapSmall) > maxTokensSmall*8 { // Assuming approx 1 token = 4-8 chars
+		t.Errorf("Repo map exceeded small token budget. Got %d bytes", len(repoMapSmall))
+	}
+
+	// Test 2: Task Dependency Buffing
+	// We specifically buff file_9.go which normally has the same PageRank as others.
+	activeFiles := []string{"code/repos/app/file_9.go"}
+	repoMapBuffed, err := provider.GetRepoMap(ctx, activeFiles, maxTokensSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Because of buffing, file_9.go MUST be included even in a highly restricted token budget
+	if !strings.Contains(repoMapBuffed, "file_9.go") {
+		t.Errorf("Buffed task dependency (file_9.go) was not prioritized in the pruned repo map:\n%s", repoMapBuffed)
+	}
+}
+
+

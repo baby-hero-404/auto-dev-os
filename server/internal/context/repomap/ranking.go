@@ -97,5 +97,12 @@ func (g *DependencyGraph) CalculatePageRank(activeFiles []string) map[string]flo
 		result[filepath] = rank
 	}
 	
+	// 6. Apply massive multiplier (50x) for active files to prioritize them
+	for _, f := range activeFiles {
+		if _, exists := result[f]; exists {
+			result[f] *= 50.0
+		}
+	}
+	
 	return result
 }

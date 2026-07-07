@@ -2,8 +2,8 @@
 
 # Ensure we're in the project root by resolving the script path
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$PROJECT_ROOT/resources"
-cd "$PROJECT_ROOT/resources" || exit
+mkdir -p "$PROJECT_ROOT/references"
+cd "$PROJECT_ROOT/references" || exit
 
 clone_repo() {
     local url=$1

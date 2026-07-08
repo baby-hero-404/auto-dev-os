@@ -49,7 +49,7 @@ func (m *Manager) Validate(ctx context.Context, task *models.Task, patchData str
 	}
 
 	var errs []error
-	for _, vErr := range engine.Validate(patchData, basePath) {
+	for _, vErr := range engine.Validate(ctx, patchData, basePath) {
 		errs = append(errs, fmt.Errorf("%s: %s", vErr.Filepath, vErr.Reason))
 	}
 	return errs

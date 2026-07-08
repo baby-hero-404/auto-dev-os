@@ -58,6 +58,7 @@ func TestAnalyzeStep_SkipsWhenReady(t *testing.T) {
 		&mockLogger{},
 		nil, // wkspace
 		nil, // containerPath
+		8.0, // maxCost
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -137,6 +138,7 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
 		&mockLogger{},
 		nil, // wkspace
 		nil, // containerPath
+		8.0, // maxCost
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})

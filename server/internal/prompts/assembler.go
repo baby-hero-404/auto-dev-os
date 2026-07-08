@@ -288,7 +288,11 @@ func (a *PromptAssembler) systemPrompt(ctx context.Context, task models.Task, ag
 	if a.promptPaths != nil && a.fs != nil {
 		corePromptFile := a.promptPaths.CorePrompt("system_prompt.md")
 		if content, err := a.fs.ReadFile(corePromptFile); err == nil && strings.TrimSpace(string(content)) != "" {
-			parts = append(parts, "# Base System Prompt\n"+string(content))
+			cStr := string(content)
+			if !strings.HasPrefix(strings.TrimSpace(cStr), "# Base System Prompt") {
+				cStr = "# Base System Prompt\n" + cStr
+			}
+			parts = append(parts, cStr)
 		}
 	}
 

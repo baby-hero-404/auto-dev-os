@@ -122,14 +122,14 @@ func TestOrchestrator_StepAnalyze(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
 				}
-				if !strings.Contains(err.Error(), "exceeded max iterations") {
-					t.Fatalf("expected max iterations error, got %v", err)
+				if !strings.Contains(err.Error(), "workflow paused for human spec review due to fallback from malformed analyzer output") {
+					t.Fatalf("expected pause error, got %v", err)
 				}
-				if task.SpecStatus != models.TaskSpecStatusDraft {
-					t.Errorf("expected spec status Draft, got %s", task.SpecStatus)
+				if task.SpecStatus != models.TaskSpecStatusPendingReview {
+					t.Errorf("expected spec status PendingReview, got %s", task.SpecStatus)
 				}
-				if task.Status != models.TaskStatusAnalyzing {
-					t.Errorf("expected task status Analyzing, got %s", task.Status)
+				if task.Status != models.TaskStatusSpecReview {
+					t.Errorf("expected task status SpecReview, got %s", task.Status)
 				}
 			},
 		},

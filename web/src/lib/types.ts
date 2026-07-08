@@ -181,6 +181,7 @@ export type TaskAnalysis = {
   execution_boundaries?: ExecutionBoundary[];
   expanded_boundaries?: ExpandedBoundary[];
   execution_units?: ExecutionUnit[];
+  execution_phases?: ExecutionPhase[];
 };
 
 export type WorkflowArtifact = {

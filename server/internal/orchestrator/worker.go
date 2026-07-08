@@ -329,6 +329,20 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		if errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
 			finalStatus = models.WorkflowJobStatusPaused
 			finalErr = err.Error()
+		} else if errors.Is(err, context.Canceled) {
+			// Check database state to see if it was paused or cancelled by user
+			if latestJob, jErr := o.workflows.LatestByTaskID(context.Background(), task.ID); jErr == nil && latestJob != nil {
+				if latestJob.Status == models.WorkflowJobStatusPaused {
+					finalStatus = models.WorkflowJobStatusPaused
+					finalErr = "workflow paused by user"
+				} else {
+					finalStatus = models.WorkflowJobStatusFailed
+					finalErr = "workflow cancelled by user"
+				}
+			} else {
+				finalStatus = models.WorkflowJobStatusFailed
+				finalErr = "workflow context cancelled"
+			}
 		} else {
 			finalStatus = models.WorkflowJobStatusFailed
 			finalErr = err.Error()
@@ -366,13 +380,13 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 
 	if err != nil {
-		if errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
+		if errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) || finalStatus == models.WorkflowJobStatusPaused {
 			cleanupCtx := context.WithoutCancel(ctx)
-			_, _ = o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusPaused, "last_error": err.Error()})
-			o.log(cleanupCtx, task.ID, &job.ID, "info", err.Error())
+			_, _ = o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusPaused, "last_error": finalErr})
+			o.log(cleanupCtx, task.ID, &job.ID, "info", finalErr)
 			return
 		}
-		o.fail(ctx, job, err)
+		o.fail(ctx, job, fmt.Errorf("%s", finalErr))
 		return
 	}
 	cleanupCtx := context.WithoutCancel(ctx)

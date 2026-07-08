@@ -157,6 +157,28 @@ export function useTaskWorkflow(taskID: string) {
     setIsRequestingChanges(true);
   }
 
+  async function pause() {
+    if (!token) return;
+    setError("");
+    try {
+      await api.pauseTask(taskID, token);
+      await mutateWorkflow();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to pause workflow");
+    }
+  }
+
+  async function cancel() {
+    if (!token) return;
+    setError("");
+    try {
+      await api.cancelTask(taskID, token);
+      await mutateWorkflow();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to cancel workflow");
+    }
+  }
+
   async function deleteTask() {
     if (!token) return false;
     setError("");
@@ -200,6 +222,8 @@ export function useTaskWorkflow(taskID: string) {
     execute,
     analyze,
     retry,
+    pause,
+    cancel,
     approveSpec,
     requestSpecChanges,
     submitSpecChanges,

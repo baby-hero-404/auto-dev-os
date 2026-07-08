@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Play, Trash2 } from "lucide-react";
+import { Sparkles, Play, Trash2, Pause, Ban } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useTaskDetail } from "./TaskDetailContext";
 
@@ -21,6 +21,8 @@ export function TaskActions() {
     retry,
     analyze,
     execute,
+    pause,
+    cancel,
     deleteTask,
   } = useTaskDetail();
 
@@ -71,8 +73,12 @@ export function TaskActions() {
   const attemptsCount = workflow?.job?.attempts ?? 0;
   const filesCount = displayFiles.length;
 
+  const jobStatus = workflow?.job?.status?.toLowerCase();
+  const canPause = jobStatus === "running";
+  const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
+
   return (
-    <div className="flex shrink-0 flex-col gap-3 rounded-lg border border-stroke bg-background p-3 xl:w-72">
+    <div className="rounded-xl border border-stroke bg-card p-5 shadow-sm flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-medium text-content-muted">Workflow progress</span>
         <span className="font-mono text-sm font-semibold text-foreground">{workflowCompletion}%</span>
@@ -134,6 +140,26 @@ export function TaskActions() {
           >
             <Play size={15} fill="currentColor" />
             Resume
+          </button>
+        )}
+        {task && canPause && (
+          <button
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-stroke bg-card px-3 py-2 text-sm font-semibold text-foreground transition hover:bg-surface shadow-sm cursor-pointer"
+            onClick={pause}
+            type="button"
+          >
+            <Pause size={15} />
+            Pause
+          </button>
+        )}
+        {task && canCancel && (
+          <button
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm font-semibold text-danger transition hover:bg-danger/20 cursor-pointer shadow-sm"
+            onClick={cancel}
+            type="button"
+          >
+            <Ban size={15} />
+            Close Task
           </button>
         )}
         {task && (

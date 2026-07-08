@@ -47,12 +47,18 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 				break
 			}
 			claimed = true
+			jobCtx, cancel := context.WithCancel(ctx)
+			o.jobCancels.Store(job.ID, cancel)
 			o.wg.Add(1)
-			go func(jobID string) {
+			go func(jobID string, jCtx context.Context, cFunc context.CancelFunc) {
 				defer o.wg.Done()
-				defer func() { <-sem }()
-				o.run(ctx, jobID)
-			}(job.ID)
+				defer func() {
+					<-sem
+					o.jobCancels.Delete(jobID)
+					cFunc()
+				}()
+				o.run(jCtx, jobID)
+			}(job.ID, jobCtx, cancel)
 		}
 
 	wait:
@@ -62,6 +68,7 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 		select {
 		case <-ctx.Done():
 			return
+		case <-o.wakeChan:
 		case <-ticker.C:
 			_ = o.workflows.ResetStuckJobs(ctx)
 		}

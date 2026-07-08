@@ -36,6 +36,7 @@ type AnalyzeStep struct {
 	log           Logger
 	wkspace       WorkspaceLoader
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+	maxCost       float64
 }
 
 func NewAnalyzeStep(
@@ -53,6 +54,7 @@ func NewAnalyzeStep(
 	log Logger,
 	wkspace WorkspaceLoader,
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+	maxCost float64,
 ) *AnalyzeStep {
 	return &AnalyzeStep{
 		rt:            rt,
@@ -69,6 +71,7 @@ func NewAnalyzeStep(
 		log:           log,
 		wkspace:       wkspace,
 		containerPath: containerPath,
+		maxCost:       maxCost,
 	}
 }
 
@@ -134,8 +137,8 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 		if loopErr == nil {
 			loopErr = fmt.Errorf("LLM returned empty or nil spec JSON")
 		}
-		s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("agent failed to output a final spec JSON: %v", loopErr))
-		return models.TaskAnalysis{}, false, fmt.Errorf("analyze step failed: %w", loopErr)
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("agent failed to output a valid final spec JSON after retry iterations: %v. Falling back to human review spec.", loopErr))
+		return deriveWorkflowAnalysis(s.rt.Task), true, nil
 	}
 
 	return parseAnalysisFinal(parsedFinal), false, nil
@@ -314,6 +317,27 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 				Content: fmt.Sprintf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", ")),
 			})
 			continue
+		}
+
+		// Option B+: Validate DAG and Cost Constraints deterministically during planning loop
+		analysisDraft := parseAnalysisFinal(parsedJSON)
+		if len(analysisDraft.ExecutionUnits) > 0 {
+			if errVal := policy.ValidateDAG(analysisDraft.ExecutionUnits, s.maxCost); errVal != nil {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: proposed execution plan failed DAG/cost validation: %v", i+1, errVal))
+				content := resp.Content
+				if content == "" {
+					content = "(empty response)"
+				}
+				messages = append(messages, llm.Message{
+					Role:    "assistant",
+					Content: content,
+				})
+				messages = append(messages, llm.Message{
+					Role:    "user",
+					Content: fmt.Sprintf("Your proposed execution plan failed DAG/cost validation checks. Error: %v\n\nPlease adjust the execution_units array by splitting units that exceed the cost limit (limit is %.1f, migration task is cost 5, file creation is cost 2, file modify is cost 1, plus max_risk multiplier). Ensure each unit is small, touches a maximum of 3-4 files, and has no cyclic dependencies. Re-output the corrected JSON specification.", errVal, s.maxCost),
+				})
+				continue
+			}
 		}
 
 		return parsedJSON, nil

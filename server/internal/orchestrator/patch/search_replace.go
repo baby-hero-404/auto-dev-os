@@ -105,7 +105,12 @@ func ApplySearchReplace(blocks []EditBlock, basePath string) error {
 	}
 
 	for relPath, fileBlocks := range blocksByFile {
-		fullPath := filepath.Join(basePath, relPath)
+		var fullPath string
+		if basePath == "" {
+			fullPath = relPath
+		} else {
+			fullPath = filepath.Join(basePath, relPath)
+		}
 		contentBytes, err := os.ReadFile(fullPath)
 		var content string
 		if err != nil {

@@ -56,18 +56,27 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 		rootDir = wsRoot
 	}
 
+	var pathCtx *paths.AgentPathContext
+	if actx, ok := ctx.Value(paths.AgentPathContextKey).(*paths.AgentPathContext); ok {
+		pathCtx = actx
+	}
+
 	// Option B: Safety Check to prevent scanning the global workspace directory.
 	// If the requested rootDir is the same as the configured global rootDir, skip scanning.
-	if rootDir == p.rootDir {
+	if rootDir == p.rootDir && pathCtx == nil {
 		return "", nil
 	}
 
 	// Only scan under 'code/repos' if it exists to isolate repository files from task metadata.
 	scanDir := rootDir
-	wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
-	reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
-	if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
-		scanDir = reposDir
+	if pathCtx != nil {
+		scanDir = pathCtx.PhysicalRoot()
+	} else {
+		wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
+		reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
+		if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
+			scanDir = reposDir
+		}
 	}
 
 	// 1. Source Discovery
@@ -90,10 +99,20 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 
 		// Rewrite filepath to be relative to the task rootDir so that the returned repo map
 		// references files clean and relative (e.g. 'code/repos/my_repo/main/main.go')
-		relPath, err := filepath.Rel(rootDir, f.Filepath)
-		if err == nil {
+		var relPath string
+		var relErr error
+		if pathCtx != nil {
+			relPath, relErr = pathCtx.ToLogical(f.Filepath)
+		} else {
+			relPath, relErr = filepath.Rel(rootDir, f.Filepath)
+			if relErr == nil {
+				relPath = filepath.ToSlash(relPath)
+			}
+		}
+
+		if relErr == nil {
 			for i := range tags {
-				tags[i].Filepath = filepath.ToSlash(relPath)
+				tags[i].Filepath = relPath
 			}
 		}
 
@@ -160,6 +179,11 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 		rootDir = wsRoot
 	}
 
+	var pathCtx *paths.AgentPathContext
+	if actx, ok := ctx.Value(paths.AgentPathContextKey).(*paths.AgentPathContext); ok {
+		pathCtx = actx
+	}
+
 	var snippets []models.ContextSnippet
 	for _, t := range tags {
 		lines, err := readLines(t.Filepath)
@@ -180,11 +204,21 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 		}
 
 		content := strings.Join(lines[startLine-1:endLine], "\n")
-		relPath, _ := filepath.Rel(rootDir, t.Filepath)
-		if relPath == "" {
+		
+		var relPath string
+		var relErr error
+		if pathCtx != nil {
+			relPath, relErr = pathCtx.ToLogical(t.Filepath)
+		} else {
+			relPath, relErr = filepath.Rel(rootDir, t.Filepath)
+			if relErr == nil {
+				relPath = filepath.ToSlash(relPath)
+			}
+		}
+
+		if relErr != nil || relPath == "" {
 			relPath = t.Filepath
 		}
-		relPath = filepath.ToSlash(relPath)
 
 		snippets = append(snippets, models.ContextSnippet{
 			Source:    "filesystem",

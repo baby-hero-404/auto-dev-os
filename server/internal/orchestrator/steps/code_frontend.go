@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"path/filepath"
+
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // FrontendAgentAssigner defines the optional hook to assign a role-specific frontend agent.
@@ -164,19 +167,36 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	}
 
 	instructionBase := "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.\nIMPORTANT: For the patch text, you MUST generate a valid Unified Diff. Ensure that your hunk headers (@@) have the exact correct line counts matching the original file."
-	
+
+	var pathCtx *paths.AgentPathContext
 	repoContext := ""
 	if s.workspace != nil {
 		if ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task); ws != nil {
+			var physicalRoot string
+			var useRepoPrefix bool
+			var repoName string
+			role := "frontend"
+
 			if len(ws.Repos) == 1 {
+				repoName = ws.Repos[0].Name
+				useRepoPrefix = false
+				if t != nil && t.Complexity == models.TaskComplexityEasy {
+					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoMain(s.rt.Task.ID, repoName, "").String()
+				} else {
+					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoWorktreeDir(s.rt.Task.ID, repoName, role).String()
+				}
 				repoContext = " Your diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
-			} else if len(ws.Repos) > 1 {
+			} else {
+				useRepoPrefix = true
+				physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).CodeRoot(s.rt.Task.ID).String()
 				var names []string
 				for _, r := range ws.Repos {
 					names = append(names, r.Name)
 				}
 				repoContext = fmt.Sprintf(" You are working on multiple repositories: %s. Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath).", strings.Join(names, ", "))
 			}
+			pathCtx = paths.NewAgentPathContext(physicalRoot, useRepoPrefix, repoName, role)
+			ctx = context.WithValue(ctx, paths.AgentPathContextKey, pathCtx)
 		}
 	}
 	if repoContext == "" {

@@ -81,7 +81,10 @@ function TaskDetailContent() {
           </div>
         )}
 
-        {workflow?.job?.status === "paused" && workflow?.job?.last_error && (
+        {workflow?.job?.status === "paused" && 
+         workflow?.job?.last_error && 
+         !workflow.job.last_error.includes("workflow paused for human spec review") &&
+         !workflow.job.last_error.includes("workflow paused for human task clarification") && (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 flex flex-col gap-2" role="alert">
             <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
               <AlertCircle size={16} className="shrink-0 text-amber-500" />
@@ -162,14 +165,30 @@ function BoundaryResolutionControls({
   const [submitting, setSubmitting] = useState(false);
 
   // Parse violated files
-  const match = errorMsg.match(/unauthorized file modifications:\s*\[(.*?)\]/);
-  const violatedFiles = match && match[1] ? match[1].split(/\s+/).filter(Boolean) : [];
+  let violatedFiles: string[] = [];
+  const matchUnauthorized = errorMsg.match(/unauthorized file modifications:\s*\[(.*?)\]/);
+  const matchCritical = errorMsg.match(/modification to infrastructure\/security-sensitive file:\s*"(.*?)"/);
+  const matchRepeated = errorMsg.match(/repeated boundary violations:\s*(.*)/);
 
-  if (violatedFiles.length === 0) {
-    return null;
+  if (matchUnauthorized && matchUnauthorized[1]) {
+    violatedFiles = matchUnauthorized[1].split(/\s+/).filter(Boolean);
+  } else if (matchCritical && matchCritical[1]) {
+    violatedFiles = [matchCritical[1]];
+  } else if (matchRepeated && matchRepeated[1]) {
+    const inner = matchRepeated[1];
+    const innerMatch = inner.match(/unauthorized file modifications:\s*\[(.*?)\]/);
+    if (innerMatch && innerMatch[1]) {
+      violatedFiles = innerMatch[1].split(/\s+/).filter(Boolean);
+    } else {
+      const innerCritical = inner.match(/modification to infrastructure\/security-sensitive file:\s*"(.*?)"/);
+      if (innerCritical && innerCritical[1]) {
+        violatedFiles = [innerCritical[1]];
+      }
+    }
   }
 
   const handleApprove = async () => {
+    if (violatedFiles.length === 0) return;
     setSubmitting(true);
     try {
       const newBoundaries = violatedFiles.map((file) => {
@@ -227,7 +246,10 @@ function BoundaryResolutionControls({
     try {
       const currentAnalysis = task?.analysis || {};
       const currentRules = currentAnalysis.task_rules || [];
-      const updatedRules = [...currentRules, `Do not modify these files: ${violatedFiles.join(", ")}. Guidance: ${feedback.trim()}`];
+      const feedbackLine = violatedFiles.length > 0 
+        ? `Do not modify these files: ${violatedFiles.join(", ")}. Guidance: ${feedback.trim()}`
+        : `Guidance: ${feedback.trim()}`;
+      const updatedRules = [...currentRules, feedbackLine];
 
       const updatedAnalysis = {
         ...currentAnalysis,
@@ -248,57 +270,65 @@ function BoundaryResolutionControls({
 
   return (
     <div className="mt-3 flex flex-col gap-4 border-t border-amber-500/25 pt-3 text-slate-800 dark:text-slate-100">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-400 mb-1">
-          Violating Files:
+      {violatedFiles.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-400 mb-1">
+            Violating Files:
+          </div>
+          <ul className="list-inside list-disc pl-1 text-xs font-mono space-y-0.5 text-amber-900 dark:text-amber-100">
+            {violatedFiles.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
         </div>
-        <ul className="list-inside list-disc pl-1 text-xs font-mono space-y-0.5 text-amber-900 dark:text-amber-100">
-          {violatedFiles.map((f) => (
-            <li key={f}>{f}</li>
-          ))}
-        </ul>
-      </div>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
         {/* Option 1: Expand Boundaries */}
-        <div className="flex-1 flex flex-col justify-between rounded-lg border border-amber-500/10 bg-amber-500/5 p-3">
-          <div className="mb-2">
-            <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">
-              Option A: Approve Edits
-            </h4>
-            <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-              Authorize the agent to edit these directories by automatically appending them to the task's execution boundaries.
-            </p>
+        {violatedFiles.length > 0 && (
+          <div className="flex-1 flex flex-col justify-between rounded-lg border border-amber-500/10 bg-amber-500/5 p-3">
+            <div className="mb-2">
+              <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">
+                Option A: Approve Edits
+              </h4>
+              <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
+                Authorize the agent to edit these directories by automatically appending them to the task's execution boundaries.
+              </p>
+            </div>
+            <button
+              onClick={handleApprove}
+              disabled={submitting}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm mt-1"
+            >
+              {submitting ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Check size={13} />
+              )}
+              Approve & Expand Boundaries
+            </button>
           </div>
-          <button
-            onClick={handleApprove}
-            disabled={submitting}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm mt-1"
-          >
-            {submitting ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Check size={13} />
-            )}
-            Approve & Expand Boundaries
-          </button>
-        </div>
+        )}
 
         {/* Option 2: Block & Feedback */}
-        <div className="flex-[1.5] flex flex-col rounded-lg border border-amber-500/10 bg-amber-500/5 p-3">
+        <div className={violatedFiles.length > 0 ? "flex-[1.5] flex flex-col rounded-lg border border-amber-500/10 bg-amber-500/5 p-3" : "w-full flex flex-col rounded-lg border border-amber-500/10 bg-amber-500/5 p-3"}>
           <div className="mb-2">
             <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">
-              Option B: Block & Provide Guidance
+              {violatedFiles.length > 0 ? "Option B: Block & Provide Guidance" : "Provide Guidance & Retry"}
             </h4>
             <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-              Prevent changes to these files. Instruct the agent on what to do instead (e.g., use mock data or existing functions).
+              {violatedFiles.length > 0 
+                ? "Prevent changes to these files. Instruct the agent on what to do instead (e.g., use mock data or existing functions)."
+                : "Instruct the agent on how to adjust its strategy (e.g., focus on a specific module or avoid a file path)."}
             </p>
           </div>
           <div className="flex flex-col gap-2 mt-1">
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="e.g., Do not create sqlite/repository.go, use existing database functions instead."
+              placeholder={violatedFiles.length > 0 
+                ? "e.g., Do not create sqlite/repository.go, use existing database functions instead."
+                : "e.g., Focus on creating the test file first, do not touch the main config files."}
               rows={2}
               className="w-full rounded border border-amber-500/20 bg-background/50 p-1.5 text-xs font-sans placeholder:opacity-60 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />

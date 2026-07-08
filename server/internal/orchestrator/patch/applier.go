@@ -63,6 +63,44 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 	// Split patch by repository using the new normalized split helper
 	repoPatches := r.SplitPatchByRepoWithWorkspace(patchText, ws, role)
 
+	// Validate paths via AgentPathContext if present
+	var pathCtx *paths.AgentPathContext
+	if actx, ok := ctx.Value(paths.AgentPathContextKey).(*paths.AgentPathContext); ok {
+		pathCtx = actx
+	}
+	if pathCtx != nil {
+		for repoName, repoPatchText := range repoPatches {
+			lines := strings.Split(repoPatchText, "\n")
+			for _, line := range lines {
+				var file string
+				if strings.HasPrefix(line, "--- ") {
+					file = strings.TrimPrefix(line, "--- ")
+					file = strings.TrimSpace(file)
+					file = strings.TrimPrefix(file, "a/")
+				} else if strings.HasPrefix(line, "+++ ") {
+					file = strings.TrimPrefix(line, "+++ ")
+					file = strings.TrimSpace(file)
+					file = strings.TrimPrefix(file, "b/")
+				}
+				if file != "" && file != "/dev/null" {
+					logicalFile := file
+					if pathCtx.UseRepoPrefix && repoName != "" && !strings.HasPrefix(logicalFile, repoName+"/") {
+						logicalFile = repoName + "/" + logicalFile
+					}
+					_, err := pathCtx.ToPhysical(logicalFile)
+					if err != nil {
+						return &PolicyViolationError{
+							Severity:   SeverityCritical,
+							ErrorMsg:   fmt.Sprintf("security boundary violation: %v", err),
+							Reason:     "unauthorized_path",
+							Violations: []string{logicalFile},
+						}
+					}
+				}
+			}
+		}
+	}
+
 	isRestore := strings.HasSuffix(stepID, "_restore")
 	allowedNewFiles := make(map[string]bool)
 	if task.Analysis != nil && !isRestore {

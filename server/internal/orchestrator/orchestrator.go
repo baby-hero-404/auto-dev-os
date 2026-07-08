@@ -40,12 +40,24 @@ type Orchestrator struct {
 	wg              sync.WaitGroup
 	lockCancels     sync.Map
 	lockConns       sync.Map
+	jobCancels      sync.Map
 	wkspace         *wkspace.Manager
 	checkpoints     *checkpoint.Store
 	repoutil        *repoutil.Manager
 	llmTraceEnabled bool
 	llmLogLevel     string
 	maxPhaseCost    float64
+	wakeChan        chan struct{}
+}
+
+func (o *Orchestrator) wake() {
+	if o.wakeChan == nil {
+		return
+	}
+	select {
+	case o.wakeChan <- struct{}{}:
+	default:
+	}
 }
 
 // WorkspaceRetention configures how long completed workspaces are kept.
@@ -148,6 +160,7 @@ func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager 
 		retention:       defaultWorkspaceRetention(),
 		llmTraceEnabled: true,
 		llmLogLevel:     "debug",
+		wakeChan:        make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -181,6 +194,7 @@ func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.Work
 			}
 		}
 		o.log(ctx, taskID, &job.ID, "info", "paused workflow job resumed")
+		o.wake()
 		return updated, nil
 	}
 
@@ -195,6 +209,7 @@ func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.Work
 		return nil, err
 	}
 	o.log(ctx, taskID, &job.ID, "info", "workflow job queued")
+	o.wake()
 	return job, nil
 }
 
@@ -220,6 +235,7 @@ func (o *Orchestrator) RetryFromLastStep(ctx context.Context, taskID string) (*m
 		return nil, err
 	}
 	o.log(ctx, taskID, &job.ID, "info", "workflow retried from last successful checkpoint")
+	o.wake()
 	return job, nil
 }
 
@@ -356,5 +372,60 @@ func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) 
 	}
 	return nil
 }
+
+// PauseJob pauses the running workflow job for a task.
+func (o *Orchestrator) PauseJob(ctx context.Context, taskID string) error {
+	job, err := o.workflows.LatestByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if job.Status != models.WorkflowJobStatusRunning {
+		return fmt.Errorf("job is not running (status: %s)", job.Status)
+	}
+
+	_, err = o.workflows.UpdateJob(ctx, job.ID, map[string]any{"status": models.WorkflowJobStatusPaused})
+	if err != nil {
+		return err
+	}
+
+	if cancelVal, ok := o.jobCancels.Load(job.ID); ok {
+		if cancel, ok := cancelVal.(context.CancelFunc); ok {
+			cancel()
+		}
+	}
+
+	o.wake()
+	return nil
+}
+
+// CancelJob cancels/closes the running workflow job for a task.
+func (o *Orchestrator) CancelJob(ctx context.Context, taskID string) error {
+	job, err := o.workflows.LatestByTaskID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if job.Status != models.WorkflowJobStatusRunning && job.Status != models.WorkflowJobStatusQueued && job.Status != models.WorkflowJobStatusPaused {
+		return fmt.Errorf("job is not running, queued, or paused (status: %s)", job.Status)
+	}
+
+	_, err = o.workflows.UpdateJob(ctx, job.ID, map[string]any{"status": models.WorkflowJobStatusFailed, "last_error": "cancelled by user"})
+	if err != nil {
+		return err
+	}
+
+	if _, err := o.updateTaskStatus(ctx, taskID, models.TaskStatusFailed); err != nil {
+		return err
+	}
+
+	if cancelVal, ok := o.jobCancels.Load(job.ID); ok {
+		if cancel, ok := cancelVal.(context.CancelFunc); ok {
+			cancel()
+		}
+	}
+
+	o.wake()
+	return nil
+}
+
 
 

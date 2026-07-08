@@ -3,6 +3,7 @@
 import { useMemo, useCallback } from "react";
 import { Bot, Clock } from "lucide-react";
 import { useTaskDetail, formatStepName } from "./TaskDetailContext";
+import { TaskActions } from "./TaskActions";
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -17,6 +18,7 @@ export function WorkflowSidebar() {
   const {
     task,
     workflow,
+    analysisData,
   } = useTaskDetail();
 
   const checkpointsList = useMemo(() => {
@@ -30,6 +32,7 @@ export function WorkflowSidebar() {
 
   return (
     <aside className="space-y-6">
+      <TaskActions />
       <div className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
         <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-3">
           <Bot size={16} className="text-brand-primary" />
@@ -55,7 +58,7 @@ export function WorkflowSidebar() {
               <div className="absolute left-[-2px] top-2.5 size-[11px] rounded-full border-2 border-card bg-brand-primary ring-2 ring-transparent group-hover:ring-brand-primary/30 transition-all" />
               <div className="rounded-lg border border-stroke bg-surface/40 p-2.5 hover:bg-surface/80 transition-colors shadow-sm">
                 <div className="font-mono text-[11px] font-bold text-brand-primary capitalize tracking-wide">
-                  {formatStepName(checkpoint.step)}
+                  {formatStepName(checkpoint.step, analysisData)}
                 </div>
                 <div className="text-[10px] text-content-muted mt-1 font-medium">
                   {new Date(checkpoint.created_at).toLocaleString()}

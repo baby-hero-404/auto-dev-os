@@ -116,6 +116,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		&mockLogger{},
 		&mockWorkspaceLoader{ws: ws},
 		containerPathFn,
+		8.0,
 	)
 
 	files, err := step.listAnalyzeFiles(context.Background())
@@ -211,6 +212,7 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 		&mockLogger{},
 		&mockWorkspaceLoader{ws: ws},
 		containerPathFn,
+		8.0,
 	)
 
 	files, err := step.listAnalyzeFiles(context.Background())

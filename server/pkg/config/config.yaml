@@ -53,7 +53,7 @@ sandbox:
 worker:
   enabled: true
   interval_ms: 30000
-  concurrency: 1
+  concurrency: 2
   max_phase_cost: 30.0
 
 telemetry:

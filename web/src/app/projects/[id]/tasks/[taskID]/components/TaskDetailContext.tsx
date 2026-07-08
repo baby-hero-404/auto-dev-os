@@ -129,32 +129,64 @@ function parseTasksMD(tasksMD: string | undefined): { backend: string[]; fronten
   return result;
 }
 
-export function formatStepName(step: string): string {
+export function formatStepName(step: string, analysisData?: any): string {
   if (step.startsWith("code_backend_")) {
     const parsedIdx = Number(step.substring("code_backend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const beUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "frontend" && (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "fe"
+      );
+      if (beUnits[parsedIdx]?.objective) {
+        return beUnits[parsedIdx].objective;
+      }
+    }
     const idx = isNaN(parsedIdx) ? 1 : parsedIdx + 1;
     return `be subtask ${idx}`;
   }
   if (step.startsWith("code_frontend_")) {
     const parsedIdx = Number(step.substring("code_frontend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const feUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") === "frontend" || (unit.execution_profile?.agent?.toLowerCase() || "backend") === "fe"
+      );
+      if (feUnits[parsedIdx]?.objective) {
+        return feUnits[parsedIdx].objective;
+      }
+    }
     const idx = isNaN(parsedIdx) ? 1 : parsedIdx + 1;
     return `fe subtask ${idx}`;
   }
   return step.replace(/_/g, " ");
 }
 
-export function getStepDescription(step: string): string {
+export function getStepDescription(step: string, analysisData?: any): string {
   if (step === WORKFLOW_STEPS.CONTEXT_LOAD) return "Load codebase structure, dependencies, and code patterns.";
   if (step === WORKFLOW_STEPS.ANALYZE) return "Analyze the request requirements and suggest high-level steps.";
   if (step === WORKFLOW_STEPS.PLAN) return "Break down the task into specific, sequential subtasks.";
   if (step.startsWith("code_backend_")) {
     const parsedIdx = Number(step.substring("code_backend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const beUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "frontend" && (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "fe"
+      );
+      if (beUnits[parsedIdx]) {
+        return beUnits[parsedIdx].objective;
+      }
+    }
     const idx = isNaN(parsedIdx) ? 1 : parsedIdx + 1;
     return `Implement backend subtask ${idx} in an isolated sandbox environment.`;
   }
   if (step === WORKFLOW_STEPS.CODE_BACKEND) return "Implement backend business logic, db models, and controllers.";
   if (step.startsWith("code_frontend_")) {
     const parsedIdx = Number(step.substring("code_frontend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const feUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") === "frontend" || (unit.execution_profile?.agent?.toLowerCase() || "backend") === "fe"
+      );
+      if (feUnits[parsedIdx]) {
+        return feUnits[parsedIdx].objective;
+      }
+    }
     const idx = isNaN(parsedIdx) ? 1 : parsedIdx + 1;
     return `Implement frontend UI subtask ${idx} in an isolated sandbox environment.`;
   }
@@ -165,6 +197,32 @@ export function getStepDescription(step: string): string {
   if (step === WORKFLOW_STEPS.TEST) return "Execute unit tests, integration tests, and check exit status.";
   if (step === WORKFLOW_STEPS.PR) return "Generate pull request description and submit changes.";
   return "Workflow execution step.";
+}
+
+export function getStepTasks(step: string, analysisData?: any): string[] {
+  if (step.startsWith("code_backend_")) {
+    const parsedIdx = Number(step.substring("code_backend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const beUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "frontend" && (unit.execution_profile?.agent?.toLowerCase() || "backend") !== "fe"
+      );
+      if (beUnits[parsedIdx]?.tasks) {
+        return beUnits[parsedIdx].tasks;
+      }
+    }
+  }
+  if (step.startsWith("code_frontend_")) {
+    const parsedIdx = Number(step.substring("code_frontend_".length));
+    if (!isNaN(parsedIdx) && analysisData?.execution_units) {
+      const feUnits = analysisData.execution_units.filter(
+        (unit: any) => (unit.execution_profile?.agent?.toLowerCase() || "backend") === "frontend" || (unit.execution_profile?.agent?.toLowerCase() || "backend") === "fe"
+      );
+      if (feUnits[parsedIdx]?.tasks) {
+        return feUnits[parsedIdx].tasks;
+      }
+    }
+  }
+  return [];
 }
 
 interface TaskDetailContextType {
@@ -186,6 +244,8 @@ interface TaskDetailContextType {
   execute: () => Promise<void>;
   analyze: () => Promise<void>;
   retry: () => Promise<void>;
+  pause: () => Promise<void>;
+  cancel: () => Promise<void>;
   approveSpec: () => Promise<void>;
   requestSpecChanges: () => void;
   submitSpecChanges: () => Promise<void>;
@@ -263,6 +323,8 @@ export function TaskDetailProvider({
     execute,
     analyze,
     retry,
+    pause,
+    cancel,
     approveSpec,
     requestSpecChanges,
     submitSpecChanges,
@@ -563,6 +625,8 @@ export function TaskDetailProvider({
         execute,
         analyze,
         retry,
+        pause,
+        cancel,
         approveSpec,
         requestSpecChanges,
         submitSpecChanges,

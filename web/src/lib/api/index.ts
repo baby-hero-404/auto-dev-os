@@ -48,6 +48,8 @@ export const api = {
   clarifyTask: projects.tasks.clarify,
   executeTask: projects.tasks.execute,
   retryTask: projects.tasks.retry,
+  pauseTask: projects.tasks.pause,
+  cancelTask: projects.tasks.cancel,
   taskWorkflow: projects.tasks.workflow,
   taskLogs: projects.tasks.logs,
   approveTaskWorkflow: projects.tasks.approveWorkflow,

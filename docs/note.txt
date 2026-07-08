@@ -1,0 +1,6 @@
+ollama run qwen2.5-coder:14b
+ollama run qwen3-coder
+
+ollama launch claude --model qwen2.5-coder:14b
+export OLLAMA_CONTEXT_LENGTH=32768 && ollama launch claude --model qwen3-coder
+

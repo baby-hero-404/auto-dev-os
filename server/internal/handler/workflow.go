@@ -79,6 +79,24 @@ func (h *WorkflowHandler) Retry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+func (h *WorkflowHandler) Pause(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	if err := h.orch.PauseJob(r.Context(), taskID); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{"status": "paused"})
+}
+
+func (h *WorkflowHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	if err := h.orch.CancelJob(r.Context(), taskID); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{"status": "cancelled"})
+}
+
 func (h *WorkflowHandler) Artifacts(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "jobID")
 	artifacts, err := h.orch.ListArtifacts(r.Context(), jobID)

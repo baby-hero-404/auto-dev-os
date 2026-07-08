@@ -146,6 +146,12 @@ export const tasks = {
   retry(taskID: string, token: string) {
     return request<WorkflowJob>(`/tasks/${taskID}/retry`, { method: "POST", token });
   },
+  pause(taskID: string, token: string) {
+    return request<{ status: string }>(`/tasks/${taskID}/pause`, { method: "POST", token });
+  },
+  cancel(taskID: string, token: string) {
+    return request<{ status: string }>(`/tasks/${taskID}/cancel`, { method: "POST", token });
+  },
   workflow(taskID: string, token: string) {
     return request<WorkflowStatus>(`/tasks/${taskID}/workflow`, { token });
   },

@@ -14,6 +14,12 @@ func TestEvaluatePolicy(t *testing.T) {
 				Root:         "internal/repository",
 				Capabilities: []string{"modify_existing", "create_test"},
 			},
+			{
+				Module:       "sqlite",
+				Root:         "internal/sqlite",
+				RepoName:     "tool_zentao",
+				Capabilities: []string{"modify_existing", "create_test"},
+			},
 		},
 	}
 
@@ -65,6 +71,18 @@ func TestEvaluatePolicy(t *testing.T) {
 			file:        "internal/service/auth.go",
 			oldFile:     "internal/service/auth.go",
 			expectedSev: SeverityError, // Soft retry
+		},
+		{
+			name:        "Valid change under repo with repo prefix in file path",
+			file:        "tool_zentao/internal/sqlite/repository.go",
+			oldFile:     "tool_zentao/internal/sqlite/repository.go",
+			expectedSev: SeverityInfo,
+		},
+		{
+			name:        "Valid change under repo without repo prefix in file path (raw match)",
+			file:        "internal/sqlite/repository.go",
+			oldFile:     "internal/sqlite/repository.go",
+			expectedSev: SeverityInfo,
 		},
 	}
 

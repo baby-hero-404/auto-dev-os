@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
-  CheckCircle2,
-  Circle,
   Key,
   GitBranch,
   FolderGit,
@@ -19,20 +16,12 @@ import {
 import { useSession } from "@/lib/session";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { api } from "@/lib/api";
+import { CheckItem } from "./checklist/types";
+import { ChecklistItem } from "./checklist/ChecklistItem";
+import { ChecklistSkeleton } from "./checklist/ChecklistSkeleton";
 
 const LS_DISMISSED_KEY = "setup-checklist-dismissed";
 const LS_AUTO_COMPLETED_KEY = "setup-checklist-auto-completed";
-
-type CheckItem = {
-  id: string;
-  label: string;
-  href: string;
-  hrefLabel: string;
-  icon: typeof Key;
-  required: boolean;
-  done: boolean;
-  onClick?: () => void;
-};
 
 export function SetupChecklist({
   onCreateProjectClick,
@@ -188,7 +177,7 @@ export function SetupChecklist({
         done: hasTask,
       },
     ];
-  }, [credentials, gitAccounts, projects, orgAgents, globalRules, skills, overview]);
+  }, [credentials, gitAccounts, projects, orgAgents, globalRules, skills, overview, onCreateProjectClick]);
 
   const requiredChecks = checks.filter((c) => c.required);
   const completedCount = checks.filter((c) => c.done).length;
@@ -313,87 +302,6 @@ export function SetupChecklist({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function ChecklistItem({
-  check,
-  isAnimating,
-}: {
-  check: CheckItem;
-  isAnimating: boolean;
-}) {
-  const Icon = check.icon;
-
-  const handleClick = (e: React.MouseEvent) => {
-    if (check.onClick) {
-      e.preventDefault();
-      check.onClick();
-    }
-  };
-
-  return (
-    <Link
-      href={check.href}
-      onClick={handleClick}
-      className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-surface ${
-        check.done ? "opacity-70" : ""
-      }`}
-    >
-      {/* Status indicator */}
-      <span className={isAnimating ? "animate-completion-pop" : ""}>
-        {check.done ? (
-          <CheckCircle2
-            size={18}
-            className={check.required ? "text-success" : "text-warning"}
-          />
-        ) : (
-          <Circle size={18} className="text-content-muted" />
-        )}
-      </span>
-
-      {/* Icon */}
-      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-surface">
-        <Icon size={14} className="text-content-muted group-hover:text-brand-primary transition" />
-      </span>
-
-      {/* Label */}
-      <span
-        className={`flex-1 text-sm transition ${
-          check.done
-            ? "text-content-muted line-through decoration-content-muted/40"
-            : "text-foreground group-hover:text-brand-primary"
-        }`}
-      >
-        {check.label}
-        {!check.required && (
-          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
-            recommended
-          </span>
-        )}
-      </span>
-
-      {/* Link hint */}
-      {!check.done && (
-        <span className="hidden text-xs text-content-muted group-hover:text-brand-primary sm:inline transition">
-          {check.hrefLabel} →
-        </span>
-      )}
-    </Link>
-  );
-}
-
-function ChecklistSkeleton() {
-  return (
-    <div className="grid gap-1">
-      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-        <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2.5">
-          <div className="skeleton-shimmer size-[18px] rounded-full" />
-          <div className="skeleton-shimmer size-7 rounded-md" />
-          <div className="skeleton-shimmer h-4 flex-1 rounded" />
-        </div>
-      ))}
     </div>
   );
 }

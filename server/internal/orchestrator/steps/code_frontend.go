@@ -142,16 +142,8 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	worktreeSuffix := ""
 	if t != nil && t.Complexity != models.TaskComplexityEasy {
 		worktreeSuffix = "-fe-worktree"
-		if s.worktree != nil {
-			if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
-				var ws *models.TaskWorkspace
-				if s.workspace != nil {
-					ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
-				}
-				if err := s.worktree.SetupRoleWorktrees(ctx, s.rt.Task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
-					return nil, err
-				}
-			}
+		if err := setupSandbox(ctx, s.rt.Task, frontendAgent, s.worktree, s.workspace, "fe", "frontend", worktreeSuffix); err != nil {
+			return nil, err
 		}
 	}
 
@@ -346,15 +338,9 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		}
 	}
 
-	if worktreeSuffix != "" && s.worktree != nil {
-		if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
-			var ws *models.TaskWorkspace
-			if s.workspace != nil {
-				ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
-			}
-			if err := s.worktree.CommitRoleWorktrees(ctx, s.rt.Task, frontendAgent, targetRepos, ws, "fe", "frontend", worktreeSuffix); err != nil {
-				return nil, err
-			}
+	if worktreeSuffix != "" {
+		if err := commitSandbox(ctx, s.rt.Task, frontendAgent, s.worktree, s.workspace, "fe", "frontend", worktreeSuffix); err != nil {
+			return nil, err
 		}
 	}
 

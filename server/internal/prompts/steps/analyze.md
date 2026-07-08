@@ -79,7 +79,7 @@ The JSON object MUST have the following structure:
       "expected": "HTTP 201"
     }
   ],
-  "clarification_questions": ["questions", "if", "more", "details", "are", "needed"],
+  "clarification_questions": ["questions", "if", "more", "details", "are", "needed.", "DO NOT ask questions that have already been answered in the Clarification section of the task description."],
   "required_skills": ["legacy list of skill names required for this task"],
   "required_skills_map": {
     "backend": ["list of skills for backend role, e.g. golang-best-practices, database-design"],

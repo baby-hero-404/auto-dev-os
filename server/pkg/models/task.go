@@ -48,34 +48,36 @@ var ValidTaskTransitions = map[string][]string{
 }
 
 const (
-	TaskSpecStatusNone             = "none"
-	TaskSpecStatusDraft            = "draft"
-	TaskSpecStatusPendingReview    = "pending_review"
-	TaskSpecStatusChangesRequested = "changes_requested"
-	TaskSpecStatusApproved         = "approved"
-	TaskSpecStatusAutoApproved     = "auto_approved"
+	TaskSpecStatusNone                  = "none"
+	TaskSpecStatusDraft                 = "draft"
+	TaskSpecStatusPendingReview         = "pending_review"
+	TaskSpecStatusChangesRequested      = "changes_requested"
+	TaskSpecStatusClarificationRequired = "clarification_required"
+	TaskSpecStatusApproved              = "approved"
+	TaskSpecStatusAutoApproved          = "auto_approved"
 )
 
 // Task represents a unit of work for an agent.
 type Task struct {
-	ID           string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	ProjectID    string          `json:"project_id" gorm:"type:uuid;not null"`
-	AgentID      *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
-	ParentTaskID *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
-	RepositoryID *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
-	Title        string          `json:"title" gorm:"not null"`
-	Description  string          `json:"description" gorm:"default:''"`
-	Status       string          `json:"status" gorm:"default:'todo'"`
-	Complexity   string          `json:"complexity" gorm:"default:'easy'"`
-	Priority     int             `json:"priority" gorm:"default:0"`
-	Labels       pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
-	Analysis     json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
-	SpecStatus   string          `json:"spec_status" gorm:"default:'none'"`
-	PRURLs       pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
-	PRMetadata   json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
-	SubTasks     []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID             string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	ProjectID      string          `json:"project_id" gorm:"type:uuid;not null"`
+	AgentID        *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
+	ParentTaskID   *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
+	RepositoryID   *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
+	Title          string          `json:"title" gorm:"not null"`
+	Description    string          `json:"description" gorm:"default:''"`
+	Status         string          `json:"status" gorm:"default:'todo'"`
+	Complexity     string          `json:"complexity" gorm:"default:'easy'"`
+	Priority       int             `json:"priority" gorm:"default:0"`
+	Labels         pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
+	Analysis       json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
+	SpecStatus     string          `json:"spec_status" gorm:"default:'none'"`
+	Clarifications json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
+	PRURLs         pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
+	PRMetadata     json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
+	SubTasks       []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // CreateTaskInput is the payload to create a task.
@@ -92,19 +94,20 @@ type CreateTaskInput struct {
 
 // UpdateTaskInput is the payload to partially update a task.
 type UpdateTaskInput struct {
-	Title        *string         `json:"title,omitempty"`
-	Description  *string         `json:"description,omitempty"`
-	Status       *string         `json:"status,omitempty"`
-	Complexity   *string         `json:"complexity,omitempty"`
-	Priority     *int            `json:"priority,omitempty"`
-	Labels       []string        `json:"labels,omitempty"`
-	AgentID      *string         `json:"agent_id,omitempty"`
-	RepositoryID *string         `json:"repository_id,omitempty"`
-	Analysis     json.RawMessage `json:"analysis,omitempty"`
-	SpecStatus   *string         `json:"spec_status,omitempty"`
-	PRURLs       *pq.StringArray `json:"pr_urls,omitempty"`
-	PRMetadata   json.RawMessage `json:"pr_metadata,omitempty"`
-	ParentTaskID *string         `json:"parent_task_id,omitempty"`
+	Title          *string         `json:"title,omitempty"`
+	Description    *string         `json:"description,omitempty"`
+	Status         *string         `json:"status,omitempty"`
+	Complexity     *string         `json:"complexity,omitempty"`
+	Priority       *int            `json:"priority,omitempty"`
+	Labels         []string        `json:"labels,omitempty"`
+	AgentID        *string         `json:"agent_id,omitempty"`
+	RepositoryID   *string         `json:"repository_id,omitempty"`
+	Analysis       json.RawMessage `json:"analysis,omitempty"`
+	SpecStatus     *string         `json:"spec_status,omitempty"`
+	Clarifications json.RawMessage `json:"clarifications,omitempty"`
+	PRURLs         *pq.StringArray `json:"pr_urls,omitempty"`
+	PRMetadata     json.RawMessage `json:"pr_metadata,omitempty"`
+	ParentTaskID   *string         `json:"parent_task_id,omitempty"`
 }
 
 type ComplexityDetails struct {
@@ -205,4 +208,11 @@ type TaskAnalysis struct {
 
 type ClarifyTaskInput struct {
 	Context string `json:"context"`
+}
+
+type ClarificationRound struct {
+	Round     int       `json:"round"`
+	Timestamp time.Time `json:"timestamp"`
+	Questions []string  `json:"questions"`
+	Response  string    `json:"response"`
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -14,75 +13,11 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
-	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"go.opentelemetry.io/otel"
-	"gorm.io/gorm"
 )
 
-func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, concurrency int) {
-	if interval <= 0 {
-		interval = 20 * time.Second
-	}
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-
-
-	sem := make(chan struct{}, concurrency)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		claimed := false
-		for {
-			select {
-			case sem <- struct{}{}:
-			default:
-				goto wait
-			}
-
-			job, err := o.workflows.ClaimNext(ctx)
-			if err != nil {
-				<-sem
-				if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, repository.ErrNotFound) {
-					break
-				}
-				observability.Error(ctx, "claim workflow job failed", "error", err)
-				break
-			}
-			claimed = true
-			o.wg.Add(1)
-			go func(jobID string) {
-				defer o.wg.Done()
-				defer func() { <-sem }()
-				o.run(ctx, jobID)
-			}(job.ID)
-		}
-
-	wait:
-		if claimed {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = o.workflows.ResetStuckJobs(ctx)
-		}
-	}
-}
-
-func (o *Orchestrator) Wait() {
-	o.wg.Wait()
-}
 
 func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.run")
@@ -450,84 +385,3 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	o.log(cleanupCtx, task.ID, &job.ID, "info", "workflow completed and is waiting for human PR approval")
 }
 
-func (o *Orchestrator) fail(ctx context.Context, job *models.WorkflowJob, err error) {
-	cleanupCtx := context.WithoutCancel(ctx)
-	defer o.cleanupWorkspaceAfterFinalState(cleanupCtx, job.TaskID)
-	failedStatus := models.TaskStatusFailed
-	if _, updateErr := o.updateTaskStatus(cleanupCtx, job.TaskID, failedStatus); updateErr != nil {
-		observability.Error(cleanupCtx, "mark task failed", "job_id", job.ID, "task_id", job.TaskID, "error", updateErr, "cause", err)
-	}
-	if _, updateErr := o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusFailed, "last_error": err.Error()}); updateErr != nil {
-		observability.Error(cleanupCtx, "mark workflow failed", "job_id", job.ID, "error", updateErr, "cause", err)
-	}
-	o.log(cleanupCtx, job.TaskID, &job.ID, "error", err.Error())
-}
-
-func (o *Orchestrator) checkpoint(ctx context.Context, taskID string, jobID *string, step string, state map[string]any) error {
-	raw, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	return o.workflows.CreateCheckpoint(ctx, models.WorkflowCheckpoint{TaskID: taskID, JobID: jobID, Step: step, State: raw})
-}
-
-func (o *Orchestrator) log(ctx context.Context, taskID string, jobID *string, level, message string) {
-	stepID, hasStep := ctx.Value("workflow_step_id").(string)
-	attempt, hasAttempt := ctx.Value("workflow_attempt").(int)
-	if hasStep && stepID != "" {
-		if hasAttempt {
-			message = fmt.Sprintf("[%s #%d] %s", stepID, attempt, message)
-		} else {
-			message = fmt.Sprintf("[%s] %s", stepID, message)
-		}
-	} else if hasAttempt {
-		message = fmt.Sprintf("[#%d] %s", attempt, message)
-	}
-	message = redactSecrets(message)
-	if err := o.workflows.CreateLog(ctx, models.TaskLog{TaskID: taskID, JobID: jobID, Level: level, Message: message}); err != nil {
-		slog.Warn("persist workflow log failed", observability.LogAttrs(ctx, "task_id", taskID, "job_id", jobID, "level", level, "error", err)...)
-	}
-	switch level {
-	case "error":
-		observability.Error(ctx, message, "job_id", jobID)
-	case "warn":
-		observability.Warn(ctx, message, "job_id", jobID)
-	default:
-		observability.Info(ctx, message, "job_id", jobID)
-	}
-}
-
-func (o *Orchestrator) updateTaskStatus(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
-	task, err := o.tasks.GetByID(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	if err := workflow.ValidateTaskTransition(task.Status, newStatus); err != nil {
-		return nil, fmt.Errorf("invalid task status transition from %q to %q: %w", task.Status, newStatus, err)
-	}
-	updated, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &newStatus})
-	if err != nil {
-		return nil, err
-	}
-
-	if o.wkspace != nil {
-		if ws, wsErr := o.wkspace.LoadTaskWorkspace(ctx, updated); wsErr == nil && ws != nil {
-			taskSnap := models.TaskStateSnapshot{
-				TaskID:      updated.ID,
-				ProjectID:   updated.ProjectID,
-				Title:       updated.Title,
-				Description: updated.Description,
-				Status:      updated.Status,
-				Complexity:  updated.Complexity,
-				SpecStatus:  updated.SpecStatus,
-				Labels:      updated.Labels,
-			}
-			taskJSONPath := filepath.Join(ws.Root, "task.json")
-			if taskBytes, err := json.MarshalIndent(taskSnap, "", "  "); err == nil {
-				_ = os.WriteFile(taskJSONPath, taskBytes, 0o644)
-			}
-		}
-	}
-
-	return updated, nil
-}

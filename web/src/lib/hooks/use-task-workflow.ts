@@ -169,7 +169,7 @@ export function useTaskWorkflow(taskID: string) {
     }
   }
 
-  async function updateTask(fields: { title?: string; description?: string }) {
+  async function updateTask(fields: any) {
     if (!token) return false;
     setError("");
     try {

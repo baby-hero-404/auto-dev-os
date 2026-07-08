@@ -174,6 +174,16 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		user += "> [!IMPORTANT]\n> Original Task Description is omitted. Your evaluation MUST be based strictly on the execution contract and specific context provided in this prompt. Do NOT rely on prior assumptions.\n"
 	}
 
+	if len(task.Clarifications) > 0 {
+		var rounds []models.ClarificationRound
+		if err := json.Unmarshal(task.Clarifications, &rounds); err == nil && len(rounds) > 0 {
+			user += "\n\n=== Answers to Clarification Questions ===\n"
+			for _, r := range rounds {
+				user += fmt.Sprintf("#### Round %d:\n%s\n\n", r.Round, r.Response)
+			}
+		}
+	}
+
 	if shouldInjectFullSpec(stepID) || isCodingStep(stepID) {
 		if analysis.ProposalMD != "" || analysis.SpecsMD != "" || len(analysis.ExecutionPhases) > 0 {
 			user += "\n\n=== Task Specification (OpenSpec) ===\n"

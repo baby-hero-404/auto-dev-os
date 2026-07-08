@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
-import { GitBranch, Plus, ShieldCheck, Workflow, Bot, CheckCircle2, AlertCircle, X, type LucideIcon } from "lucide-react";
+import { AlertCircle, X } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { api } from "@/lib/api";
-import type { Agent, Task } from "@/lib/types";
-import { workflowStageCounts, isActiveTask, isDoneStatus } from "@/lib/utils/task-utils";
+import type { Agent } from "@/lib/types";
+import { isActiveTask, isDoneStatus } from "@/lib/utils/task-utils";
 import { CreateTaskPanel } from "@/components/projects/create-task-panel";
 import { TasksTab } from "@/components/projects/tasks-tab";
 import { ProjectStatusSummary } from "@/components/projects/project-status-summary";
@@ -16,16 +16,9 @@ import { AgentsView } from "@/components/projects/agents-view";
 import { RepositoriesView } from "@/components/projects/repositories-view";
 import { RulesView } from "@/components/projects/rules-view";
 import { ProjectProfile } from "@/components/projects/project-profile";
+import { ProjectHeader } from "@/components/projects/ProjectHeader";
 
 type ProjectView = "tasks" | "agents" | "repositories" | "rules" | "settings";
-
-const projectViews: { id: ProjectView; label: string }[] = [
-  { id: "tasks", label: "Tasks" },
-  { id: "agents", label: "Agents" },
-  { id: "repositories", label: "Repositories" },
-  { id: "rules", label: "Rules" },
-  { id: "settings", label: "Settings" },
-];
 
 export default function ProjectDetailRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectID } = use(params);
@@ -165,73 +158,28 @@ function ProjectDetailContent() {
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="shrink-0 border-b border-stroke bg-card/95 px-5 py-4 shadow-sm md:px-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-content-muted">
-                <span>Projects</span>
-                <span>/</span>
-                <span className="truncate font-semibold text-foreground">{project?.name || "Loading..."}</span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">
-                  {project?.name || "Project workspace"}
-                </h1>
-                <span className="rounded-md border border-stroke bg-surface px-2 py-0.5 font-mono text-[11px] text-content-muted">
-                  {projectID.slice(0, 8)}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-content-muted">
-                <WorkspaceSignal icon={GitBranch} label={`${repositories.length} repos`} />
-                <WorkspaceSignal icon={Workflow} label={`${tasks.length} tasks`} />
-                <WorkspaceSignal icon={Bot} label={`${projectAgents.length} agents`} />
-                <WorkspaceSignal icon={ShieldCheck} label={`${rules.length} rules`} />
-                <WorkspaceSignal icon={CheckCircle2} label={`${completedTasks}/${tasks.length} done`} />
-              </div>
-            </div>
-
-            <div className="flex shrink-0 flex-wrap items-center gap-3">
-              <div className="hidden rounded-lg border border-stroke bg-background px-3 py-2 text-xs text-content-muted lg:block">
-                <span className="font-mono text-foreground">{activeTasks}</span> active now
-              </div>
-              <button
-                onClick={() => {
-                  taskActions.setTaskError("");
-                  if (repositories.length === 0) {
-                    setActiveView("repositories");
-                    taskActions.setTaskError("You must add a repository to the project before creating tasks.");
-                    return;
-                  }
-                  setIsTaskPanelOpen(true);
-                }}
-                className="flex items-center gap-1.5 rounded-md bg-brand-primary px-3.5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
-                type="button"
-              >
-                <Plus size={15} /> Create Task
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 md:hidden">
-            <label htmlFor="project-view" className="sr-only">
-              Project view
-            </label>
-            <select
-              id="project-view"
-              value={activeView}
-              onChange={(event) => setActiveView(event.target.value as ProjectView)}
-              className="w-full rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground"
-            >
-              {projectViews.map((view) => (
-                <option key={view.id} value={view.id}>
-                  {view.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <WorkflowStageStrip tasks={tasks} />
-        </header>
+        <ProjectHeader
+          projectName={project?.name ?? ""}
+          projectID={projectID}
+          repositoriesCount={repositories.length}
+          tasksCount={tasks.length}
+          agentsCount={projectAgents.length}
+          rulesCount={rules.length}
+          completedTasksCount={completedTasks}
+          activeTasksCount={activeTasks}
+          activeView={activeView}
+          onViewChange={setActiveView}
+          onCreateTaskClick={() => {
+            taskActions.setTaskError("");
+            if (repositories.length === 0) {
+              setActiveView("repositories");
+              taskActions.setTaskError("You must add a repository to the project before creating tasks.");
+              return;
+            }
+            setIsTaskPanelOpen(true);
+          }}
+          tasks={tasks}
+        />
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-surface/10 p-4 md:p-6">
           {taskActions.taskError && (
@@ -345,42 +293,6 @@ function ProjectDetailContent() {
           return success;
         }}
       />
-    </div>
-  );
-}
-
-function WorkspaceSignal({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-stroke bg-surface px-2 py-1">
-      <Icon size={13} className="text-brand-primary" />
-      {label}
-    </span>
-  );
-}
-
-function WorkflowStageStrip({ tasks }: { tasks: Task[] }) {
-  const stages = workflowStageCounts(tasks);
-
-  return (
-    <div className="mt-4 overflow-x-auto pb-1">
-      <div className="flex min-w-max gap-2">
-        {stages.map((stage) => {
-          const hasTasks = stage.count > 0;
-          return (
-            <div
-              key={stage.label}
-              className={`flex min-w-28 items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs transition ${
-                hasTasks
-                  ? "border-brand-primary/30 bg-brand-primary-muted text-foreground"
-                  : "border-stroke bg-surface text-content-muted"
-              }`}
-            >
-              <span className="font-medium">{stage.label}</span>
-              <span className="font-mono font-semibold">{stage.count}</span>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

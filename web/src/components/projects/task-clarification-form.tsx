@@ -33,7 +33,7 @@ export function TaskClarificationForm({
     );
   }
 
-  if (!(clarificationQuestions.length > 0 && (specStatus === "pending_review" || specStatus === "changes_requested"))) {
+  if (!(clarificationQuestions.length > 0 && (specStatus === "clarification_required" || specStatus === "pending_review" || specStatus === "changes_requested"))) {
     return null;
   }
 
@@ -42,29 +42,24 @@ export function TaskClarificationForm({
     setSubmittingAnswers(true);
     setError("");
 
-    let formattedText = "### Answers to Clarification Questions:\n";
+    let formattedText = "";
     clarificationQuestions.forEach((q, idx) => {
       const ans = (answers[idx] || "").trim();
       formattedText += `- **Q**: ${q}\n  **A**: ${ans || "No answer provided"}\n\n`;
     });
 
-    // Optimistically update UI
-    setSubmittingAnswers(true);
-    setSubmitted(true);
-    
-    api.clarifyTask(taskID, token, formattedText.trim())
-      .then(() => api.retryTask(taskID, token))
-      .then(() => {
-        setAnswers({});
-        onAnswersSubmitted();
-      })
-      .catch((err) => {
-        setError((err as Error)?.message || "Failed to submit answers");
-        setSubmitted(false);
-      })
-      .finally(() => {
-        setSubmittingAnswers(false);
-      });
+    try {
+      await api.clarifyTask(taskID, token, formattedText.trim());
+      await api.retryTask(taskID, token);
+      setAnswers({});
+      setSubmitted(true);
+      await onAnswersSubmitted();
+    } catch (err) {
+      setError((err as Error)?.message || "Failed to submit answers");
+      setSubmitted(false);
+    } finally {
+      setSubmittingAnswers(false);
+    }
   };
 
   return (

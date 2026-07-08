@@ -53,7 +53,7 @@ func ShouldAutoApproveSpec(
 	hasClarifications bool,
 ) (specStatus string, taskStatus string) {
 	if hasClarifications {
-		return models.TaskSpecStatusChangesRequested, models.TaskStatusSpecReview
+		return models.TaskSpecStatusClarificationRequired, models.TaskStatusSpecReview
 	}
 
 	if projectReviewPolicy == "always_review" {

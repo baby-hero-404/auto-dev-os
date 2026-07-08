@@ -91,6 +91,9 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 	if input.SpecStatus != nil {
 		updates["spec_status"] = *input.SpecStatus
 	}
+	if input.Clarifications != nil {
+		updates["clarifications"] = input.Clarifications
+	}
 	if input.PRURLs != nil {
 		updates["pr_urls"] = *input.PRURLs
 	}

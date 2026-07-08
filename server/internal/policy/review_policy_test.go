@@ -72,7 +72,7 @@ func TestShouldAutoApproveSpec(t *testing.T) {
 			name:              "has clarifications",
 			complexity:        models.TaskComplexityEasy,
 			hasClarifications: true,
-			wantSpecStatus:    models.TaskSpecStatusChangesRequested,
+			wantSpecStatus:    models.TaskSpecStatusClarificationRequired,
 			wantTaskStatus:    models.TaskStatusSpecReview,
 		},
 		{

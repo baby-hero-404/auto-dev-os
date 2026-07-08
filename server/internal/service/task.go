@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
@@ -122,13 +123,32 @@ func (s *TaskService) Clarify(ctx context.Context, id string, input models.Clari
 	if err != nil {
 		return nil, err
 	}
-	description := strings.TrimSpace(task.Description + "\n\nClarification:\n" + input.Context)
+
+	var rounds []models.ClarificationRound
+	if len(task.Clarifications) > 0 {
+		_ = json.Unmarshal(task.Clarifications, &rounds)
+	}
+
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+
+	newRound := models.ClarificationRound{
+		Round:     len(rounds) + 1,
+		Timestamp: time.Now(),
+		Questions: analysis.ClarificationQuestions,
+		Response:  input.Context,
+	}
+	rounds = append(rounds, newRound)
+	clarificationsBytes, _ := json.Marshal(rounds)
+
 	specStatus := models.TaskSpecStatusNone
 	status := models.TaskStatusAnalyzing
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{
-		Description: &description,
-		SpecStatus:  &specStatus,
-		Status:      &status,
+		SpecStatus:     &specStatus,
+		Status:         &status,
+		Clarifications: json.RawMessage(clarificationsBytes),
 	})
 }
 

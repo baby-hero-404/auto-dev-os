@@ -78,8 +78,16 @@ export type Task = {
   pr_metadata?: Record<string, unknown>;
   analysis?: TaskAnalysis;
   spec_status: string;
+  clarifications?: ClarificationRound[];
   created_at: string;
   updated_at: string;
+};
+
+export type ClarificationRound = {
+  round: number;
+  timestamp: string;
+  questions: string[];
+  response: string;
 };
 
 export type AffectedFile = {
@@ -124,6 +132,33 @@ export type ExpandedBoundary = {
   risk?: string;
 };
 
+export type ExecutionPhase = {
+  phase: string;
+  tasks: string[];
+};
+
+export type ExecutionProfile = {
+  agent: string;
+  skills: string[];
+};
+
+export type ExecutionConstraints = {
+  parallelizable: boolean;
+  max_files: number;
+  estimated_tokens: number;
+  max_risk: string;
+  risk_multiplier?: number;
+};
+
+export type ExecutionUnit = {
+  id: string;
+  objective: string;
+  tasks: string[];
+  execution_profile: ExecutionProfile;
+  constraints: ExecutionConstraints;
+  dependencies?: string[];
+};
+
 export type TaskAnalysis = {
   complexity: "easy" | "medium" | "hard";
   primary_category?: string;
@@ -145,6 +180,7 @@ export type TaskAnalysis = {
   required_skills_map?: Record<string, string[]>;
   execution_boundaries?: ExecutionBoundary[];
   expanded_boundaries?: ExpandedBoundary[];
+  execution_units?: ExecutionUnit[];
 };
 
 export type WorkflowArtifact = {

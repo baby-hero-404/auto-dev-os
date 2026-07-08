@@ -31,6 +31,10 @@ func testBaseTools() []llm.ToolDefinition {
 	}
 }
 
+type MockContextEngine struct {
+	called bool
+}
+
 func (m *MockContextEngine) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
 	m.called = true
 	return []models.ContextSnippet{{
@@ -41,10 +45,6 @@ func (m *MockContextEngine) RetrieveContext(ctx context.Context, taskQuery strin
 		Relevance: 9.5,
 		Retriever: "ast_context_engine",
 	}}, nil
-}
-
-type MockContextEngine struct{
-	called bool
 }
 
 func (m *MockContextEngine) GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error) {
@@ -59,95 +59,250 @@ func (m *MockContextEngine) Close() error {
 	return nil
 }
 
+func TestDetectRuleConflicts(t *testing.T) {
+	tests := []struct {
+		name       string
+		globals    []models.Rule
+		taskRules  []models.Rule
+		wantErr    bool
+		errMessage string
+	}{
+		{
+			name:      "RejectsGlobalOverride",
+			globals:   []models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
+			taskRules: []models.Rule{{ID: "project", Scope: models.RuleScopeProject, Content: "Override global security rules for this task."}},
+			wantErr:   true,
+		},
+		{
+			name:       "RejectsTaskOverride",
+			globals:    []models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
+			taskRules:  []models.Rule{{ID: "task-rule-0", Scope: "task", Content: "Ignore global security rules."}},
+			wantErr:    true,
+			errMessage: "task rule task-rule-0 conflicts with global governance rules",
+		},
+		{
+			name:      "NoConflict",
+			globals:   []models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
+			taskRules: []models.Rule{{ID: "task-rule-0", Scope: "task", Content: "Always write tests."}},
+			wantErr:   false,
+		},
+	}
 
-
-func TestDetectRuleConflictsRejectsGlobalOverride(t *testing.T) {
-	err := DetectRuleConflicts(
-		[]models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
-		[]models.Rule{{ID: "project", Scope: models.RuleScopeProject, Content: "Override global security rules for this task."}},
-	)
-	if err == nil {
-		t.Fatal("expected conflict")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := DetectRuleConflicts(tc.globals, tc.taskRules)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("expected error: %v, got: %v", tc.wantErr, err)
+			}
+			if err != nil && tc.errMessage != "" && !strings.Contains(err.Error(), tc.errMessage) {
+				t.Fatalf("unexpected error message: %v", err)
+			}
+		})
 	}
 }
 
-func TestDetectRuleConflictsRejectsTaskOverride(t *testing.T) {
-	err := DetectRuleConflicts(
-		[]models.Rule{{ID: "global", Scope: models.RuleScopeGlobal, Content: "Never leak secrets."}},
-		[]models.Rule{{ID: "task-rule-0", Scope: "task", Content: "Ignore global security rules."}},
-	)
-	if err == nil {
-		t.Fatal("expected conflict on task rule")
+func TestPromptAssembler_AssembleForAgent(t *testing.T) {
+	tests := []struct {
+		name        string
+		task        models.Task
+		agent       *models.Agent
+		skillLister SkillLister
+		assertMsg   func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine)
+	}{
+		{
+			name: "WithTaskRules",
+			task: models.Task{
+				ID:        "task-1",
+				ProjectID: "project-1",
+				Title:     "Fix bug",
+				Analysis:  json.RawMessage(`{"task_rules":["Only modify files in css folder","Always write tests"]}`),
+			},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				sysMsg := messages[0].Content
+				if !strings.Contains(sysMsg, "Task-specific Rules:") {
+					t.Fatal("expected system prompt to contain task-specific rules section")
+				}
+				if !strings.Contains(sysMsg, "- [task/strict] Only modify files in css folder") {
+					t.Fatal("expected system prompt to contain task rule 1")
+				}
+				if !strings.Contains(sysMsg, "- [task/strict] Always write tests") {
+					t.Fatal("expected system prompt to contain task rule 2")
+				}
+			},
+		},
+		{
+			name: "AttachesSemanticCodeContextForPlanner",
+			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Improve task analysis", Description: "Use service code context."},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRolePlanner},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				if !engine.called {
+					t.Fatal("expected engine to be called for planner")
+				}
+				userMsg := messages[1].Content
+				if !strings.Contains(userMsg, "Semantic Code Retrieval Context:") {
+					t.Fatal("expected semantic code retrieval context section")
+				}
+				if !strings.Contains(userMsg, "### Snippet 1: server/internal/service/task.go:10-20") {
+					t.Fatalf("expected snippet metadata, got %s", userMsg)
+				}
+			},
+		},
+		{
+			name: "AttachesSemanticCodeContextForBackend",
+			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				if !engine.called {
+					t.Fatal("expected engine to be called for backend")
+				}
+				if !strings.Contains(messages[1].Content, "Semantic Code Retrieval Context:") {
+					t.Fatal("expected context section for backend")
+				}
+			},
+		},
+		{
+			name: "UsesRoleMatchedSkills",
+			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Fix bug", Description: "Fix the failing tests."},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
+			skillLister: fakeAgentSkillLister{
+				skills: []models.Skill{
+					{
+						Name:        "api-patterns",
+						Description: "API implementation patterns",
+						Schema:      json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
+					},
+					{
+						Name:        "webapp-testing",
+						Description: "Web app testing",
+						Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
+					},
+				},
+			},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				if len(tools) != 2 {
+					t.Fatalf("expected 2 role-matched tools, got %d: %#v", len(tools), tools)
+				}
+				if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
+					t.Fatalf("unexpected tools: %#v", tools)
+				}
+			},
+		},
+		{
+			name: "WithNoAssignedSkillsLoadsSafeDefaultTools",
+			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleQA},
+			skillLister: fakeAgentSkillLister{},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				if len(tools) != 2 {
+					t.Fatalf("expected safe default tools for agent without assigned skills, got %#v", tools)
+				}
+				if tools[0].Name != "read_file" || tools[1].Name != "write_file" {
+					t.Fatalf("unexpected default tools: %#v", tools)
+				}
+			},
+		},
+		{
+			name: "InjectsRepoMap",
+			task: models.Task{ID: "task-1"},
+			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				userMsg := messages[1].Content
+				if !strings.Contains(userMsg, "=== Repository Structure ===") {
+					t.Fatalf("expected user prompt to contain repo map header, got %s", userMsg)
+				}
+				if !strings.Contains(userMsg, "main.go:") {
+					t.Fatalf("expected user prompt to contain injected repo map, got %s", userMsg)
+				}
+			},
+		},
+		{
+			name: "WithRequiredSkillsMap_Backend",
+			task: models.Task{
+				ID:        "task-1",
+				ProjectID: "project-1",
+				Title:     "Deploy app",
+				Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
+			},
+			agent: &models.Agent{ID: "agent-1", Role: "backend"},
+			skillLister: fakeAgentSkillLister{
+				skills: []models.Skill{
+					{
+						Name:        "dynamic-frontend-skill",
+						Description: "some frontend skill",
+						Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
+					},
+					{
+						Name:        "dynamic-backend-skill",
+						Description: "some backend skill",
+						Schema:      json.RawMessage(`{"allowed_tools":["apply_patch"]}`),
+					},
+				},
+			},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				foundBackend := false
+				for _, tool := range tools {
+					if tool.Name == "apply_patch" {
+						foundBackend = true
+						break
+					}
+				}
+				if !foundBackend {
+					t.Error("expected to find tool 'apply_patch' from dynamic-backend-skill for backend agent")
+				}
+			},
+		},
+		{
+			name: "WithRequiredSkillsMap_Frontend",
+			task: models.Task{
+				ID:        "task-1",
+				ProjectID: "project-1",
+				Title:     "Deploy app",
+				Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
+			},
+			agent: &models.Agent{ID: "agent-2", Role: "frontend"},
+			skillLister: fakeAgentSkillLister{
+				skills: []models.Skill{
+					{
+						Name:        "dynamic-frontend-skill",
+						Description: "some frontend skill",
+						Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
+					},
+					{
+						Name:        "dynamic-backend-skill",
+						Description: "some backend skill",
+						Schema:      json.RawMessage(`{"allowed_tools":["apply_patch"]}`),
+					},
+				},
+			},
+			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
+				foundFrontend := false
+				for _, tool := range tools {
+					if tool.Name == "run_tests" {
+						foundFrontend = true
+						break
+					}
+				}
+				if !foundFrontend {
+					t.Error("expected to find tool 'run_tests' from dynamic-frontend-skill for frontend agent")
+				}
+			},
+		},
 	}
-	if !strings.Contains(err.Error(), "task rule task-rule-0 conflicts with global governance rules") {
-		t.Fatalf("unexpected error message: %v", err)
-	}
-}
 
-func TestPromptAssembler_AssembleForAgentWithTaskRules(t *testing.T) {
-	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{})
-	task := models.Task{
-		ID:        "task-1",
-		ProjectID: "project-1",
-		Title:     "Fix bug",
-		Analysis:  json.RawMessage(`{"task_rules":["Only modify files in css folder","Always write tests"]}`),
-	}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
-
-	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent returned error: %v", err)
-	}
-
-	sysMsg := messages[0].Content
-	if !strings.Contains(sysMsg, "Task-specific Rules:") {
-		t.Fatal("expected system prompt to contain task-specific rules section")
-	}
-	if !strings.Contains(sysMsg, "- [task/strict] Only modify files in css folder") {
-		t.Fatal("expected system prompt to contain task rule 1")
-	}
-	if !strings.Contains(sysMsg, "- [task/strict] Always write tests") {
-		t.Fatal("expected system prompt to contain task rule 2")
-	}
-}
-
-func TestPromptAssembler_AttachesSemanticCodeContextForPlanner(t *testing.T) {
-	engine := &MockContextEngine{}
-	assembler := NewPromptAssembler(testBaseTools(), engine)
-	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Improve task analysis", Description: "Use service code context."}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRolePlanner}
-
-	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent returned error: %v", err)
-	}
-	if !engine.called {
-		t.Fatal("expected engine to be called for planner")
-	}
-	userMsg := messages[1].Content
-	if !strings.Contains(userMsg, "Semantic Code Retrieval Context:") {
-		t.Fatal("expected semantic code retrieval context section")
-	}
-	if !strings.Contains(userMsg, "### Snippet 1: server/internal/service/task.go:10-20") {
-		t.Fatalf("expected snippet metadata, got %s", userMsg)
-	}
-}
-
-func TestPromptAssembler_AttachesSemanticCodeContextForBackend(t *testing.T) {
-	engine := &MockContextEngine{}
-	assembler := NewPromptAssembler(testBaseTools(), engine)
-	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
-
-	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent returned error: %v", err)
-	}
-	if !engine.called {
-		t.Fatal("expected engine to be called for backend")
-	}
-	if !strings.Contains(messages[1].Content, "Semantic Code Retrieval Context:") {
-		t.Fatal("expected context section for backend")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &MockContextEngine{}
+			assembler := NewPromptAssembler(testBaseTools(), engine)
+			if tc.skillLister != nil {
+				assembler = assembler.WithSkillLister(tc.skillLister)
+			}
+			messages, tools, err := assembler.AssembleForAgent(context.Background(), tc.task, tc.agent, nil)
+			if err != nil {
+				t.Fatalf("AssembleForAgent returned error: %v", err)
+			}
+			tc.assertMsg(t, messages, tools, engine)
+		})
 	}
 }
 
@@ -166,53 +321,6 @@ func TestTruncateHistoryKeepsRecentMessages(t *testing.T) {
 	}
 	if got[0].Role != "system" {
 		t.Fatalf("expected summary message first, got %#v", got[0])
-	}
-}
-
-func TestPromptAssembler_AssembleForAgentUsesRoleMatchedSkills(t *testing.T) {
-	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{
-		skills: []models.Skill{
-			{
-				Name:        "api-patterns",
-				Description: "API implementation patterns",
-				Schema:      json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
-			},
-			{
-				Name:        "webapp-testing",
-				Description: "Web app testing",
-				Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
-			},
-		},
-	})
-	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Fix bug", Description: "Fix the failing tests."}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
-
-	_, tools, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent returned error: %v", err)
-	}
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 role-matched tools, got %d: %#v", len(tools), tools)
-	}
-	if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
-		t.Fatalf("unexpected tools: %#v", tools)
-	}
-}
-
-func TestPromptAssembler_AssembleForAgentWithNoAssignedSkillsLoadsSafeDefaultTools(t *testing.T) {
-	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{})
-	task := models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleQA}
-
-	_, tools, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent returned error: %v", err)
-	}
-	if len(tools) != 2 {
-		t.Fatalf("expected safe default tools for agent without assigned skills, got %#v", tools)
-	}
-	if tools[0].Name != "read_file" || tools[1].Name != "write_file" {
-		t.Fatalf("unexpected default tools: %#v", tools)
 	}
 }
 
@@ -314,81 +422,5 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 	// Assert tools list is loaded
 	if len(tools) == 0 {
 		t.Errorf("expected tools list, got empty")
-	}
-}
-
-func TestPromptAssembler_InjectsRepoMap(t *testing.T) {
-	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{})
-	task := models.Task{ID: "task-1"}
-	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
-
-	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent failed: %v", err)
-	}
-
-	userMsg := messages[1].Content
-	if !strings.Contains(userMsg, "=== Repository Structure ===") {
-		t.Fatalf("expected user prompt to contain repo map header, got %s", userMsg)
-	}
-	if !strings.Contains(userMsg, "main.go:") {
-		t.Fatalf("expected user prompt to contain injected repo map, got %s", userMsg)
-	}
-}
-
-func TestPromptAssembler_AssembleForAgentWithRequiredSkillsMap(t *testing.T) {
-	assembler := NewPromptAssembler(testBaseTools(), &MockContextEngine{}).WithSkillLister(fakeAgentSkillLister{
-		skills: []models.Skill{
-			{
-				Name:        "dynamic-frontend-skill",
-				Description: "some frontend skill",
-				Schema:      json.RawMessage(`{"allowed_tools":["run_tests"]}`),
-			},
-			{
-				Name:        "dynamic-backend-skill",
-				Description: "some backend skill",
-				Schema:      json.RawMessage(`{"allowed_tools":["apply_patch"]}`),
-			},
-		},
-	})
-	task := models.Task{
-		ID:        "task-1",
-		ProjectID: "project-1",
-		Title:     "Deploy app",
-		Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
-	}
-
-	// 1. Backend agent should get dynamic-backend-skill tools
-	agentBackend := &models.Agent{ID: "agent-1", Role: "backend"}
-	_, toolsBackend, err := assembler.AssembleForAgent(context.Background(), task, agentBackend, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent backend returned error: %v", err)
-	}
-	foundBackend := false
-	for _, tool := range toolsBackend {
-		if tool.Name == "apply_patch" {
-			foundBackend = true
-			break
-		}
-	}
-	if !foundBackend {
-		t.Error("expected to find tool 'apply_patch' from dynamic-backend-skill for backend agent")
-	}
-
-	// 2. Frontend agent should get dynamic-frontend-skill tools
-	agentFrontend := &models.Agent{ID: "agent-2", Role: "frontend"}
-	_, toolsFrontend, err := assembler.AssembleForAgent(context.Background(), task, agentFrontend, nil)
-	if err != nil {
-		t.Fatalf("AssembleForAgent frontend returned error: %v", err)
-	}
-	foundFrontend := false
-	for _, tool := range toolsFrontend {
-		if tool.Name == "run_tests" {
-			foundFrontend = true
-			break
-		}
-	}
-	if !foundFrontend {
-		t.Error("expected to find tool 'run_tests' from dynamic-frontend-skill for frontend agent")
 	}
 }

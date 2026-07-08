@@ -10,84 +10,86 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func TestShouldSkipFrontend_BackendOnly(t *testing.T) {
-	analysis := models.TaskAnalysis{PrimaryCategory: "backend"}
-	subtasks := map[string][]string{"backend": {"task1"}}
-	if !shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=true for backend-only category")
+func TestShouldSkipFrontend(t *testing.T) {
+	tests := []struct {
+		name     string
+		analysis models.TaskAnalysis
+		subtasks map[string][]string
+		expected bool
+	}{
+		{
+			name:     "BackendOnly",
+			analysis: models.TaskAnalysis{PrimaryCategory: "backend"},
+			subtasks: map[string][]string{"backend": {"task1"}},
+			expected: true,
+		},
+		{
+			name:     "DatabaseCategory",
+			analysis: models.TaskAnalysis{PrimaryCategory: "database"},
+			subtasks: map[string][]string{},
+			expected: true,
+		},
+		{
+			name:     "HasFrontendTasks",
+			analysis: models.TaskAnalysis{PrimaryCategory: "frontend"},
+			subtasks: map[string][]string{
+				"backend":  {"be task"},
+				"frontend": {"fe task"},
+			},
+			expected: false,
+		},
+		{
+			name:     "FrontendTasksOverrideBackendCategory",
+			analysis: models.TaskAnalysis{PrimaryCategory: "backend"},
+			subtasks: map[string][]string{
+				"backend":  {"be task"},
+				"frontend": {"fe task"},
+			},
+			expected: false,
+		},
+		{
+			name:     "BackendCategory_WithSubtasks_KeepsFrontend",
+			analysis: models.TaskAnalysis{PrimaryCategory: "backend"},
+			subtasks: map[string][]string{
+				"frontend": {"fe task"},
+			},
+			expected: false,
+		},
+		{
+			name: "NoSubtasksButFrontendFiles",
+			analysis: models.TaskAnalysis{
+				PrimaryCategory: "",
+				AffectedFiles:   []models.AffectedFile{{File: "web/src/App.tsx"}, {File: "server/main.go"}},
+			},
+			subtasks: map[string][]string{"backend": {"be task"}},
+			expected: false,
+		},
+		{
+			name: "NoSubtasksNoFiles",
+			analysis: models.TaskAnalysis{
+				PrimaryCategory: "",
+				AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}, {File: "internal/repo.go"}},
+			},
+			subtasks: map[string][]string{"backend": {"be task"}},
+			expected: true,
+		},
+		{
+			name: "UnknownCategory_NoSubtasks_Skips",
+			analysis: models.TaskAnalysis{
+				PrimaryCategory: "mobile",
+				AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}},
+			},
+			subtasks: map[string][]string{},
+			expected: true,
+		},
 	}
-}
 
-func TestShouldSkipFrontend_DatabaseCategory(t *testing.T) {
-	analysis := models.TaskAnalysis{PrimaryCategory: "database"}
-	subtasks := map[string][]string{}
-	if !shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=true for database category")
-	}
-}
-
-func TestShouldSkipFrontend_HasFrontendTasks(t *testing.T) {
-	analysis := models.TaskAnalysis{PrimaryCategory: "frontend"}
-	subtasks := map[string][]string{
-		"backend":  {"be task"},
-		"frontend": {"fe task"},
-	}
-	if shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=false when frontend subtasks exist")
-	}
-}
-
-func TestShouldSkipFrontend_FrontendTasksOverrideBackendCategory(t *testing.T) {
-	analysis := models.TaskAnalysis{PrimaryCategory: "backend"}
-	subtasks := map[string][]string{
-		"backend":  {"be task"},
-		"frontend": {"fe task"},
-	}
-	if shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=false when frontend subtasks exist even if category is backend")
-	}
-}
-
-func TestShouldSkipFrontend_BackendCategory_WithSubtasks_KeepsFrontend(t *testing.T) {
-	analysis := models.TaskAnalysis{PrimaryCategory: "backend"}
-	subtasks := map[string][]string{
-		"frontend": {"fe task"},
-	}
-	if shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=false when frontend subtasks exist")
-	}
-}
-
-func TestShouldSkipFrontend_NoSubtasksButFrontendFiles(t *testing.T) {
-	analysis := models.TaskAnalysis{
-		PrimaryCategory: "",
-		AffectedFiles:   []models.AffectedFile{{File: "web/src/App.tsx"}, {File: "server/main.go"}},
-	}
-	subtasks := map[string][]string{"backend": {"be task"}}
-	if shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=false when affected_files contains frontend files")
-	}
-}
-
-func TestShouldSkipFrontend_NoSubtasksNoFiles(t *testing.T) {
-	analysis := models.TaskAnalysis{
-		PrimaryCategory: "",
-		AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}, {File: "internal/repo.go"}},
-	}
-	subtasks := map[string][]string{"backend": {"be task"}}
-	if !shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=true when no frontend subtasks or files")
-	}
-}
-
-func TestShouldSkipFrontend_UnknownCategory_NoSubtasks_Skips(t *testing.T) {
-	analysis := models.TaskAnalysis{
-		PrimaryCategory: "mobile",
-		AffectedFiles:   []models.AffectedFile{{File: "server/main.go"}},
-	}
-	subtasks := map[string][]string{}
-	if !shouldSkipFrontend(analysis, subtasks) {
-		t.Error("expected skip=true when category is unknown and no frontend signals exist")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldSkipFrontend(tc.analysis, tc.subtasks); got != tc.expected {
+				t.Errorf("expected skip=%v, got skip=%v", tc.expected, got)
+			}
+		})
 	}
 }
 

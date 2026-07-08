@@ -112,7 +112,7 @@ export const tasks = {
   update(
     taskID: string,
     token: string,
-    input: { title?: string; description?: string; complexity?: string; priority?: number; labels?: string[]; agent_id?: string; repository_id?: string },
+    input: { title?: string; description?: string; complexity?: string; priority?: number; labels?: string[]; agent_id?: string; repository_id?: string; analysis?: any; spec_status?: string },
   ) {
     return request<Task>(`/tasks/${taskID}`, {
       method: "PATCH",

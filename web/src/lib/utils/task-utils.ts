@@ -29,7 +29,7 @@ export function isActiveTask(task: Task) {
 }
 
 export function needsReview(task: Task) {
-  return reviewStatuses.has(task.status) || task.spec_status === "pending_review";
+  return reviewStatuses.has(task.status) || task.spec_status === "pending_review" || task.spec_status === "clarification_required";
 }
 
 export function isFailedTask(task: Task) {

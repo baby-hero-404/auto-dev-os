@@ -104,12 +104,44 @@ func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAna
 	var matchedBoundary *models.ExecutionBoundary
 	for _, b := range analysis.ExecutionBoundaries {
 		cleanRoot := filepath.ToSlash(filepath.Clean(b.Root))
-		// Root boundary match
-		if file == cleanRoot || strings.HasPrefix(file, cleanRoot+"/") {
+		if cleanRoot == "." || cleanRoot == "/" {
+			cleanRoot = ""
+		}
+
+		isMatch := false
+		if cleanRoot == "" {
+			isMatch = true
+		} else if file == cleanRoot || strings.HasPrefix(file, cleanRoot+"/") {
+			isMatch = true
+		}
+
+		// Check match by stripping RepoName prefix (e.g. "tool_zentao/" from "tool_zentao/internal/sqlite/repository.go")
+		if !isMatch && b.RepoName != "" {
+			prefix := b.RepoName + "/"
+			if strings.HasPrefix(file, prefix) {
+				stripped := strings.TrimPrefix(file, prefix)
+				if cleanRoot == "" || stripped == cleanRoot || strings.HasPrefix(stripped, cleanRoot+"/") {
+					isMatch = true
+				}
+			} else if file == b.RepoName && cleanRoot == "" {
+				isMatch = true
+			}
+		}
+
+		// Check match by prepending RepoName to cleanRoot (e.g. comparing "tool_zentao/internal/sqlite" with file)
+		if !isMatch && b.RepoName != "" && cleanRoot != "" {
+			repoRoot := b.RepoName + "/" + cleanRoot
+			if file == repoRoot || strings.HasPrefix(file, repoRoot+"/") {
+				isMatch = true
+			}
+		}
+
+		if isMatch {
 			matchedBoundary = &b
 			break
 		}
 	}
+
 
 	// Determine required capability
 	requiredCap := "modify_existing"

@@ -14,7 +14,10 @@ interface TaskActionProps {
 export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionProps) {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
-  const isPendingSpecReview = task.status === "spec_review" || task.spec_status === "pending_review";
+  const isPendingSpecReview =
+    task.status === "spec_review" ||
+    task.spec_status === "pending_review" ||
+    task.spec_status === "clarification_required";
   const isExecutionReady =
     (task.spec_status === "auto_approved" || task.spec_status === "approved") &&
     task.status === "todo";
@@ -43,9 +46,13 @@ export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionP
       {isPendingSpecReview && (
         <Link
           href={`/projects/${projectID}/tasks/${task.id}`}
-          className="inline-flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm font-medium text-warning transition hover:bg-warning/20"
+          className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition ${
+            task.spec_status === "clarification_required"
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
+              : "border-warning/40 bg-warning/10 text-warning hover:bg-warning/20"
+          }`}
         >
-          <Search size={15} /> Review Spec
+          <Search size={15} /> {task.spec_status === "clarification_required" ? "Clarify Task" : "Review Spec"}
         </Link>
       )}
 

@@ -120,16 +120,8 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 	worktreeSuffix := ""
 	if !isEasy {
 		worktreeSuffix = "-be-worktree"
-		if s.worktree != nil {
-			if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
-				var ws *models.TaskWorkspace
-				if s.workspace != nil {
-					ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
-				}
-				if err := s.worktree.SetupRoleWorktrees(ctx, s.rt.Task, backendAgent, targetRepos, ws, "be", "backend", worktreeSuffix); err != nil {
-					return nil, err
-				}
-			}
+		if err := setupSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, "be", "backend", worktreeSuffix); err != nil {
+			return nil, err
 		}
 	}
 
@@ -328,15 +320,9 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		}
 	}
 
-	if worktreeSuffix != "" && s.worktree != nil {
-		if targetRepos, err := s.worktree.LoadTargetRepositories(ctx, s.rt.Task); err == nil {
-			var ws *models.TaskWorkspace
-			if s.workspace != nil {
-				ws, _ = s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
-			}
-			if err := s.worktree.CommitRoleWorktrees(ctx, s.rt.Task, backendAgent, targetRepos, ws, "be", "backend", worktreeSuffix); err != nil {
-				return nil, err
-			}
+	if worktreeSuffix != "" {
+		if err := commitSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, "be", "backend", worktreeSuffix); err != nil {
+			return nil, err
 		}
 	}
 

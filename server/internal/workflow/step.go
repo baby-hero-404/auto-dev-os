@@ -156,7 +156,7 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 	var beIndex, feIndex int
 	var allStepIDs []string
 
-	for _, unit := range units {
+	for idx, unit := range units {
 		agent := strings.ToLower(unit.ExecutionProfile.Agent)
 		var stepID string
 		var runFunc StepFunc
@@ -182,6 +182,34 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 				dependsOn = append(dependsOn, mapped)
 			}
 		}
+
+		// Enforce setup-project (first unit) dependency for all subsequent units
+		if idx > 0 && len(units) > 0 {
+			firstUnitStepID := idToStepID[units[0].ID]
+			if len(dependsOn) == 0 {
+				dependsOn = []string{firstUnitStepID}
+			}
+		}
+
+		// Respect parallelizable: false constraint
+		if idx > 0 && !unit.Constraints.Parallelizable && len(units) > 0 {
+			prevStepID := idToStepID[units[idx-1].ID]
+			found := false
+			for _, d := range dependsOn {
+				if d == prevStepID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				if len(dependsOn) == 1 && dependsOn[0] == StepPlan {
+					dependsOn = []string{prevStepID}
+				} else {
+					dependsOn = append(dependsOn, prevStepID)
+				}
+			}
+		}
+
 		if len(dependsOn) == 0 {
 			dependsOn = []string{StepPlan}
 		}

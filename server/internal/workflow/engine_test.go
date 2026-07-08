@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -196,5 +197,73 @@ func TestEngine_ResumeFromPausedState(t *testing.T) {
 	// The `running` event should still emit for the subsequent step
 	if testRunningCount != 1 {
 		t.Fatalf("expected 1 running event for subsequent step 'test', got %d", testRunningCount)
+	}
+}
+
+func TestEngine_ParallelStepRetrySkipsCompleted(t *testing.T) {
+	var mu sync.Mutex
+	executed := make(map[string]int)
+	
+	runFunc := func(id string, shouldFail bool) StepFunc {
+		return func(context.Context, StepContext) (map[string]any, error) {
+			mu.Lock()
+			executed[id]++
+			mu.Unlock()
+			if shouldFail {
+				return nil, errors.New("fail")
+			}
+			return map[string]any{"status": "ok"}, nil
+		}
+	}
+
+	def := Definition{Steps: []StepDefinition{
+		{ID: "start", Run: runFunc("start", false)},
+		{ID: "p0", DependsOn: []string{"start"}, Run: runFunc("p0", false)},
+		{ID: "p1", DependsOn: []string{"start"}, Run: runFunc("p1", true)}, // Will fail
+		{ID: "end", DependsOn: []string{"p0", "p1"}, Run: runFunc("end", false)},
+	}}
+
+	// Attempt 1: p0 will succeed, p1 will fail
+	engine := &Engine{
+		MaxParallel: 2,
+	}
+	_, err := engine.Run(context.Background(), def, nil)
+	if err == nil {
+		t.Fatal("expected error on attempt 1")
+	}
+
+	mu.Lock()
+	p0Count := executed["p0"]
+	p1Count := executed["p1"]
+	mu.Unlock()
+
+	if p0Count != 1 {
+		t.Fatalf("expected p0 to run once, ran %d times", p0Count)
+	}
+	if p1Count != 1 {
+		t.Fatalf("expected p1 to run once, ran %d times", p1Count)
+	}
+
+	// Now p1 is fixed (won't fail anymore)
+	def.Steps[2].Run = runFunc("p1", false)
+
+	// Attempt 2: we run again on the same engine.
+	// Since p0 succeeded on attempt 1, it was saved to CompletedSteps by the engine,
+	// so it should be skipped in attempt 2!
+	_, err = engine.Run(context.Background(), def, nil)
+	if err != nil {
+		t.Fatalf("expected success on attempt 2, got: %v", err)
+	}
+
+	mu.Lock()
+	p0CountAfter := executed["p0"]
+	p1CountAfter := executed["p1"]
+	mu.Unlock()
+
+	if p0CountAfter != 1 {
+		t.Fatalf("expected p0 to NOT run again in attempt 2, total runs: %d", p0CountAfter)
+	}
+	if p1CountAfter != 2 {
+		t.Fatalf("expected p1 to run again in attempt 2, total runs: %d", p1CountAfter)
 	}
 }

@@ -78,6 +78,9 @@ func run() error {
 	projRepo := repository.NewProjectRepo(db)
 	repoRepo := repository.NewRepositoryRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
+	if err := agentRepo.ResetAllStatuses(context.Background()); err != nil {
+		slog.Warn("failed to reset stuck agent statuses on startup", "error", err)
+	}
 	roleTemplateRepo := repository.NewRoleTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
 	ruleRepo := repository.NewRuleRepo(db)
@@ -270,6 +273,12 @@ func run() error {
 		aigateway.StartCooldownWorker(workerCtx, credentialPoolSvc, time.Minute)
 	}()
 	slog.Info("provider credential cooldown worker started")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orchestrator.StartAgentWatchdog(workerCtx, agentRepo, 5*time.Minute, 30*time.Minute)
+	}()
+	slog.Info("agent watchdog worker started")
 	go func() {
 		slog.Info("api server starting", "port", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

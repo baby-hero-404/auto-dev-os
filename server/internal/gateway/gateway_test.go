@@ -16,6 +16,8 @@ type fakePool struct {
 	credentials []*service.DecryptedCredential
 	selected    []string
 	cooldowns   []string
+	minCooldown time.Duration
+	minCredID   string
 }
 
 func (p *fakePool) SelectCredential(_ context.Context, orgID, provider, model string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error) {
@@ -31,6 +33,10 @@ func (p *fakePool) SelectCredential(_ context.Context, orgID, provider, model st
 func (p *fakePool) SetCooldown(_ context.Context, id string, model string, _ time.Time) error {
 	p.cooldowns = append(p.cooldowns, id+":"+model)
 	return nil
+}
+
+func (p *fakePool) GetMinCooldown(_ context.Context, orgID, provider, model string) (time.Duration, string, error) {
+	return p.minCooldown, p.minCredID, nil
 }
 
 type fakeResolver struct {
@@ -379,5 +385,101 @@ func TestAIGatewayChatTelemetry_ContextTimeout(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for telemetry record despite parent context cancel")
+	}
+}
+
+func TestAIGatewayWaitAndRetry(t *testing.T) {
+	// Scenario 1: cooldown < 30s (e.g., 50ms), success on retry.
+	pool := &fakePool{
+		credentials: []*service.DecryptedCredential{}, // initially empty to trigger error
+		minCooldown: 50 * time.Millisecond,
+		minCredID:   "cred-1",
+	}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "retry success", Model: "gpt-4o"}}, nil
+		},
+	})
+
+	// Run a goroutine to populate credentials after 20ms (simulating cooldown expiration)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		pool.credentials = []*service.DecryptedCredential{
+			{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+		}
+	}()
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+	start := time.Now()
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("expected retry success, got error: %v", err)
+	}
+	if resp.Content != "retry success" {
+		t.Errorf("expected Content 'retry success', got %q", resp.Content)
+	}
+	if duration < 50*time.Millisecond {
+		t.Errorf("expected wait of at least 50ms, got %v", duration)
+	}
+
+	// Scenario 2: cooldown >= 30s (e.g., 30s), fails immediately without waiting.
+	pool2 := &fakePool{
+		credentials: []*service.DecryptedCredential{},
+		minCooldown: 30 * time.Second,
+		minCredID:   "cred-2",
+	}
+	g2 := NewAIGateway(Options{
+		CredentialPool:        pool2,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "retry success", Model: "gpt-4o"}}, nil
+		},
+	})
+	start = time.Now()
+	_, err = g2.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	duration = time.Since(start)
+	if err == nil {
+		t.Fatal("expected error immediately, got nil")
+	}
+	if duration >= 1*time.Second {
+		t.Errorf("expected immediate failure without 30s wait, took %v", duration)
+	}
+
+	// Scenario 3: Context canceled during wait.
+	pool3 := &fakePool{
+		credentials: []*service.DecryptedCredential{},
+		minCooldown: 10 * time.Second,
+		minCredID:   "cred-3",
+	}
+	g3 := NewAIGateway(Options{
+		CredentialPool:        pool3,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "retry success", Model: "gpt-4o"}}, nil
+		},
+	})
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelCtx = llm.WithRouteOptions(cancelCtx, llm.RouteOptions{OrgID: "org-1"})
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	start = time.Now()
+	_, err = g3.Chat(cancelCtx, []llm.Message{{Role: "user", Content: "hello"}})
+	duration = time.Since(start)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+	if duration >= 1*time.Second {
+		t.Errorf("expected quick cancellation, took %v", duration)
 	}
 }

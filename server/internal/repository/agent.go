@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gorm.io/gorm"
@@ -286,6 +287,31 @@ func (r *AgentRepo) ResetAllStatuses(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (r *AgentRepo) ResetStuckAgents(ctx context.Context, cutoff time.Time) ([]models.Agent, error) {
+	var stuckAgents []models.Agent
+	err := r.db.WithContext(ctx).
+		Where("status IN ? AND updated_at < ?", []string{models.AgentStatusAssigned, models.AgentStatusRunning}, cutoff).
+		Find(&stuckAgents).Error
+	if err != nil {
+		return nil, fmt.Errorf("find stuck agents: %w", mapError(err))
+	}
+	if len(stuckAgents) == 0 {
+		return nil, nil
+	}
+	var ids []string
+	for _, a := range stuckAgents {
+		ids = append(ids, a.ID)
+	}
+	err = r.db.WithContext(ctx).Model(&models.Agent{}).
+		Where("id IN ?", ids).
+		Update("status", models.AgentStatusIdle).Error
+	if err != nil {
+		return nil, fmt.Errorf("reset stuck agents status: %w", mapError(err))
+	}
+	return stuckAgents, nil
+}
+
 
 func (r *AgentRepo) orgIDForProject(ctx context.Context, projectID string) (string, error) {
 	var orgID string

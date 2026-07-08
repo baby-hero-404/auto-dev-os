@@ -292,6 +292,40 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	var result workflow.Result
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		attemptCtx := context.WithValue(ctx, "workflow_attempt", attempt)
+
+		// Reload checkpoints to catch successes from previous attempts
+		if checkpoints, cpErr := o.workflows.ListCheckpoints(ctx, task.ID); cpErr == nil && len(checkpoints) > 0 {
+			var currentSpecHash string
+			if len(task.Analysis) > 0 {
+				var analysis models.TaskAnalysis
+				if json.Unmarshal(task.Analysis, &analysis) == nil {
+					currentSpecHash = analysis.SpecHash
+				}
+			}
+
+			completed := make(map[string]map[string]any)
+			for _, cp := range checkpoints {
+				var state map[string]any
+				if json.Unmarshal(cp.State, &state) == nil {
+					if cpHash, ok := state["spec_hash"].(string); ok && cpHash != "" && currentSpecHash != "" && cpHash != currentSpecHash {
+						continue
+					}
+
+					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
+						if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
+							continue
+						}
+						output, _ := state["output"].(map[string]any)
+						if output == nil {
+							output = map[string]any{}
+						}
+						completed[cp.Step] = output
+					}
+				}
+			}
+			engine.CompletedSteps = completed
+		}
+
 		if resumedStepID != "" {
 			result, err = engine.Resume(attemptCtx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID}, resumedStepID)
 		} else {
@@ -318,8 +352,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			break
 		}
 		if attempt < maxRetries {
-			o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Workflow failed: %v. Retrying attempt %d of %d in 2s...", err, attempt+1, maxRetries))
-			time.Sleep(2 * time.Second)
+			backoff := o.calculateBackoff(attempt)
+			o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Workflow failed: %v. Retrying attempt %d of %d in %v...", err, attempt+1, maxRetries, backoff))
+			time.Sleep(backoff)
 		}
 	}
 
@@ -398,4 +433,15 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	_ = o.checkpoint(cleanupCtx, task.ID, &job.ID, models.WorkflowStepDone, map[string]any{"status": models.WorkflowJobStatusDone, "steps": result.Status})
 	o.log(cleanupCtx, task.ID, &job.ID, "info", "workflow completed and is waiting for human PR approval")
 }
+
+func (o *Orchestrator) calculateBackoff(attempt int) time.Duration {
+	// formula: delay = min(2^attempt * 2, 60) seconds
+	power := 1 << attempt
+	seconds := power * 2
+	if seconds > 60 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 

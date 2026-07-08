@@ -424,3 +424,46 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 		t.Errorf("expected tools list, got empty")
 	}
 }
+
+func TestPromptAssembler_AssembleForAgent_PrunesCodingManifest(t *testing.T) {
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
+
+	task := models.Task{
+		ID:        "task-pruned-1",
+		ProjectID: "project-1",
+		Title:     "Implement logic",
+		Analysis:  json.RawMessage(`{"acceptance_criteria":["should be fast"],"risk_domains":["performance"],"execution_boundaries":[{"root":"/tmp","capabilities":["modify_existing"]}],"execution_phases":[{"name":"phase 1","tasks":["step 1"]}],"risks":["timeout"]}`),
+	}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
+
+	// Set StepIDCtxKey to workflow.StepCodeBackend to trigger isCodingStep
+	ctx := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
+
+	messages, _, err := assembler.AssembleForAgent(ctx, task, agent, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent failed: %v", err)
+	}
+
+	userMsg := messages[1].Content
+	if !strings.Contains(userMsg, "## Execution Manifest (JSON):") {
+		t.Fatalf("expected user prompt to contain manifest, got %s", userMsg)
+	}
+
+	// Assert pruned fields are NOT in the manifest
+	if strings.Contains(userMsg, "acceptance_criteria") {
+		t.Error("expected manifest to NOT contain 'acceptance_criteria'")
+	}
+	if strings.Contains(userMsg, "risk_domains") {
+		t.Error("expected manifest to NOT contain 'risk_domains'")
+	}
+	if strings.Contains(userMsg, "execution_boundaries") {
+		t.Error("expected manifest to NOT contain 'execution_boundaries'")
+	}
+	if strings.Contains(userMsg, "execution_phases") {
+		t.Error("expected manifest to NOT contain 'execution_phases'")
+	}
+	if strings.Contains(userMsg, "timeout") {
+		t.Error("expected manifest to NOT contain 'risks'")
+	}
+}

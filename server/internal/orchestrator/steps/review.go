@@ -151,11 +151,19 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 	reviewerAgent := s.rt.Agent
 	assignedAgentID := ""
 	if s.assigner != nil {
-		if rev, err := s.assigner.AssignReviewer(ctx, s.rt.Task); err == nil && rev != nil {
+		rev, err := s.assigner.AssignReviewer(ctx, s.rt.Task)
+		if rev != nil {
 			reviewerAgent = rev
 			assignedAgentID = rev.ID
 			if s.log != nil {
 				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("assigned reviewer agent %s for review step", reviewerAgent.Name))
+			}
+		}
+		if err != nil {
+			if assignedAgentID != "" {
+				if releaser, ok := s.assigner.(AgentReleaser); ok {
+					_ = releaser.Release(context.WithoutCancel(ctx), assignedAgentID)
+				}
 			}
 		}
 	}

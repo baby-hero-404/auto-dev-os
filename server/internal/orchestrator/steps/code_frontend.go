@@ -116,13 +116,18 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 			return nil, fmt.Errorf("frontend coding step requires a frontend agent, but got role %s", roleStr)
 		}
 		fg, err := assigner.AssignFrontendAgent(ctx, s.rt.Task)
-		if err != nil {
-			return nil, fmt.Errorf("failed to assign frontend agent for frontend coding step: %w", err)
-		}
 		if fg != nil {
 			frontendAgent = fg
 			assignedAgentID = fg.ID
 			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("assigned frontend agent %s for frontend coding step", frontendAgent.Name))
+		}
+		if err != nil {
+			if assignedAgentID != "" {
+				if releaser, ok := s.agents.(AgentReleaser); ok {
+					_ = releaser.Release(context.WithoutCancel(ctx), assignedAgentID)
+				}
+			}
+			return nil, fmt.Errorf("failed to assign frontend agent for frontend coding step: %w", err)
 		}
 	}
 	if assignedAgentID != "" && (s.rt.Agent == nil || assignedAgentID != s.rt.Agent.ID) {
@@ -170,9 +175,9 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 
 	var pathCtx *paths.AgentPathContext
 	repoContext := ""
+	var physicalRoot string
 	if s.workspace != nil {
 		if ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task); ws != nil {
-			var physicalRoot string
 			var useRepoPrefix bool
 			var repoName string
 			role := "frontend"
@@ -185,7 +190,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 				} else {
 					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoWorktreeDir(s.rt.Task.ID, repoName, role).String()
 				}
-				repoContext = " Your diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
+				repoContext = "\nIMPORTANT: Your workspace root IS the repository root.\nAll file paths MUST be relative (e.g., internal/model/commit.go).\nDo NOT prefix with the repository name.\nYour diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
 			} else {
 				useRepoPrefix = true
 				physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).CodeRoot(s.rt.Task.ID).String()
@@ -205,6 +210,13 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	instruction := instructionBase + repoContext + " DO NOT rewrite the entire file unless creating a new file."
 	if prFeedback != "" {
 		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
+	}
+
+	// Perform repository structure scan (Task 2.1)
+	if physicalRoot != "" {
+		if tree, err := ScanDirectory(physicalRoot, 3, 200); err == nil && tree != "" {
+			instruction += fmt.Sprintf("\n\n=== Repository Structure ===\n%s\n", tree)
+		}
 	}
 	// Inject role-specific subtasks from Plan output
 	if planOut, ok := stepCtx.Inputs[workflow.StepPlan]; ok {
@@ -226,6 +238,38 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 					}
 				}
 			}
+		}
+	}
+
+	// Inject files created/modified by prior steps (Task 2.4)
+	var priorFiles []string
+	seenPriorFiles := make(map[string]bool)
+	for inputStepID, stepOut := range stepCtx.Inputs {
+		if strings.HasPrefix(inputStepID, workflow.StepCodeBackend) || strings.HasPrefix(inputStepID, workflow.StepCodeFrontend) {
+			if fc, ok := stepOut["files_changed"]; ok {
+				var filesList []string
+				if fl, ok := fc.([]any); ok {
+					for _, f := range fl {
+						if str, ok := f.(string); ok {
+							filesList = append(filesList, str)
+						}
+					}
+				} else if fl, ok := fc.([]string); ok {
+					filesList = fl
+				}
+				for _, f := range filesList {
+					if !seenPriorFiles[f] {
+						seenPriorFiles[f] = true
+						priorFiles = append(priorFiles, f)
+					}
+				}
+			}
+		}
+	}
+	if len(priorFiles) > 0 {
+		instruction += "\n\n### Files Created/Modified by Prior Steps ###\n"
+		for _, f := range priorFiles {
+			instruction += fmt.Sprintf("- %s\n", f)
 		}
 	}
 
@@ -391,6 +435,11 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 			}
 		}
 	}
+
+	if out == nil {
+		out = make(map[string]any)
+	}
+	out["files_changed"] = changedFiles
 
 	return out, nil
 }

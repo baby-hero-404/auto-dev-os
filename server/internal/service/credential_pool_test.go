@@ -218,3 +218,41 @@ func expectListActiveProviderCredentials(mock sqlmock.Sqlmock, orgID, provider s
 		WithArgs(orgID, provider, models.ProviderCredentialStatusActive).
 		WillReturnRows(rows)
 }
+
+func TestClearExpiredCooldowns_LogsAndMetrics(t *testing.T) {
+	svc, mock, _, cleanup := newCredentialPoolServiceForTest(t, "plain-key")
+	defer cleanup()
+
+	now := time.Now()
+	// Mock selecting credentials that are expired cooldowns
+	rowsGet := sqlmock.NewRows([]string{
+		"id", "org_id", "provider", "label", "encrypted_key", "base_url", "status", "priority", "cooldown_until", "metadata", "created_at", "updated_at",
+	}).AddRow("cred-expired", "org-1", "openai", "default", "enc", "", models.ProviderCredentialStatusRateLimited, 0, now.Add(-5*time.Minute), []byte("{}"), now, now)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "provider_credentials" WHERE status = $1 AND cooldown_until < NOW()`)).
+		WithArgs(models.ProviderCredentialStatusRateLimited).
+		WillReturnRows(rowsGet)
+
+	// Mock updating status
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "provider_credentials" SET`)).
+		WillReturnResult(sqlmock.NewResult(0, 1)) // 1 row affected
+	mock.ExpectCommit()
+
+	count, err := svc.ClearExpiredCooldowns(context.Background())
+	if err != nil {
+		t.Fatalf("ClearExpiredCooldowns failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 expired cooldown cleared, got %d", count)
+	}
+
+	recoveryCount := svc.GetRecoveryCount()
+	if recoveryCount != 1 {
+		t.Errorf("expected recovery metrics count to be 1, got %d", recoveryCount)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}

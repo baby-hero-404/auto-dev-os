@@ -136,6 +136,17 @@ func (r *ProviderCredentialRepo) ClearExpiredCooldowns(ctx context.Context) (int
 	return result.RowsAffected, nil
 }
 
+func (r *ProviderCredentialRepo) GetExpiredCooldowns(ctx context.Context) ([]models.ProviderCredential, error) {
+	var creds []models.ProviderCredential
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND cooldown_until < NOW()", models.ProviderCredentialStatusRateLimited).
+		Find(&creds).Error
+	if err != nil {
+		return nil, fmt.Errorf("get expired cooldowns: %w", err)
+	}
+	return creds, nil
+}
+
 func (r *ProviderCredentialRepo) Delete(ctx context.Context, orgID string, id string) error {
 	result := r.db.WithContext(ctx).Where("org_id = ?", orgID).Delete(&models.ProviderCredential{}, "id = ?", id)
 	if result.Error != nil {

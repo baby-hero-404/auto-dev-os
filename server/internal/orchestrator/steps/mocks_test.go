@@ -52,11 +52,13 @@ func (m *mockLogger) Log(ctx context.Context, taskID string, jobID *string, leve
 }
 
 type mockLLMRunner struct {
-	result StepResult
-	err    error
+	result          StepResult
+	err             error
+	lastInstruction string
 }
 
 func (m *mockLLMRunner) RunLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepID string, instruction string) (StepResult, error) {
+	m.lastInstruction = instruction
 	if m.err != nil {
 		return nil, m.err
 	}

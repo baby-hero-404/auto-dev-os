@@ -39,6 +39,7 @@ type Options struct {
 type credentialPool interface {
 	SelectCredential(ctx context.Context, orgID, provider, model string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error)
 	SetCooldown(ctx context.Context, id string, model string, until time.Time) error
+	GetMinCooldown(ctx context.Context, orgID, provider, model string) (time.Duration, string, error)
 }
 
 type ProviderModelResolver interface {
@@ -200,64 +201,98 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 	}
 
 	var failures []string
-	for _, entry := range entries {
-		currentEntry := entry
-		lastEntry = &currentEntry
-		excluded := map[string]bool{}
-		for {
-			var cred *service.DecryptedCredential
-			cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, entry.Model, g.strategy, excluded)
-			if errors.Is(err, service.ErrNoCredentialsAvailable) {
-				failures = append(failures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
-				break
-			}
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
-				break
-			}
-			lastCred = cred
+	var retried bool
 
-			var provider llm.Provider
-			provider, err = g.providerFactory(cred, entry.Model)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
-				break
-			}
-			attempts := 4
-			for attempt := 0; attempt < attempts; attempt++ {
-				resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
-				if err == nil {
+	for {
+		failures = nil
+		for _, entry := range entries {
+			currentEntry := entry
+			lastEntry = &currentEntry
+			excluded := map[string]bool{}
+			for {
+				var cred *service.DecryptedCredential
+				cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, entry.Model, g.strategy, excluded)
+				if errors.Is(err, service.ErrNoCredentialsAvailable) {
+					failures = append(failures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
 					break
 				}
-				if isTransientError(err) && attempt < attempts-1 {
-					backoff := time.Duration(1000*(1<<attempt)) * time.Millisecond
-					log.Printf("[AIGateway] Transient error calling %s/%s: %v. Retrying in %v (attempt %d/%d)...", entry.Provider, entry.Model, err, backoff, attempt+1, attempts)
-					timer := time.NewTimer(backoff)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						err = ctx.Err()
-						return nil, err
-					case <-timer.C:
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
+					break
+				}
+				lastCred = cred
+
+				var provider llm.Provider
+				provider, err = g.providerFactory(cred, entry.Model)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
+					break
+				}
+				attempts := 4
+				for attempt := 0; attempt < attempts; attempt++ {
+					resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
+					if err == nil {
+						break
 					}
-					continue
+					if isTransientError(err) && attempt < attempts-1 {
+						backoff := time.Duration(1000*(1<<attempt)) * time.Millisecond
+						log.Printf("[AIGateway] Transient error calling %s/%s: %v. Retrying in %v (attempt %d/%d)...", entry.Provider, entry.Model, err, backoff, attempt+1, attempts)
+						timer := time.NewTimer(backoff)
+						select {
+						case <-ctx.Done():
+							timer.Stop()
+							err = ctx.Err()
+							return nil, err
+						case <-timer.C:
+						}
+						continue
+					}
+					break
 				}
-				break
-			}
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
-				if isTransientError(err) {
-					_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
-					excluded[cred.ID] = true
-					continue
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
+					if isTransientError(err) {
+						_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
+						excluded[cred.ID] = true
+						continue
+					}
+					break
 				}
-				break
+				if resp.Model == "" {
+					resp.Model = entry.Model
+				}
+				return resp, nil
 			}
-			if resp.Model == "" {
-				resp.Model = entry.Model
-			}
-			return resp, nil
 		}
+
+		if !retried {
+			var lowestCD time.Duration = -1
+			var lowestCredID string
+			for _, entry := range entries {
+				cd, credID, cdErr := g.credentialPool.GetMinCooldown(ctx, opts.OrgID, entry.Provider, entry.Model)
+				if cdErr == nil && cd >= 0 {
+					if lowestCD == -1 || cd < lowestCD {
+						lowestCD = cd
+						lowestCredID = credID
+					}
+				}
+			}
+
+			if lowestCD > 0 && lowestCD < 30*time.Second {
+				log.Printf("All credentials in cooldown. Waiting %ds for credential %s...", int(lowestCD.Seconds()), lowestCredID)
+				timer := time.NewTimer(lowestCD)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					err = ctx.Err()
+					return nil, err
+				case <-timer.C:
+				}
+				retried = true
+				continue
+			}
+		}
+		break
 	}
 
 	err = fmt.Errorf("ai gateway exhausted routes: %s", strings.Join(failures, "; "))

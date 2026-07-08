@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -96,14 +98,81 @@ func (s *CredentialPoolService) SetCooldown(ctx context.Context, id string, mode
 }
 
 func (s *CredentialPoolService) ClearExpiredCooldowns(ctx context.Context) (int64, error) {
+	expired, err := s.repo.GetExpiredCooldowns(ctx)
+	if err != nil {
+		slog.Error("failed to get expired cooldowns for logging", "error", err)
+	}
+
 	count, err := s.repo.ClearExpiredCooldowns(ctx)
 	if err != nil {
 		return 0, err
 	}
+
+	if count > 0 && len(expired) > 0 {
+		for _, cred := range expired {
+			slog.Info(fmt.Sprintf("Credential %s recovered from cooldown, now available", cred.ID))
+		}
+		atomic.AddInt64(&s.recoveryCounter, int64(len(expired)))
+	}
+
 	if count > 0 && s.audit != nil {
 		s.audit.RecordAction(ctx, models.AuditActionProviderCredentialRecovered, "provider_credential", "",
 			WithDetails(map[string]any{"count": count}),
 		)
 	}
 	return count, nil
+}
+
+func (s *CredentialPoolService) GetMinCooldown(ctx context.Context, orgID, provider, model string) (time.Duration, string, error) {
+	creds, err := s.repo.ListByOrg(ctx, orgID)
+	if err != nil {
+		return 0, "", err
+	}
+	now := time.Now()
+	var minCooldown time.Duration = -1
+	var minCredID string
+
+	for _, cred := range creds {
+		if strings.ToLower(cred.Provider) != strings.ToLower(provider) {
+			continue
+		}
+		// Ignore inactive/disabled credentials
+		if cred.Status == models.ProviderCredentialStatusDisabled {
+			continue
+		}
+
+		var cooldownUntil time.Time
+		// Check credential-level cooldown
+		if cred.Status == models.ProviderCredentialStatusRateLimited && cred.CooldownUntil != nil && cred.CooldownUntil.After(now) {
+			cooldownUntil = *cred.CooldownUntil
+		}
+
+		// Check model-specific cooldown
+		if model != "" {
+			s.mu.Lock()
+			mc, ok := s.modelCooldowns[cred.ID+":"+model]
+			s.mu.Unlock()
+			if ok && mc.After(now) {
+				if mc.After(cooldownUntil) {
+					cooldownUntil = mc
+				}
+			}
+		}
+
+		// If this credential has no active cooldown, then its cooldown is 0
+		var cd time.Duration
+		if !cooldownUntil.IsZero() && cooldownUntil.After(now) {
+			cd = cooldownUntil.Sub(now)
+		}
+
+		if minCooldown == -1 || cd < minCooldown {
+			minCooldown = cd
+			minCredID = cred.ID
+		}
+	}
+
+	if minCooldown == -1 {
+		return 0, "", nil
+	}
+	return minCooldown, minCredID, nil
 }

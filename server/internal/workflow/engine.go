@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -101,6 +102,7 @@ func (e *Engine) runInternal(ctx context.Context, def Definition, initial map[st
 		if _, exists := steps[stepID]; exists {
 			result.Status[stepID] = StepStatusSuccess
 			result.Outputs[stepID] = output
+			slog.Info(fmt.Sprintf("Skipping step %s — already completed (checkpoint found)", stepID))
 		}
 	}
 
@@ -140,6 +142,7 @@ func (e *Engine) runInternal(ctx context.Context, def Definition, initial map[st
 		wg.Wait()
 		close(ch)
 
+		var errToReturn error
 		for item := range ch {
 			if item.err != nil {
 				status := StepStatusFailed
@@ -152,13 +155,22 @@ func (e *Engine) runInternal(ctx context.Context, def Definition, initial map[st
 				}
 				result.Status[item.id] = status
 				_ = e.emit(ctx, Event{StepID: item.id, Status: status, Error: item.err.Error()})
-				return result, item.err
+				errToReturn = item.err
+				continue
 			}
 			result.Outputs[item.id] = item.output
 			result.Status[item.id] = StepStatusSuccess
+			if e.CompletedSteps == nil {
+				e.CompletedSteps = make(map[string]map[string]any)
+			}
+			e.CompletedSteps[item.id] = item.output
+
 			if err := e.emit(ctx, Event{StepID: item.id, Status: StepStatusSuccess, Output: item.output}); err != nil {
 				return result, err
 			}
+		}
+		if errToReturn != nil {
+			return result, errToReturn
 		}
 	}
 

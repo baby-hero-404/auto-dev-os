@@ -106,8 +106,23 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 		_ = json.Unmarshal(t.Analysis, &analysis)
 	}
 
-	// Backward Compatibility: Map legacy phases to units
-	MapLegacyPhasesToUnits(&analysis)
+	// Check if Analyze output already contains execution_units with dependencies and tasks
+	hasUnits := len(analysis.ExecutionUnits) > 0
+	if hasUnits {
+		for _, u := range analysis.ExecutionUnits {
+			if len(u.Tasks) == 0 {
+				hasUnits = false
+				break
+			}
+		}
+	}
+
+	if hasUnits {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", "Plan step skipped — execution units already provided by analyze step")
+	} else {
+		// Backward Compatibility: Map legacy phases to units
+		MapLegacyPhasesToUnits(&analysis)
+	}
 
 	// Validate ExecutionUnits DAG
 	maxCostThreshold := s.maxCost

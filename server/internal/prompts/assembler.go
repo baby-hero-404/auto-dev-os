@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
@@ -203,26 +205,71 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 			}
 			
 			// Inject Execution Manifest (JSON)
-			manifest := map[string]any{
-				"affected_files": analysis.AffectedFiles,
-				"risks":          analysis.Risks,
+			var manifestJSON []byte
+			if isCodingStep(stepID) {
+				manifest := map[string]any{
+					"affected_files": analysis.AffectedFiles,
+				}
+				if len(analysis.Tasks) > 0 {
+					manifest["tasks"] = analysis.Tasks
+				}
+				manifestJSON, _ = json.MarshalIndent(manifest, "", "  ")
+
+				// Calculate before/after tokens for metric logging
+				fullManifest := map[string]any{
+					"affected_files": analysis.AffectedFiles,
+					"risks":          analysis.Risks,
+				}
+				if len(analysis.ExecutionPhases) > 0 {
+					fullManifest["execution_phases"] = analysis.ExecutionPhases
+				}
+				if len(analysis.Tasks) > 0 {
+					fullManifest["tasks"] = analysis.Tasks
+				}
+				if len(analysis.RiskDomains) > 0 {
+					fullManifest["risk_domains"] = analysis.RiskDomains
+				}
+				if len(analysis.AcceptanceCriteria) > 0 {
+					fullManifest["acceptance_criteria"] = analysis.AcceptanceCriteria
+				}
+				if len(analysis.ExecutionBoundaries) > 0 {
+					fullManifest["execution_boundaries"] = analysis.ExecutionBoundaries
+				}
+				fullJSON, _ := json.MarshalIndent(fullManifest, "", "  ")
+
+				userBefore := user + "## Execution Manifest (JSON):\n```json\n" + string(fullJSON) + "\n```\n\n"
+				userAfter := user + "## Execution Manifest (JSON):\n```json\n" + string(manifestJSON) + "\n```\n\n"
+				tokensBefore := len(userBefore) / 4
+				tokensAfter := len(userAfter) / 4
+				log.Printf("[Metric] Prompt pruning for step %s: prompt_tokens_before=%d, prompt_tokens_after=%d, reduced=%d (%.2f%%)",
+					stepID, tokensBefore, tokensAfter, tokensBefore-tokensAfter, float64(tokensBefore-tokensAfter)/float64(tokensBefore)*100.0)
+
+				// Strip existing manifest from TasksMD
+				re := regexp.MustCompile(`(?s)## Execution Manifest \(JSON\):\n*` + "```" + `json\n.*?` + "```" + `\n*`)
+				user = re.ReplaceAllString(user, "")
+			} else {
+				manifest := map[string]any{
+					"affected_files": analysis.AffectedFiles,
+					"risks":          analysis.Risks,
+				}
+				if len(analysis.ExecutionPhases) > 0 {
+					manifest["execution_phases"] = analysis.ExecutionPhases
+				}
+				if len(analysis.Tasks) > 0 {
+					manifest["tasks"] = analysis.Tasks
+				}
+				if len(analysis.RiskDomains) > 0 {
+					manifest["risk_domains"] = analysis.RiskDomains
+				}
+				if len(analysis.AcceptanceCriteria) > 0 {
+					manifest["acceptance_criteria"] = analysis.AcceptanceCriteria
+				}
+				if len(analysis.ExecutionBoundaries) > 0 {
+					manifest["execution_boundaries"] = analysis.ExecutionBoundaries
+				}
+				manifestJSON, _ = json.MarshalIndent(manifest, "", "  ")
 			}
-			if len(analysis.ExecutionPhases) > 0 {
-				manifest["execution_phases"] = analysis.ExecutionPhases
-			}
-			if len(analysis.Tasks) > 0 {
-				manifest["tasks"] = analysis.Tasks
-			}
-			if len(analysis.RiskDomains) > 0 {
-				manifest["risk_domains"] = analysis.RiskDomains
-			}
-			if len(analysis.AcceptanceCriteria) > 0 {
-				manifest["acceptance_criteria"] = analysis.AcceptanceCriteria
-			}
-			if len(analysis.ExecutionBoundaries) > 0 {
-				manifest["execution_boundaries"] = analysis.ExecutionBoundaries
-			}
-			if manifestJSON, err := json.MarshalIndent(manifest, "", "  "); err == nil {
+			if len(manifestJSON) > 0 {
 				user += "## Execution Manifest (JSON):\n```json\n" + string(manifestJSON) + "\n```\n\n"
 			}
 		}

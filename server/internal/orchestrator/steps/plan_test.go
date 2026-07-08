@@ -469,3 +469,97 @@ func TestPlanStep_ValidationFailure_ExceededPause(t *testing.T) {
 		t.Errorf("expected task status to transition to spec_review, got %s", statusMock.lastStatus)
 	}
 }
+
+func TestPlanStep_SkipWhenExecutionUnitsAlreadyProvided(t *testing.T) {
+	// 1. Path where execution units are already fully provided
+	analysis := models.TaskAnalysis{
+		Complexity:      "medium",
+		PrimaryCategory: "backend",
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID:        "unit1",
+				Objective: "Obj 1",
+				Tasks:     []string{"Task 1"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+		},
+	}
+	analysisJSON, _ := json.Marshal(analysis)
+	task := &models.Task{
+		ID:         "task-skip-provided",
+		Complexity: models.TaskComplexityMedium,
+		Analysis:   analysisJSON,
+	}
+
+	log := &mockLogger{}
+	step := NewPlanStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		nil, nil, nil,
+		&mockStatusUpdater{},
+		log,
+		&mockCheckpointLister{},
+		8.0,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the log was emitted
+	found := false
+	for _, msg := range log.messages {
+		if strings.Contains(msg, "Plan step skipped — execution units already provided by analyze step") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected skip log message, got: %v", log.messages)
+	}
+
+	// 2. Path where execution units are not fully provided (tasks are empty)
+	analysisEmpty := models.TaskAnalysis{
+		Complexity:      "medium",
+		PrimaryCategory: "backend",
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID:        "unit1",
+				Objective: "Obj 1",
+				Tasks:     []string{}, // empty tasks
+			},
+		},
+	}
+	analysisEmptyJSON, _ := json.Marshal(analysisEmpty)
+	taskEmpty := &models.Task{
+		ID:         "task-no-skip",
+		Complexity: models.TaskComplexityMedium,
+		Analysis:   analysisEmptyJSON,
+	}
+
+	logEmpty := &mockLogger{}
+	stepEmpty := NewPlanStep(
+		StepRuntime{Task: taskEmpty, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: taskEmpty},
+		nil, nil, nil,
+		&mockStatusUpdater{},
+		logEmpty,
+		&mockCheckpointLister{},
+		8.0,
+	)
+
+	_, err = stepEmpty.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the log was NOT emitted
+	for _, msg := range logEmpty.messages {
+		if strings.Contains(msg, "Plan step skipped — execution units already provided by analyze step") {
+			t.Errorf("did not expect skip log message, but got one")
+		}
+	}
+}

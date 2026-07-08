@@ -143,7 +143,7 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		
 		repoContext := ""
 		if s.rt.Task.RepositoryID != nil {
-			repoContext = "Your diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
+			repoContext = "\nIMPORTANT: Your workspace root IS the repository root.\nAll file paths MUST be relative (e.g., internal/model/commit.go).\nDo NOT prefix with the repository name.\nYour diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
 		} else {
 			repoContext = "Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath) because you are working in a multi-repository workspace."
 		}

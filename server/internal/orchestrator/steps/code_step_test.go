@@ -3,10 +3,15 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type mockBackendAgentAssigner struct {
@@ -128,6 +133,47 @@ func TestCodeBackendStep_ReusesCurrentBackendAgent(t *testing.T) {
 	}
 	if len(assigner.releasedIDs) != 0 {
 		t.Fatalf("expected no borrowed backend release, got %d releases", len(assigner.releasedIDs))
+	}
+}
+
+func TestCodeBackendStep_ReleasesAgentOnAssignmentFailure(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-fail-assign",
+		Complexity: models.TaskComplexityMedium,
+	}
+	agent := &models.Agent{ID: "a1", Name: "Default Planner Agent", Role: models.AgentRolePlanner}
+	
+	// Mock assigner returning an agent AND an error
+	assigner := &mockBackendAgentAssigner{
+		agent: &models.Agent{ID: "assigned-be-1", Name: "Assigned BE", Role: models.AgentRoleBackend},
+		err:   errors.New("db error after assign"),
+	}
+
+	step := NewCodeBackendStep(
+		StepRuntime{Task: task, Agent: agent, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockLLMRunner{},
+		assigner,
+		&mockWorktreeManager{},
+		&mockPatchApplier{},
+		&mockDiffCapturer{},
+		&mockStepWorkspaceLoader{},
+		&mockArtifactSaver{},
+		&mockTestRunner{},
+		nil,
+		&mockLogger{},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error from step.Execute, got nil")
+	}
+	
+	if len(assigner.releasedIDs) != 1 {
+		t.Fatalf("expected backend agent release on failure, got %d releases", len(assigner.releasedIDs))
+	}
+	if assigner.releasedIDs[0] != "assigned-be-1" {
+		t.Fatalf("expected release of assigned-be-1, got %s", assigner.releasedIDs[0])
 	}
 }
 
@@ -271,5 +317,161 @@ func TestCodeFrontendStep_ReusesCurrentFrontendAgent(t *testing.T) {
 	}
 	if len(assigner.releasedIDs) != 0 {
 		t.Fatalf("expected no borrowed frontend release, got %d releases", len(assigner.releasedIDs))
+	}
+}
+
+func TestCodeBackendStep_IncludesDirectoryScan(t *testing.T) {
+	// Create a temp directory to simulate the worktree
+	tmpDir, err := os.MkdirTemp("", "code-step-scan-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:         "task-scan-123",
+		Complexity: models.TaskComplexityMedium,
+	}
+
+	// Compute physical root matching the logic in code_backend.go
+	workspaceRoot := filepath.Dir(tmpDir)
+	repoName := "my-repo"
+	role := "backend"
+	
+	// Create directories
+	physicalRoot := paths.NewOSWorkspacePaths(workspaceRoot).RepoWorktreeDir(task.ID, repoName, role).String()
+	if err := os.MkdirAll(physicalRoot, 0755); err != nil {
+		t.Fatalf("failed to create physical root: %v", err)
+	}
+
+	// Create a mock file in physicalRoot
+	mockFileName := "mock_backend_file_xxx.go"
+	if err := os.WriteFile(filepath.Join(physicalRoot, mockFileName), []byte("package main"), 0644); err != nil {
+		t.Fatalf("failed to write mock file: %v", err)
+	}
+
+	assigner := &mockBackendAgentAssigner{agent: &models.Agent{ID: "assigned-be-1", Role: models.AgentRoleBackend}}
+	llmMock := &mockLLMRunner{
+		result: StepResult{
+			"parsed": map[string]any{
+				"patch": "diff --git a/mock_backend_file_xxx.go b/mock_backend_file_xxx.go\n+new content\n",
+			},
+		},
+	}
+
+	wsLoader := &mockStepWorkspaceLoader{
+		loadFunc: func(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
+			return &models.TaskWorkspace{
+				Root: tmpDir, // Setting root to our temp directory
+				Repos: []models.RepoWorkspace{
+					{Name: "my-repo"},
+				},
+			}, nil
+		},
+	}
+
+	step := NewCodeBackendStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRolePlanner}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		llmMock,
+		assigner,
+		&mockWorktreeManager{},
+		&mockPatchApplier{},
+		&mockDiffCapturer{},
+		wsLoader,
+		&mockArtifactSaver{},
+		&mockTestRunner{},
+		nil,
+		&mockLogger{},
+	)
+
+	_, err = step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that the prompt instruction contains mock_backend_file_xxx.go
+	if !strings.Contains(llmMock.lastInstruction, mockFileName) {
+		t.Errorf("expected instruction to contain file name %q, got: %s", mockFileName, llmMock.lastInstruction)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "=== Repository Structure ===") {
+		t.Error("expected instruction to contain repository structure section header")
+	}
+}
+
+func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	task := &models.Task{
+		ID:         "task-test-2",
+		ProjectID: "proj-1",
+		Title:     "Prior files prop test",
+	}
+
+	assigner := &mockBackendAgentAssigner{agent: &models.Agent{ID: "assigned-be-1", Role: models.AgentRoleBackend}}
+	llmMock := &mockLLMRunner{
+		result: StepResult{
+			"parsed": map[string]any{
+				"patch": "diff --git a/some_file.go b/some_file.go\n+new content\n",
+			},
+		},
+	}
+
+	wsLoader := &mockStepWorkspaceLoader{
+		loadFunc: func(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
+			return &models.TaskWorkspace{
+				Root: tmpDir,
+				Repos: []models.RepoWorkspace{
+					{Name: "my-repo"},
+				},
+			}, nil
+		},
+	}
+
+	step := NewCodeBackendStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRolePlanner}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		llmMock,
+		assigner,
+		&mockWorktreeManager{},
+		&mockPatchApplier{},
+		&mockDiffCapturer{changed: []string{"some_file.go"}},
+		wsLoader,
+		&mockArtifactSaver{},
+		&mockTestRunner{},
+		nil,
+		&mockLogger{},
+	)
+
+	// Build StepContext with a prior step's outputs containing files_changed
+	stepCtx := workflow.StepContext{
+		StepID: "code_backend_1",
+		Inputs: map[string]map[string]any{
+			"code_backend_0": {
+				"files_changed": []string{"prior_file_1.go", "prior_file_2.go"},
+			},
+		},
+	}
+
+	out, err := step.Execute(context.Background(), stepCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify files_changed output of this step
+	outFiles, ok := out["files_changed"].([]string)
+	if !ok || len(outFiles) != 1 || outFiles[0] != "some_file.go" {
+		t.Fatalf("expected out[files_changed] to be ['some_file.go'], got %#v", out["files_changed"])
+	}
+
+	// Verify instruction contains Files Created/Modified by Prior Steps
+	if !strings.Contains(llmMock.lastInstruction, "### Files Created/Modified by Prior Steps ###") {
+		t.Error("expected instruction to contain Files Created/Modified by Prior Steps section")
+	}
+	if !strings.Contains(llmMock.lastInstruction, "- prior_file_1.go") {
+		t.Error("expected instruction to list prior_file_1.go")
+	}
+	if !strings.Contains(llmMock.lastInstruction, "- prior_file_2.go") {
+		t.Error("expected instruction to list prior_file_2.go")
 	}
 }

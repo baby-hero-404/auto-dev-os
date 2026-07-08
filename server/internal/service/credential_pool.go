@@ -10,6 +10,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"sync/atomic"
 )
 
 var ErrNoCredentialsAvailable = errors.New("no provider credentials available")
@@ -24,7 +25,7 @@ const (
 const (
 	testOpenAIModel    = "gpt-5.4-mini"
 	testAnthropicModel = "claude-haiku-4-5"
-	testGeminiModel    = "gemini-3.5-flash"
+	testGeminiModel    = "gemini-2.5-flash"
 	testNineRouterMode = "balanced"
 )
 
@@ -49,6 +50,7 @@ type CredentialPoolService struct {
 	mu               sync.Mutex
 	rrCounters       map[string]int
 	modelCooldowns   map[string]time.Time
+	recoveryCounter  int64
 }
 
 type credentialConnectionTester func(context.Context, models.ProviderCredential, string) error
@@ -143,10 +145,8 @@ func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID str
 		}
 	case "gemini":
 		defaults = []models.CreateProviderModelInput{
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 0},
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 1},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.5-flash", Priority: 0},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 1},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 0},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 0},
 			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 0},
 		}
 	}
@@ -256,5 +256,9 @@ func keySuffix(key string) string {
 		return key
 	}
 	return key[len(key)-4:]
+}
+
+func (s *CredentialPoolService) GetRecoveryCount() int64 {
+	return atomic.LoadInt64(&s.recoveryCounter)
 }
 

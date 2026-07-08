@@ -48,6 +48,13 @@ func (a *LegacyGitApplier) Validate(ctx context.Context, patchData string, baseP
 				file = strings.TrimPrefix(file, "b/")
 			}
 			if file != "" && file != "/dev/null" {
+				if !pathCtx.UseRepoPrefix && pathCtx.RepoName != "" && (strings.HasPrefix(file, pathCtx.RepoName+"/") || file == pathCtx.RepoName) {
+					validationErrs = append(validationErrs, ValidationError{
+						Filepath: file,
+						Reason:   fmt.Sprintf("path contains redundant repository name prefix %q; paths must be relative to the repository root without repo prefix", pathCtx.RepoName),
+						IsFatal:  false,
+					})
+				}
 				if _, err := pathCtx.ToPhysical(file); err != nil {
 					validationErrs = append(validationErrs, ValidationError{
 						Filepath: file,
@@ -85,6 +92,13 @@ func (a *SearchReplaceApplier) Validate(ctx context.Context, patchData string, b
 	if pathCtx != nil {
 		for _, b := range blocks {
 			if b.Filepath != "" {
+				if !pathCtx.UseRepoPrefix && pathCtx.RepoName != "" && (strings.HasPrefix(b.Filepath, pathCtx.RepoName+"/") || b.Filepath == pathCtx.RepoName) {
+					validationErrs = append(validationErrs, ValidationError{
+						Filepath: b.Filepath,
+						Reason:   fmt.Sprintf("path contains redundant repository name prefix %q; paths must be relative to the repository root without repo prefix", pathCtx.RepoName),
+						IsFatal:  false,
+					})
+				}
 				if _, err := pathCtx.ToPhysical(b.Filepath); err != nil {
 					validationErrs = append(validationErrs, ValidationError{
 						Filepath: b.Filepath,

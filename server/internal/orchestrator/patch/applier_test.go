@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func TestRunner_CapturePRDiff_MultiRepo(t *testing.T) {
@@ -486,6 +487,37 @@ func TestRunner_SplitPatchByRepoWithWorkspace(t *testing.T) {
 
 	if !strings.Contains(cleaned, "a/config/config.go") {
 		t.Errorf("expected cleaned paths, got:\n%s", cleaned)
+	}
+}
+
+func TestLegacyGitApplier_Validate_RedundantRepoPrefixWarning(t *testing.T) {
+	// Create context with AgentPathContext that has UseRepoPrefix = false and RepoName = "my-repo"
+	pathCtx := paths.NewAgentPathContext("/tmp/my-repo", false, "my-repo", "backend")
+	ctx := context.WithValue(context.Background(), paths.AgentPathContextKey, pathCtx)
+
+	applier := &LegacyGitApplier{runner: &Runner{}}
+
+	// Patch with redundant prefix: my-repo/file.go
+	patchText := `diff --git a/my-repo/file.go b/my-repo/file.go
+--- a/my-repo/file.go
++++ b/my-repo/file.go
+@@ -1,1 +1,2 @@
++// new change
+`
+
+	errs := applier.Validate(ctx, patchText, "/tmp/my-repo")
+
+	// We expect a warning validation error about the redundant prefix
+	var foundWarning bool
+	for _, err := range errs {
+		if !err.IsFatal && strings.Contains(err.Reason, "path contains redundant repository name prefix") {
+			foundWarning = true
+			break
+		}
+	}
+
+	if !foundWarning {
+		t.Errorf("expected warning validation error about redundant repo prefix, got: %v", errs)
 	}
 }
 

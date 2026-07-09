@@ -104,23 +104,61 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		}
 		r.log(ctx, task.ID, nil, "info", fmt.Sprintf("%s (attempt %d): llm response from %s", stepID, attempt, resp.Model))
 
-		if parsedJSON, err := ParseJSONMarkdown(resp.Content); err == nil {
+		parsedJSON, parseErr := ParseJSONMarkdown(resp.Content)
+		if parseErr == nil {
+			if schemaErr := r.validateSchema(stepID, parsedJSON); schemaErr != nil {
+				parseErr = schemaErr
+			} else if bizErr := r.validateBusiness(stepID, parsedJSON); bizErr != nil {
+				parseErr = bizErr
+			}
+		}
+
+		if parseErr == nil {
 			parsed = parsedJSON
 			break
 		} else {
-			r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: invalid JSON in response: %v", stepID, err))
+			var parseKind ParseErrorKind = ParseBusinessError
+			var errMsg string = parseErr.Error()
+
+			if cErr, ok := parseErr.(*ClassifiedParseError); ok {
+				parseKind = cErr.Kind
+				errMsg = cErr.Message
+			}
+
+			r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: parse failure [%s] (attempt %d/3): %s", stepID, parseKind, attempt, errMsg))
 			if attempt == 3 {
-				parsed = map[string]any{"raw_content": resp.Content}
+				parsed = map[string]any{"raw_content": resp.Content, "error": errMsg}
 				break
 			}
+
+			// FormatError: only local JSON repair is attempted (no LLM re-call)
+			if parseKind == ParseFormatError {
+				r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: format error, aborting LLM retry loop", stepID))
+				parsed = map[string]any{"raw_content": resp.Content, "error": errMsg}
+				break
+			}
+
 			content := resp.Content
 			if content == "" {
 				content = "(empty response)"
 			}
 			messages = append(messages, llm.Message{Role: "assistant", Content: content})
+
+			var feedbackMsg string
+			switch parseKind {
+			case ParseTruncationError:
+				feedbackMsg = fmt.Sprintf("Your response appeared to be truncated or incomplete. Error: %s. Please output the complete response again, making sure all JSON structures are properly closed.", errMsg)
+			case ParseSchemaError:
+				feedbackMsg = fmt.Sprintf("Your response was valid JSON but did not match the expected schema. Error: %s. Please correct the schema and output ONLY strictly valid JSON matching the requested format directly (or inside a ```json ``` block).", errMsg)
+			case ParseBusinessError:
+				feedbackMsg = fmt.Sprintf("Your response failed domain/business validation. Error: %s. Please correct the contents and output ONLY strictly valid JSON matching the requested format directly (or inside a ```json ``` block).", errMsg)
+			default:
+				feedbackMsg = fmt.Sprintf("Your output was not valid JSON. Error: %s. Please correct the syntax and output ONLY strictly valid JSON matching the requested format directly (or inside a ```json ``` block).", errMsg)
+			}
+
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Your output was not valid JSON. Error: %v. Please correct the syntax and output ONLY strictly valid JSON matching the requested format directly (or inside a ```json ``` block).", err),
+				Content: feedbackMsg,
 			})
 		}
 	}
@@ -138,6 +176,63 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		"prompt_tokens": resp.PromptTokens,
 		"output_tokens": resp.OutputTokens,
 	}, nil
+}
+
+func (r Runner) validateSchema(stepID string, parsed map[string]any) error {
+	if requiresPatch(stepID) {
+		p := ""
+		if pat, ok := parsed["patch"].(string); ok {
+			p = pat
+		} else if pat, ok := parsed["patch_text"].(string); ok {
+			p = pat
+		} else if pat, ok := parsed["diff"].(string); ok {
+			p = pat
+		}
+		if p == "" {
+			return &ClassifiedParseError{
+				Kind:    ParseSchemaError,
+				Message: "missing required 'patch', 'patch_text', or 'diff' field in JSON response",
+			}
+		}
+	}
+	if requiresStrictJSON(stepID) {
+		if len(parsed) == 0 {
+			return &ClassifiedParseError{
+				Kind:    ParseSchemaError,
+				Message: "parsed JSON response is empty",
+			}
+		}
+	}
+	return nil
+}
+
+func (r Runner) validateBusiness(stepID string, parsed map[string]any) error {
+	if requiresPatch(stepID) {
+		if fc, ok := parsed["files_changed"]; ok {
+			switch val := fc.(type) {
+			case []any:
+				if len(val) == 0 {
+					return &ClassifiedParseError{
+						Kind:    ParseBusinessError,
+						Message: "files_changed is empty, but patch changes are expected",
+					}
+				}
+			case []string:
+				if len(val) == 0 {
+					return &ClassifiedParseError{
+						Kind:    ParseBusinessError,
+						Message: "files_changed is empty, but patch changes are expected",
+					}
+				}
+			default:
+				return &ClassifiedParseError{
+					Kind:    ParseSchemaError,
+					Message: "files_changed must be an array of strings",
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (r Runner) initialMessages(ctx context.Context, task *models.Task, agent *models.Agent) ([]llm.Message, error) {

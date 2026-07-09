@@ -206,6 +206,22 @@ type TaskAnalysis struct {
 	RetryCount             int                 `json:"retry_count,omitempty"`
 }
 
+// FrozenContext holds the immutable execution contract for a workflow run.
+type FrozenContext struct {
+	SpecHash            string               `json:"spec_hash"`
+	ProposalMD          string               `json:"proposal_md"`
+	SpecsMD             string               `json:"specs_md"`
+	DesignMD            string               `json:"design_md"`
+	TasksMD             string               `json:"tasks_md"`
+	ExecutionUnits      []ExecutionUnit      `json:"execution_units"`
+	ExecutionBoundaries []ExecutionBoundary  `json:"execution_boundaries"`
+	AffectedFiles       []AffectedFile       `json:"affected_files"`
+	AcceptanceCriteria  []map[string]any     `json:"acceptance_criteria"`
+	ExecutionPhases     []ExecutionPhase     `json:"execution_phases"`
+	Risks               []string             `json:"risks"`
+	RiskDomains         []string             `json:"risk_domains"`
+}
+
 type ClarifyTaskInput struct {
 	Context string `json:"context"`
 }

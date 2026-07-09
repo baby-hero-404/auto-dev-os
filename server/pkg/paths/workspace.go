@@ -76,19 +76,13 @@ func (w *OSWorkspacePaths) RepoRoot(taskID, repoName string) Directory {
 }
 
 // RepoMain returns the main integration checkout of a repository.
-func (w *OSWorkspacePaths) RepoMain(taskID, repoName, branch string) Directory {
-	if branch == "" {
-		branch = "main"
-	}
-	return w.RepoRoot(taskID, repoName).Child(branch)
+func (w *OSWorkspacePaths) RepoMain(taskID, repoName string) Directory {
+	return w.RepoRoot(taskID, repoName).Child("main")
 }
 
 // RepoMainRelative returns the workspace-relative path to the main checkout.
-func (w *OSWorkspacePaths) RepoMainRelative(repoName, branch string) string {
-	if branch == "" {
-		branch = "main"
-	}
-	return filepath.ToSlash(filepath.Join(ReposDirName, repoName, branch))
+func (w *OSWorkspacePaths) RepoMainRelative(repoName string) string {
+	return filepath.ToSlash(filepath.Join(ReposDirName, repoName, "main"))
 }
 
 // RepoWorktreeDir returns the directory for a role-specific git worktree.
@@ -120,6 +114,9 @@ func WorkspaceToRepoRelative(path string) string {
 	after := path[idx+len(prefix):]
 	parts := strings.Split(after, "/")
 	if len(parts) < 2 {
+		if len(parts) == 1 && parts[0] != "" {
+			return parts[0]
+		}
 		return strings.TrimPrefix(path, "/")
 	}
 
@@ -128,21 +125,18 @@ func WorkspaceToRepoRelative(path string) string {
 		if len(parts) >= 4 {
 			return repoName + "/" + strings.Join(parts[3:], "/")
 		}
-		return strings.TrimPrefix(path, "/")
+		return repoName
 	}
 
 	if len(parts) >= 3 {
 		return repoName + "/" + strings.Join(parts[2:], "/")
 	}
 
-	return strings.TrimPrefix(path, "/")
+	return repoName
 }
 
-// RepoRelativeToWorkspace converts a repo-relative path (e.g. "readme.md") into a workspace-relative path (e.g. "code/repos/repoName/branch/readme.md").
-func RepoRelativeToWorkspace(repoName, branch, repoPath string) string {
-	if branch == "" {
-		branch = "main"
-	}
+// RepoRelativeToWorkspace converts a repo-relative path (e.g. "readme.md") into a workspace-relative path (e.g. "code/repos/repoName/main/readme.md").
+func RepoRelativeToWorkspace(repoName, repoPath string) string {
 	repoPath = filepath.ToSlash(filepath.Clean(repoPath))
 	repoPrefix := repoName + "/"
 	if strings.HasPrefix(repoPath, repoPrefix) {
@@ -150,7 +144,7 @@ func RepoRelativeToWorkspace(repoName, branch, repoPath string) string {
 	} else if repoPath == repoName {
 		repoPath = ""
 	}
-	return filepath.ToSlash(filepath.Join(ReposDirName, repoName, branch, repoPath))
+	return filepath.ToSlash(filepath.Join(ReposDirName, repoName, "main", repoPath))
 }
 
 // IsWorkspaceInternalPath returns true if the path points to a workspace meta-directory (artifacts, logs, specs, openspec, context, pr).
@@ -166,16 +160,4 @@ func IsWorkspaceInternalPath(path string) bool {
 	return false
 }
 
-// FindRepoMainBranchDir searches the repo root directory for the main integration branch folder (e.g. "main", "master").
-// It ignores the "worktrees" directory and any directories containing hyphens.
-func FindRepoMainBranchDir(repoRootPath string) string {
-	mainDirName := "main"
-	if entries, errEntries := os.ReadDir(repoRootPath); errEntries == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && entry.Name() != "worktrees" && !strings.Contains(entry.Name(), "-") {
-				return entry.Name()
-			}
-		}
-	}
-	return mainDirName
-}
+

@@ -1,6 +1,7 @@
 package llmrunner
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -97,3 +98,57 @@ func TestParseJSONMarkdown_KeyQuoteInString(t *testing.T) {
 		t.Errorf("expected next_key 'next value', got %q", res["next_key"])
 	}
 }
+
+func TestParseJSONMarkdown_BracketsMismatch(t *testing.T) {
+	content := `{
+  "files_changed": ["a.go"],
+  "required_skills_map": {
+    "backend": [
+      "golang-best-practices"
+    ],
+    "qa": [
+      "golang-testing"
+    }
+  }
+}`
+	res, err := ParseJSONMarkdown(content)
+	if err != nil {
+		t.Fatalf("expected no error after repairing mismatch, got %v", err)
+	}
+
+	skillsMap, ok := res["required_skills_map"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected required_skills_map to be a map, got %T", res["required_skills_map"])
+	}
+
+	qaSkills, ok := skillsMap["qa"].([]any)
+	if !ok {
+		t.Fatalf("expected qa skills to be array, got %T", skillsMap["qa"])
+	}
+
+	if len(qaSkills) != 1 || qaSkills[0] != "golang-testing" {
+		t.Errorf("unexpected qa skills contents: %v", qaSkills)
+	}
+}
+
+func TestParseRealLog(t *testing.T) {
+	bytes, err := os.ReadFile("/home/ubuntu/my_projects/auto_code_os/server/.data/workspaces/8f242c99-c616-4d15-9a75-51243f1403ba/logs/llm/call-003-code_backend_0/output.md")
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+	res, err := ParseJSONMarkdown(string(bytes))
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	patchStr, ok := res["patch"].(string)
+	if !ok {
+		t.Fatalf("patch not a string")
+	}
+	t.Logf("PATCH STRING LENGTH: %d", len(patchStr))
+	// Write it out to a file so we can inspect it
+	err = os.WriteFile("/home/ubuntu/my_projects/auto_code_os/server/.data/workspaces/8f242c99-c616-4d15-9a75-51243f1403ba/logs/llm/call-003-code_backend_0/extracted_patch.diff", []byte(patchStr), 0644)
+	if err != nil {
+		t.Fatalf("failed to write extracted patch: %v", err)
+	}
+}
+

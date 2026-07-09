@@ -194,11 +194,30 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 	skipFE := shouldSkipFrontend(analysis, subtasks)
 	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Plan: skip_frontend=%v (category=%s)", skipFE, analysis.PrimaryCategory))
 
+	// Phase 4: Create FrozenContext snapshot — immutable execution contract
+	frozen := models.FrozenContext{
+		SpecHash:            analysis.SpecHash,
+		ProposalMD:          analysis.ProposalMD,
+		SpecsMD:             analysis.SpecsMD,
+		DesignMD:            analysis.DesignMD,
+		TasksMD:             analysis.TasksMD,
+		ExecutionUnits:      analysis.ExecutionUnits,
+		ExecutionBoundaries: analysis.ExecutionBoundaries,
+		AffectedFiles:       analysis.AffectedFiles,
+		AcceptanceCriteria:  analysis.AcceptanceCriteria,
+		ExecutionPhases:     analysis.ExecutionPhases,
+		Risks:               analysis.Risks,
+		RiskDomains:         analysis.RiskDomains,
+	}
+	frozenJSON, _ := json.Marshal(frozen)
+	s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", "Plan: created FrozenContext snapshot")
+
 	// Build output
 	out := StepResult{
 		"subtasks":         subtasks,
 		"skip_frontend":    skipFE,
 		"execution_phases": analysis.ExecutionPhases,
+		"frozen_context":   string(frozenJSON),
 	}
 
 	// Setup branches (preserved from original)

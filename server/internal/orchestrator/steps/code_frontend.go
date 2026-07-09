@@ -82,8 +82,10 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 			return StepResult{"status": "skipped", "info": "skipped frontend step for easy task"}, nil
 		}
 		var analysis models.TaskAnalysis
-		if json.Unmarshal(t.Analysis, &analysis) == nil {
-			for _, file := range analysis.AffectedFiles {
+		_ = json.Unmarshal(t.Analysis, &analysis)
+		frozen := LoadFrozenContext(stepCtx, &analysis)
+		if frozen != nil {
+			for _, file := range frozen.AffectedFiles {
 				if isFrontendFile(file.File) {
 					hasFrontendFiles = true
 					break
@@ -186,7 +188,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 				repoName = ws.Repos[0].Name
 				useRepoPrefix = false
 				if t != nil && t.Complexity == models.TaskComplexityEasy {
-					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoMain(s.rt.Task.ID, repoName, "").String()
+					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoMain(s.rt.Task.ID, repoName).String()
 				} else {
 					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoWorktreeDir(s.rt.Task.ID, repoName, role).String()
 				}
@@ -212,11 +214,23 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
 	}
 
-	// Perform repository structure scan (Task 2.1)
-	if physicalRoot != "" {
-		if tree, err := ScanDirectory(physicalRoot, 3, 200); err == nil && tree != "" {
-			instruction += fmt.Sprintf("\n\n=== Repository Structure ===\n%s\n", tree)
+	// Perform repository structure scan (Task 2.1) (REQ-M02)
+	var tree string
+	if contextLoadOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
+		if cacheJSON, ok := contextLoadOut["context_cache"].(string); ok && cacheJSON != "" {
+			var cache models.ContextCache
+			if err := json.Unmarshal([]byte(cacheJSON), &cache); err == nil && cache.DirectoryTree != "" {
+				tree = cache.DirectoryTree
+			}
 		}
+	}
+	if tree == "" && physicalRoot != "" {
+		if t, err := ScanDirectory(physicalRoot, 3, 200); err == nil && t != "" {
+			tree = t
+		}
+	}
+	if tree != "" {
+		instruction += fmt.Sprintf("\n\n=== Repository Structure ===\n%s\n", tree)
 	}
 	// Inject role-specific subtasks from Plan output
 	if planOut, ok := stepCtx.Inputs[workflow.StepPlan]; ok {

@@ -3,6 +3,7 @@ package steps
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -45,14 +46,14 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 		}
 	}
 	if phases, ok := parsedFinal["execution_phases"].([]any); ok {
-		for _, phaseItem := range phases {
+		for i, phaseItem := range phases {
 			if pMap, ok := phaseItem.(map[string]any); ok {
 				phaseName, _ := pMap["phase"].(string)
 				var tasks []string
 				if tArr, ok := pMap["tasks"].([]any); ok {
-					for _, t := range tArr {
+					for j, t := range tArr {
 						if ts, ok := t.(string); ok {
-							tasks = append(tasks, ts)
+							tasks = append(tasks, normalizeTaskID(ts, i+1, j+1))
 						}
 					}
 				}
@@ -72,7 +73,7 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 				if tArr, ok := uMap["tasks"].([]any); ok {
 					for _, t := range tArr {
 						if ts, ok := t.(string); ok {
-							unit.Tasks = append(unit.Tasks, ts)
+							unit.Tasks = append(unit.Tasks, normalizeTaskID(ts, 0, 0))
 						}
 					}
 				}
@@ -249,4 +250,18 @@ func deriveWorkflowAnalysis(task *models.Task) models.TaskAnalysis {
 		},
 		ClarificationQuestions: questions,
 	}
+}
+
+var taskPrefixRegex = regexp.MustCompile(`^(?i)task[\s-]*(\d+)\.(\d+)[:\-\s]*`)
+
+func normalizeTaskID(taskStr string, fallbackPhase, fallbackTask int) string {
+	taskStr = strings.TrimSpace(taskStr)
+	if matches := taskPrefixRegex.FindStringSubmatch(taskStr); len(matches) > 0 {
+		content := strings.TrimSpace(taskStr[len(matches[0]):])
+		return fmt.Sprintf("Task %s.%s: %s", matches[1], matches[2], content)
+	}
+	if fallbackPhase > 0 && fallbackTask > 0 {
+		return fmt.Sprintf("Task %d.%d: %s", fallbackPhase, fallbackTask, taskStr)
+	}
+	return taskStr
 }

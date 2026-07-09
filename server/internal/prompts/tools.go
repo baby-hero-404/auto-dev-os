@@ -9,13 +9,72 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *models.Agent, projectID string, requiredSkills []string, requiredSkillsMap map[string][]string) ([]llm.ToolDefinition, error) {
+func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, task models.Task, agent *models.Agent) ([]llm.ToolDefinition, error) {
 	if agent == nil || a == nil {
 		if a != nil && a.baseTools != nil {
 			return a.baseTools, nil
 		}
 		return []llm.ToolDefinition{}, nil
 	}
+
+	stepID := stepIDFromCtx(ctx)
+	resolvedJIT, err := a.resolveSkills(ctx, task, agent, stepID)
+	if err == nil && len(resolvedJIT) > 0 {
+		// Extract allowed tools dynamically from frontmatter
+		allowedMap := map[string]bool{}
+		hasExplicitTools := false
+		for _, sk := range resolvedJIT {
+			if len(sk.AllowedTools) > 0 {
+				hasExplicitTools = true
+				for _, t := range sk.AllowedTools {
+					normalized := strings.TrimSpace(strings.ToLower(t))
+					switch normalized {
+					case "read", "read_file", "view", "grep", "search":
+						allowedMap["read_file"] = true
+						allowedMap["search_code"] = true
+					case "write", "write_file", "create":
+						allowedMap["write_file"] = true
+					case "edit", "patch", "modify":
+						allowedMap["apply_patch"] = true
+						allowedMap["write_file"] = true
+					case "test", "tests", "run_tests", "qa":
+						allowedMap["run_tests"] = true
+						allowedMap["analyze_logs"] = true
+					case "database", "migration":
+						allowedMap["create_migration"] = true
+						allowedMap["read_file"] = true
+						allowedMap["write_file"] = true
+					case "docs", "documentation":
+						allowedMap["generate_docs"] = true
+					default:
+						addAllowedTool(allowedMap, t)
+					}
+				}
+			}
+		}
+
+		if hasExplicitTools {
+			if len(allowedMap) == 0 {
+				allowedMap = map[string]bool{"read_file": true, "write_file": true}
+			}
+			var filtered []llm.ToolDefinition
+			for _, tool := range a.baseTools {
+				if allowedMap[tool.Name] {
+					filtered = append(filtered, tool)
+				}
+			}
+			if len(filtered) == 0 {
+				for _, tool := range a.baseTools {
+					if tool.Name == "read_file" || tool.Name == "write_file" {
+						filtered = append(filtered, tool)
+					}
+				}
+			}
+			return filtered, nil
+		}
+	}
+
+	// Fallback to static role-based templates
 	var allSkills []models.Skill
 	if a.skills != nil {
 		var err error
@@ -26,7 +85,7 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 	}
 
 	// Merge with project-specific disk skills
-	diskSkills, err := a.loadProjectDiskSkills(projectID)
+	diskSkills, err := a.loadProjectDiskSkills(task.ProjectID)
 	if err == nil && len(diskSkills) > 0 {
 		skillMap := make(map[string]models.Skill)
 		for _, s := range allSkills {
@@ -41,15 +100,20 @@ func (a *PromptAssembler) toolDefinitionsForAgent(ctx context.Context, agent *mo
 		}
 	}
 
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+
 	requiredMap := make(map[string]bool)
-	for _, req := range requiredSkills {
+	for _, req := range analysis.RequiredSkills {
 		requiredMap[strings.ToLower(strings.TrimSpace(req))] = true
 	}
 
-	// Dynamic Planner Role-Skill Assignment (Phase 19)
-	if len(requiredSkillsMap) > 0 {
+	// Dynamic Planner Role-Skill Assignment
+	if len(analysis.RequiredSkillsMap) > 0 {
 		roleKey := strings.ToLower(agent.Role)
-		for _, req := range requiredSkillsMap[roleKey] {
+		for _, req := range analysis.RequiredSkillsMap[roleKey] {
 			requiredMap[strings.ToLower(strings.TrimSpace(req))] = true
 		}
 	}

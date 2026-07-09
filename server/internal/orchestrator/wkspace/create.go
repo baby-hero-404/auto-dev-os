@@ -70,7 +70,7 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 				TestStatus:  models.TestStatusPending,
 			},
 			Paths: models.RepoWorkspacePaths{
-				Main:      paths.NewOSWorkspacePaths("").RepoMainRelative(repoName, defaultBranch),
+				Main:      paths.NewOSWorkspacePaths("").RepoMainRelative(repoName),
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{

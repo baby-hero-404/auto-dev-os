@@ -89,7 +89,7 @@ func (r *Runner) CapturePRDiff(ctx context.Context, task *models.Task, agent *mo
 		}
 		if repoHostPath == "" {
 			repoName := repoNameFromURL(repo.URL)
-			repoHostPath = paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoMain(task.ID, repoName, "").String()
+			repoHostPath = paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoMain(task.ID, repoName).String()
 			if stat, statErr := os.Stat(repoHostPath); statErr != nil || !stat.IsDir() {
 				repoHostPath = filepath.Join(localPath, repoName)
 			}

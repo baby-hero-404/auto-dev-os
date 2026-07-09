@@ -102,7 +102,6 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 	}
 
 	isRestore := strings.HasSuffix(stepID, "_restore")
-	allowedNewFiles := make(map[string]bool)
 	if task.Analysis != nil && !isRestore {
 		var analysis models.TaskAnalysis
 		if err := json.Unmarshal(task.Analysis, &analysis); err == nil {
@@ -249,8 +248,8 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 				cleanedPatch = p
 			}
 		}
-		patchText = CleanPatchPaths(cleanedPatch)
 		targetPath := r.HostWorktreePath(task, repoHostPath, worktreeSuffix)
+		patchText = cleanedPatch
 		fullPath := filepath.Join(targetPath, "patch.diff")
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			return err
@@ -270,8 +269,6 @@ if git -C %[2]s apply --check -R %[3]s >/dev/null 2>&1; then
 elif git -C %[2]s apply --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1; then
 	true
 elif patch --batch --no-backup-if-mismatch -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
-	true
-elif patch --batch --no-backup-if-mismatch -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
 else
 	cat "$ERR_LOG" >&2
@@ -295,8 +292,6 @@ elif git -C %[2]s apply --reverse --recount --whitespace=nowarn %[3]s >"$ERR_LOG
 	true
 elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
-	true
 else
 	cat "$ERR_LOG" >&2
 	(exit 2)
@@ -312,11 +307,6 @@ exit $CODE`,
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch", revertCmd, worktreeSuffix)
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch: %w", err)
-		}
-		if len(allowedNewFiles) > 0 {
-			if err := r.appendNewAffectedFiles(ctx, task, allowedNewFiles); err != nil && r.Log != nil {
-				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
-			}
 		}
 		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 		return nil
@@ -336,8 +326,7 @@ exit $CODE`,
 		if repoHostPath == "" {
 			// Fallback to ReposPrefix + repoName/<defaultBranch>
 			repoDir := paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoRoot(task.ID, repoName).String()
-			mainDirName := paths.FindRepoMainBranchDir(repoDir)
-			repoHostPath = filepath.Join(repoDir, mainDirName)
+			repoHostPath = filepath.Join(repoDir, "main")
 			// Double fallback to localPath/repoName
 			if stat, err := os.Stat(repoHostPath); err != nil || !stat.IsDir() {
 				repoHostPath = filepath.Join(localPath, repoName)
@@ -372,8 +361,6 @@ elif git -C %[2]s apply -p1 --recount --whitespace=nowarn %[3]s >"$ERR_LOG" 2>&1
 	true
 elif patch --batch --no-backup-if-mismatch -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
-	true
 else
 	cat "$ERR_LOG" >&2
 	(exit 2)
@@ -396,8 +383,6 @@ elif git -C %[2]s apply --reverse -p1 --recount --whitespace=nowarn %[3]s >"$ERR
 	true
 elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p1 < %[3]s >"$ERR_LOG" 2>&1; then
 	true
-elif patch --batch --no-backup-if-mismatch -R -d %[2]s -p0 < %[3]s >"$ERR_LOG" 2>&1; then
-	true
 else
 	cat "$ERR_LOG" >&2
 	(exit 2)
@@ -413,11 +398,6 @@ exit $CODE`,
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch_"+repoName, revertCmd, worktreeSuffix)
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
-		}
-		if len(allowedNewFiles) > 0 {
-			if err := r.appendNewAffectedFiles(ctx, task, allowedNewFiles); err != nil && r.Log != nil {
-				r.Log(ctx, task.ID, "warn", fmt.Sprintf("failed to persist new affected files: %v", err))
-			}
 		}
 		_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 	}

@@ -31,7 +31,7 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 		branch = "main"
 	}
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
-	return wp.RepoMain(task.ID, RepoNameFromURL(repo.URL), branch).String()
+	return wp.RepoMain(task.ID, RepoNameFromURL(repo.URL)).String()
 }
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
@@ -99,7 +99,13 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
 	relPath := wp.RepoWorktreeRelative(rWS.Name, role)
 	rWS.Paths.Worktrees[role] = relPath
-	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, role)
+	roleSuffix := role
+	if role == "backend" {
+		roleSuffix = "be"
+	} else if role == "frontend" {
+		roleSuffix = "fe"
+	}
+	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, roleSuffix)
 
 	if wsLoaded, errLoad := m.LoadTaskWorkspace(ctx, task); errLoad == nil {
 		for i := range wsLoaded.Repos {

@@ -1,0 +1,66 @@
+# Binaries and build artifacts
+bin/
+server/api
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test related
+*.test
+*.out
+cover.out
+
+# Go dependencies
+vendor/
+
+# Environment configurations
+.env
+.env.*
+server/.env
+server/.env.*
+
+# IDE and Editor configs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# OS specific files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Thumbs.db
+
+# Temporary directories
+tmp/
+temp/
+
+# External cloned references
+references/
+
+# Orchestrator data & database files
+.data/
+server/.data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Git directories
+.git/
+.github/
+
+# Web dependencies and build files
+web/node_modules/
+node_modules/
+.next/
+web/.next/
+web/out/
+dist/
+build/

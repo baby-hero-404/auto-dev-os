@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -156,6 +157,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return step.StatusOnResume(steps.StepResult(output))
 		}
 		runner := func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
+			ctx = context.WithValue(ctx, prompts.StepInputsCtxKey, sc.Inputs)
 			res, err := step.Execute(ctx, sc)
 			return map[string]any(res), err
 		}

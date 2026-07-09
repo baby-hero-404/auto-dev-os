@@ -48,6 +48,12 @@ func (h *TaskHandler) Clarify(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	if h.orch != nil {
+		if _, err := h.orch.Execute(r.Context(), id); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -88,6 +94,12 @@ func (h *TaskHandler) RequestAnalysisChanges(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		writeServiceError(w, err)
 		return
+	}
+	if h.orch != nil {
+		if _, err := h.orch.Execute(r.Context(), id); err != nil {
+			writeServiceError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, t)
 }

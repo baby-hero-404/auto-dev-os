@@ -126,7 +126,7 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 		return deriveWorkflowAnalysis(s.rt.Task), true, nil
 	}
 
-	instruction := buildAnalyzeInstruction(stepCtx)
+	instruction := s.buildAnalyzeInstruction(ctx, stepCtx)
 	messages, err := s.buildAnalyzeMessages(ctx, instruction)
 	if err != nil {
 		return models.TaskAnalysis{}, false, err
@@ -137,8 +137,7 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 		if loopErr == nil {
 			loopErr = fmt.Errorf("LLM returned empty or nil spec JSON")
 		}
-		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("agent failed to output a valid final spec JSON after retry iterations: %v. Falling back to human review spec.", loopErr))
-		return deriveWorkflowAnalysis(s.rt.Task), true, nil
+		return models.TaskAnalysis{}, false, fmt.Errorf("failed to generate valid specification after retry iterations: %w", loopErr)
 	}
 
 	return parseAnalysisFinal(parsedFinal), false, nil
@@ -163,7 +162,7 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 	return messages, nil
 }
 
-func buildAnalyzeInstruction(stepCtx workflow.StepContext) string {
+func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workflow.StepContext) string {
 	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
 	var repoContext string
 	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
@@ -173,6 +172,9 @@ func buildAnalyzeInstruction(stepCtx workflow.StepContext) string {
 	}
 	if repoContext != "" {
 		instruction += "\n\n=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===\n" + repoContext
+	}
+	if files, err := s.listAnalyzeFiles(ctx); err == nil && files != "" && files != "No files found in workspace." {
+		instruction += "\n\n=== Workspace Files ===\n" + files
 	}
 	return instruction
 }

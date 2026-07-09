@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
+	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type fakeAgentSkillLister struct {
@@ -478,5 +480,63 @@ func TestPromptAssembler_AssembleForAgent_PrunesCodingManifest(t *testing.T) {
 	}
 	if strings.Contains(userMsg, "timeout") {
 		t.Error("expected manifest to NOT contain 'risks'")
+	}
+}
+
+func TestPromptAssembler_WorkspaceSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	taskID := "task-workspace-test"
+	projectID := "proj-workspace-test"
+
+	// Create workspace repo layout
+	repoSkillDir := filepath.Join(tmpDir, "workspaces", taskID, "code", "repos", "repo-a", "main", "skills")
+	if err := os.MkdirAll(repoSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	skillContent := `---
+name: WorkspaceSkill
+description: A local skill inside task workspace repo
+allowed-tools: read_file
+---
+This is a skill from the task's repository checkout.`
+
+	if err := os.WriteFile(filepath.Join(repoSkillDir, "workspace-skill.md"), []byte(skillContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create prompt assembler with rules set so isUnitTest is false, prompting local scan
+	mockRules := &repository.RuleRepo{}
+	assembler := NewPromptAssemblerWithRules(mockRules, testBaseTools(), paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{}).WithDataRoot(tmpDir)
+
+	task := models.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Testing local skills",
+		Description: "Verify local skill is discovered from repository workspace.",
+	}
+
+	skills, err := assembler.loadAllSkills(context.Background(), task)
+	if err != nil {
+		t.Fatalf("loadAllSkills failed: %v", err)
+	}
+
+	found := false
+	for _, sk := range skills {
+		if sk.Name == "WorkspaceSkill" {
+			found = true
+			if sk.Description != "A local skill inside task workspace repo" {
+				t.Errorf("unexpected description: %s", sk.Description)
+			}
+			if len(sk.AllowedTools) != 1 || sk.AllowedTools[0] != "read_file" {
+				t.Errorf("unexpected allowed tools: %v", sk.AllowedTools)
+			}
+			if !strings.Contains(sk.Content, "This is a skill from the task's repository checkout.") {
+				t.Errorf("unexpected content: %s", sk.Content)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected WorkspaceSkill to be found in loaded skills")
 	}
 }

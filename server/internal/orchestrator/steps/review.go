@@ -222,24 +222,23 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		}
 		instruction := "Review the proposed changes. Here is the current workspace diff:\n\n" + diffText + "\n\n" +
 			"Return JSON findings with severity, file, line, and recommendation."
+		var analysis models.TaskAnalysis
 		if len(s.rt.Task.Analysis) > 0 {
-			var analysis models.TaskAnalysis
-			if err := json.Unmarshal(s.rt.Task.Analysis, &analysis); err == nil {
-				if analysis.TasksMD != "" {
-					instruction += "\n\nCRITICAL RUBRIC - You MUST verify that the following tasks have been completed correctly and accurately based on the diff. If any task is incomplete or not addressed, report a finding with 'requires_fix': true:\n\n" + analysis.TasksMD
-				}
-				if len(analysis.AcceptanceCriteria) > 0 {
-					acJSON, _ := json.MarshalIndent(analysis.AcceptanceCriteria, "", "  ")
-					instruction += "\n\nACCEPTANCE CRITERIA - You MUST verify the code meets these criteria:\n```json\n" + string(acJSON) + "\n```"
-				}
-				if len(analysis.ExecutionBoundaries) > 0 {
-					ebJSON, _ := json.MarshalIndent(analysis.ExecutionBoundaries, "", "  ")
-					instruction += "\n\nEXECUTION BOUNDARIES - You MUST verify the code modifications did not violate these boundaries:\n```json\n" + string(ebJSON) + "\n```"
-				}
-				if len(analysis.ExpandedBoundaries) > 0 {
-					expJSON, _ := json.MarshalIndent(analysis.ExpandedBoundaries, "", "  ")
-					instruction += "\n\nJIT BOUNDARY EXPANSIONS (AUDIT LOG) - These boundaries were automatically expanded during implementation:\n```json\n" + string(expJSON) + "\n```"
-				}
+			_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
+		}
+		frozen := LoadFrozenContext(stepCtx, &analysis)
+
+		if frozen != nil {
+			if frozen.TasksMD != "" {
+				instruction += "\n\nCRITICAL RUBRIC - You MUST verify that the following tasks have been completed correctly and accurately based on the diff. If any task is incomplete or not addressed, report a finding with 'requires_fix': true:\n\n" + frozen.TasksMD
+			}
+			if len(frozen.AcceptanceCriteria) > 0 {
+				acJSON, _ := json.MarshalIndent(frozen.AcceptanceCriteria, "", "  ")
+				instruction += "\n\nACCEPTANCE CRITERIA - You MUST verify the code meets these criteria:\n```json\n" + string(acJSON) + "\n```"
+			}
+			if len(frozen.ExecutionBoundaries) > 0 {
+				ebJSON, _ := json.MarshalIndent(frozen.ExecutionBoundaries, "", "  ")
+				instruction += "\n\nEXECUTION BOUNDARIES - You MUST verify the code modifications did not violate these boundaries:\n```json\n" + string(ebJSON) + "\n```"
 			}
 		}
 

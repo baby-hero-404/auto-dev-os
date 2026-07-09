@@ -106,6 +106,13 @@ func (v *AgentPathContext) ToPhysical(logical string) (string, error) {
 			}
 			logical = filepath.Join(v.RepoName, roleFolder, logical)
 		}
+	} else if v.RepoName != "" {
+		repoPrefix := v.RepoName + "/"
+		if strings.HasPrefix(logical, repoPrefix) {
+			logical = logical[len(repoPrefix):]
+		} else if logical == v.RepoName {
+			logical = ""
+		}
 	}
 
 	// Prevent directory traversal attacks

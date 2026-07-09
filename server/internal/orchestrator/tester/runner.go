@@ -63,9 +63,7 @@ func (r Runner) RunTargetedTests(ctx context.Context, task *models.Task, agent *
 				workspaceRoot := filepath.Dir(repoHostPath)
 				taskDirName := filepath.Base(repoHostPath)
 				wp := paths.NewOSWorkspacePaths(workspaceRoot)
-				repoDir := wp.RepoRoot(taskDirName, repoName).String()
-				mainDirName := paths.FindRepoMainBranchDir(repoDir)
-				repoMainHostPath := wp.RepoMain(taskDirName, repoName, mainDirName).String()
+				repoMainHostPath := wp.RepoMain(taskDirName, repoName).String()
 				fileMountedHostPath = r.HostWorktreePath(task, repoMainHostPath, worktreeSuffix)
 			} else {
 				fileMountedHostPath = repoHostPath

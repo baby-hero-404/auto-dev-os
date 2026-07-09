@@ -162,3 +162,25 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
 		t.Errorf("expected category backend, got: %s", analysis.PrimaryCategory)
 	}
 }
+
+func TestNormalizeTaskID(t *testing.T) {
+	tests := []struct {
+		input         string
+		fallbackPhase int
+		fallbackTask  int
+		expected      string
+	}{
+		{"Khởi tạo dự án", 1, 1, "Task 1.1: Khởi tạo dự án"},
+		{"task 1.2: Định nghĩa interface", 2, 3, "Task 1.2: Định nghĩa interface"},
+		{"Task-2.1 - Triển khai SQLite", 3, 4, "Task 2.1: Triển khai SQLite"},
+		{"Task 3.2: Sync engine", 0, 0, "Task 3.2: Sync engine"},
+		{"Triển khai scheduler", 0, 0, "Triển khai scheduler"},
+	}
+
+	for _, tt := range tests {
+		actual := normalizeTaskID(tt.input, tt.fallbackPhase, tt.fallbackTask)
+		if actual != tt.expected {
+			t.Errorf("normalizeTaskID(%q, %d, %d) = %q; expected %q", tt.input, tt.fallbackPhase, tt.fallbackTask, actual, tt.expected)
+		}
+	}
+}

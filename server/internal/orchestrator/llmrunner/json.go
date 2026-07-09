@@ -42,6 +42,12 @@ func ParseJSONMarkdown(content string) (map[string]any, error) {
 		return res, nil
 	}
 
+	// Try repairing brackets as a fallback before robust parsing
+	repaired := RepairJSONBrackets(sanitized)
+	if err := json.Unmarshal([]byte(repaired), &res); err == nil {
+		return res, nil
+	}
+
 	// Fallback to robust parsing
 	robustRes, err := RobustParseLLMResponse(trimmed)
 	if err == nil {
@@ -56,9 +62,14 @@ func ParseJSONMarkdown(content string) (map[string]any, error) {
 		if err := json.Unmarshal([]byte(extracted), &res); err == nil {
 			return res, nil
 		}
+		repairedExtracted := RepairJSONBrackets(extracted)
+		if err := json.Unmarshal([]byte(repairedExtracted), &res); err == nil {
+			return res, nil
+		}
 	}
 
-	return nil, err
+	// Classify the failure and return a ClassifiedParseError
+	return nil, ClassifyParseError(content, err)
 }
 
 func RobustParseLLMResponse(content string) (map[string]any, error) {
@@ -342,3 +353,68 @@ func SanitizeJSON(input string) string {
 	}
 	return result.String()
 }
+
+func RepairJSONBrackets(input string) string {
+	var result strings.Builder
+	inString := false
+	escaped := false
+	var stack []byte
+
+	runes := []rune(input)
+	for i := 0; i < len(runes); i++ {
+		c := runes[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			result.WriteRune(c)
+		} else {
+			if c == '"' {
+				inString = true
+				result.WriteRune(c)
+			} else if c == '[' {
+				stack = append(stack, '[')
+				result.WriteRune(c)
+			} else if c == '{' {
+				stack = append(stack, '{')
+				result.WriteRune(c)
+			} else if c == ']' {
+				if len(stack) > 0 {
+					top := stack[len(stack)-1]
+					if top == '[' {
+						stack = stack[:len(stack)-1]
+						result.WriteRune(c)
+					} else if top == '{' {
+						result.WriteRune('}')
+						stack = stack[:len(stack)-1]
+					}
+				} else {
+					result.WriteRune(c)
+				}
+			} else if c == '}' {
+				if len(stack) > 0 {
+					top := stack[len(stack)-1]
+					if top == '{' {
+						stack = stack[:len(stack)-1]
+						result.WriteRune(c)
+					} else if top == '[' {
+						// Mismatch: array is open but we got a curly brace closing.
+						// Repair by closing with square bracket.
+						result.WriteRune(']')
+						stack = stack[:len(stack)-1]
+					}
+				} else {
+					result.WriteRune(c)
+				}
+			} else {
+				result.WriteRune(c)
+			}
+		}
+	}
+	return result.String()
+}
+

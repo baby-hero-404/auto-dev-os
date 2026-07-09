@@ -11,8 +11,8 @@ type WorkspacePaths interface {
 	OpenSpecDir(taskID, changeName string) Directory
 	CodeRoot(taskID string) Directory
 	RepoRoot(taskID, repoName string) Directory
-	RepoMain(taskID, repoName, branch string) Directory
-	RepoMainRelative(repoName, branch string) string // returns relative string for metadata
+	RepoMain(taskID, repoName string) Directory
+	RepoMainRelative(repoName string) string // returns relative string for metadata
 	RepoWorktreeDir(taskID, repoName, role string) Directory
 	RepoWorktreeRelative(repoName, role string) string // returns relative string
 }

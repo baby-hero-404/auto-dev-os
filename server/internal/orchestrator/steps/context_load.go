@@ -142,6 +142,50 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		}
 	}
 
+	// 3. Pre-compute and populate ContextCache (REQ-M02)
+	var cache models.ContextCache
+	if s.ctxEngine != nil {
+		taskQuery := s.rt.Task.Title + "\n" + s.rt.Task.Description
+		snippets, err := s.ctxEngine.RetrieveContext(ctx, taskQuery, 10)
+		if err == nil {
+			var modelsSnippets []models.ContextSnippet
+			for _, sn := range snippets {
+				modelsSnippets = append(modelsSnippets, models.ContextSnippet{
+					Source:    sn.Source,
+					Path:      sn.Path,
+					StartLine: sn.StartLine,
+					EndLine:   sn.EndLine,
+					Content:   sn.Content,
+					Relevance: sn.Relevance,
+					Retriever: sn.Retriever,
+				})
+				cache.ActiveFiles = append(cache.ActiveFiles, sn.Path)
+			}
+			cache.SemanticSnippets = modelsSnippets
+		}
+
+		repoMap, err := s.ctxEngine.GetRepoMap(ctx, cache.ActiveFiles, 2048)
+		if err == nil {
+			cache.RepoMap = repoMap
+		}
+	}
+
+	// Pre-compute ScanDirectory tree
+	var treeBuilder strings.Builder
+	for _, root := range repoPaths {
+		if tree, err := ScanDirectory(root.path, 3, 200); err == nil && tree != "" {
+			if root.prefix != "" {
+				treeBuilder.WriteString(fmt.Sprintf("=== Repository %s ===\n%s\n\n", root.prefix, tree))
+			} else {
+				treeBuilder.WriteString(tree + "\n\n")
+			}
+		}
+	}
+	cache.DirectoryTree = strings.TrimSpace(treeBuilder.String())
+
+	cacheJSON, _ := json.Marshal(cache)
+	result["context_cache"] = string(cacheJSON)
+
 	if s.artifacts != nil {
 		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepContextLoad, "context", result)
 	}

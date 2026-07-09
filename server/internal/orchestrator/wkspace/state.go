@@ -62,7 +62,7 @@ func (m *Manager) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 					}
 					if rWS.DefaultBranch != expectedBranch {
 						meta.Repos[i].DefaultBranch = expectedBranch
-						meta.Repos[i].Paths.Main = paths.NewOSWorkspacePaths("").RepoMainRelative(rWS.Name, expectedBranch)
+						meta.Repos[i].Paths.Main = paths.NewOSWorkspacePaths("").RepoMainRelative(rWS.Name)
 						updated = true
 					}
 				}

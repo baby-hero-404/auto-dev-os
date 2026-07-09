@@ -126,9 +126,9 @@ diff --git a/repo-b/index.js b/repo-b/index.js
 -1
 +2`,
 			expected: map[string]string{
-				"repo-a": `diff --git a/src/main.go b/src/main.go
---- a/src/main.go
-+++ b/src/main.go
+				"repo-a": `diff --git a/main/src/main.go b/main/src/main.go
+--- a/main/src/main.go
++++ b/main/src/main.go
 @@ -1,2 +1,2 @@
 -1
 +2`,
@@ -143,9 +143,9 @@ diff --git a/repo-b/index.js b/repo-b/index.js
 -1
 +2`,
 			expected: map[string]string{
-				"repo-a": `diff --git a/src/main.go b/src/main.go
---- a/src/main.go
-+++ b/src/main.go
+				"repo-a": `diff --git a/master/src/main.go b/master/src/main.go
+--- a/master/src/main.go
++++ b/master/src/main.go
 @@ -1,2 +1,2 @@
 -1
 +2`,
@@ -174,8 +174,8 @@ diff --git a/repo-b/index.js b/repo-b/index.js
 -1
 +2`,
 			expected: map[string]string{
-				"repo-a": `--- a/readme.md
-+++ b/readme.md
+				"repo-a": `--- a/main/readme.md
++++ b/main/readme.md
 @@ -1,2 +1,2 @@
 -1
 +2`,

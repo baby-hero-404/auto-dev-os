@@ -352,8 +352,8 @@ func TestLoadTaskWorkspace_DynamicBranchReconcile(t *testing.T) {
 	if ws.Repos[0].DefaultBranch != "develop-branch" {
 		t.Errorf("expected branch to be develop-branch, got %s", ws.Repos[0].DefaultBranch)
 	}
-	if ws.Repos[0].Paths.Main != filepath.Join("code", "repos", "repo-123", "develop-branch") {
-		t.Errorf("expected main path to reflect develop-branch, got %s", ws.Repos[0].Paths.Main)
+	if ws.Repos[0].Paths.Main != filepath.Join("code", "repos", "repo-123", "main") {
+		t.Errorf("expected main path to remain static 'main', got %s", ws.Repos[0].Paths.Main)
 	}
 
 	// Verify the changes are persisted to metadata.json on disk

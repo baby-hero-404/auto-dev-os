@@ -1,6 +1,10 @@
 Analyze this task and output the proposed specification as a valid JSON object.
 You have access to read-only native tools to retrieve more context about the workspace files before writing your final specification.
 
+CRITICAL FORMATTING & SYNTAX RULES (MANDATORY):
+1. TASK ID LOGICAL NUMBERING: Every task string in the arrays of "execution_phases[].tasks" and "execution_units[].tasks" MUST strictly start with the "Task X.Y: " prefix (for example, "Task 1.1: Khởi tạo dự án Go và cấu trúc thư mục", or "Task 2.1: Implement GitLab Client"). You MUST use this logical numbering scheme linked directly to phase X and task Y. Do not output plain text tasks without "Task X.Y:" prefixes.
+2. JSON ESCAPING RULES: Because fields like "proposal_md", "specs_md", and "design_md" contain markdown text, you MUST properly escape all double quotes (") inside these strings as \" (or use single quotes ' or backticks ` for inline code/text instead of double quotes) and escape raw newlines as \n. Ensure the entire response is a strictly valid JSON object.
+
 CRITICAL LANGUAGE REQUIREMENT:
 You MUST write all the human-readable text and markdown fields in the JSON object (specifically "scope", "risks", "execution_plan", "clarification_questions", "proposal_md", "specs_md", "design_md", and "tasks") using the SAME language as the task title and description provided by the user. 
 For example, if the user's task description or title is in Vietnamese, all of these fields in your output JSON MUST be generated in Vietnamese. If the user's task description is in English, generate them in English. Do not mix languages.
@@ -41,14 +45,14 @@ The JSON object MUST have the following structure:
   "execution_phases": [
     {
       "phase": "Name of the phase (e.g., Phase 1: Setup, Phase 2: Core Logic)",
-      "tasks": ["Actionable step 1", "Actionable step 2"]
+      "tasks": ["Task 1.1: Actionable step 1", "Task 1.2: Actionable step 2"] // MUST follow the "Task X.Y" logical numbering scheme linked directly to phase X and task Y.
     }
   ],
   "execution_units": [
     {
       "id": "unique_unit_id",
       "objective": "Objective of this execution unit",
-      "tasks": ["Actionable step 1", "Actionable step 2"],
+      "tasks": ["Task 1.1: Actionable step 1", "Task 1.2: Actionable step 2"], // MUST follow the "Task X.Y" logical numbering scheme linked directly to phase X and task Y.
       "execution_profile": {
         "agent": "backend" | "frontend" | "devops" | "qa",
         "skills": ["golang-best-practices", "sqlite"]

@@ -47,6 +47,17 @@ func TestAgentPathContext(t *testing.T) {
 		}
 	})
 
+	t.Run("ToPhysical - strip redundant repo prefix", func(t *testing.T) {
+		physical, err := vfs.ToPhysical("tool_zentao/internal/main.go")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "/workspace/code/repos/tool_zentao/worktrees/backend/internal/main.go"
+		if physical != expected {
+			t.Errorf("expected '%s', got '%s'", expected, physical)
+		}
+	})
+
 	t.Run("ToPhysical - path traversal protection", func(t *testing.T) {
 		_, err := vfs.ToPhysical("../../../secrets.txt")
 		if err == nil {

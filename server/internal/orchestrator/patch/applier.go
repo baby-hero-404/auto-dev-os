@@ -324,7 +324,7 @@ exit $CODE`,
 			}
 		}
 		if repoHostPath == "" {
-			// Fallback to ReposPrefix + repoName/<defaultBranch>
+			// Fallback to ReposPrefix + repoName/main
 			repoDir := paths.NewOSWorkspacePaths(r.WorkspaceRoot).RepoRoot(task.ID, repoName).String()
 			repoHostPath = filepath.Join(repoDir, "main")
 			// Double fallback to localPath/repoName

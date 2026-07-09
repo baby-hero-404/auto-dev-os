@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### REQ-001: Background Global Cache Pre-warming
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario: Auto-indexing new commits via cron/webhook**
 - **WHEN** a new commit is detected on the configured default integration branch of a registered repository
@@ -11,14 +11,14 @@
 - **AND** save the result as a Read-Only SQLite database file `global_cache_<repo_id>_<commit_hash>.db`
 
 ### REQ-002: Lazy Fallback Cache Building
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario: Cache miss during task context load**
 - **WHEN** a task starts and requests the base cache for commit `X`, but `global_cache_<repo_id>_X.db` does not exist
 - **THEN** the system MUST block the task, build the global cache for commit `X`, save it, and then proceed
 
 ### REQ-003: Safe Global Cache Garbage Collection
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario: Pruning outdated cache files**
 - **WHEN** the `CacheGarbageCollector` runs its daily schedule
@@ -28,7 +28,7 @@
 ## MODIFIED Requirements
 
 ### REQ-M01: Two-Tier Cache Instantiation
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario: Initializing local workspace cache**
 - **WHEN** a task successfully clones the repository into its workspace

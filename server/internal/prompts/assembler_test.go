@@ -540,3 +540,38 @@ This is a skill from the task's repository checkout.`
 		t.Error("expected WorkspaceSkill to be found in loaded skills")
 	}
 }
+
+func TestPromptAssembler_AssembleForAgent_SkipsSpecsMarkdownInCodingSteps(t *testing.T) {
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
+
+	task := models.Task{
+		ID:        "task-pruned-2",
+		ProjectID: "project-1",
+		Title:     "Implement logic",
+		Analysis:  json.RawMessage(`{"proposal_md":"PROPOSAL_TEXT","specs_md":"SPECS_TEXT","design_md":"DESIGN_TEXT"}`),
+	}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
+
+	// 1. Coding step (should skip ProposalMD, SpecsMD, DesignMD)
+	ctxCoding := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
+	messagesCoding, _, err := assembler.AssembleForAgent(ctxCoding, task, agent, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent failed: %v", err)
+	}
+	userMsgCoding := messagesCoding[1].Content
+	if strings.Contains(userMsgCoding, "PROPOSAL_TEXT") || strings.Contains(userMsgCoding, "SPECS_TEXT") || strings.Contains(userMsgCoding, "DESIGN_TEXT") {
+		t.Error("expected coding step prompt to omit ProposalMD, SpecsMD, and DesignMD")
+	}
+
+	// 2. Non-coding step (should include them)
+	ctxNonCoding := context.WithValue(context.Background(), StepIDCtxKey, "analyze")
+	messagesNonCoding, _, err := assembler.AssembleForAgent(ctxNonCoding, task, agent, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent failed: %v", err)
+	}
+	userMsgNonCoding := messagesNonCoding[1].Content
+	if !strings.Contains(userMsgNonCoding, "PROPOSAL_TEXT") || !strings.Contains(userMsgNonCoding, "SPECS_TEXT") || !strings.Contains(userMsgNonCoding, "DESIGN_TEXT") {
+		t.Error("expected non-coding step prompt to include ProposalMD, SpecsMD, and DesignMD")
+	}
+}

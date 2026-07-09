@@ -11,6 +11,7 @@ import (
 
 	"context"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -109,5 +110,10 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 	if len(parsed) > 0 {
 		parsedJSON, _ := json.MarshalIndent(parsed, "", "  ")
 		_ = os.WriteFile(filepath.Join(callPath, "parsed.json"), []byte(redactSecrets(string(parsedJSON))), 0o644)
+	}
+
+	if budgetTrace := prompts.BudgetTraceFromCtx(ctx); budgetTrace != nil && len(budgetTrace.Logs) > 0 {
+		budgetLogJSON, _ := json.MarshalIndent(budgetTrace.Logs, "", "  ")
+		_ = os.WriteFile(filepath.Join(callPath, "budget_log.json"), []byte(redactSecrets(string(budgetLogJSON))), 0o644)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -12,6 +13,9 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 	o.initCheckpoints()
 	var assemble llmrunner.PromptAssembler
 	if o.prompts != nil {
+		var budgetTrace *prompts.BudgetTrace
+		ctx, budgetTrace = prompts.WithBudgetTrace(ctx)
+		_ = budgetTrace
 		assemble = func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, error) {
 			messages, _, err := o.prompts.AssembleForAgent(ctx, task, agent, history)
 			return messages, err

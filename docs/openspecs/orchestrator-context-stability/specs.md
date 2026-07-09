@@ -3,7 +3,7 @@
 ## Modified Requirements
 
 ### REQ-M01: Frozen Context at Plan Boundary
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN the Plan step completes successfully
@@ -12,7 +12,7 @@
 - AND only `AffectedFiles` accumulation is allowed on the live `TaskAnalysis`
 
 ### REQ-M02: Context Cache Layer
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN `ContextLoadStep` completes
@@ -21,7 +21,7 @@
 - AND no redundant `ScanDirectory()` calls are made in coding steps
 
 ### REQ-M03: Typed Parse Error Classification
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN `ParseJSONMarkdown` fails to parse LLM output
@@ -30,7 +30,7 @@
 - AND the error type is returned to the caller for retry strategy selection
 
 ### REQ-M04: Error-Aware Retry Strategy
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN a `FormatError` occurs
@@ -43,7 +43,7 @@
 - THEN a full LLM re-generation is performed
 
 ### REQ-M05: Prompt Content Deduplication
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN the Execution Manifest JSON is injected for coding steps
@@ -51,7 +51,7 @@
 - AND the total prompt token count is reduced by the deduplicated content
 
 ### REQ-M06: Budget Pruning Observability
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN `optimizeBudget()` drops a mutable section to meet the token limit

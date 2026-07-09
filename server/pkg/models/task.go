@@ -36,15 +36,15 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusTodo:           {TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusCoding},
 	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusTesting, TaskStatusPrReady, TaskStatusFailed},
 	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
-	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed},
-	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed},
-	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed},
-	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed},
-	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing},
-	TaskStatusPrReady:        {TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed, TaskStatusFixing},
-	TaskStatusHumanReview:    {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed},
+	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed, TaskStatusAnalyzing},
+	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
+	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
+	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
+	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing, TaskStatusAnalyzing},
+	TaskStatusPrReady:        {TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed, TaskStatusFixing, TaskStatusAnalyzing},
+	TaskStatusHumanReview:    {TaskStatusMerged, TaskStatusFixing, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusMerged:         {},
-	TaskStatusFailed:         {TaskStatusTodo, TaskStatusContextLoading, TaskStatusAnalyzing},
+	TaskStatusFailed:         {TaskStatusTodo, TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusPrReady, TaskStatusHumanReview},
 }
 
 const (

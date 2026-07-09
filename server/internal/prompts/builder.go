@@ -605,13 +605,13 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 			if analysis.ProposalMD != "" || analysis.SpecsMD != "" || len(analysis.ExecutionPhases) > 0 {
 				var specBuilder strings.Builder
 				specBuilder.WriteString("=== Task Specification (OpenSpec) ===\n")
-				if analysis.ProposalMD != "" {
+				if analysis.ProposalMD != "" && !isCodingStep(stepID) {
 					specBuilder.WriteString(analysis.ProposalMD + "\n\n")
 				}
-				if analysis.SpecsMD != "" {
+				if analysis.SpecsMD != "" && !isCodingStep(stepID) {
 					specBuilder.WriteString(analysis.SpecsMD + "\n\n")
 				}
-				if analysis.DesignMD != "" {
+				if analysis.DesignMD != "" && !isCodingStep(stepID) {
 					specBuilder.WriteString(analysis.DesignMD + "\n\n")
 				}
 				if len(analysis.Tasks) > 0 {
@@ -797,10 +797,15 @@ func (a *PromptAssembler) render(sections []PromptSection) (string, string) {
 }
 
 // optimizeBudget enforces the maximum token limit by dropping/truncating mutable sections (REQ-002).
-func (a *PromptAssembler) optimizeBudget(sections []PromptSection, maxLimit int) []PromptSection {
+func (a *PromptAssembler) optimizeBudget(ctx context.Context, sections []PromptSection, maxLimit int) []PromptSection {
 	totalTokens := 0
 	for _, sec := range sections {
 		totalTokens += sec.Tokens
+	}
+
+	trace := BudgetTraceFromCtx(ctx)
+	if trace != nil {
+		trace.Logs = append(trace.Logs, fmt.Sprintf("Initial tokens: %d, Max limit: %d", totalTokens, maxLimit))
 	}
 
 	if totalTokens <= maxLimit {
@@ -829,9 +834,14 @@ func (a *PromptAssembler) optimizeBudget(sections []PromptSection, maxLimit int)
 		}
 
 		// Omit the section
-		totalTokens -= result[worstIdx].Tokens
+		droppedSec := result[worstIdx]
+		totalTokens -= droppedSec.Tokens
 		result[worstIdx].Body = ""
 		result[worstIdx].Tokens = 0
+
+		if trace != nil {
+			trace.Logs = append(trace.Logs, fmt.Sprintf("Dropped section '%s' (tokens: %d, priority: %d). Remaining budget: %d", droppedSec.Name, droppedSec.Tokens, droppedSec.Priority, totalTokens))
+		}
 	}
 
 	var activeSections []PromptSection

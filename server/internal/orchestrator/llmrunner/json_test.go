@@ -1,7 +1,6 @@
 package llmrunner
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,25 +129,3 @@ func TestParseJSONMarkdown_BracketsMismatch(t *testing.T) {
 		t.Errorf("unexpected qa skills contents: %v", qaSkills)
 	}
 }
-
-func TestParseRealLog(t *testing.T) {
-	bytes, err := os.ReadFile("/home/ubuntu/my_projects/auto_code_os/server/.data/workspaces/8f242c99-c616-4d15-9a75-51243f1403ba/logs/llm/call-003-code_backend_0/output.md")
-	if err != nil {
-		t.Fatalf("failed to read log: %v", err)
-	}
-	res, err := ParseJSONMarkdown(string(bytes))
-	if err != nil {
-		t.Fatalf("failed to parse: %v", err)
-	}
-	patchStr, ok := res["patch"].(string)
-	if !ok {
-		t.Fatalf("patch not a string")
-	}
-	t.Logf("PATCH STRING LENGTH: %d", len(patchStr))
-	// Write it out to a file so we can inspect it
-	err = os.WriteFile("/home/ubuntu/my_projects/auto_code_os/server/.data/workspaces/8f242c99-c616-4d15-9a75-51243f1403ba/logs/llm/call-003-code_backend_0/extracted_patch.diff", []byte(patchStr), 0644)
-	if err != nil {
-		t.Fatalf("failed to write extracted patch: %v", err)
-	}
-}
-

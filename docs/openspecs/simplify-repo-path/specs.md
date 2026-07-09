@@ -3,7 +3,7 @@
 ## Modified Requirements
 
 ### REQ-M01: Static Main Integration Path
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN the orchestrator generates paths for the main integration repository checkout
@@ -11,7 +11,7 @@
 - AND the dynamic branch parameter should not be accepted by path generation interfaces
 
 ### REQ-M02: Path Normalization
-> ❌ Status: Not Started
+> ✅ Status: Completed
 
 **Scenario:**
 - WHEN `RepoRelativeToWorkspace` is called

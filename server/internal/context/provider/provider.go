@@ -183,7 +183,7 @@ func (p *Provider) initLocalCacheFromGlobal(wsRoot string, localDbPath string) e
 		return err
 	}
 
-	globalCacheDir := filepath.Join(filepath.Dir(p.workspaceCacheDbPath), "global_cache")
+	globalCacheDir := p.GetGlobalCacheDir()
 	if err := os.MkdirAll(globalCacheDir, 0755); err != nil {
 		_, err := source.NewCache(localDbPath)
 		return err

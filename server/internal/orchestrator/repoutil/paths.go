@@ -26,10 +26,6 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 			}
 		}
 	}
-	branch := repo.Branch
-	if branch == "" {
-		branch = "main"
-	}
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
 	return wp.RepoMain(task.ID, RepoNameFromURL(repo.URL)).String()
 }

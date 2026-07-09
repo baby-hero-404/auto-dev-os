@@ -189,6 +189,13 @@ func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.Work
 		return nil, err
 	}
 
+	// Avoid duplicate/concurrent execution if a job is already queued or running
+	if job, err := o.workflows.LatestByTaskID(ctx, taskID); err == nil && job != nil {
+		if job.Status == models.WorkflowJobStatusRunning || job.Status == models.WorkflowJobStatusQueued {
+			return job, nil
+		}
+	}
+
 	// Check if there is a paused job to resume
 	if job, err := o.workflows.LatestByTaskID(ctx, taskID); err == nil && job.Status == models.WorkflowJobStatusPaused {
 		updated, err := o.workflows.UpdateJob(ctx, job.ID, map[string]any{"status": models.WorkflowJobStatusQueued})
@@ -230,6 +237,22 @@ func (o *Orchestrator) RetryFromLastStep(ctx context.Context, taskID string) (*m
 	}
 	if task.Status != models.TaskStatusFailed && task.Status != models.TaskStatusSpecReview && task.Status != models.TaskStatusAnalyzing {
 		return nil, fmt.Errorf("can only retry paused or failed tasks (current status: %s)", task.Status)
+	}
+
+	// 1. If there is an active/paused job, cancel and supersede it, releasing locks.
+	if job, err := o.workflows.LatestByTaskID(ctx, taskID); err == nil && job != nil {
+		if job.Status == models.WorkflowJobStatusRunning || job.Status == models.WorkflowJobStatusQueued || job.Status == models.WorkflowJobStatusPaused {
+			if cancelVal, ok := o.jobCancels.Load(job.ID); ok {
+				if cancel, ok := cancelVal.(context.CancelFunc); ok {
+					cancel()
+				}
+			}
+			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
+				"status":     models.WorkflowJobStatusFailed,
+				"last_error": "superseded by retry",
+			})
+			o.releaseWorkspaceLock(taskID)
+		}
 	}
 
 	// Transition task back to analyzing so the workflow can start.
@@ -430,6 +453,7 @@ func (o *Orchestrator) CancelJob(ctx context.Context, taskID string) error {
 		}
 	}
 
+	o.releaseWorkspaceLock(taskID)
 	o.wake()
 	return nil
 }

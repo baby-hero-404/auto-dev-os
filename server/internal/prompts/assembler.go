@@ -80,6 +80,24 @@ func StepInputsFromCtx(ctx context.Context) map[string]map[string]any {
 	return nil
 }
 
+const BudgetLogCtxKey contextKey = "budget_log_entries"
+
+type BudgetTrace struct {
+	Logs []string
+}
+
+func WithBudgetTrace(ctx context.Context) (context.Context, *BudgetTrace) {
+	trace := &BudgetTrace{}
+	return context.WithValue(ctx, BudgetLogCtxKey, trace), trace
+}
+
+func BudgetTraceFromCtx(ctx context.Context) *BudgetTrace {
+	if t, ok := ctx.Value(BudgetLogCtxKey).(*BudgetTrace); ok {
+		return t
+	}
+	return nil
+}
+
 // shouldInjectFullSpec returns true for steps that need the full OpenSpec
 // (analyze, plan, review). Coding and fix steps already get the relevant
 // subtask text injected by the step runner itself.
@@ -104,7 +122,7 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	}
 
 	// Hard budget enforcement (Target: 8192 tokens)
-	sections = a.optimizeBudget(sections, 8192)
+	sections = a.optimizeBudget(ctx, sections, 8192)
 
 	// Sort sections logically based on RenderOrder
 	sorted := a.sort(sections)

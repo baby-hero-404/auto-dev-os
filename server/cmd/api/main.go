@@ -140,8 +140,7 @@ func run() error {
 	skillSvc := service.NewSkillService(skillRepo, skillSourceRepo, pathRegistry.Skill, pathRegistry.FS)
 	agentManager := orchestrator.NewAgentManager(agentRepo)
 
-	cacheDbPath := pathRegistry.Database.CacheDB().String()
-	ctxEngine, err := provider.NewProvider(cfg.Sandbox.WorkspaceRoot, cacheDbPath)
+	ctxEngine, err := provider.NewProvider(cfg.Sandbox.WorkspaceRoot, ":memory:")
 	if err != nil {
 		return fmt.Errorf("init context engine: %w", err)
 	}
@@ -166,6 +165,7 @@ func run() error {
 		orchestrator.WithRepositoryRepository(repoRepo),
 		orchestrator.WithProjectRepository(projRepo),
 		orchestrator.WithWorkspaceRoot(cfg.Sandbox.WorkspaceRoot),
+		orchestrator.WithDataRoot(cfg.AutoCodeOS.DataRoot),
 		orchestrator.WithWorkspaceRetention(
 			time.Duration(cfg.Sandbox.WorkspaceRetentionHours)*time.Hour,
 			time.Duration(cfg.Sandbox.WorkspaceCleanupIntervalMinutes)*time.Minute,
@@ -258,6 +258,20 @@ func run() error {
 		"retention_hours", cfg.Sandbox.WorkspaceRetentionHours,
 		"interval_minutes", cfg.Sandbox.WorkspaceCleanupIntervalMinutes,
 	)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.StartGlobalCachePrewarmer(workerCtx)
+	}()
+	slog.Info("global cache prewarmer started", "interval_minutes", 15)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orch.StartCacheGarbageCollector(workerCtx)
+	}()
+	slog.Info("cache garbage collector started", "interval_minutes", 15)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

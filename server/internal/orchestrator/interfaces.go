@@ -61,6 +61,7 @@ type ArtifactRepository interface {
 // RepositoryRepository lists source code repositories for a project.
 type RepositoryRepository interface {
 	ListByProjectID(ctx context.Context, projectID string) ([]models.Repository, error)
+	ListAll(ctx context.Context) ([]models.Repository, error)
 }
 
 // ProjectRepository retrieves project configuration.

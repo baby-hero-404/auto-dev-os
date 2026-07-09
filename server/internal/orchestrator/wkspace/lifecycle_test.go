@@ -18,6 +18,10 @@ func (m *testMockRepositoriesRepo) ListByProjectID(ctx context.Context, projectI
 	return m.repos, nil
 }
 
+func (m *testMockRepositoriesRepo) ListAll(ctx context.Context) ([]models.Repository, error) {
+	return m.repos, nil
+}
+
 type testMockTasksRepo struct{}
 
 func (m *testMockTasksRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {

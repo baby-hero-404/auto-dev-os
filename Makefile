@@ -28,6 +28,8 @@ init: ## Setup local environment (configs & deps)
 	fi
 	@echo "==> Installing web dependencies..."
 	cd web && npm install
+	@echo "==> Installing server dependencies & syncing vendor..."
+	cd server && go mod tidy && go mod vendor
 	@echo "==> Initialization complete. Please update your .env file with necessary keys."
 
 clone-references: ## Clone external test/skill references

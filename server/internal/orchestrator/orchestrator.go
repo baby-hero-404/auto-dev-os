@@ -36,6 +36,7 @@ type Orchestrator struct {
 	projects        ProjectRepository
 	sandboxGit      gitops.SandboxGitClient
 	workspaceRoot   string
+	dataRoot        string
 	retention       WorkspaceRetention
 	wg              sync.WaitGroup
 	lockCancels     sync.Map
@@ -111,6 +112,12 @@ func WithProjectRepository(repo ProjectRepository) Option {
 func WithWorkspaceRoot(rootPath string) Option {
 	return func(o *Orchestrator) {
 		o.workspaceRoot = rootPath
+	}
+}
+
+func WithDataRoot(dataRoot string) Option {
+	return func(o *Orchestrator) {
+		o.dataRoot = dataRoot
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -56,6 +57,18 @@ func (m *MockContextEngine) IndexWorkspace(ctx context.Context) error {
 }
 
 func (m *MockContextEngine) Close() error {
+	return nil
+}
+
+func (m *MockContextEngine) GetGlobalCacheDir() string {
+	return ""
+}
+
+func (m *MockContextEngine) BuildGlobalCache(repoAbsPath string, repoName string, commitHash string) error {
+	return nil
+}
+
+func (m *MockContextEngine) InitLocalCache(wsRoot string, repoCommits []provider.RepoCommitInfo) error {
 	return nil
 }
 

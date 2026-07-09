@@ -52,6 +52,14 @@ func (r *RepositoryRepo) ListByProjectID(ctx context.Context, projectID string) 
 	return repos, nil
 }
 
+func (r *RepositoryRepo) ListAll(ctx context.Context) ([]models.Repository, error) {
+	var repos []models.Repository
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&repos).Error; err != nil {
+		return nil, fmt.Errorf("list all repositories: %w", err)
+	}
+	return repos, nil
+}
+
 func (r *RepositoryRepo) Update(ctx context.Context, id string, input models.UpdateRepositoryInput) (*models.Repository, error) {
 	repo, err := r.GetByID(ctx, id)
 	if err != nil {

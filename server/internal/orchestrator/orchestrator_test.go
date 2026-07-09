@@ -561,6 +561,10 @@ func (m *testMockRepositoriesRepo) ListByProjectID(ctx context.Context, projectI
 	return m.repos, nil
 }
 
+func (m *testMockRepositoriesRepo) ListAll(ctx context.Context) ([]models.Repository, error) {
+	return m.repos, nil
+}
+
 func TestOrchestrator_GetTaskRepoHostPath_FailsOnRepositoryIDMismatch(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "repo-path-mismatch-*")
 	if err != nil {

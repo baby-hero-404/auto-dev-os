@@ -1,10 +1,12 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -78,7 +80,62 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	// Pre-warm the SQLite AST cache.
 	if s.ctxEngine != nil {
-		if err := s.ctxEngine.IndexWorkspace(ctx); err != nil {
+		localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+
+		// 1. Two-Tier Cache Initialization
+		var repoCommits []provider.RepoCommitInfo
+		if s.wkspace != nil {
+			if ws, errWS := s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task); errWS == nil && ws != nil {
+				for _, rWS := range ws.Repos {
+					if s.rt.Task.RepositoryID != nil && rWS.RepoID != *s.rt.Task.RepositoryID {
+						continue
+					}
+					if rWS.Paths.Main == "" {
+						continue
+					}
+					repoAbs := filepath.Join(ws.Root, rWS.Paths.Main)
+					if _, errStat := os.Stat(repoAbs); errStat == nil {
+						commitHash, errCommit := runGitCmd(repoAbs, "rev-parse", "HEAD")
+						if errCommit == nil && commitHash != "" {
+							repoCommits = append(repoCommits, provider.RepoCommitInfo{
+								RepoName:   rWS.Name,
+								RepoPath:   repoAbs,
+								CommitHash: commitHash,
+							})
+						}
+					}
+				}
+
+				// Check for existence of the global cache, build if missing (Lazy Fallback Cache Builder)
+				for _, rc := range repoCommits {
+					globalCacheDir := s.ctxEngine.GetGlobalCacheDir()
+					globalCachePath := filepath.Join(globalCacheDir, fmt.Sprintf("global_cache_%s_%s.db", rc.RepoName, rc.CommitHash))
+					if _, errStat := os.Stat(globalCachePath); os.IsNotExist(errStat) {
+						if s.log != nil {
+							s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("global cache miss for repo %s at commit %s, building synchronously...", rc.RepoName, rc.CommitHash))
+						}
+						if errBuild := s.ctxEngine.BuildGlobalCache(rc.RepoPath, rc.RepoName, rc.CommitHash); errBuild != nil {
+							if s.log != nil {
+								s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to build global cache for repo %s: %v", rc.RepoName, errBuild))
+							}
+						}
+					}
+				}
+
+				// Copy/merge the global cache to the local workspace's context/workspace_cache.db
+				if len(repoCommits) > 0 {
+					if errInit := s.ctxEngine.InitLocalCache(ws.Root, repoCommits); errInit != nil {
+						if s.log != nil {
+							s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to initialize local workspace cache: %v", errInit))
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Perform incremental workspace indexing
+		indexCtx := context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
+		if err := s.ctxEngine.IndexWorkspace(indexCtx); err != nil {
 			if s.log != nil {
 				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to index workspace: %v", err))
 			}
@@ -89,6 +146,18 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepContextLoad, "context", result)
 	}
 	return result, nil
+}
+
+func runGitCmd(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 type contextSourceRoot struct {

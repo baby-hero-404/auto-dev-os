@@ -321,3 +321,7 @@ type mockRepositoriesRepo struct {
 func (m *mockRepositoriesRepo) ListByProjectID(ctx context.Context, projectID string) ([]models.Repository, error) {
 	return []models.Repository{m.repo}, nil
 }
+
+func (m *mockRepositoriesRepo) ListAll(ctx context.Context) ([]models.Repository, error) {
+	return []models.Repository{m.repo}, nil
+}

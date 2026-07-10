@@ -57,11 +57,11 @@ func (a loggerAdapter) Log(ctx context.Context, taskID string, jobID *string, le
 }
 
 type promptAssemblerAdapter struct {
-	assemble func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error)
+	assemble func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
 }
 
-func (a promptAssemblerAdapter) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error) {
-	return a.assemble(ctx, task, agent, history)
+func (a promptAssemblerAdapter) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error) {
+	return a.assemble(ctx, task, agent, history, tools)
 }
 
 type traceRecorderAdapter struct {

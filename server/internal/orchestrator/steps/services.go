@@ -130,7 +130,7 @@ type CheckpointLister interface {
 
 // PromptAssembler builds LLM prompts. Used by: analyze, context_load.
 type PromptAssembler interface {
-	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error)
+	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
 }
 
 // TraceRecorder writes LLM call traces. Used by: analyze.

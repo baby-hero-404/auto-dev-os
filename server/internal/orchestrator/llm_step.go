@@ -17,7 +17,11 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		ctx, budgetTrace = prompts.WithBudgetTrace(ctx)
 		_ = budgetTrace
 		assemble = func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, error) {
-			messages, _, err := o.prompts.AssembleForAgent(ctx, task, agent, history)
+			var tools []llm.ToolDefinition
+			if o.capManager != nil && agent != nil {
+				tools = o.capManager.ToolsForRole(agent.Role)
+			}
+			messages, _, err := o.prompts.AssembleForAgent(ctx, task, agent, history, tools)
 			return messages, err
 		}
 	}

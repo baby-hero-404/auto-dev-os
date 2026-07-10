@@ -1,13 +1,13 @@
 # LLM Call Architecture Report
 ## Deep Investigation — Verified Against Source Code
 
-> **Version:** v2.0 — Verified from codebase audit  
+> **Version:** v2.1 — Verified from codebase audit (Capability Enforcement Integrated)  
 > **Date:** 2026-07-10  
 > **Scope:** Prompt Construction, Context Assembly, LLM Invocation, Response Handling, Retry Strategy, Multi-Agent Coordination  
 > **Method:** Full source code trace, not log speculation
 >
 > **Confidence Legend:**
-> - ✅ **Confirmed** — verified in code  
+> - ✅ **Confirmed / Resolved** — verified in code / successfully integrated  
 > - ⚠️ **Real Issue** — confirmed gap with recommended fix  
 > - ❌ **False Positive** — original report was wrong, system already handles this  
 
@@ -15,22 +15,20 @@
 
 # Executive Summary
 
-The v1.0 report was based on log speculation and made 20 findings — many of which were **already solved** in the codebase. This v2.0 report corrects those errors and identifies the **actual** remaining gaps based on a full source code audit.
+The v1.0 report was based on log speculation. This report corrects those errors, and documents the progress made in **v2.1** to address dynamic capability enforcement.
 
-**Key corrections:**
-- The system is NOT stateless — it has identity, traces, and prompt hashing (Finding 1: ❌ False Positive)
-- Prompt compilation is NOT fully dynamic — FrozenContext provides immutability for retry (Finding 2: Partially False)
-- Context DOES have explicit separation (immutable vs mutable) via `PromptSection.IsImmutable` (Finding 3: ❌ False Positive)
-- Output contract IS layered: Syntax → Schema → Business validation exists in `llmrunner` (Finding 9: ❌ False Positive)
-- Retry strategy does NOT restart the conversation — it appends error feedback (Finding 8: ❌ False Positive)
+**Key achievements in v2.1:**
+- **Dynamic capability enforcement integrated:** Resolved role-based tool restrictions dynamically via the `CapabilityManager` and routed them to the prompt assembly pipeline (`AssembleForAgent`), ensuring coding agents only compile with authorized tools.
+- **Unified Base Tools initialization:** Wired `o.registry.Definitions()` dynamically into the prompt assembler on startup.
+- **Dynamic Prompt Tool Descriptions:** Implemented dynamic prompt tool documentation in the system prompt. Registered tools are grouped by category, showing names, descriptions, parameter schemas parsed dynamically from JSON raw schema, and usage examples. Budget token usage for the tool section is tracked under `BudgetTrace.ToolTokens`.
 
-**Actual real issues found (6 critical):**
-1. Two parallel, incompatible LLM call paths (runner vs analyze agentic loop)
-2. Coding steps use `Chat()` (no tools) while analyze uses `ChatWithOptions()` (with tools)  
-3. `llmrunner.Runner` discards tool definitions from prompt assembler
-4. Token budget hardcoded at 8192 regardless of model
-5. No prompt hash/fingerprint recorded in trace metadata
-6. Massive instruction strings built via string concatenation — no template system
+**Remaining real issues:**
+- [ ] 1. Two parallel, incompatible LLM call paths (runner vs analyze agentic loop)
+- [ ] 2. Coding steps use `Chat()` (no tools) while analyze uses `ChatWithOptions()` (with tools)  
+- [ ] 3. `llmrunner.Runner` does not yet execute native tool calls parsed from the LLM
+- [ ] 4. Token budget hardcoded at 8192 regardless of model
+- [ ] 5. No prompt hash/fingerprint recorded in trace metadata
+- [ ] 6. Massive instruction strings built via string concatenation — no template system
 
 ---
 
@@ -134,6 +132,7 @@ However, the analyze step's tool-call loop (`runAnalyzeLLMLoop`) does accumulate
 
 ## ⚠️ Issue 1: Two Incompatible LLM Call Paths
 
+**Status: ⭕ OPEN**  
 **Severity: HIGH** — Architectural inconsistency
 
 The system has **two completely separate LLM invocation paths** that don't share code:
@@ -143,33 +142,37 @@ The system has **two completely separate LLM invocation paths** that don't share
 | `llmrunner.Runner.Run()` | `code_backend`, `code_frontend`, `fix`, `plan`, `review`, `test`, `pr` | `Provider.Chat()` | ❌ No tools | JSON parse retry (3 attempts) |
 | `AnalyzeStep.runAnalyzeLLMLoop()` | `analyze` only | `Provider.ChatWithOptions()` | ✅ Native tools (`list_files`, `read_file`, `grep_search`) | Tool-call loop (6 iterations) |
 
-**The problem:** `llmrunner.Runner.Run()` calls `r.Provider.Chat()` ([runner.go:91](file:///home/ubuntu/my_projects/auto_code_os/server/internal/orchestrator/llmrunner/runner.go#L91)) — the plain chat API **without tool support**. Even though the prompt assembler resolves tools via `toolDefinitionsForAgent()`, the runner **discards them**:
+**The problem:** Historically, tool definitions were discarded in `llm_step.go`. In **v2.1**, this has been **partially resolved** in prompt construction: the `Orchestrator` resolves capabilities via `CapabilityManager` and passes them down:
 
 ```go
-// llm_step.go:19-22 — tools are explicitly thrown away
+// llm_step.go:19-26 — tools are resolved dynamically via CapabilityManager
 assemble = func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, error) {
-    messages, _, err := o.prompts.AssembleForAgent(ctx, task, agent, history)
-    //          ^^ tools discarded here!
+    var tools []llm.ToolDefinition
+    if o.capManager != nil && agent != nil {
+        tools = o.capManager.ToolsForRole(agent.Role)
+    }
+    messages, _, err := o.prompts.AssembleForAgent(ctx, task, agent, history, tools)
     return messages, err
 }
 ```
 
-**Impact:** Coding agents (backend/frontend/fix) cannot use native tool calls. They must produce a single monolithic JSON response containing an entire unified diff. This is the root cause of patch formatting failures.
+However, the runner itself (`llmrunner/runner.go`) still invokes the single-shot `Chat()` API without passing those tools, so actual tool execution inside coding steps is not yet triggered.
 
 **Best practice comparison:**
 - Claude Code: Multi-turn tool-call loop — `Read → Edit → Verify → Commit`
 - Codex CLI: Agentic loop with `apply_patch`, `read_file`, `run_command` tools
 - Gemini CLI: Tool-call loop with `EditFile`, `ReadFile`, `ExecuteCommand`
 
-**Recommendation:** Unify onto a single `ChatWithOptions()` path. Coding steps should use the same agentic tool-call loop as analyze, with native tools for `read_file`, `search_replace`, `run_tests`, `git_diff`.
+**Recommendation:** Unify onto a single `ChatWithOptions()` path. Update `llmrunner.Runner` to accept the tools parameter and execute the agentic tool-call loop for coding steps.
 
 ---
 
-## ⚠️ Issue 2: Coding Steps Are Single-Shot — Not Agentic
+## ⚠️ Issue 2: Coding & Review Steps Are Single-Shot — Not Agentic
 
+**Status: ⭕ OPEN**  
 **Severity: HIGH** — Architectural limitation
 
-The coding pipeline follows this flow:
+The coding pipeline (`code_backend`, `code_frontend`, `fix`, `review`) follows this flow:
 
 ```
 System Prompt + Rules + Context
@@ -178,40 +181,44 @@ Single user message (instruction + affected files + tree + subtasks)
         ↓
 ONE LLM call → Provider.Chat()
         ↓
-Parse JSON response with { patch, files_changed, summary }
+Parse JSON response
         ↓
-Apply patch
+Apply patch or Extract review findings
 ```
 
-This is a **single-shot generation** pattern, not an agentic loop. The LLM must:
-1. Understand all files from the context injected into the instruction
-2. Generate an entire unified diff in one response
-3. Get it right on the first try (or 3 retries with the same single-shot approach)
+This is a **single-shot generation** pattern, not an agentic loop. 
+- A **Coder** must understand all files from context, write an entire unified diff perfectly in one try.
+- A **Reviewer** receives only the unified diff and must find bugs without being able to run `git grep` or read surrounding context via tools.
 
 **Contrast with production agents:**
 
 ```
-Claude Code / Codex / Gemini CLI:
+Claude Code / Codex / Gemini CLI (Coder):
     LLM → read_file(path) → result
-    LLM → read_file(another_path) → result
     LLM → search_replace(path, search, replace) → result
     LLM → run_tests() → result
     LLM → search_replace(fix test) → result
-    LLM → "done"
+
+Claude Code (Reviewer):
+    LLM → git_diff() → result
+    LLM → read_file(context) → result
+    LLM → "Approved" / "Rejected with feedback"
 ```
 
 The agentic loop lets the LLM read exactly the files it needs (reducing token waste), make edits incrementally (reducing diff errors), and verify its work (reducing regressions).
 
-**Recommendation:** Convert coding steps to use `ChatWithOptions()` with a tool-call loop similar to `runAnalyzeLLMLoop()`. Provide tools: `read_file`, `search_replace`, `run_tests`, `list_files`, `git_diff`.
+**Recommendation:** Convert coding, fix, and review steps to use `ChatWithOptions()` with a tool-call loop similar to `runAnalyzeLLMLoop()`. Provide tools: `read_file`, `search_replace`, `run_tests`, `list_files`, `git_diff`.
 
 ---
 
 ## ⚠️ Issue 3: Instruction String is Built via Concatenation — No Template System
 
+**Status: ⭕ OPEN**  
 **Severity: MEDIUM** — Maintainability and reliability
 
-The instruction for `CodeBackendStep` is built via 15+ concatenation steps across 100+ lines ([code_backend.go:156-267](file:///home/ubuntu/my_projects/auto_code_os/server/internal/orchestrator/steps/code_backend.go#L156-L267)):
+While `PromptAssembler` has a method to load base step prompts from `.md` files (`loadStepPromptWithFallback()` at `builder.go:57`), the actual runtime instructions are built via massive string concatenation loops in the step code.
 
+Example from `code_backend.go:156-267`:
 ```go
 instruction := instructionBase + repoContext + " DO NOT rewrite..."
 if prFeedback != "" {
@@ -223,18 +230,27 @@ if tree != "" {
 // + subtasks, + prior files, + retry errors, + search/replace format...
 ```
 
+Example from `review.go:223-243`:
+```go
+instruction := "Review the proposed changes. Here is the current workspace diff:\n\n" + diffText + "\n\n" + ...
+if frozen.TasksMD != "" {
+    instruction += "\n\nCRITICAL RUBRIC - You MUST verify..."
+}
+```
+
 **Problems:**
 - No way to inspect the final instruction template without running the code
-- Identical concatenation patterns duplicated across `code_backend.go`, `code_frontend.go`, `fix.go`
+- Identical concatenation patterns duplicated across `code_backend.go`, `code_frontend.go`, `fix.go`, `review.go`
 - The `CRITICAL REQUIREMENT` strings from `llmrunner/runner.go:67-71` are ALSO appended to the same instruction, creating competing directives
-- Token estimation is inaccurate because content is concatenated after `optimizeBudget()` runs
+- Token estimation is inaccurate because content is concatenated *after* `optimizeBudget()` runs
 
-**Recommendation:** Use Go `text/template` or structured prompt sections. Instructions should be `.md` template files loaded via `loadStepPromptWithFallback()` (which already exists at [builder.go:57](file:///home/ubuntu/my_projects/auto_code_os/server/internal/prompts/builder.go#L57) but is underused).
+**Recommendation:** Move runtime instructions into Go `text/template` files. All file injection, diffs, and context should be passed as data structs to `PromptAssembler` and rendered as explicit prompt sections, moving logic out of the step executors.
 
 ---
 
 ## ⚠️ Issue 4: Double Context Injection Creates Token Waste
 
+**Status: ⭕ OPEN**  
 **Severity: MEDIUM** — Performance and prompt quality
 
 Affected files are injected **twice** through independent code paths:
@@ -260,6 +276,7 @@ The LLM may receive the same file content in 3 different forms:
 
 ## ⚠️ Issue 5: Missing Prompt Hash in Trace Metadata
 
+**Status: ⭕ OPEN**  
 **Severity: LOW** — Observability gap
 
 The `TraceMetadata` struct ([llm_trace.go:66-76](file:///home/ubuntu/my_projects/auto_code_os/server/internal/orchestrator/llm_trace.go#L66-L76)) captures `model`, `prompt_tokens`, `output_tokens`, `agent_id`, `role`, `timestamp` but does NOT include:
@@ -279,6 +296,7 @@ The raw `request.json` IS persisted, so the hash could be computed after the fac
 
 ## ⚠️ Issue 6: Hardcoded Token Budget of 8192
 
+**Status: ⭕ OPEN**  
 **Severity: MEDIUM** — Performance limitation
 
 ```go

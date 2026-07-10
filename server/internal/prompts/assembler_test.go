@@ -118,11 +118,12 @@ func TestDetectRuleConflicts(t *testing.T) {
 
 func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 	tests := []struct {
-		name        string
-		task        models.Task
-		agent       *models.Agent
-		skillLister SkillLister
-		assertMsg   func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine)
+		name         string
+		task         models.Task
+		agent        *models.Agent
+		skillLister  SkillLister
+		dynamicTools []llm.ToolDefinition
+		assertMsg    func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine)
 	}{
 		{
 			name: "WithTaskRules",
@@ -180,6 +181,10 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			name: "UsesRoleMatchedSkills",
 			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Fix bug", Description: "Fix the failing tests."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
+			dynamicTools: []llm.ToolDefinition{
+				{Name: "search_code"},
+				{Name: "apply_patch"},
+			},
 			skillLister: fakeAgentSkillLister{
 				skills: []models.Skill{
 					{
@@ -207,6 +212,10 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			name: "WithNoAssignedSkillsLoadsSafeDefaultTools",
 			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleQA},
+			dynamicTools: []llm.ToolDefinition{
+				{Name: "read_file"},
+				{Name: "write_file"},
+			},
 			skillLister: fakeAgentSkillLister{},
 			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
 				if len(tools) != 2 {
@@ -218,8 +227,8 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "InjectsRepoMap",
-			task: models.Task{ID: "task-1"},
+			name:  "InjectsRepoMap",
+			task:  models.Task{ID: "task-1"},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
 			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
 				userMsg := messages[1].Content
@@ -240,6 +249,9 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 				Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
 			},
 			agent: &models.Agent{ID: "agent-1", Role: "backend"},
+			dynamicTools: []llm.ToolDefinition{
+				{Name: "apply_patch"},
+			},
 			skillLister: fakeAgentSkillLister{
 				skills: []models.Skill{
 					{
@@ -276,6 +288,9 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 				Analysis:  json.RawMessage(`{"required_skills_map":{"backend":["dynamic-backend-skill"],"frontend":["dynamic-frontend-skill"]}}`),
 			},
 			agent: &models.Agent{ID: "agent-2", Role: "frontend"},
+			dynamicTools: []llm.ToolDefinition{
+				{Name: "run_tests"},
+			},
 			skillLister: fakeAgentSkillLister{
 				skills: []models.Skill{
 					{
@@ -312,7 +327,7 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			if tc.skillLister != nil {
 				assembler = assembler.WithSkillLister(tc.skillLister)
 			}
-			messages, tools, err := assembler.AssembleForAgent(context.Background(), tc.task, tc.agent, nil)
+			messages, tools, err := assembler.AssembleForAgent(context.Background(), tc.task, tc.agent, nil, tc.dynamicTools)
 			if err != nil {
 				t.Fatalf("AssembleForAgent returned error: %v", err)
 			}
@@ -336,19 +351,6 @@ func TestTruncateHistoryKeepsRecentMessages(t *testing.T) {
 	}
 	if got[0].Role != "system" {
 		t.Fatalf("expected summary message first, got %#v", got[0])
-	}
-}
-
-func TestFilterToolsBySkillsUsesSchemaAllowedTools(t *testing.T) {
-	tools := FilterToolsBySkills(testBaseTools(), []models.Skill{{
-		Name:   "custom_code_skill",
-		Schema: json.RawMessage(`{"allowed_tools":["search_code","apply_patch"]}`),
-	}})
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %#v", tools)
-	}
-	if tools[0].Name != "search_code" || tools[1].Name != "apply_patch" {
-		t.Fatalf("unexpected tools: %#v", tools)
 	}
 }
 
@@ -414,7 +416,7 @@ func TestPromptAssembler_LoadProjectSpecificDiskData(t *testing.T) {
 	}
 	agent := &models.Agent{ID: "agent-1", Role: models.AgentRolePlanner}
 
-	messages, tools, err := assembler.AssembleForAgent(context.Background(), task, agent, nil)
+	messages, tools, err := assembler.AssembleForAgent(context.Background(), task, agent, nil, nil)
 	if err != nil {
 		t.Fatalf("AssembleForAgent failed: %v", err)
 	}
@@ -455,7 +457,7 @@ func TestPromptAssembler_AssembleForAgent_PrunesCodingManifest(t *testing.T) {
 	// Set StepIDCtxKey to workflow.StepCodeBackend to trigger isCodingStep
 	ctx := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
 
-	messages, _, err := assembler.AssembleForAgent(ctx, task, agent, nil)
+	messages, _, err := assembler.AssembleForAgent(ctx, task, agent, nil, nil)
 	if err != nil {
 		t.Fatalf("AssembleForAgent failed: %v", err)
 	}
@@ -555,7 +557,7 @@ func TestPromptAssembler_AssembleForAgent_SkipsSpecsMarkdownInCodingSteps(t *tes
 
 	// 1. Coding step (should skip ProposalMD, SpecsMD, DesignMD)
 	ctxCoding := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
-	messagesCoding, _, err := assembler.AssembleForAgent(ctxCoding, task, agent, nil)
+	messagesCoding, _, err := assembler.AssembleForAgent(ctxCoding, task, agent, nil, nil)
 	if err != nil {
 		t.Fatalf("AssembleForAgent failed: %v", err)
 	}
@@ -566,7 +568,7 @@ func TestPromptAssembler_AssembleForAgent_SkipsSpecsMarkdownInCodingSteps(t *tes
 
 	// 2. Non-coding step (should include them)
 	ctxNonCoding := context.WithValue(context.Background(), StepIDCtxKey, "analyze")
-	messagesNonCoding, _, err := assembler.AssembleForAgent(ctxNonCoding, task, agent, nil)
+	messagesNonCoding, _, err := assembler.AssembleForAgent(ctxNonCoding, task, agent, nil, nil)
 	if err != nil {
 		t.Fatalf("AssembleForAgent failed: %v", err)
 	}
@@ -625,7 +627,7 @@ func TestPromptAssembler_BypassCacheAndBoostRAGOnRetry(t *testing.T) {
 	ctxNormal := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
 	ctxNormal = context.WithValue(ctxNormal, StepInputsCtxKey, stepInputs)
 
-	messagesNormal, _, err := assembler.AssembleForAgent(ctxNormal, task, &models.Agent{Role: "backend"}, nil)
+	messagesNormal, _, err := assembler.AssembleForAgent(ctxNormal, task, &models.Agent{Role: "backend"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +644,7 @@ func TestPromptAssembler_BypassCacheAndBoostRAGOnRetry(t *testing.T) {
 	ctxRetry = context.WithValue(ctxRetry, StepInputsCtxKey, stepInputs)
 	ctxRetry = context.WithValue(ctxRetry, IsRetryCtxKey, true)
 
-	messagesRetry, _, err := assembler.AssembleForAgent(ctxRetry, task, &models.Agent{Role: "backend"}, nil)
+	messagesRetry, _, err := assembler.AssembleForAgent(ctxRetry, task, &models.Agent{Role: "backend"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,5 +662,69 @@ func TestPromptAssembler_BypassCacheAndBoostRAGOnRetry(t *testing.T) {
 	}
 	if !strings.Contains(messagesRetry[1].Content, "main.go") {
 		t.Fatal("expected prompt to contain dynamically retrieved snippet")
+	}
+}
+
+func TestAssembleToolDescriptions(t *testing.T) {
+	engine := &MockContextEngine{}
+	// Mock a skill named "clean-code" to allow apply_patch and read_file.
+	skillsList := fakeAgentSkillLister{
+		skills: []models.Skill{
+			{
+				Name:   "clean-code",
+				Schema: json.RawMessage(`{"allowed_tools": ["apply_patch", "read_file"]}`),
+			},
+		},
+	}
+	assembler := NewPromptAssembler(testBaseTools(), engine).WithSkillLister(skillsList)
+
+	task := models.Task{
+		ID:        "task-123",
+		ProjectID: "proj-123",
+		Title:     "Test Task",
+	}
+
+	ctx, trace := WithBudgetTrace(context.Background())
+	ctx = context.WithValue(ctx, StepIDCtxKey, "code_backend")
+
+	dynamicTools := []llm.ToolDefinition{
+		{Name: "read_file", Description: "Read file description.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)},
+		{Name: "apply_patch", Description: "Apply patch description.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)},
+	}
+
+	messages, tools, err := assembler.AssembleForAgent(ctx, task, &models.Agent{Role: "backend"}, nil, dynamicTools)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tools) == 0 {
+		t.Fatal("expected tools to be returned")
+	}
+
+	var systemPrompt string
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemPrompt = msg.Content
+			break
+		}
+	}
+
+	if systemPrompt == "" {
+		t.Fatal("system prompt not found")
+	}
+
+	if !strings.Contains(systemPrompt, "## Available Tools") {
+		t.Fatal("system prompt does not contain Available Tools section")
+	}
+
+	if !strings.Contains(systemPrompt, "read_file") {
+		t.Fatal("system prompt does not contain read_file description")
+	}
+	if !strings.Contains(systemPrompt, "apply_patch") {
+		t.Fatal("system prompt does not contain apply_patch description")
+	}
+
+	if trace.ToolTokens <= 0 {
+		t.Fatalf("expected ToolTokens to be tracked and > 0, got %d", trace.ToolTokens)
 	}
 }

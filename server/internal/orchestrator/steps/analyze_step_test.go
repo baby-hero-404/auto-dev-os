@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -17,7 +18,7 @@ type mockPromptAssembler struct {
 	err      error
 }
 
-func (m *mockPromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error) {
+func (m *mockPromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error) {
 	return m.messages, m.tools, m.err
 }
 
@@ -59,6 +60,7 @@ func TestAnalyzeStep_SkipsWhenReady(t *testing.T) {
 		nil, // wkspace
 		nil, // containerPath
 		8.0, // maxCost
+		tools.DefaultRegistry(nil, nil),
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -139,6 +141,7 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
 		nil, // wkspace
 		nil, // containerPath
 		8.0, // maxCost
+		tools.DefaultRegistry(nil, nil),
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})

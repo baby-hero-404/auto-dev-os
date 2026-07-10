@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
+	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gopkg.in/yaml.v3"
 )
@@ -345,9 +346,7 @@ func (a *PromptAssembler) resolveSkills(ctx context.Context, task models.Task, a
 		skNameLower := strings.ToLower(sk.Name)
 
 		// 1. Role match
-		if roleLower != "" && isSkillMatchingRole(sk.Name, agent.Role) {
-			score += 10
-		}
+		// (Removed hardcoded isSkillMatchingRole to support fully dynamic skills)
 
 		// 2. Required skills map match
 		if roleLower != "" && len(analysis.RequiredSkillsMap) > 0 {
@@ -399,7 +398,7 @@ func (a *PromptAssembler) resolveSkills(ctx context.Context, task models.Task, a
 }
 
 // collect gathers all prompt sections for the given task and agent.
-func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *models.Agent) ([]PromptSection, error) {
+func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *models.Agent, tools []llm.ToolDefinition) ([]PromptSection, error) {
 	stepID := stepIDFromCtx(ctx)
 	var sections []PromptSection
 
@@ -557,6 +556,12 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 		if content, err := a.fs.ReadFile(outputRulesFile); err == nil {
 			sections = append(sections, NewPromptSection("Output Rules", string(content), 35, 90, true, "system"))
 		}
+	}
+
+	// 6.5 Available Tools (Immutable)
+	if len(tools) > 0 {
+		toolsMarkdown := FormatAvailableTools(tools)
+		sections = append(sections, NewPromptSection("Available Tools", toolsMarkdown, 5, 95, true, "system"))
 	}
 
 	// 7. Context Builder slices & Sliced Context (REQ-M01, REQ-M02)
@@ -820,6 +825,11 @@ func (a *PromptAssembler) optimizeBudget(ctx context.Context, sections []PromptS
 	trace := BudgetTraceFromCtx(ctx)
 	if trace != nil {
 		trace.Logs = append(trace.Logs, fmt.Sprintf("Initial tokens: %d, Max limit: %d", totalTokens, maxLimit))
+		for _, sec := range sections {
+			if sec.Name == "Available Tools" {
+				trace.ToolTokens = sec.Tokens
+			}
+		}
 	}
 
 	if totalTokens <= maxLimit {
@@ -867,3 +877,134 @@ func (a *PromptAssembler) optimizeBudget(ctx context.Context, sections []PromptS
 
 	return activeSections
 }
+
+func FormatAvailableTools(tools []llm.ToolDefinition) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	// Group tools by Category
+	toolsByCategory := make(map[string][]llm.ToolDefinition)
+	for _, t := range tools {
+		cat, _ := toolMetadata(t.Name)
+		toolsByCategory[cat] = append(toolsByCategory[cat], t)
+	}
+
+	// Sort categories for deterministic rendering
+	var categories []string
+	for cat := range toolsByCategory {
+		categories = append(categories, cat)
+	}
+	sort.Strings(categories)
+
+	var sb strings.Builder
+	sb.WriteString("## Available Tools\n\n")
+
+	for _, cat := range categories {
+		sb.WriteString(fmt.Sprintf("### Category: %s\n\n", cat))
+		// Sort tools inside the category
+		catTools := toolsByCategory[cat]
+		sort.Slice(catTools, func(i, j int) bool {
+			return catTools[i].Name < catTools[j].Name
+		})
+
+		for _, t := range catTools {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", t.Name, t.Description))
+
+			// Parse parameters schema
+			if len(t.Parameters) > 0 {
+				var schema struct {
+					Properties map[string]struct {
+						Type        string `json:"type"`
+						Description string `json:"description"`
+						Default     any    `json:"default"`
+					} `json:"properties"`
+					Required []string `json:"required"`
+				}
+				if err := json.Unmarshal(t.Parameters, &schema); err == nil && len(schema.Properties) > 0 {
+					sb.WriteString("  - Parameters:\n")
+					// Sort keys for deterministic rendering
+					var keys []string
+					for k := range schema.Properties {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+
+					requiredMap := make(map[string]bool)
+					for _, req := range schema.Required {
+						requiredMap[req] = true
+					}
+
+					for _, k := range keys {
+						prop := schema.Properties[k]
+						reqStr := "optional"
+						if requiredMap[k] {
+							reqStr = "required"
+						}
+						defaultStr := ""
+						if prop.Default != nil {
+							defaultStr = fmt.Sprintf(", default: %v", prop.Default)
+						}
+						descStr := ""
+						if prop.Description != "" {
+							descStr = fmt.Sprintf(" - %s", prop.Description)
+						}
+						sb.WriteString(fmt.Sprintf("    - `%s` (%s, %s%s)%s\n", k, prop.Type, reqStr, defaultStr, descStr))
+					}
+				}
+			}
+
+			// Add usage example
+			_, example := toolMetadata(t.Name)
+			if example != "" {
+				sb.WriteString(fmt.Sprintf("  - Example: `%s`\n", example))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
+func toolMetadata(name string) (category string, example string) {
+	switch name {
+	case "read_file":
+		return "filesystem", `{"path": "src/main.go", "start_line": 1, "end_line": 100}`
+	case "write_file":
+		return "filesystem", `{"path": "src/hello.go", "content": "package main\n\nfunc main() {}"}`
+	case "list_files":
+		return "filesystem", `{"path": ".", "max_depth": 2}`
+	case "file_exists":
+		return "filesystem", `{"path": "package.json"}`
+	case "search_replace":
+		return "editing", `{"path": "src/main.go", "search": "fmt.Println(\"hello\")", "replace": "fmt.Println(\"world\")"}`
+	case "apply_patch":
+		return "editing", `{"path": "src/main.go", "search": "old content", "replace": "new content"}`
+	case "grep_search":
+		return "search", `{"query": "type Registry struct", "include": "*.go"}`
+	case "search_code":
+		return "search", `{"query": "func Main"}`
+	case "git_diff":
+		return "git", `{"staged": false}`
+	case "git_status":
+		return "git", `{}`
+	case "run_tests":
+		return "build", `{"command": "go test ./..."}`
+	case "run_build":
+		return "build", `{"command": "go build ./..."}`
+	case "read_spec":
+		return "context", `{}`
+	case "read_affected_files":
+		return "context", `{}`
+	case "analyze_logs":
+		return "other", `{"path": "logs/test.log"}`
+	case "generate_docs":
+		return "documentation", `{"topic": "API"}`
+	case "create_migration":
+		return "database", `{"name": "init"}`
+	default:
+		return "other", `{}`
+	}
+}
+
+

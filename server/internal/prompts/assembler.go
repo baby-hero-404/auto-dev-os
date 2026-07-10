@@ -56,8 +56,12 @@ func (a *PromptAssembler) WithDataRoot(dataRoot string) *PromptAssembler {
 	return a
 }
 
+func (a *PromptAssembler) SetBaseTools(tools []llm.ToolDefinition) {
+	a.baseTools = tools
+}
+
 func (a *PromptAssembler) Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error) {
-	return a.AssembleForAgent(ctx, task, nil, nil)
+	return a.AssembleForAgent(ctx, task, nil, nil, nil)
 }
 
 type contextKey string
@@ -101,7 +105,8 @@ func StepInputsFromCtx(ctx context.Context) map[string]map[string]any {
 const BudgetLogCtxKey contextKey = "budget_log_entries"
 
 type BudgetTrace struct {
-	Logs []string
+	Logs       []string
+	ToolTokens int
 }
 
 func WithBudgetTrace(ctx context.Context) (context.Context, *BudgetTrace) {
@@ -133,8 +138,14 @@ func isCodingStep(stepID string) bool {
 		stepID == workflow.StepFix
 }
 
-func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error) {
-	sections, err := a.collect(ctx, task, agent)
+func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, dynamicTools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error) {
+	// Fetch dynamic tools dynamically resolved from JIT skills
+	tools, err := a.toolDefinitionsForAgent(ctx, task, agent, dynamicTools)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sections, err := a.collect(ctx, task, agent, tools)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -170,12 +181,6 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		{Role: "user", Content: user},
 	}
 	messages = append(messages, TruncateHistory(history, 12000)...)
-
-	// Fetch dynamic tools dynamically resolved from JIT skills
-	tools, err := a.toolDefinitionsForAgent(ctx, task, agent)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	return messages, tools, nil
 }

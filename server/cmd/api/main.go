@@ -22,7 +22,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/skills"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
@@ -148,7 +147,7 @@ func run() error {
 
 	promptAssembler := prompts.NewPromptAssemblerWithRules(
 		ruleRepo,
-		skills.BuiltinToolDefinitions(),
+		nil,
 		pathRegistry.Prompt,
 		pathRegistry.FS,
 		ctxEngine,

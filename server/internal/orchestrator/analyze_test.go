@@ -94,7 +94,7 @@ func TestOrchestrator_StepAnalyze(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if len(mockLLM.lastChatOptions.Tools) != 3 {
+				if len(mockLLM.lastChatOptions.Tools) != 5 {
 					t.Fatalf("expected analyze tool definitions, got %+v", mockLLM.lastChatOptions.Tools)
 				}
 				if len(runtime.commands) == 0 || !strings.Contains(strings.Join(runtime.commands, "\n"), "find .") {

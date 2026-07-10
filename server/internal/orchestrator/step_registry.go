@@ -46,6 +46,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.wkspace,                                              // WorkspaceLoader
 			o.containerPathForHostPath,
 			o.maxPhaseCost,
+			o.registry,
 		),
 		steps.NewPlanStep(
 			rt,

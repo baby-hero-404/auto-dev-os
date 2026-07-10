@@ -14,6 +14,8 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/tool"
+	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -49,6 +51,8 @@ type Orchestrator struct {
 	llmLogLevel     string
 	maxPhaseCost    float64
 	wakeChan        chan struct{}
+	registry        *tool.Registry
+	capManager      *tool.CapabilityManager
 }
 
 func (o *Orchestrator) wake() {
@@ -172,8 +176,41 @@ func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager 
 	for _, opt := range opts {
 		opt(o)
 	}
+
+	provider := taskAffectedFilesAdapter{tasks: o.tasks}
+	o.registry = tools.DefaultRegistry(o.runtime, provider)
+	o.capManager = tool.NewCapabilityManager(o.registry, tool.DefaultRoleProfiles())
+
+	if o.prompts != nil {
+		if setter, ok := o.prompts.(interface{ SetBaseTools([]llm.ToolDefinition) }); ok {
+			setter.SetBaseTools(o.registry.Definitions())
+		}
+	}
+
 	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
 	return o
+}
+
+type taskAffectedFilesAdapter struct {
+	tasks TaskRepository
+}
+
+func (a taskAffectedFilesAdapter) GetAffectedFiles(ctx context.Context, taskID string) ([]string, error) {
+	task, err := a.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			return nil, err
+		}
+	}
+	var files []string
+	for _, f := range analysis.AffectedFiles {
+		files = append(files, f.File)
+	}
+	return files, nil
 }
 
 func (o *Orchestrator) ListArtifacts(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error) {

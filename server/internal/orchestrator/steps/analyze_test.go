@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -117,6 +118,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		&mockWorkspaceLoader{ws: ws},
 		containerPathFn,
 		8.0,
+		tools.DefaultRegistry(nil, nil),
 	)
 
 	files, err := step.listAnalyzeFiles(context.Background())
@@ -213,6 +215,7 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 		&mockWorkspaceLoader{ws: ws},
 		containerPathFn,
 		8.0,
+		tools.DefaultRegistry(nil, nil),
 	)
 
 	files, err := step.listAnalyzeFiles(context.Background())

@@ -19,7 +19,7 @@ type AgentAssigner interface {
 // PromptBuilder assembles LLM messages and tool definitions for agents.
 type PromptBuilder interface {
 	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error)
-	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message) ([]llm.Message, []llm.ToolDefinition, error)
+	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
 }
 
 // GitOpsClient handles git operations (clone, branch, push, PR).

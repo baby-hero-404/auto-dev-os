@@ -15,6 +15,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -37,6 +38,7 @@ type AnalyzeStep struct {
 	wkspace       WorkspaceLoader
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
 	maxCost       float64
+	registry      *tool.Registry
 }
 
 func NewAnalyzeStep(
@@ -55,6 +57,7 @@ func NewAnalyzeStep(
 	wkspace WorkspaceLoader,
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
 	maxCost float64,
+	registry *tool.Registry,
 ) *AnalyzeStep {
 	return &AnalyzeStep{
 		rt:            rt,
@@ -72,6 +75,7 @@ func NewAnalyzeStep(
 		wkspace:       wkspace,
 		containerPath: containerPath,
 		maxCost:       maxCost,
+		registry:      registry,
 	}
 }
 
@@ -83,7 +87,12 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 
 	if s.prompts != nil {
-		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil)
+		var plannerTools []llm.ToolDefinition
+		if s.registry != nil {
+			profile := tool.DefaultRoleProfiles()["planner"]
+			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
+		}
+		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
 		if err != nil {
 			return nil, fmt.Errorf("assemble prompt: %w", err)
 		}
@@ -148,7 +157,12 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 	var err error
 	if s.prompts != nil {
 		stepCtx := context.WithValue(ctx, prompts.StepIDCtxKey, workflow.StepAnalyze)
-		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, s.rt.Agent, nil)
+		var plannerTools []llm.ToolDefinition
+		if s.registry != nil {
+			profile := tool.DefaultRoleProfiles()["planner"]
+			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
+		}
+		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +195,7 @@ func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workf
 
 func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Message) (map[string]any, error) {
 	maxIterations := 6
-	analyzeTools := analyzeToolDefinitions()
+	analyzeTools := s.analyzeToolDefinitions()
 
 	for i := 0; i < maxIterations; i++ {
 		routeName := s.rt.Agent.ModelLevelGroup
@@ -484,3 +498,71 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 
 	return StepResult{"complexity": analysis.Complexity, "spec_status": specStatus}, nil
 }
+
+// analyzeToolDefinitions returns the registry tool definitions for read/search capabilities.
+func (s *AnalyzeStep) analyzeToolDefinitions() []llm.ToolDefinition {
+	if s.registry == nil {
+		return []llm.ToolDefinition{}
+	}
+	return s.registry.ToolsForCapabilities([]tool.Capability{tool.CapRead, tool.CapSearch})
+}
+
+// executeAnalyzeTool executes a registry tool by name.
+func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, arguments string) string {
+	var args map[string]any
+	if strings.TrimSpace(arguments) != "" {
+		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+			return fmt.Sprintf("Error: invalid tool arguments JSON: %v", err)
+		}
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+
+	if s.registry == nil {
+		return "Error: tool registry not configured"
+	}
+
+	workspacePath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	if s.wkspace != nil {
+		if ws, err := s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task); err == nil && ws != nil && len(ws.Repos) > 0 {
+			for _, repo := range ws.Repos {
+				if s.rt.Task.RepositoryID != nil && repo.RepoID != *s.rt.Task.RepositoryID {
+					continue
+				}
+				if repo.Paths.Main != "" {
+					workspacePath = filepath.Join(ws.Root, repo.Paths.Main)
+					break
+				}
+			}
+		}
+	}
+
+	call := tool.Call{
+		Input:     args,
+		Workspace: workspacePath,
+		TaskID:    s.rt.Task.ID,
+		AgentID:   s.rt.Agent.ID,
+		AgentRole: s.rt.Agent.Role,
+	}
+
+	res, err := s.registry.Execute(ctx, toolName, call)
+	if err != nil {
+		return "Error: " + err.Error()
+	}
+
+	if !res.Success {
+		var errStr string
+		if res.Message != "" {
+			errStr = res.Message
+		} else if len(res.Diagnostics) > 0 {
+			errStr = res.Diagnostics[0].Message
+		} else {
+			errStr = "tool execution failed"
+		}
+		return "Error: " + errStr
+	}
+
+	return res.Output
+}
+

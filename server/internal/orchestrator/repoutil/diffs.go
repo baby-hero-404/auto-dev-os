@@ -6,10 +6,11 @@ import (
 
 	orchestratorpatch "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func (m *Manager) getEngine() orchestratorpatch.PatchEngine {
+func (m *Manager) getEngine(ctx context.Context) orchestratorpatch.PatchEngine {
 	runner := &orchestratorpatch.Runner{
 		WorkspaceRoot:            m.WorkspaceRoot,
 		GetTaskRepoHostPath:      m.GetTaskRepoHostPath,
@@ -28,14 +29,16 @@ func (m *Manager) getEngine() orchestratorpatch.PatchEngine {
 	if m.ListRepositories != nil {
 		runner.ListRepositories = m.ListRepositories
 	}
-	// TODO: dynamically select strategy if config supports it, otherwise default to search_replace or unified_diff.
-	// For Phase 12, we can return search_replace to test it, but plan says "opt-in via a configuration flag".
-	// Let's use "search_replace" if preferred, else "unified_diff". We'll hardcode "unified_diff" for now as default.
-	return orchestratorpatch.NewEngine("unified_diff", runner)
+	
+	strategy := "unified_diff"
+	if prompts.UseSearchReplace(ctx) {
+		strategy = "search_replace"
+	}
+	return orchestratorpatch.NewEngine(strategy, runner)
 }
 
 func (m *Manager) Validate(ctx context.Context, task *models.Task, patchData string, worktreeSuffix string) []error {
-	engine := m.getEngine()
+	engine := m.getEngine(ctx)
 
 	// Actually, we can get repo path:
 	basePath := ""
@@ -56,7 +59,7 @@ func (m *Manager) Validate(ctx context.Context, task *models.Task, patchData str
 }
 
 func (m *Manager) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
-	engine := m.getEngine()
+	engine := m.getEngine(ctx)
 	return engine.Apply(ctx, task, agent, stepID, patchText, worktreeSuffix)
 }
 

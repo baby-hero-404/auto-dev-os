@@ -101,6 +101,64 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 		return "", false
 	}
 
+	var role string
+	if task.AgentID != nil && o.agents != nil {
+		if agent, err := o.agents.GetByID(ctx, *task.AgentID); err == nil && agent != nil {
+			role = agent.Role
+		}
+	}
+
+	o.initWkspace()
+	ws, err := o.wkspace.LoadTaskWorkspace(ctx, task)
+	if err == nil && ws != nil {
+		for _, repo := range ws.Repos {
+			prefix := repo.Name + string(filepath.Separator)
+			if strings.HasPrefix(filepath.Clean(file), prefix) {
+				rel := strings.TrimPrefix(filepath.Clean(file), prefix)
+				if role != "" && repo.Paths.Worktrees != nil {
+					if wtPath, ok := repo.Paths.Worktrees[role]; ok && wtPath != "" {
+						root := filepath.Join(ws.Root, wtPath)
+						safePath, err := paths.ResolveSafePath(root, rel)
+						if err == nil {
+							if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
+								return content, true
+							}
+						}
+					}
+				}
+				root := filepath.Join(ws.Root, repo.Paths.Main)
+				safePath, err := paths.ResolveSafePath(root, rel)
+				if err == nil {
+					if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
+						return content, true
+					}
+				}
+			}
+		}
+		// Fallback for single repository workspace if file does not have a repo prefix
+		if len(ws.Repos) == 1 {
+			repo := ws.Repos[0]
+			if role != "" && repo.Paths.Worktrees != nil {
+				if wtPath, ok := repo.Paths.Worktrees[role]; ok && wtPath != "" {
+					root := filepath.Join(ws.Root, wtPath)
+					safePath, err := paths.ResolveSafePath(root, file)
+					if err == nil {
+						if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
+							return content, true
+						}
+					}
+				}
+			}
+			root := filepath.Join(ws.Root, repo.Paths.Main)
+			safePath, err := paths.ResolveSafePath(root, file)
+			if err == nil {
+				if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
+					return content, true
+				}
+			}
+		}
+	}
+
 	for _, root := range o.affectedFileRoots(ctx, task, file) {
 		safePath, err := paths.ResolveSafePath(root, file)
 		if err == nil {
@@ -110,35 +168,6 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 		}
 	}
 
-	o.initWkspace()
-	ws, err := o.wkspace.LoadTaskWorkspace(ctx, task)
-	if err != nil || ws == nil {
-		return "", false
-	}
-	for _, repo := range ws.Repos {
-		prefix := repo.Name + string(filepath.Separator)
-		if strings.HasPrefix(filepath.Clean(file), prefix) {
-			rel := strings.TrimPrefix(filepath.Clean(file), prefix)
-			root := filepath.Join(ws.Root, repo.Paths.Main)
-			safePath, err := paths.ResolveSafePath(root, rel)
-			if err == nil {
-				if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
-					return content, true
-				}
-			}
-		}
-	}
-	// Fallback for single repository workspace if file does not have a repo prefix
-	if len(ws.Repos) == 1 {
-		repo := ws.Repos[0]
-		root := filepath.Join(ws.Root, repo.Paths.Main)
-		safePath, err := paths.ResolveSafePath(root, file)
-		if err == nil {
-			if content, readErr := paths.ReadLimitedFile(safePath, 20_000); readErr == nil {
-				return content, true
-			}
-		}
-	}
 	return "", false
 }
 

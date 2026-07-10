@@ -105,3 +105,7 @@ func rolesForTask(task *models.Task) []string {
 func (m *AgentManager) Release(ctx context.Context, agentID string) error {
 	return m.repo.UpdateStatus(ctx, agentID, models.AgentStatusIdle)
 }
+
+func (m *AgentManager) GetByID(ctx context.Context, id string) (*models.Agent, error) {
+	return m.repo.GetByID(ctx, id)
+}

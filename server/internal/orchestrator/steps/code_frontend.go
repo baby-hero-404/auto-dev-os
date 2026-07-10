@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -34,6 +35,7 @@ type CodeFrontendStep struct {
 	tester      TestRunner
 	checkpoints CheckpointLister
 	log         Logger
+	fileReader  AffectedFileReader
 }
 
 func NewCodeFrontendStep(
@@ -49,6 +51,7 @@ func NewCodeFrontendStep(
 	tester TestRunner,
 	checkpoints CheckpointLister,
 	log Logger,
+	fileReader AffectedFileReader,
 ) *CodeFrontendStep {
 	return &CodeFrontendStep{
 		rt:          rt,
@@ -63,6 +66,7 @@ func NewCodeFrontendStep(
 		tester:      tester,
 		checkpoints: checkpoints,
 		log:         log,
+		fileReader:  fileReader,
 	}
 }
 
@@ -289,8 +293,31 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 
 	var out map[string]any
 	maxRetries := 3
+	baseInstruction := instruction
+	var retryErrorMsg string
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		out, err = s.llm.RunLLMStep(ctx, s.rt.Task, frontendAgent, s.rt.JobID, stepCtx.StepID, instruction)
+		currentInstruction := baseInstruction
+		if attempt >= 3 {
+			currentInstruction += "\n\nCRITICAL: Due to persistent Unified Diff failures, you MUST now output your changes in SEARCH/REPLACE block format instead of a Unified Diff. Do NOT output a unified diff patch. Use the following format for each modification:\n<<<<<<< SEARCH\n[exact original code lines here]\n=======\n[replacement code lines here]\n>>>>>>> REPLACE\n"
+		}
+		if retryErrorMsg != "" {
+			currentInstruction += retryErrorMsg
+		}
+		if attempt >= 2 && s.worktree != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Resetting worktree before retry attempt %d", attempt))
+			if errReset := s.worktree.ResetRoleWorktrees(ctx, s.rt.Task, frontendAgent, worktreeSuffix); errReset != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("failed to reset worktree: %v", errReset))
+				return nil, fmt.Errorf("worktree corrupted: failed to reset worktree: %w", errReset)
+			}
+		}
+		llmCtx := ctx
+		if attempt >= 2 {
+			llmCtx = prompts.WithRetry(llmCtx)
+		}
+		if attempt >= 3 {
+			llmCtx = prompts.WithSearchReplace(llmCtx)
+		}
+		out, err = s.llm.RunLLMStep(llmCtx, s.rt.Task, frontendAgent, s.rt.JobID, stepCtx.StepID, currentInstruction)
 		if err != nil {
 			return nil, err
 		}
@@ -307,7 +334,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 						for _, ve := range validationErrs {
 							errMsg += "- " + ve.Error() + "\n"
 						}
-						instruction += fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
+						retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
 						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Patch validation failed (attempt %d/%d). Retrying...", attempt, maxRetries))
 						retryNeeded = true
 					} else {
@@ -333,15 +360,17 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 							}
 
 							jsonErrBytes, _ := json.MarshalIndent(pErr, "", "  ")
-							instruction += fmt.Sprintf("\n\nYour previous patch failed to apply due to an Execution Boundary Violation:\n```json\n%s\n```\nPlease regenerate your patch without modifying files outside the execution boundary.", string(jsonErrBytes))
+							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply due to an Execution Boundary Violation:\n```json\n%s\n```\nPlease regenerate your patch without modifying files outside the execution boundary.", string(jsonErrBytes))
 							retryNeeded = true
 							out["patch_apply_error"] = pErr.Error()
 							continue
 						}
 
 						out["patch_apply_error"] = applyErr.Error()
+						updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, applyErr)
 						if attempt < maxRetries {
-							instruction += fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
+							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
+							InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
 							retryNeeded = true
 						} else {
 							s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", "Patch apply failed after max retries")
@@ -354,8 +383,10 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 								if changedFiles, diffErr := s.diff.GetChangedFiles(ctx, s.rt.Task, frontendAgent, repoHostPath, worktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
 									if _, errT := s.tester.RunTargetedTests(ctx, s.rt.Task, frontendAgent, s.rt.JobID, "code_frontend_test", changedFiles, worktreeSuffix); errT != nil {
 										s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("targeted tests failed (attempt %d/%d): %v", attempt, maxRetries, errT))
+										updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, errT)
 										if attempt < maxRetries {
-											instruction += fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
+											retryErrorMsg = fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
+											InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
 											retryNeeded = true
 										} else {
 											s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", "Targeted tests failed after max retries")

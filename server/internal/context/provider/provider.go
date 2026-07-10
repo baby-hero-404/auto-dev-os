@@ -349,10 +349,14 @@ func (p *Provider) IndexWorkspace(ctx context.Context) error {
 	defer cache.Close()
 
 	scanDir := rootDir
-	wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
-	reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
-	if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
-		scanDir = reposDir
+	if actx, ok := ctx.Value(paths.AgentPathContextKey).(*paths.AgentPathContext); ok && actx != nil {
+		scanDir = actx.PhysicalRoot()
+	} else {
+		wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
+		reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
+		if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
+			scanDir = reposDir
+		}
 	}
 
 	filesMeta, err := source.ScanRepository(scanDir)
@@ -431,8 +435,8 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 			}
 		}
 
-		if relErr != nil || relPath == "" {
-			relPath = t.Filepath
+		if relErr != nil || relPath == "" || strings.HasPrefix(relPath, "..") {
+			continue
 		}
 
 		snippets = append(snippets, models.ContextSnippet{

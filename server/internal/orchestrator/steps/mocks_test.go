@@ -97,6 +97,18 @@ func (m *mockWorktreeManager) CommitRoleWorktrees(ctx context.Context, task *mod
 	return nil
 }
 
+func (m *mockWorktreeManager) ResetRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) error {
+	return nil
+}
+
+func (m *mockWorktreeManager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
+	return "mock-commit-hash", nil
+}
+
+func (m *mockWorktreeManager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error {
+	return nil
+}
+
 func (m *mockWorktreeManager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string {
 	return "/tmp/test"
 }

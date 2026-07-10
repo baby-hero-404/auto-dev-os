@@ -3,6 +3,7 @@ package repoutil
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -105,6 +106,93 @@ fi`,
 		)
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "commit_"+roleName, script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to commit changes for repo %s: %w", repo.URL, err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) ResetRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) error {
+	targetRepos, err := m.LoadTargetRepositories(ctx, task)
+	if err != nil {
+		return err
+	}
+	ws := m.GetTaskWorkspace(task)
+
+	for _, repo := range targetRepos {
+		localPath := m.RepoHostPath(task, ws, repo)
+		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
+		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+
+		script := fmt.Sprintf(`set -e
+git -C %[1]s reset --hard HEAD
+git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath))
+
+		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "reset_worktree", script, worktreeSuffix); err != nil {
+			return fmt.Errorf("failed to reset worktree for repo %s: %w", repo.URL, err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
+	targetRepos, err := m.LoadTargetRepositories(ctx, task)
+	if err != nil {
+		return "", err
+	}
+	ws := m.GetTaskWorkspace(task)
+
+	var lastCommitHash string
+	for _, repo := range targetRepos {
+		localPath := m.RepoHostPath(task, ws, repo)
+		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
+		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+
+		commitMsg := fmt.Sprintf("chore(auto-code-os): checkpoint %s", stepID)
+
+		script := fmt.Sprintf(`set -e
+git -C %[1]s add -u
+git -C %[1]s status --porcelain | grep '^??' | cut -c 4- | while read -r file; do
+  if [ -n "$file" ]; then
+    case "$file" in
+      *.go|*.ts|*.tsx|*.js|*.jsx|*.css|*.json|*.sql|*.yaml|*.yml|*.toml|*.md|*go.mod|*go.sum)
+        git -C %[1]s add "$file"
+        ;;
+    esac
+  fi
+done
+git -C %[1]s commit -m %[2]s --allow-empty
+git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitMsg))
+
+		res, err := m.RunSandboxStepInWorktree(ctx, task, agent, "checkpoint_"+stepID, script, worktreeSuffix)
+		if err != nil {
+			return "", fmt.Errorf("failed to create checkpoint commit for repo %s: %w", repo.URL, err)
+		}
+		if stdout, ok := res["stdout"].(string); ok {
+			lastCommitHash = strings.TrimSpace(stdout)
+		}
+	}
+	return lastCommitHash, nil
+}
+
+func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error {
+	targetRepos, err := m.LoadTargetRepositories(ctx, task)
+	if err != nil {
+		return err
+	}
+	ws := m.GetTaskWorkspace(task)
+
+	for _, repo := range targetRepos {
+		localPath := m.RepoHostPath(task, ws, repo)
+		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
+		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+
+		script := fmt.Sprintf(`set -e
+git -C %[1]s checkout %[2]s
+git -C %[1]s reset --hard HEAD
+git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash))
+
+		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
+			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)
 		}
 	}
 	return nil

@@ -160,6 +160,13 @@ func (m *mockAgentAssigner) Release(ctx context.Context, agentID string) error {
 	return nil
 }
 
+func (m *mockAgentAssigner) GetByID(ctx context.Context, id string) (*models.Agent, error) {
+	if m.agent != nil && m.agent.ID == id {
+		return m.agent, nil
+	}
+	return nil, errors.New("not found")
+}
+
 type mockSandboxRuntime struct {
 	commands []string
 }

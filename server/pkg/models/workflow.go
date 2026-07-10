@@ -41,12 +41,27 @@ type WorkflowJob struct {
 }
 
 type WorkflowCheckpoint struct {
-	ID        string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	TaskID    string          `json:"task_id" gorm:"type:uuid;not null"`
-	JobID     *string         `json:"job_id,omitempty" gorm:"type:uuid"`
-	Step      string          `json:"step" gorm:"not null"`
-	State     json.RawMessage `json:"state" gorm:"type:jsonb;default:'{}'"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID         string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	TaskID     string          `json:"task_id" gorm:"type:uuid;not null"`
+	JobID      *string         `json:"job_id,omitempty" gorm:"type:uuid"`
+	Step       string          `json:"step" gorm:"not null"`
+	State      json.RawMessage `json:"state" gorm:"type:jsonb;default:'{}'"`
+	CreatedAt  time.Time       `json:"created_at"`
+	CommitHash string          `json:"commit_hash,omitempty" gorm:"-"`
+}
+
+func (c *WorkflowCheckpoint) GetCommitHash() string {
+	if len(c.State) == 0 {
+		return ""
+	}
+	var state map[string]any
+	if err := json.Unmarshal(c.State, &state); err != nil {
+		return ""
+	}
+	if h, ok := state["commit_hash"].(string); ok {
+		return h
+	}
+	return ""
 }
 
 type TaskLog struct {

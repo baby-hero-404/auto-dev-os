@@ -71,6 +71,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
 			o.workflows,               // CheckpointLister
 			loggerAdapter{log: o.log}, // Logger
+			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
 		),
 		steps.NewCodeFrontendStep(
 			rt,
@@ -85,6 +86,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
 			o.workflows,               // CheckpointLister
 			loggerAdapter{log: o.log}, // Logger
+			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
 		),
 		steps.NewMergeStep(
 			rt,
@@ -121,6 +123,8 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			testerRunnerAdapter{run: o.runTargetedTests},     // TestRunner
 			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
 			loggerAdapter{log: o.log},                        // Logger
+			o.repoutil,                          // WorktreeManager
+			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
 		),
 		steps.NewTestStep(
 			rt,
@@ -168,4 +172,12 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 	}
 
 	return runners
+}
+
+type affectedFileReaderAdapter struct {
+	read func(ctx context.Context, task *models.Task, file string) (string, bool)
+}
+
+func (a affectedFileReaderAdapter) ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool) {
+	return a.read(ctx, task, file)
 }

@@ -13,8 +13,11 @@ var diffFileHeaderRegex = regexp.MustCompile(`^\+\+\+ (?:b/)?(.*)$`)
 
 func ValidateUnifiedDiff(patch string, basePath string) []ValidationError {
 	var errors []ValidationError
-	lines := strings.Split(patch, "\n")
+	
+	// Check hunk count mismatches
+	errors = append(errors, ValidateHunkCounts(patch)...)
 
+	lines := strings.Split(patch, "\n")
 	var currentFile string
 	for _, line := range lines {
 		if strings.HasPrefix(line, "+++ ") {
@@ -49,6 +52,97 @@ func ValidateUnifiedDiff(patch string, basePath string) []ValidationError {
 			}
 		}
 	}
+	return errors
+}
+
+func ValidateHunkCounts(patch string) []ValidationError {
+	var errors []ValidationError
+	lines := strings.Split(patch, "\n")
+
+	var currentFile string
+	var inHunk bool
+	var currentHunkHeader string
+	var expectedOldLen, expectedNewLen int
+	var actualOldLen, actualNewLen int
+
+	flushHunk := func() {
+		if !inHunk {
+			return
+		}
+		if actualOldLen != expectedOldLen || actualNewLen != expectedNewLen {
+			errors = append(errors, ValidationError{
+				Filepath: currentFile,
+				Reason:   fmt.Sprintf("Hunk line count mismatch in header %q: expected old=%d/new=%d, got old=%d/new=%d", currentHunkHeader, expectedOldLen, expectedNewLen, actualOldLen, actualNewLen),
+				IsFatal:  true,
+			})
+		}
+		inHunk = false
+	}
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+++ ") {
+			flushHunk()
+			matches := diffFileHeaderRegex.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				currentFile = strings.TrimSpace(matches[1])
+				currentFile = strings.TrimPrefix(currentFile, "b/")
+				if currentFile == "/dev/null" {
+					currentFile = ""
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "--- ") {
+			flushHunk()
+			continue
+		}
+		if strings.HasPrefix(line, "diff ") {
+			flushHunk()
+			continue
+		}
+		if strings.HasPrefix(line, "@@ ") {
+			flushHunk()
+			matches := hunkHeaderRegex.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				inHunk = true
+				currentHunkHeader = strings.TrimSpace(line)
+				// old length
+				if matches[2] != "" {
+					fmt.Sscanf(matches[2], "%d", &expectedOldLen)
+				} else {
+					expectedOldLen = 1
+				}
+				// new length
+				if matches[4] != "" {
+					fmt.Sscanf(matches[4], "%d", &expectedNewLen)
+				} else {
+					expectedNewLen = 1
+				}
+				actualOldLen = 0
+				actualNewLen = 0
+			}
+			continue
+		}
+
+		if inHunk {
+			if strings.HasPrefix(line, "-") {
+				actualOldLen++
+			} else if strings.HasPrefix(line, "+") {
+				actualNewLen++
+			} else if strings.HasPrefix(line, " ") {
+				actualOldLen++
+				actualNewLen++
+			} else if strings.HasPrefix(line, "\\") {
+				// ignore metadata line e.g. \ No newline at end of file
+			} else if line == "" {
+				if actualOldLen < expectedOldLen || actualNewLen < expectedNewLen {
+					actualOldLen++
+					actualNewLen++
+				}
+			}
+		}
+	}
+	flushHunk()
 	return errors
 }
 

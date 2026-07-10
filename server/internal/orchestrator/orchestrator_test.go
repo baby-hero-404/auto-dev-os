@@ -639,6 +639,89 @@ func TestOrchestrator_ReadAffectedFileContent_ResolvesRepoRelativePath(t *testin
 	}
 }
 
+func TestOrchestrator_ReadAffectedFileContent_WorktreeFirst(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "affected-file-worktree-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoID := "repo-a"
+	agentID := "agent-123"
+	task := &models.Task{
+		ID:           "task-affected-wt",
+		ProjectID:    "proj-affected-wt",
+		RepositoryID: &repoID,
+		AgentID:      &agentID,
+	}
+
+	agent := &models.Agent{
+		ID:   agentID,
+		Role: "backend",
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+
+	orch := New(taskRepo, nil, agentAssigner, nil, WithWorkspaceRoot(tmpDir))
+	orch.initWkspace()
+	ws := orch.wkspace.GetTaskWorkspace(task)
+	ws.Repos = []models.RepoWorkspace{{
+		RepoID: repoID,
+		Name:   "repo-a",
+		Paths: models.RepoWorkspacePaths{
+			Main: filepath.Join("repos", "repo-a", "main"),
+			Worktrees: map[string]string{
+				"backend": filepath.Join("repos", "repo-a", "worktrees", "backend"),
+			},
+		},
+	}}
+
+	mainRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
+	wtRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Worktrees["backend"])
+
+	if err := os.MkdirAll(filepath.Join(mainRoot, "src"), 0o755); err != nil {
+		t.Fatalf("failed to create main repo dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(wtRoot, "src"), 0o755); err != nil {
+		t.Fatalf("failed to create wt repo dir: %v", err)
+	}
+
+	// Write different content to main vs worktree
+	if err := os.WriteFile(filepath.Join(mainRoot, "src", "main.go"), []byte("package main\n// main\n"), 0o644); err != nil {
+		t.Fatalf("failed to write main file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtRoot, "src", "main.go"), []byte("package main\n// worktree\n"), 0o644); err != nil {
+		t.Fatalf("failed to write wt file: %v", err)
+	}
+	// Write a file that only exists in worktree
+	if err := os.WriteFile(filepath.Join(wtRoot, "src", "wt_only.go"), []byte("package main\n// wt only\n"), 0o644); err != nil {
+		t.Fatalf("failed to write wt only file: %v", err)
+	}
+
+	if err := orch.wkspace.SaveTaskWorkspaceMetadata(task, ws); err != nil {
+		t.Fatalf("failed to save metadata: %v", err)
+	}
+
+	// 1. Verify we read the worktree version for a file in both
+	content, ok := orch.readAffectedFileContent(context.Background(), task, "src/main.go")
+	if !ok {
+		t.Fatal("expected file to resolve")
+	}
+	if !strings.Contains(content, "// worktree") {
+		t.Fatalf("expected worktree content, got %q", content)
+	}
+
+	// 2. Verify we read the file that only exists in worktree
+	contentOnly, okOnly := orch.readAffectedFileContent(context.Background(), task, "src/wt_only.go")
+	if !okOnly {
+		t.Fatal("expected wt_only file to resolve")
+	}
+	if !strings.Contains(contentOnly, "// wt only") {
+		t.Fatalf("expected wt only content, got %q", contentOnly)
+	}
+}
+
 
 
 func TestOrchestrator_ClearCheckpointsForRepair(t *testing.T) {

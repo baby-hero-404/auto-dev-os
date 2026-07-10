@@ -606,18 +606,23 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 				var specBuilder strings.Builder
 				specBuilder.WriteString("=== Task Specification (OpenSpec) ===\n")
 				if analysis.ProposalMD != "" && !isCodingStep(stepID) {
-					specBuilder.WriteString(analysis.ProposalMD + "\n\n")
+					specBuilder.WriteString(analysis.ProposalMD)
+					specBuilder.WriteString("\n\n")
 				}
 				if analysis.SpecsMD != "" && !isCodingStep(stepID) {
-					specBuilder.WriteString(analysis.SpecsMD + "\n\n")
+					specBuilder.WriteString(analysis.SpecsMD)
+					specBuilder.WriteString("\n\n")
 				}
 				if analysis.DesignMD != "" && !isCodingStep(stepID) {
-					specBuilder.WriteString(analysis.DesignMD + "\n\n")
+					specBuilder.WriteString(analysis.DesignMD)
+					specBuilder.WriteString("\n\n")
 				}
 				if len(analysis.Tasks) > 0 {
-					specBuilder.WriteString(formatTasksMD(analysis.Tasks) + "\n\n")
+					specBuilder.WriteString(formatTasksMD(analysis.Tasks))
+					specBuilder.WriteString("\n\n")
 				} else if analysis.TasksMD != "" {
-					specBuilder.WriteString(analysis.TasksMD + "\n\n")
+					specBuilder.WriteString(analysis.TasksMD)
+					specBuilder.WriteString("\n\n")
 				}
 				if specBuilder.Len() > len("=== Task Specification (OpenSpec) ===\n") {
 					sections = append(sections, NewPromptSection("Task Specifications", specBuilder.String(), 40, 30, false, "user"))
@@ -693,7 +698,8 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 		var contextBlock string
 		var activeFiles []string
 
-		if cachedData != nil && len(cachedData.SemanticSnippets) > 0 {
+		isRetry := ctx.Value(IsRetryCtxKey) == true
+		if cachedData != nil && len(cachedData.SemanticSnippets) > 0 && !isRetry {
 			maxSnippets := 8
 			if isCodingStep(stepID) {
 				maxSnippets = 4
@@ -709,10 +715,18 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 			}
 		} else if a.ctxEngine != nil && shouldAttachCodeContext(agent) {
 			maxSnippets := 8
-			if isCodingStep(stepID) {
+			if isCodingStep(stepID) && !isRetry {
 				maxSnippets = 4
 			}
-			snippets, err := a.ctxEngine.RetrieveContext(ctx, task.Title+"\n"+task.Description, maxSnippets)
+			query := task.Title + "\n" + task.Description
+			if isRetry && len(analysis.AffectedFiles) > 0 {
+				var errorPaths []string
+				for _, af := range analysis.AffectedFiles {
+					errorPaths = append(errorPaths, af.File)
+				}
+				query = strings.Join(errorPaths, " ") + "\n" + query
+			}
+			snippets, err := a.ctxEngine.RetrieveContext(ctx, query, maxSnippets)
 			if err == nil {
 				snippets = deduplicateSnippets(snippets)
 				contextBlock = formatContextSnippets(snippets)

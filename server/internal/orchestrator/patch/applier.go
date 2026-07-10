@@ -304,7 +304,10 @@ exit $CODE`,
 				paths.QuoteShellArg(containerTargetPath),
 				paths.QuoteShellArg(containerPatchPath),
 			)
-			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch", revertCmd, worktreeSuffix)
+			_, revertErr := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch", revertCmd, worktreeSuffix)
+			if revertErr != nil && r.Log != nil {
+				r.Log(ctx, task.ID, "error", fmt.Sprintf("REVERT FAILED for step %s: %v", stepID, revertErr))
+			}
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch", fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch: %w", err)
 		}
@@ -395,7 +398,10 @@ exit $CODE`,
 				paths.QuoteShellArg(containerRepoWorktreePath),
 				paths.QuoteShellArg(containerPatchPath),
 			)
-			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch_"+repoName, revertCmd, worktreeSuffix)
+			_, revertErr := r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_revert_patch_"+repoName, revertCmd, worktreeSuffix)
+			if revertErr != nil && r.Log != nil {
+				r.Log(ctx, task.ID, "error", fmt.Sprintf("REVERT FAILED for step %s on repo %s: %v", stepID, repoName, revertErr))
+			}
 			_, _ = r.RunSandboxStepInWorktree(ctx, task, agent, stepID+"_clean_patch_"+repoName, fmt.Sprintf("rm -f %s", paths.QuoteShellArg(containerPatchPath)), worktreeSuffix)
 			return fmt.Errorf("git apply patch failed for repo %s: %w", repoName, err)
 		}

@@ -575,3 +575,90 @@ func TestPromptAssembler_AssembleForAgent_SkipsSpecsMarkdownInCodingSteps(t *tes
 		t.Error("expected non-coding step prompt to include ProposalMD, SpecsMD, and DesignMD")
 	}
 }
+
+type spyContextEngine struct {
+	lastQuery string
+	lastLimit int
+}
+
+func (s *spyContextEngine) RetrieveContext(ctx context.Context, query string, limit int) ([]models.ContextSnippet, error) {
+	s.lastQuery = query
+	s.lastLimit = limit
+	return []models.ContextSnippet{{Path: "main.go", Content: "main"}}, nil
+}
+
+func (s *spyContextEngine) GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error) {
+	return "", nil
+}
+
+func (s *spyContextEngine) IndexWorkspace(ctx context.Context) error { return nil }
+func (s *spyContextEngine) Close() error                           { return nil }
+func (s *spyContextEngine) GetGlobalCacheDir() string              { return "" }
+func (s *spyContextEngine) BuildGlobalCache(repoAbsPath, repoName, commitHash string) error {
+	return nil
+}
+func (s *spyContextEngine) InitLocalCache(wsRoot string, repoCommits []provider.RepoCommitInfo) error {
+	return nil
+}
+
+func TestPromptAssembler_BypassCacheAndBoostRAGOnRetry(t *testing.T) {
+	engine := &spyContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
+
+	task := models.Task{
+		ID:          "t-123",
+		Title:       "Repair login page",
+		Description: "Login form fails to load styles.",
+		Analysis:    json.RawMessage(`{"affected_files":[{"file":"web/login.go"}]}`),
+		Clarifications: json.RawMessage(`[]`),
+	}
+
+	// 1. First run, WITH cached snippets: should use cache, not engine.
+	cache := models.ContextCache{
+		SemanticSnippets: []models.ContextSnippet{{Path: "cached.go", Content: "cached"}},
+	}
+	cacheBytes, _ := json.Marshal(cache)
+	stepInputs := map[string]map[string]any{
+		"context_load": {"context_cache": string(cacheBytes)},
+	}
+
+	ctxNormal := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
+	ctxNormal = context.WithValue(ctxNormal, StepInputsCtxKey, stepInputs)
+
+	messagesNormal, _, err := assembler.AssembleForAgent(ctxNormal, task, &models.Agent{Role: "backend"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if engine.lastQuery != "" {
+		t.Fatal("expected context engine not to be called when cached snippets exist")
+	}
+	if !strings.Contains(messagesNormal[1].Content, "cached.go") {
+		t.Fatal("expected prompt to contain cached snippet")
+	}
+
+	// 2. Retry run, WITH cached snippets: should bypass cache, call engine, boost RAG.
+	ctxRetry := context.WithValue(context.Background(), StepIDCtxKey, "code_backend_0")
+	ctxRetry = context.WithValue(ctxRetry, StepInputsCtxKey, stepInputs)
+	ctxRetry = context.WithValue(ctxRetry, IsRetryCtxKey, true)
+
+	messagesRetry, _, err := assembler.AssembleForAgent(ctxRetry, task, &models.Agent{Role: "backend"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if engine.lastQuery == "" {
+		t.Fatal("expected context engine to be called on retry")
+	}
+	// Verify query boost: should contain the error file path "web/login.go" prepended
+	if !strings.HasPrefix(engine.lastQuery, "web/login.go") {
+		t.Fatalf("expected search query to start with boosted error path, got %q", engine.lastQuery)
+	}
+	// Verify limit boost: coding step normal is 4, retry is 8
+	if engine.lastLimit != 8 {
+		t.Fatalf("expected limit to be boosted to 8 on retry, got %d", engine.lastLimit)
+	}
+	if !strings.Contains(messagesRetry[1].Content, "main.go") {
+		t.Fatal("expected prompt to contain dynamically retrieved snippet")
+	}
+}

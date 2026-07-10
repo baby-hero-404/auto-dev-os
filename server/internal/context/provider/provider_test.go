@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 func TestIntegrationLatencyAndLeakage(t *testing.T) {
@@ -232,6 +235,143 @@ func TestGetRepoMapTokenPruningAndBuffing(t *testing.T) {
 	// Because of buffing, file_9.go MUST be included even in a highly restricted token budget
 	if !strings.Contains(repoMapBuffed, "file_9.go") {
 		t.Errorf("Buffed task dependency (file_9.go) was not prioritized in the pruned repo map:\n%s", repoMapBuffed)
+	}
+}
+
+func TestIndexWorkspaceScopingToAgentPathContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheDb := filepath.Join(tmpDir, "cache.db")
+	taskWS := filepath.Join(tmpDir, "task1")
+
+	// Create dynamic code repositories directory structure (reposDir)
+	reposDir := filepath.Join(taskWS, "code", "repos", "app", "main")
+	if err := os.MkdirAll(reposDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write file in standard reposDir
+	if err := os.WriteFile(filepath.Join(reposDir, "standard.go"), []byte("package main\nfunc Standard() {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create physical worktree root (which is NOT reposDir)
+	worktreeRoot := filepath.Join(taskWS, "worktrees", "wt1")
+	if err := os.MkdirAll(worktreeRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write file in physical worktree root
+	if err := os.WriteFile(filepath.Join(worktreeRoot, "worktree.go"), []byte("package main\nfunc WorktreeOnly() {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewProvider(tmpDir, cacheDb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	// 1. Without AgentPathContext: should scan standard reposDir
+	ctxNormal := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
+	if err := provider.IndexWorkspace(ctxNormal); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify standard.go was indexed (GetRepoMap should contain standard.go)
+	repoMapNormal, err := provider.GetRepoMap(ctxNormal, []string{}, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(repoMapNormal, "standard.go") {
+		t.Errorf("expected standard.go to be indexed, repo map: %s", repoMapNormal)
+	}
+	if strings.Contains(repoMapNormal, "worktree.go") {
+		t.Errorf("expected worktree.go NOT to be indexed under normal scan, repo map: %s", repoMapNormal)
+	}
+
+	// Clean/reset the workspace cache for the next test
+	localCacheDb := filepath.Join(taskWS, "context", "workspace_cache.db")
+	_ = os.Remove(localCacheDb)
+
+	// 2. With AgentPathContext: should scan only physical worktree root
+	pathCtx := paths.NewAgentPathContext(worktreeRoot, false, "app", "backend")
+	ctxWorktree := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
+	ctxWorktree = context.WithValue(ctxWorktree, paths.AgentPathContextKey, pathCtx)
+
+	if err := provider.IndexWorkspace(ctxWorktree); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify worktree.go was indexed and standard.go was not
+	repoMapWorktree, err := provider.GetRepoMap(ctxWorktree, []string{}, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(repoMapWorktree, "worktree.go") {
+		t.Errorf("expected worktree.go to be indexed when scoped to worktree, repo map: %s", repoMapWorktree)
+	}
+	if strings.Contains(repoMapWorktree, "standard.go") {
+		t.Errorf("expected standard.go NOT to be indexed when scoped to worktree, repo map: %s", repoMapWorktree)
+	}
+}
+
+func TestDropUnresolvableSnippetPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheDb := filepath.Join(tmpDir, "cache.db")
+	taskWS := filepath.Join(tmpDir, "task1")
+
+	reposDir := filepath.Join(taskWS, "code", "repos", "app", "main")
+	if err := os.MkdirAll(reposDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write standard file
+	if err := os.WriteFile(filepath.Join(reposDir, "valid.go"), []byte("package main\nfunc Valid() {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewProvider(tmpDir, cacheDb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	ctx := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
+	if err := provider.IndexWorkspace(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a snippet with an out-of-boundary path directly in DB to simulate unresolvable path.
+	// We want to verify retrieve ignores it.
+	localDbPath := filepath.Join(taskWS, "context", "workspace_cache.db")
+	// Open DB and insert a tag whose Filepath points to a different/non-existing/out-of-boundary directory.
+	db, err := sql.Open("sqlite3", localDbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Insert tag pointing to an out-of-boundary absolute path
+	outOfBoundaryPath := "/etc/passwd"
+	tagsOutOfBoundary := `[{"name":"LeakSymbol","kind":"def","line":1,"end_line":10,"filepath":"/etc/passwd"}]`
+	if _, err := db.Exec(`INSERT OR REPLACE INTO file_cache (filepath, mtime, tags_json) VALUES (?, ?, ?)`, outOfBoundaryPath, 123456, tagsOutOfBoundary); err != nil {
+		t.Fatal(err)
+	}
+	// Also insert content in valid.go so search query matches something
+	validPath := filepath.Join(reposDir, "valid.go")
+	tagsValid := fmt.Sprintf(`[{"name":"ValidSymbol","kind":"def","line":1,"end_line":10,"filepath":%q}]`, validPath)
+	if _, err := db.Exec(`INSERT OR REPLACE INTO file_cache (filepath, mtime, tags_json) VALUES (?, ?, ?)`, validPath, 123456, tagsValid); err != nil {
+		t.Fatal(err)
+	}
+
+	// Retrieve context - query should match "LeakSymbol" and "ValidSymbol"
+	snippets, err := provider.RetrieveContext(ctx, "LeakSymbol ValidSymbol", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify that the outOfBoundaryPath "/etc/passwd" is dropped and not present in snippets
+	for _, sn := range snippets {
+		if strings.Contains(sn.Path, "passwd") || strings.Contains(sn.Path, "etc") || filepath.IsAbs(sn.Path) {
+			t.Errorf("DATA LEAKAGE: retrieved snippet with out-of-boundary/absolute path: %s", sn.Path)
+		}
 	}
 }
 

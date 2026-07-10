@@ -34,4 +34,7 @@ These skills have been successfully mapped to manage tasks in this repository ef
 2. **Layered Architecture:** Handlers must never call repositories directly. All communication flows: `internal/handler` ➔ `internal/service` ➔ `internal/repository`.
 3. **Immutability of System Prompt:** Global guidelines and classifier rules always take precedence over task/project-level rules.
 4. **Sandboxed Isolation:** All agent-triggered execution tasks must run inside isolated Docker containers using the Sandbox client.
-5. **Human-in-the-Loop (HITL) Gate:** PR reviews and approvals are required for Medium and Hard tasks before merging.
+5. **Flat Repository Paths:** Checkouts are standardized to a flat `code/repos/{repo_name}/main` structure to eliminate branch-level path nesting and reduce path complexity.
+6. **Prompt Assembly Pipeline:** Prompts are compiled through a strict pipeline (`collect -> sort -> render`) utilizing `PromptSection` structures, token budget enforcement, and diagnostic tracing.
+7. **Two-Tier Context Caching:** Employs two-tier context caching with automated global prewarming and garbage collection.
+8. **Human-in-the-Loop (HITL) Gate:** PR reviews and approvals are required for Medium and Hard tasks before merging.

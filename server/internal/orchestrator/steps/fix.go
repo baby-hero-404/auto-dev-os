@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -13,7 +14,7 @@ import (
 // FixStep implements Step for fixing findings/feedback from PR review.
 type FixStep struct {
 	rt          StepRuntime
-	tasks       TaskReader
+	tasks       TaskRepository
 	checkpoints CheckpointLister
 	llm         LLMRunner
 	diff        DiffCapturer
@@ -22,11 +23,13 @@ type FixStep struct {
 	tests       TestRunner
 	status      StatusUpdater
 	log         Logger
+	worktree    WorktreeManager
+	fileReader  AffectedFileReader
 }
 
 func NewFixStep(
 	rt StepRuntime,
-	tasks TaskReader,
+	tasks TaskRepository,
 	checkpoints CheckpointLister,
 	llm LLMRunner,
 	diff DiffCapturer,
@@ -35,6 +38,8 @@ func NewFixStep(
 	tests TestRunner,
 	status StatusUpdater,
 	log Logger,
+	worktree WorktreeManager,
+	fileReader AffectedFileReader,
 ) *FixStep {
 	return &FixStep{
 		rt:          rt,
@@ -47,6 +52,8 @@ func NewFixStep(
 		tests:       tests,
 		status:      status,
 		log:         log,
+		worktree:    worktree,
+		fileReader:  fileReader,
 	}
 }
 
@@ -154,9 +161,36 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		var err error
 		maxRetries := 3
 		var patchApplied bool
+		baseInstruction := instruction
+		var retryErrorMsg string
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
-			out, err = s.llm.RunLLMStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepFix, instruction)
+			currentInstruction := baseInstruction
+			if attempt >= 3 {
+				currentInstruction += "\n\nCRITICAL: Due to persistent Unified Diff failures, you MUST now output your changes in SEARCH/REPLACE block format instead of a Unified Diff. Do NOT output a unified diff patch. Use the following format for each modification:\n<<<<<<< SEARCH\n[exact original code lines here]\n=======\n[replacement code lines here]\n>>>>>>> REPLACE\n"
+			}
+			if retryErrorMsg != "" {
+				currentInstruction += retryErrorMsg
+			}
+			if attempt >= 2 && s.worktree != nil {
+				if s.log != nil {
+					s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Resetting worktree before retry attempt %d", attempt))
+				}
+				if errReset := s.worktree.ResetRoleWorktrees(ctx, s.rt.Task, s.rt.Agent, ""); errReset != nil {
+					if s.log != nil {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("failed to reset worktree: %v", errReset))
+					}
+					return nil, fmt.Errorf("worktree corrupted: failed to reset worktree: %w", errReset)
+				}
+			}
+			llmCtx := ctx
+			if attempt >= 2 {
+				llmCtx = prompts.WithRetry(llmCtx)
+			}
+			if attempt >= 3 {
+				llmCtx = prompts.WithSearchReplace(llmCtx)
+			}
+			out, err = s.llm.RunLLMStep(llmCtx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepFix, currentInstruction)
 			if err != nil {
 				return nil, err
 			}
@@ -174,7 +208,7 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 								for _, ve := range validationErrs {
 									errMsg += "- " + ve.Error() + "\n"
 								}
-								instruction += fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
+								retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
 								if s.log != nil {
 									s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Patch validation failed (attempt %d/%d). Retrying...", attempt, maxRetries))
 								}
@@ -210,15 +244,17 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 									}
 
 									jsonErrBytes, _ := json.MarshalIndent(pErr, "", "  ")
-									instruction += fmt.Sprintf("\n\nYour previous patch failed to apply due to an Execution Boundary Violation:\n```json\n%s\n```\nPlease regenerate your patch without modifying files outside the execution boundary.", string(jsonErrBytes))
+									retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply due to an Execution Boundary Violation:\n```json\n%s\n```\nPlease regenerate your patch without modifying files outside the execution boundary.", string(jsonErrBytes))
 									retryNeeded = true
 									out["patch_apply_error"] = pErr.Error()
 									continue
 								}
 
 								out["patch_apply_error"] = applyErr.Error()
+								updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, applyErr)
 								if attempt < maxRetries {
-									instruction += fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
+									retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
+									InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
 									retryNeeded = true
 								} else {
 									if s.log != nil {
@@ -235,8 +271,10 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 												if s.log != nil {
 													s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("targeted tests failed (attempt %d/%d): %v", attempt, maxRetries, errT))
 												}
+												updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, errT)
 												if attempt < maxRetries {
-													instruction += fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
+													retryErrorMsg = fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
+													InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
 													retryNeeded = true
 												} else {
 													if s.log != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -48,6 +49,15 @@ func (m *mockFrontendAgentAssigner) Release(ctx context.Context, agentID string)
 	return nil
 }
 
+type mockAffectedFileReader struct {
+	content string
+	ok      bool
+}
+
+func (m *mockAffectedFileReader) ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool) {
+	return m.content, m.ok
+}
+
 func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 	task := &models.Task{
 		ID:         "task-123",
@@ -82,6 +92,7 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -123,6 +134,7 @@ func TestCodeBackendStep_ReusesCurrentBackendAgent(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
@@ -162,6 +174,7 @@ func TestCodeBackendStep_ReleasesAgentOnAssignmentFailure(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -195,6 +208,7 @@ func TestCodeFrontendStep_SkipsOnEasyTask(t *testing.T) {
 		nil,
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -231,6 +245,7 @@ func TestCodeFrontendStep_SkipsOnNoFrontendFiles(t *testing.T) {
 		nil,
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -268,6 +283,7 @@ func TestCodeFrontendStep_ReleasesBorrowedAgent(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -307,6 +323,7 @@ func TestCodeFrontendStep_ReusesCurrentFrontendAgent(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
@@ -383,6 +400,7 @@ func TestCodeBackendStep_IncludesDirectoryScan(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	_, err = step.Execute(context.Background(), workflow.StepContext{})
@@ -441,6 +459,7 @@ func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
 		&mockTestRunner{},
 		nil,
 		&mockLogger{},
+		&mockAffectedFileReader{content: "mock code", ok: true},
 	)
 
 	// Build StepContext with a prior step's outputs containing files_changed
@@ -475,3 +494,194 @@ func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
 		t.Error("expected instruction to list prior_file_2.go")
 	}
 }
+
+type retryPatchApplier struct {
+	calls int
+}
+
+func (m *retryPatchApplier) Validate(ctx context.Context, task *models.Task, patchData string, worktreeSuffix string) []error {
+	return nil
+}
+
+func (m *retryPatchApplier) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
+	m.calls++
+	if m.calls == 1 {
+		return errors.New("main.go:12: compilation failed")
+	}
+	return nil
+}
+
+func TestCodeBackendStep_RetryInjectsAffectedFiles(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-retry-test",
+		Complexity: models.TaskComplexityMedium,
+	}
+	agent := &models.Agent{ID: "a1", Name: "Default Planner Agent", Role: models.AgentRolePlanner}
+	assigner := &mockBackendAgentAssigner{agent: &models.Agent{ID: "assigned-be-1", Name: "Assigned BE", Role: models.AgentRoleBackend}}
+	llmMock := &mockLLMRunner{
+		result: StepResult{
+			"parsed": map[string]any{
+				"patch": "diff --git a/main.go b/main.go\n+new content\n",
+			},
+		},
+	}
+
+	mockReader := &mockAffectedFileReader{
+		content: "package main\n\nfunc main() {\n\t// test code\n}",
+		ok:      true,
+	}
+
+	step := NewCodeBackendStep(
+		StepRuntime{Task: task, Agent: agent, JobID: "j1"},
+		&mockTaskReader{task: task},
+		llmMock,
+		assigner,
+		&mockWorktreeManager{},
+		&retryPatchApplier{},
+		&mockDiffCapturer{},
+		&mockStepWorkspaceLoader{},
+		&mockArtifactSaver{},
+		&mockTestRunner{},
+		nil,
+		&mockLogger{},
+		mockReader,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that llmMock.lastInstruction contains the formatted file content from retry
+	expectedHeader := "### Workspace Affected Files ###"
+	if !strings.Contains(llmMock.lastInstruction, expectedHeader) {
+		t.Errorf("expected instruction to contain header %q, got: %s", expectedHeader, llmMock.lastInstruction)
+	}
+
+	expectedFileHeader := "### File: main.go"
+	if !strings.Contains(llmMock.lastInstruction, expectedFileHeader) {
+		t.Errorf("expected instruction to contain file header %q, got: %s", expectedFileHeader, llmMock.lastInstruction)
+	}
+
+	expectedContent := "func main() {"
+	if !strings.Contains(llmMock.lastInstruction, expectedContent) {
+		t.Errorf("expected instruction to contain file content %q, got: %s", expectedContent, llmMock.lastInstruction)
+	}
+}
+
+type trackInstructionsLLMRunner struct {
+	instructions []string
+	isRetry      []bool
+	isSR         []bool
+	result       StepResult
+}
+
+func (m *trackInstructionsLLMRunner) RunLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepID string, instruction string) (StepResult, error) {
+	// Import prompts inside or use imported prompts
+	m.instructions = append(m.instructions, instruction)
+	m.isRetry = append(m.isRetry, prompts.IsRetry(ctx))
+	m.isSR = append(m.isSR, prompts.UseSearchReplace(ctx))
+	return m.result, nil
+}
+
+type failingPatchApplier struct {
+	attempts int
+}
+
+func (f *failingPatchApplier) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
+	f.attempts++
+	return errors.New("apply error number " + string(rune('0'+f.attempts)))
+}
+
+func (f *failingPatchApplier) Validate(ctx context.Context, task *models.Task, patchText string, worktreeSuffix string) []error {
+	return nil
+}
+
+func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
+	task := &models.Task{
+		ID:         "task-123",
+		Complexity: models.TaskComplexityMedium,
+	}
+	agent := &models.Agent{ID: "a1", Name: "Default Planner Agent", Role: models.AgentRolePlanner}
+	assigner := &mockBackendAgentAssigner{agent: &models.Agent{ID: "assigned-be-1", Name: "Assigned BE", Role: models.AgentRoleBackend}}
+
+	llmMock := &trackInstructionsLLMRunner{
+		result: StepResult{
+			"parsed": map[string]any{
+				"patch": "diff --git a/main.go b/main.go\n+new content\n",
+			},
+		},
+	}
+
+	applier := &failingPatchApplier{}
+
+	step := NewCodeBackendStep(
+		StepRuntime{Task: task, Agent: agent, JobID: "j1"},
+		&mockTaskReader{task: task},
+		llmMock,
+		assigner,
+		&mockWorktreeManager{},
+		applier,
+		&mockDiffCapturer{},
+		&mockStepWorkspaceLoader{},
+		&mockArtifactSaver{},
+		&mockTestRunner{},
+		nil,
+		&mockLogger{},
+		&mockAffectedFileReader{content: "package main\n\nfunc main() {}", ok: true},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error from step due to repeated apply failures")
+	}
+
+	// Should have run 3 attempts
+	if len(llmMock.instructions) != 3 {
+		t.Fatalf("expected 3 LLM calls, got %d", len(llmMock.instructions))
+	}
+
+	// 1st attempt: should be the base instruction.
+	// 2nd attempt: should contain "apply error number 1".
+	// 3rd attempt: should contain "apply error number 2".
+	// CRITICAL: 3rd attempt should NOT contain "apply error number 1"!
+	inst1 := llmMock.instructions[0]
+	inst2 := llmMock.instructions[1]
+	inst3 := llmMock.instructions[2]
+
+	if strings.Contains(inst1, "apply error number") {
+		t.Error("1st attempt should not contain apply error")
+	}
+
+	if !strings.Contains(inst2, "apply error number 1") {
+		t.Error("2nd attempt should contain error 1")
+	}
+
+	if !strings.Contains(inst3, "apply error number 2") {
+		t.Error("3rd attempt should contain error 2")
+	}
+
+	if strings.Contains(inst3, "apply error number 1") {
+		t.Error("3rd attempt should NOT contain error 1 (sliding window violation)")
+	}
+
+	// Context propagation checks:
+	if llmMock.isRetry[0] || llmMock.isSR[0] {
+		t.Error("1st attempt context: isRetry and isSR should be false")
+	}
+	if !llmMock.isRetry[1] || llmMock.isSR[1] {
+		t.Error("2nd attempt context: isRetry should be true, isSR should be false")
+	}
+	if !llmMock.isRetry[2] || !llmMock.isSR[2] {
+		t.Error("3rd attempt context: isRetry and isSR should be true")
+	}
+
+	// Instruction switch checks:
+	if strings.Contains(inst2, "SEARCH/REPLACE block format") {
+		t.Error("2nd attempt instruction should NOT contain SEARCH/REPLACE format switch")
+	}
+	if !strings.Contains(inst3, "SEARCH/REPLACE block format") {
+		t.Error("3rd attempt instruction should contain SEARCH/REPLACE format switch")
+	}
+}
+

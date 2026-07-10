@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
@@ -161,6 +162,24 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 					state["spec_hash"] = analysis.SpecHash
 				}
 			}
+
+			if event.Status == workflow.StepStatusSuccess && (event.StepID == workflow.StepCodeBackend || event.StepID == workflow.StepCodeFrontend || event.StepID == workflow.StepFix) {
+				worktreeSuffix := ""
+				if event.StepID == workflow.StepCodeBackend {
+					worktreeSuffix = "-be-worktree"
+				} else if event.StepID == workflow.StepCodeFrontend {
+					worktreeSuffix = "-fe-worktree"
+				}
+				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Creating git checkpoint commit for step %s", event.StepID))
+				commitHash, err := o.repoutil.CreateGitCheckpoint(ctx, task, agent, event.StepID, worktreeSuffix)
+				if err != nil {
+					o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to create git checkpoint: %v", err))
+				} else {
+					state["commit_hash"] = commitHash
+					o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Checkpoint commit hash: %s", commitHash))
+				}
+			}
+
 			if err := o.checkpoint(ctx, task.ID, &job.ID, event.StepID, state); err != nil {
 				return err
 			}
@@ -280,6 +299,51 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		if len(completed) > 0 {
 			engine.CompletedSteps = completed
 			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("resuming workflow with %d completed steps from checkpoint", len(completed)))
+
+			// Find the latest successful checkpoint among code_backend, code_frontend, and fix
+			var latestCommitHash string
+			var latestStep string
+			for _, cp := range checkpoints {
+				var state map[string]any
+				if json.Unmarshal(cp.State, &state) == nil {
+					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
+						if cpHash, ok := state["commit_hash"].(string); ok && cpHash != "" {
+							latestCommitHash = cpHash
+							latestStep = cp.Step
+						}
+					}
+				}
+			}
+
+			if latestCommitHash != "" {
+				worktreeSuffix := ""
+				if latestStep == workflow.StepCodeBackend {
+					worktreeSuffix = "-be-worktree"
+				} else if latestStep == workflow.StepCodeFrontend {
+					worktreeSuffix = "-fe-worktree"
+				}
+				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Restoring worktree %s to commit checkpoint %s from step %s", worktreeSuffix, latestCommitHash, latestStep))
+				if err := o.repoutil.RestoreGitCheckpoint(ctx, task, agent, latestCommitHash, worktreeSuffix); err != nil {
+					o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to restore git checkpoint: %v", err))
+				} else {
+					// Delete workspace_cache.db
+					if ws := o.wkspace.GetTaskWorkspace(task); ws != nil {
+						cachePath := filepath.Join(ws.Root, "context", "workspace_cache.db")
+						if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+							o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to delete workspace_cache.db: %v", err))
+						} else {
+							o.log(ctx, task.ID, &job.ID, "info", "Deleted workspace_cache.db for re-indexing")
+						}
+					}
+					// Re-index workspace
+					prewarmCtx := context.WithValue(ctx, provider.WorkspaceRootKey, o.wkspace.GetTaskWorkspace(task).Root)
+					if errIndex := o.ctxEngine.IndexWorkspace(prewarmCtx); errIndex != nil {
+						o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to re-index workspace after restore: %v", errIndex))
+					} else {
+						o.log(ctx, task.ID, &job.ID, "info", "Workspace re-indexed successfully")
+					}
+				}
+			}
 		}
 	}
 	maxRetries := 1

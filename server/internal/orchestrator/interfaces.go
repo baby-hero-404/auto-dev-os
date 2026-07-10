@@ -13,6 +13,7 @@ type AgentAssigner interface {
 	AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error)
 	MarkRunning(ctx context.Context, agentID string) error
 	Release(ctx context.Context, agentID string) error
+	GetByID(ctx context.Context, id string) (*models.Agent, error)
 }
 
 // PromptBuilder assembles LLM messages and tool definitions for agents.

@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -63,6 +64,9 @@ type WorktreeManager interface {
 	SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool)
 	SetupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error
 	CommitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error
+	ResetRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) error
+	CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error)
+	RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error
 	RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string
 }
 
@@ -279,4 +283,47 @@ func isFrontendFile(file string) bool {
 		strings.HasSuffix(file, ".scss") ||
 		strings.HasSuffix(file, ".sass") ||
 		strings.HasSuffix(file, ".svelte")
+}
+
+// AffectedFileReader reads files from a task's workspace/worktrees.
+type AffectedFileReader interface {
+	ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool)
+}
+
+// InjectAffectedFilesContext reads and appends all affected files' full content to instruction.
+func InjectAffectedFilesContext(ctx context.Context, taskID string, tasks TaskRepository, rtTask *models.Task, reader AffectedFileReader, instruction *string) {
+	if reader == nil || tasks == nil {
+		return
+	}
+	task, err := tasks.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return
+	}
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			return
+		}
+	}
+	if len(analysis.AffectedFiles) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n### Workspace Affected Files ###\n")
+	totalLen := 0
+	maxTotalLen := 80_000
+
+	for _, af := range analysis.AffectedFiles {
+		if content, ok := reader.ReadAffectedFileContent(ctx, rtTask, af.File); ok {
+			formatted := fmt.Sprintf("\n### File: %s\n```\n%s\n```\n", af.File, content)
+			if totalLen+len(formatted) > maxTotalLen {
+				sb.WriteString(fmt.Sprintf("\n### File: %s\n[Content truncated to fit token budget]\n", af.File))
+				break
+			}
+			sb.WriteString(formatted)
+			totalLen += len(formatted)
+		}
+	}
+	*instruction += sb.String()
 }

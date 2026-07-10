@@ -125,3 +125,49 @@ func TestValidateSearchReplace(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateHunkCounts(t *testing.T) {
+	// Hunk header specifying @@ -1,3 +1,19 @@.
+	// Context lines (space prefix or empty) contribute 1 to old, 1 to new.
+	// - lines contribute 1 to old.
+	// + lines contribute 1 to new.
+	// Here we have:
+	// - old: expected = 3
+	// - new: expected = 19
+	// We provide 20 added lines starting with + and 3 context lines, total new = 23. This is a mismatch.
+	invalidPatch := `--- a/main.go
++++ b/main.go
+@@ -1,3 +1,19 @@
+ package main
+ 
+ func main() {
++	line1
++	line2
++	line3
++	line4
++	line5
++	line6
++	line7
++	line8
++	line9
++	line10
++	line11
++	line12
++	line13
++	line14
++	line15
++	line16
++	line17
++	line18
++	line19
++	line20
+ }`
+
+	errs := ValidateHunkCounts(invalidPatch)
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly 1 validation error, got %d: %v", len(errs), errs)
+	}
+	if !errs[0].IsFatal {
+		t.Error("expected hunk mismatch error to be fatal")
+	}
+}

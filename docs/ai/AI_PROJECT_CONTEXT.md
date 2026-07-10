@@ -13,6 +13,9 @@
 - **Task Queue & Orchestrator**: Uses PostgreSQL `SKIP LOCKED` for queue-based task management. Execution flow varies by complexity: Easy tasks auto-approve; Medium/Hard tasks trigger a Human-in-the-Loop (HITL) review loop.
 - **AI Gateway & Tier Routing**: An internal LLM gateway (`pkg/llm`) maps task tiers to models (fast/cost-efficient for easy tasks, smart/capable for hard tasks) and implements fallback chains and cost circuit breakers.
 - **Workflow Engine (DAG)**: A Go-compiled step registry DAG runner supports parallel task orchestration, log streaming (SSE), and execution checkpointing.
+- **Modular Pipeline Assembler & JIT Skill Routing**: Prompts are compiled through a pipeline (`collect -> sort -> render`) utilizing `PromptSection` structures, token budget enforcement, and diagnostic tracing. Routes skills dynamically.
+- **Two-Tier Context Caching**: Utilizes a two-tier context caching system with automated global prewarming and garbage collection.
+- **Flat Repository Path Layout**: Checkouts are standardized to a flat `code/repos/{repo_name}/main` structure to eliminate branch-level path nesting and reduce path complexity.
 
 ## Entry Points
 - **API Server Entry**: `server/cmd/api/main.go`

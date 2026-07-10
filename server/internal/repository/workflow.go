@@ -105,6 +105,9 @@ func (r *WorkflowRepo) ListCheckpoints(ctx context.Context, taskID string) ([]mo
 	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("created_at ASC").Find(&checkpoints).Error; err != nil {
 		return nil, fmt.Errorf("list workflow checkpoints: %w", err)
 	}
+	for i := range checkpoints {
+		checkpoints[i].CommitHash = checkpoints[i].GetCommitHash()
+	}
 	return checkpoints, nil
 }
 

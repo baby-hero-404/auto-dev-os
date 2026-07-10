@@ -65,6 +65,24 @@ type contextKey string
 const MemoriesCtxKey contextKey = "retrieved_memories"
 const StepIDCtxKey contextKey = "prompt_step_id"
 const StepInputsCtxKey contextKey = "step_inputs"
+const IsRetryCtxKey contextKey = "is_retry"
+const UseSearchReplaceCtxKey contextKey = "use_search_replace"
+
+func IsRetry(ctx context.Context) bool {
+	return ctx.Value(IsRetryCtxKey) == true
+}
+
+func UseSearchReplace(ctx context.Context) bool {
+	return ctx.Value(UseSearchReplaceCtxKey) == true
+}
+
+func WithRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, IsRetryCtxKey, true)
+}
+
+func WithSearchReplace(ctx context.Context) context.Context {
+	return context.WithValue(ctx, UseSearchReplaceCtxKey, true)
+}
 
 func stepIDFromCtx(ctx context.Context) string {
 	if v, ok := ctx.Value(StepIDCtxKey).(string); ok {

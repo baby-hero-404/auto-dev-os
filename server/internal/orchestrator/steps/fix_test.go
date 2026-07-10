@@ -14,7 +14,8 @@ func TestFixStep_SkipsEasyTask(t *testing.T) {
 	step := NewFixStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, &mockWorktreeManager{},
+		&mockAffectedFileReader{},
 	)
 	result, err := step.Execute(context.Background(), workflow.StepContext{})
 	if err != nil {
@@ -30,7 +31,8 @@ func TestFixStep_SkipsOnCycleLimit(t *testing.T) {
 	step := NewFixStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, &mockWorktreeManager{},
+		&mockAffectedFileReader{},
 	)
 	sc := workflow.StepContext{
 		Inputs: map[string]StepResult{
@@ -52,7 +54,8 @@ func TestFixStep_SkipsOnNoFindings(t *testing.T) {
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
 		&mockTaskReader{task: task},
 		&mockCheckpointLister{}, // No PR rejection feedback
-		nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, &mockWorktreeManager{},
+		&mockAffectedFileReader{},
 	)
 	sc := workflow.StepContext{
 		Inputs: map[string]StepResult{
@@ -98,6 +101,8 @@ func TestFixStep_AppliesFixAndTriggersLoop(t *testing.T) {
 		testMock,
 		statusMock,
 		&mockLogger{},
+		&mockWorktreeManager{},
+		&mockAffectedFileReader{},
 	)
 	sc := workflow.StepContext{
 		Inputs: map[string]StepResult{
@@ -134,6 +139,8 @@ func TestFixStep_PRDiffFallbackUsesFrontendWorktreeSuffix(t *testing.T) {
 		diffMock,
 		nil, nil, nil, nil,
 		&mockLogger{},
+		&mockWorktreeManager{},
+		&mockAffectedFileReader{},
 	)
 	sc := workflow.StepContext{
 		Inputs: map[string]StepResult{

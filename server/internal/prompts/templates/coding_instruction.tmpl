@@ -1,0 +1,27 @@
+{{.InstructionVerb}}{{if .RepoContext}} {{.RepoContext}}{{else}} Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath).{{end}} DO NOT rewrite the entire file unless creating a new file.
+
+{{if .PRFeedback}}
+Note: The previous PR was rejected. Address the following PR rejection feedback:
+
+{{.PRFeedback}}
+{{end}}
+
+{{if .Tree}}
+=== Repository Structure ===
+{{.Tree}}
+{{end}}
+
+{{if .AssignedSubtask}}
+## Your Assigned Subtask:
+{{.AssignedSubtask}}
+{{else if .AssignedSubtasks}}
+## Your Assigned Subtasks:
+{{range $index, $task := .AssignedSubtasks}}{{add $index 1}}. {{$task}}
+{{end}}
+{{end}}
+
+{{if .PriorFiles}}
+### Files Created/Modified by Prior Steps ###
+{{range .PriorFiles}}- {{.}}
+{{end}}
+{{end}}

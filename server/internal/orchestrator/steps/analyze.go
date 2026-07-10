@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
@@ -19,6 +22,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // AnalyzeStep implements Step for the analysis phase.
@@ -92,7 +96,11 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
+		
+		plannerAgent := *s.rt.Agent
+		plannerAgent.Role = models.AgentRolePlanner
+		
+		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, fmt.Errorf("assemble prompt: %w", err)
 		}
@@ -162,7 +170,11 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
+		
+		plannerAgent := *s.rt.Agent
+		plannerAgent.Role = models.AgentRolePlanner
+		
+		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, err
 		}
@@ -176,19 +188,58 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 	return messages, nil
 }
 
+type analyzeTemplateData struct {
+	AvailableTools []llm.ToolDefinition
+	RepoContext    string
+	WorkspaceFiles string
+}
+
 func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workflow.StepContext) string {
-	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
-	var repoContext string
-	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
-		if contextJSON, err := json.Marshal(contextOut); err == nil {
-			repoContext = string(contextJSON)
+	data := analyzeTemplateData{}
+	
+	if s.registry != nil {
+		data.AvailableTools = s.registry.Definitions()
+	}
+	if s.prompts != nil {
+		if skills, err := s.prompts.ListAllSkills(ctx, *s.rt.Task); err == nil {
+			data.AvailableTools = append(data.AvailableTools, skills...)
 		}
 	}
-	if repoContext != "" {
-		instruction += "\n\n=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===\n" + repoContext
+
+	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
+		if contextJSON, err := json.Marshal(contextOut); err == nil {
+			data.RepoContext = string(contextJSON)
+		}
 	}
 	if files, err := s.listAnalyzeFiles(ctx); err == nil && files != "" && files != "No files found in workspace." {
-		instruction += "\n\n=== Workspace Files ===\n" + files
+		data.WorkspaceFiles = files
+	}
+
+	tmplPath := filepath.Join("internal", "prompts", "templates", "analyze_instruction.tmpl")
+	tmplBytes, err := os.ReadFile(tmplPath)
+	if err != nil {
+		// Fallback for unit tests
+		tmplPath = filepath.Join("..", "..", "prompts", "templates", "analyze_instruction.tmpl")
+		tmplBytes, err = os.ReadFile(tmplPath)
+	}
+	if err == nil {
+		tmpl, err := template.New("analyze").Parse(string(tmplBytes))
+		if err == nil {
+			var buf bytes.Buffer
+			if err := tmpl.Execute(&buf, data); err == nil {
+				return buf.String()
+			}
+		}
+	}
+
+	// Fallback
+	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
+	instruction += "\nCRITICAL: If all requirements are clear and you have no NEW questions, you MUST return an empty array `[]` for `clarification_questions`. DO NOT repeat questions that have already been answered in the context."
+	if data.RepoContext != "" {
+		instruction += "\n\n=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===\n" + data.RepoContext
+	}
+	if data.WorkspaceFiles != "" {
+		instruction += "\n\n=== Workspace Files ===\n" + data.WorkspaceFiles
 	}
 	return instruction
 }
@@ -217,7 +268,9 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 			RouteName:  routeName,
 		})
 
+		callStart := time.Now()
 		resp, err := s.llm.ChatWithOptions(routeCtx, messages, llm.ChatOptions{Tools: analyzeTools, ToolChoice: "auto"})
+		callLatency := time.Since(callStart)
 		if err != nil {
 			return nil, fmt.Errorf("llm tool loop call failed: %w", err)
 		}
@@ -225,7 +278,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 
 		if len(resp.ToolCalls) > 0 {
 			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls})
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls}, i+1, callLatency)
 			}
 			messages = append(messages, llm.Message{
 				Role:      "assistant",
@@ -247,7 +300,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		parsedJSON, parseErr := llmrunner.ParseJSONMarkdown(resp.Content)
 		if parseErr != nil {
 			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content})
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content}, i+1, callLatency)
 			}
 			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output is invalid JSON: %v", i+1, parseErr))
 			content := resp.Content
@@ -266,7 +319,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		}
 
 		if s.traces != nil {
-			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON)
+			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON, i+1, callLatency)
 		}
 
 		if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
@@ -523,7 +576,9 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 		return "Error: tool registry not configured"
 	}
 
-	workspacePath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	osPaths := paths.NewOSWorkspacePaths(s.workspaceRoot)
+	workspacePath := osPaths.TaskRoot(s.rt.Task.ID).String()
+
 	if s.wkspace != nil {
 		if ws, err := s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task); err == nil && ws != nil && len(ws.Repos) > 0 {
 			for _, repo := range ws.Repos {
@@ -531,7 +586,7 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 					continue
 				}
 				if repo.Paths.Main != "" {
-					workspacePath = filepath.Join(ws.Root, repo.Paths.Main)
+					workspacePath = osPaths.RepoMain(s.rt.Task.ID, repo.Name).String()
 					break
 				}
 			}
@@ -565,4 +620,3 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 
 	return res.Output
 }
-

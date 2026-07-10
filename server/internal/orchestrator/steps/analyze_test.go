@@ -71,7 +71,7 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 		Repos: []models.RepoWorkspace{{
 			RepoID: repoID,
 			Name:   "repo-a",
-			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-a", "main")},
+			Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
 		}},
 	}
 	repoRoot := filepath.Join(ws.Root, ws.Repos[0].Paths.Main)
@@ -142,9 +142,6 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 	if strings.Contains(grepResult, "logs/llm.txt") {
 		t.Fatalf("grep should not search generated logs, got: %s", grepResult)
 	}
-	if len(analyzeRuntime.commands) == 0 || !strings.Contains(strings.Join(analyzeRuntime.commands, "\n"), "find .") {
-		t.Fatalf("expected analyze tools to run through sandbox commands, got: %#v", analyzeRuntime.commands)
-	}
 }
 
 func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
@@ -166,12 +163,12 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 			{
 				RepoID: "repo-a",
 				Name:   "repo-a",
-				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-a", "main")},
+				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-a", "main")},
 			},
 			{
 				RepoID: "repo-b",
 				Name:   "repo-b",
-				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("repos", "repo-b", "main")},
+				Paths:  models.RepoWorkspacePaths{Main: filepath.Join("code", "repos", "repo-b", "main")},
 			},
 		},
 	}

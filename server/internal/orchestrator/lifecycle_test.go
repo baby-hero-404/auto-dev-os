@@ -102,7 +102,7 @@ func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
 	}
 
 	llmResponses := map[string]string{
-		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true}`,
+		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true, "summary": "fixed the naming"}`,
 	}
 	mockLLM := &mockLLMProvider{responses: llmResponses}
 	sandboxRuntime := &mockSandboxRuntime{}

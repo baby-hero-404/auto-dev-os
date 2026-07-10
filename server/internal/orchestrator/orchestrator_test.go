@@ -20,8 +20,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-
-
 func TestOrchestrator_Run_Integration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "orch-test-*")
 	if err != nil {
@@ -92,19 +90,14 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 		t.Errorf("expected repo clone, got %s", gitOps.clonedRepo)
 	}
 
-	// 2. Verify git apply and git diff command executions in sandbox
-	appliedPatch := false
+	// 2. Verify git diff command executions in sandbox. Coding steps are agentic now (Issue
+	// 1+2): edits are applied via native tool calls rather than a sandboxed "git apply
+	// patch.diff" command, so only the post-hoc diff capture still goes through the sandbox.
 	capturedDiff := false
 	for _, cmd := range sandboxRuntime.commands {
-		if strings.Contains(cmd, "patch.diff") {
-			appliedPatch = true
-		}
 		if cmd == "git diff" || strings.Contains(cmd, "git diff") {
 			capturedDiff = true
 		}
-	}
-	if !appliedPatch {
-		t.Error("expected 'git apply patch.diff' to have been executed in sandbox")
 	}
 	if !capturedDiff {
 		t.Error("expected 'git diff' to have been executed in sandbox")
@@ -118,11 +111,12 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 		t.Errorf("expected PR title AutoCodeOS: Test Task, got %s", gitOps.prTitle)
 	}
 
-	// 4. Verify artifacts were saved in DB
+	// 4. Verify artifacts were saved in DB. Agentic coding steps no longer produce a "patch"
+	// artifact (edits are applied directly via tool calls); the workspace diff is still
+	// captured and saved.
 	expectedTypes := map[string]bool{
 		"prompt":          false,
 		"llm_response":    false,
-		"patch":           false,
 		"diff":            false,
 		"review_findings": false,
 		"test_output":     false,
@@ -430,7 +424,6 @@ func TestMatchAffectedFile(t *testing.T) {
 	}
 }
 
-
 func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	task := &models.Task{
 		ID:         "task-loop",
@@ -450,7 +443,7 @@ func TestOrchestrator_StepFix_LoopAndLimit(t *testing.T) {
 	workflowRepo := &mockWorkflowRepo{job: job}
 
 	llmResponses := map[string]string{
-		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true}`,
+		"fix": `{"patch": "diff --git a/main.go b/main.go\n+fix", "fixes_applied": true, "summary": "fixed the finding"}`,
 	}
 	mockLLM := &mockLLMProvider{responses: llmResponses}
 	sandboxRuntime := &mockSandboxRuntime{}
@@ -722,13 +715,11 @@ func TestOrchestrator_ReadAffectedFileContent_WorktreeFirst(t *testing.T) {
 	}
 }
 
-
-
 func TestOrchestrator_ClearCheckpointsForRepair(t *testing.T) {
 	tests := []struct {
-		name       string
-		task       *models.Task
-		expected   []string
+		name     string
+		task     *models.Task
+		expected []string
 	}{
 		{
 			name: "PrunesDynamicSubsteps_MediumComplexity",
@@ -946,4 +937,3 @@ func TestFullVerificationScriptUsesSharedMarkers(t *testing.T) {
 		}
 	}
 }
-

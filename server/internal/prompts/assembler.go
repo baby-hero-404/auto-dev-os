@@ -14,13 +14,42 @@ import (
 )
 
 type PromptAssembler struct {
-	rules       *repository.RuleRepo
-	skills      SkillLister
-	baseTools   []llm.ToolDefinition
-	promptPaths paths.PromptPaths
-	fs          paths.FileSystem
-	dataRoot    string
-	ctxEngine   provider.ContextEngine
+	rules            *repository.RuleRepo
+	skills           SkillLister
+	baseTools        []llm.ToolDefinition
+	promptPaths      paths.PromptPaths
+	fs               paths.FileSystem
+	dataRoot         string
+	ctxEngine        provider.ContextEngine
+	metadataProvider llm.MetadataProvider
+}
+
+// defaultPromptBudget is used when no model metadata is available to derive a budget from.
+const defaultPromptBudget = 8192
+
+// promptBudgetReserveRatio is the fraction of the model's context window reserved for the prompt
+// (the remainder is left for the model's output).
+const promptBudgetReserveRatio = 0.7
+
+// SetModelMetadataProvider wires the LLM provider/gateway used to derive the token budget from
+// the target model's max context window instead of a hardcoded constant.
+func (a *PromptAssembler) SetModelMetadataProvider(mp llm.MetadataProvider) {
+	a.metadataProvider = mp
+}
+
+func (a *PromptAssembler) resolvePromptBudget() int {
+	if a.metadataProvider == nil {
+		return defaultPromptBudget
+	}
+	meta := a.metadataProvider.Metadata()
+	if meta.MaxContextTokens <= 0 {
+		return defaultPromptBudget
+	}
+	budget := int(float64(meta.MaxContextTokens) * promptBudgetReserveRatio)
+	if budget <= 0 {
+		return defaultPromptBudget
+	}
+	return budget
 }
 
 type SkillLister interface {
@@ -145,13 +174,15 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 		return nil, nil, err
 	}
 
-	sections, err := a.collect(ctx, task, agent, tools)
+	promptBudget := a.resolvePromptBudget()
+
+	sections, err := a.collect(ctx, task, agent, tools, promptBudget)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Hard budget enforcement (Target: 8192 tokens)
-	sections = a.optimizeBudget(ctx, sections, 8192)
+	// Hard budget enforcement, derived from the target model's max context window (Issue 6)
+	sections = a.optimizeBudget(ctx, sections, promptBudget)
 
 	// Sort sections logically based on RenderOrder
 	sorted := a.sort(sections)
@@ -183,4 +214,19 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	messages = append(messages, TruncateHistory(history, 12000)...)
 
 	return messages, tools, nil
+}
+
+func (a *PromptAssembler) ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error) {
+	skills, err := a.loadAllSkills(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	var defs []llm.ToolDefinition
+	for _, s := range skills {
+		defs = append(defs, llm.ToolDefinition{
+			Name:        s.Name,
+			Description: s.Description,
+		})
+	}
+	return defs, nil
 }

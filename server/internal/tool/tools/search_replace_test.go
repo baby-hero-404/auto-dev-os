@@ -154,4 +154,25 @@ func TestSearchReplaceTool(t *testing.T) {
 	if string(data) != initialContent {
 		t.Errorf("rollback failed, content is %q", string(data))
 	}
+
+	// Test 6: Rewrite entire file by passing search: ""
+	resRewrite, err := srt.Execute(context.Background(), tool.Call{
+		Input: map[string]any{
+			"path":    "code.go",
+			"search":  "",
+			"replace": "package main\n\nfunc main() {\n\tprintln(\"rewritten completely\")\n}\n",
+		},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute rewrite test: %v", err)
+	}
+	if !resRewrite.Success {
+		t.Errorf("expected success for empty search rewrite, got %v", resRewrite.Message)
+	}
+	data, _ = os.ReadFile(filePath)
+	expectedRewrite := "package main\n\nfunc main() {\n\tprintln(\"rewritten completely\")\n}\n"
+	if string(data) != expectedRewrite {
+		t.Errorf("expected rewritten content %q, got %q", expectedRewrite, string(data))
+	}
 }

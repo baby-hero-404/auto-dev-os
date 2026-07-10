@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,7 +33,7 @@ func redactSecrets(s string) string {
 	return s
 }
 
-func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any) {
+func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, retryAttempt int, latency time.Duration) {
 	if !o.llmTraceEnabled {
 		return
 	}
@@ -64,26 +65,54 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 	_ = os.MkdirAll(callPath, 0o755)
 
 	type TraceMetadata struct {
-		Step         string    `json:"step"`
-		CallNumber   int       `json:"call_number"`
-		Model        string    `json:"model"`
-		PromptTokens int       `json:"prompt_tokens"`
-		OutputTokens int       `json:"output_tokens"`
-		AgentID      string    `json:"agent_id"`
-		AgentName    string    `json:"agent_name"`
-		Role         string    `json:"role"`
-		Timestamp    time.Time `json:"timestamp"`
+		Step            string    `json:"step"`
+		CallNumber      int       `json:"call_number"`
+		Model           string    `json:"model"`
+		PromptTokens    int       `json:"prompt_tokens"`
+		OutputTokens    int       `json:"output_tokens"`
+		AgentID         string    `json:"agent_id"`
+		AgentName       string    `json:"agent_name"`
+		Role            string    `json:"role"`
+		Timestamp       time.Time `json:"timestamp"`
+		PromptHash      string    `json:"prompt_hash"`
+		TemplateVersion string    `json:"template_version,omitempty"`
+		ContextVersion  string    `json:"context_version,omitempty"`
+		RetryAttempt    int       `json:"retry_attempt"`
+		LatencyMS       int64     `json:"latency_ms"`
+		CostUSD         float64   `json:"cost_usd"`
 	}
+
+	var promptForHash strings.Builder
+	for _, msg := range messages {
+		promptForHash.WriteString(msg.Role)
+		promptForHash.WriteString(":")
+		promptForHash.WriteString(msg.Content)
+		promptForHash.WriteString("\n")
+	}
+	promptHash := fmt.Sprintf("%x", sha256.Sum256([]byte(promptForHash.String())))
+
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+
+	costUSD := llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, llm.MetadataForModel("", resp.Model))
+
 	meta := TraceMetadata{
-		Step:         stepID,
-		CallNumber:   callNumber,
-		Model:        resp.Model,
-		PromptTokens: resp.PromptTokens,
-		OutputTokens: resp.OutputTokens,
-		AgentID:      agent.ID,
-		AgentName:    agent.Name,
-		Role:         agent.Role,
-		Timestamp:    time.Now(),
+		Step:           stepID,
+		CallNumber:     callNumber,
+		Model:          resp.Model,
+		PromptTokens:   resp.PromptTokens,
+		OutputTokens:   resp.OutputTokens,
+		AgentID:        agent.ID,
+		AgentName:      agent.Name,
+		Role:           agent.Role,
+		Timestamp:      time.Now(),
+		PromptHash:     promptHash,
+		ContextVersion: analysis.SpecHash,
+		RetryAttempt:   retryAttempt,
+		LatencyMS:      latency.Milliseconds(),
+		CostUSD:        costUSD,
 	}
 	metaJSON, _ := json.MarshalIndent(meta, "", "  ")
 	_ = os.WriteFile(filepath.Join(callPath, "metadata.json"), metaJSON, 0o644)

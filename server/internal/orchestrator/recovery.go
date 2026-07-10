@@ -2,12 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 func (o *Orchestrator) fail(ctx context.Context, job *models.WorkflowJob, err error) {
+	if err != nil && (errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled")) {
+		return
+	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	defer o.cleanupWorkspaceAfterFinalState(cleanupCtx, job.TaskID)
 	failedStatus := models.TaskStatusFailed

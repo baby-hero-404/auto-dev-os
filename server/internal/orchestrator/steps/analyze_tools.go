@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // listAnalyzeFiles lists all files in the task workspace.
@@ -16,12 +16,9 @@ func (s *AnalyzeStep) listAnalyzeFiles(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("registry not configured")
 	}
 
-	if s.sandbox != nil {
-		// Run a mock command to satisfy test expectations of running a sandbox command
-		_, _ = s.sandbox.RunCommand(ctx, s.rt.Task, s.rt.Agent, "analyze_sandbox_cmd", "find .")
-	}
+	osPaths := paths.NewOSWorkspacePaths(s.workspaceRoot)
+	localPath := osPaths.TaskRoot(s.rt.Task.ID).String()
 
-	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
 	var roots []struct {
 		path   string
 		prefix string
@@ -55,7 +52,7 @@ func (s *AnalyzeStep) listAnalyzeFiles(ctx context.Context) (string, error) {
 					prefix = repo.Name
 				}
 				roots = append(roots, struct{ path, prefix string }{
-					path:   filepath.Join(ws.Root, repo.Paths.Main),
+					path:   osPaths.RepoMain(s.rt.Task.ID, repo.Name).String(),
 					prefix: prefix,
 				})
 			}
@@ -116,7 +113,9 @@ func (s *AnalyzeStep) readAnalyzeFile(ctx context.Context, path string) (string,
 		return "", fmt.Errorf("registry not configured")
 	}
 
-	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	osPaths := paths.NewOSWorkspacePaths(s.workspaceRoot)
+	localPath := osPaths.TaskRoot(s.rt.Task.ID).String()
+
 	var roots []struct {
 		path   string
 		prefix string
@@ -150,7 +149,7 @@ func (s *AnalyzeStep) readAnalyzeFile(ctx context.Context, path string) (string,
 					prefix = repo.Name
 				}
 				roots = append(roots, struct{ path, prefix string }{
-					path:   filepath.Join(ws.Root, repo.Paths.Main),
+					path:   osPaths.RepoMain(s.rt.Task.ID, repo.Name).String(),
 					prefix: prefix,
 				})
 			}
@@ -192,12 +191,9 @@ func (s *AnalyzeStep) grepAnalyzeFiles(ctx context.Context, query string) (strin
 		return "", fmt.Errorf("registry not configured")
 	}
 
-	if s.sandbox != nil {
-		// Run a mock command to satisfy test expectations of running a sandbox command
-		_, _ = s.sandbox.RunCommand(ctx, s.rt.Task, s.rt.Agent, "analyze_sandbox_cmd", "grep -RIn")
-	}
+	osPaths := paths.NewOSWorkspacePaths(s.workspaceRoot)
+	localPath := osPaths.TaskRoot(s.rt.Task.ID).String()
 
-	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
 	var roots []struct {
 		path   string
 		prefix string
@@ -231,7 +227,7 @@ func (s *AnalyzeStep) grepAnalyzeFiles(ctx context.Context, query string) (strin
 					prefix = repo.Name
 				}
 				roots = append(roots, struct{ path, prefix string }{
-					path:   filepath.Join(ws.Root, repo.Paths.Main),
+					path:   osPaths.RepoMain(s.rt.Task.ID, repo.Name).String(),
 					prefix: prefix,
 				})
 			}

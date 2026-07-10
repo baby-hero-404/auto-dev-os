@@ -68,7 +68,7 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 	llmMock := &mockLLMRunner{
 		result: StepResult{
 			"parsed": map[string]any{
-				"patch": "diff --git a/file.go b/file.go\n+new content\n",
+				"summary": "implemented the feature via tool calls",
 			},
 		},
 	}
@@ -86,7 +86,7 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 		assigner,
 		worktreeMock,
 		&mockPatchApplier{},
-		&mockDiffCapturer{},
+		&mockDiffCapturer{diffVal: "diff --git a/file.go b/file.go\n+new content\n"},
 		&mockStepWorkspaceLoader{},
 		artifactMock,
 		&mockTestRunner{},
@@ -106,11 +106,13 @@ func TestCodeBackendStep_ExecutesAndSavesArtifacts(t *testing.T) {
 		t.Fatalf("expected backend release of assigned-be-1, got %s", assigner.releasedIDs[0])
 	}
 
+	// Agentic mode: edits are already applied via tool calls, so no "patch" artifact is
+	// produced anymore — the workspace diff (captured from real git state) is saved instead.
 	if !artifactMock.called {
 		t.Error("expected artifact to be saved")
 	}
-	if artifactMock.artType != "patch" {
-		t.Errorf("expected patch artifact, got: %s", artifactMock.artType)
+	if artifactMock.artType != "diff" {
+		t.Errorf("expected diff artifact, got: %s", artifactMock.artType)
 	}
 }
 
@@ -154,7 +156,7 @@ func TestCodeBackendStep_ReleasesAgentOnAssignmentFailure(t *testing.T) {
 		Complexity: models.TaskComplexityMedium,
 	}
 	agent := &models.Agent{ID: "a1", Name: "Default Planner Agent", Role: models.AgentRolePlanner}
-	
+
 	// Mock assigner returning an agent AND an error
 	assigner := &mockBackendAgentAssigner{
 		agent: &models.Agent{ID: "assigned-be-1", Name: "Assigned BE", Role: models.AgentRoleBackend},
@@ -181,7 +183,7 @@ func TestCodeBackendStep_ReleasesAgentOnAssignmentFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from step.Execute, got nil")
 	}
-	
+
 	if len(assigner.releasedIDs) != 1 {
 		t.Fatalf("expected backend agent release on failure, got %d releases", len(assigner.releasedIDs))
 	}
@@ -354,7 +356,7 @@ func TestCodeBackendStep_IncludesDirectoryScan(t *testing.T) {
 	workspaceRoot := filepath.Dir(tmpDir)
 	repoName := "my-repo"
 	role := "backend"
-	
+
 	// Create directories
 	physicalRoot := paths.NewOSWorkspacePaths(workspaceRoot).RepoWorktreeDir(task.ID, repoName, role).String()
 	if err := os.MkdirAll(physicalRoot, 0755); err != nil {
@@ -421,7 +423,7 @@ func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	task := &models.Task{
-		ID:         "task-test-2",
+		ID:        "task-test-2",
 		ProjectID: "proj-1",
 		Title:     "Prior files prop test",
 	}
@@ -511,7 +513,22 @@ func (m *retryPatchApplier) ApplyPatch(ctx context.Context, task *models.Task, a
 	return nil
 }
 
-func TestCodeBackendStep_RetryInjectsAffectedFiles(t *testing.T) {
+// flakyTestRunner fails targeted tests on the first call and succeeds afterward, used to
+// exercise the agentic retry gate (edits are already applied via tool calls; the only
+// remaining verification is the post-hoc targeted-test run).
+type flakyTestRunner struct {
+	calls int
+}
+
+func (m *flakyTestRunner) RunTargetedTests(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepName string, changedFiles []string, worktreeSuffix string) (StepResult, error) {
+	m.calls++
+	if m.calls == 1 {
+		return nil, errors.New("main_test.go:5: assertion failed")
+	}
+	return StepResult{"status": "passed"}, nil
+}
+
+func TestCodeBackendStep_RetryDoesNotDuplicateAffectedFilesContext(t *testing.T) {
 	task := &models.Task{
 		ID:         "task-retry-test",
 		Complexity: models.TaskComplexityMedium,
@@ -521,7 +538,7 @@ func TestCodeBackendStep_RetryInjectsAffectedFiles(t *testing.T) {
 	llmMock := &mockLLMRunner{
 		result: StepResult{
 			"parsed": map[string]any{
-				"patch": "diff --git a/main.go b/main.go\n+new content\n",
+				"summary": "implemented the change via tool calls",
 			},
 		},
 	}
@@ -538,10 +555,10 @@ func TestCodeBackendStep_RetryInjectsAffectedFiles(t *testing.T) {
 		assigner,
 		&mockWorktreeManager{},
 		&retryPatchApplier{},
-		&mockDiffCapturer{},
+		&mockDiffCapturer{changed: []string{"main.go"}},
 		&mockStepWorkspaceLoader{},
 		&mockArtifactSaver{},
-		&mockTestRunner{},
+		&flakyTestRunner{},
 		nil,
 		&mockLogger{},
 		mockReader,
@@ -552,20 +569,18 @@ func TestCodeBackendStep_RetryInjectsAffectedFiles(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify that llmMock.lastInstruction contains the formatted file content from retry
-	expectedHeader := "### Workspace Affected Files ###"
-	if !strings.Contains(llmMock.lastInstruction, expectedHeader) {
-		t.Errorf("expected instruction to contain header %q, got: %s", expectedHeader, llmMock.lastInstruction)
+	// The retry error message from the failed targeted test must still reach the LLM...
+	expectedErrorMsg := "the automated tests failed"
+	if !strings.Contains(llmMock.lastInstruction, expectedErrorMsg) {
+		t.Errorf("expected instruction to contain retry error message %q, got: %s", expectedErrorMsg, llmMock.lastInstruction)
 	}
 
-	expectedFileHeader := "### File: main.go"
-	if !strings.Contains(llmMock.lastInstruction, expectedFileHeader) {
-		t.Errorf("expected instruction to contain file header %q, got: %s", expectedFileHeader, llmMock.lastInstruction)
-	}
-
-	expectedContent := "func main() {"
-	if !strings.Contains(llmMock.lastInstruction, expectedContent) {
-		t.Errorf("expected instruction to contain file content %q, got: %s", expectedContent, llmMock.lastInstruction)
+	// ...but the step itself must no longer duplicate the affected-files dump into the
+	// instruction string: llmrunner.Runner already injects it unconditionally on every
+	// attempt (Issue 4: double context injection).
+	unexpectedHeader := "### Workspace Affected Files ###"
+	if strings.Contains(llmMock.lastInstruction, unexpectedHeader) {
+		t.Errorf("expected instruction to NOT contain duplicated header %q (now handled by llmrunner.Runner), got: %s", unexpectedHeader, llmMock.lastInstruction)
 	}
 }
 
@@ -584,17 +599,16 @@ func (m *trackInstructionsLLMRunner) RunLLMStep(ctx context.Context, task *model
 	return m.result, nil
 }
 
-type failingPatchApplier struct {
+// alwaysFailingTestRunner fails every targeted test run with an incrementing error message,
+// used to exercise the agentic retry loop's sliding-window feedback (only the latest test
+// failure should be present in the instruction, not all prior ones).
+type alwaysFailingTestRunner struct {
 	attempts int
 }
 
-func (f *failingPatchApplier) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
+func (f *alwaysFailingTestRunner) RunTargetedTests(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepName string, changedFiles []string, worktreeSuffix string) (StepResult, error) {
 	f.attempts++
-	return errors.New("apply error number " + string(rune('0'+f.attempts)))
-}
-
-func (f *failingPatchApplier) Validate(ctx context.Context, task *models.Task, patchText string, worktreeSuffix string) []error {
-	return nil
+	return nil, errors.New("test failure number " + string(rune('0'+f.attempts)))
 }
 
 func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
@@ -608,12 +622,12 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 	llmMock := &trackInstructionsLLMRunner{
 		result: StepResult{
 			"parsed": map[string]any{
-				"patch": "diff --git a/main.go b/main.go\n+new content\n",
+				"summary": "implemented the change via tool calls",
 			},
 		},
 	}
 
-	applier := &failingPatchApplier{}
+	tester := &alwaysFailingTestRunner{}
 
 	step := NewCodeBackendStep(
 		StepRuntime{Task: task, Agent: agent, JobID: "j1"},
@@ -621,11 +635,11 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 		llmMock,
 		assigner,
 		&mockWorktreeManager{},
-		applier,
-		&mockDiffCapturer{},
+		&mockPatchApplier{},
+		&mockDiffCapturer{changed: []string{"main.go"}},
 		&mockStepWorkspaceLoader{},
 		&mockArtifactSaver{},
-		&mockTestRunner{},
+		tester,
 		nil,
 		&mockLogger{},
 		&mockAffectedFileReader{content: "package main\n\nfunc main() {}", ok: true},
@@ -633,7 +647,7 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
 	if err == nil {
-		t.Fatal("expected error from step due to repeated apply failures")
+		t.Fatal("expected error from step due to repeated targeted test failures")
 	}
 
 	// Should have run 3 attempts
@@ -642,27 +656,27 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 	}
 
 	// 1st attempt: should be the base instruction.
-	// 2nd attempt: should contain "apply error number 1".
-	// 3rd attempt: should contain "apply error number 2".
-	// CRITICAL: 3rd attempt should NOT contain "apply error number 1"!
+	// 2nd attempt: should contain "test failure number 1".
+	// 3rd attempt: should contain "test failure number 2".
+	// CRITICAL: 3rd attempt should NOT contain "test failure number 1"!
 	inst1 := llmMock.instructions[0]
 	inst2 := llmMock.instructions[1]
 	inst3 := llmMock.instructions[2]
 
-	if strings.Contains(inst1, "apply error number") {
-		t.Error("1st attempt should not contain apply error")
+	if strings.Contains(inst1, "test failure number") {
+		t.Error("1st attempt should not contain a test failure message")
 	}
 
-	if !strings.Contains(inst2, "apply error number 1") {
-		t.Error("2nd attempt should contain error 1")
+	if !strings.Contains(inst2, "test failure number 1") {
+		t.Error("2nd attempt should contain failure 1")
 	}
 
-	if !strings.Contains(inst3, "apply error number 2") {
-		t.Error("3rd attempt should contain error 2")
+	if !strings.Contains(inst3, "test failure number 2") {
+		t.Error("3rd attempt should contain failure 2")
 	}
 
-	if strings.Contains(inst3, "apply error number 1") {
-		t.Error("3rd attempt should NOT contain error 1 (sliding window violation)")
+	if strings.Contains(inst3, "test failure number 1") {
+		t.Error("3rd attempt should NOT contain failure 1 (sliding window violation)")
 	}
 
 	// Context propagation checks:
@@ -672,16 +686,14 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 	if !llmMock.isRetry[1] || llmMock.isSR[1] {
 		t.Error("2nd attempt context: isRetry should be true, isSR should be false")
 	}
-	if !llmMock.isRetry[2] || !llmMock.isSR[2] {
-		t.Error("3rd attempt context: isRetry and isSR should be true")
+	// Agentic mode never switches to the SEARCH/REPLACE text convention — edits happen via
+	// native tool calls, so isSR should stay false even on the final attempt.
+	if !llmMock.isRetry[2] || llmMock.isSR[2] {
+		t.Error("3rd attempt context: isRetry should be true, isSR should remain false in agentic mode")
 	}
 
-	// Instruction switch checks:
-	if strings.Contains(inst2, "SEARCH/REPLACE block format") {
-		t.Error("2nd attempt instruction should NOT contain SEARCH/REPLACE format switch")
-	}
-	if !strings.Contains(inst3, "SEARCH/REPLACE block format") {
-		t.Error("3rd attempt instruction should contain SEARCH/REPLACE format switch")
+	// Agentic mode must never fall back to the SEARCH/REPLACE text instructions.
+	if strings.Contains(inst2, "SEARCH/REPLACE block format") || strings.Contains(inst3, "SEARCH/REPLACE block format") {
+		t.Error("agentic mode should never switch to the SEARCH/REPLACE format instructions")
 	}
 }
-

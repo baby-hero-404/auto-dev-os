@@ -75,6 +75,27 @@ func deduplicateSnippets(snippets []models.ContextSnippet) []models.ContextSnipp
 	return result
 }
 
+// filterAffectedFileSnippets drops snippets for files already delivered in full
+// elsewhere (llmrunner.Runner injects full content for AffectedFiles on every
+// call for coding/fix/review steps), so the same file isn't sent twice.
+func filterAffectedFileSnippets(snippets []models.ContextSnippet, affectedFiles []models.AffectedFile) []models.ContextSnippet {
+	if len(affectedFiles) == 0 {
+		return snippets
+	}
+	affected := make(map[string]bool, len(affectedFiles))
+	for _, af := range affectedFiles {
+		affected[af.File] = true
+	}
+	var result []models.ContextSnippet
+	for _, s := range snippets {
+		if affected[s.Path] {
+			continue
+		}
+		result = append(result, s)
+	}
+	return result
+}
+
 // lineOverlap returns the fraction of the shorter snippet's line range
 // that overlaps with the other snippet.
 func lineOverlap(a, b models.ContextSnippet) float64 {

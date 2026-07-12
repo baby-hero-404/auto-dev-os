@@ -1,0 +1,20 @@
+Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions.
+
+CRITICAL: If all requirements are clear and you have no NEW questions, you MUST return an empty array `[]` for `clarification_questions`. DO NOT repeat questions that have already been answered in the context.
+
+{{if .AvailableSkills}}
+=== Available JIT Skills ===
+The following skills are available in the project registry. You may assign these to the agent if they are required to complete the task.
+{{range .AvailableSkills}}- {{.Name}}: {{.Description}}
+{{end}}
+{{end}}
+
+{{if .RepoContext}}
+=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===
+{{.RepoContext}}
+{{end}}
+
+{{if .WorkspaceFiles}}
+=== Workspace Files ===
+{{.WorkspaceFiles}}
+{{end}}

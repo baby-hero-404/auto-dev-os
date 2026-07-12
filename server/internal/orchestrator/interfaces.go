@@ -20,6 +20,7 @@ type AgentAssigner interface {
 type PromptBuilder interface {
 	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error)
 	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
+	ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error)
 }
 
 // GitOpsClient handles git operations (clone, branch, push, PR).

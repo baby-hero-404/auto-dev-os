@@ -92,7 +92,7 @@ func TestFixStep_AppliesFixAndTriggersLoop(t *testing.T) {
 		&mockCheckpointLister{},
 		&mockLLMRunner{result: StepResult{
 			"parsed": map[string]any{
-				"patch": "diff --git a/main.go b/main.go\n...",
+				"summary": "fixed the finding via tool calls",
 			},
 		}},
 		diffMock,
@@ -117,9 +117,8 @@ func TestFixStep_AppliesFixAndTriggersLoop(t *testing.T) {
 	if !errors.Is(err, workflow.ErrReviewFixLoop) {
 		t.Fatalf("expected ErrReviewFixLoop, got: %v", err)
 	}
-	if !patchMock.called {
-		t.Error("expected patch to be applied")
-	}
+	// Agentic mode: edits are applied via tool calls inside the LLM call itself, so the
+	// diff-based patch applier is no longer invoked — only the post-hoc test verification is.
 	if !testMock.called {
 		t.Error("expected targeted tests to be run")
 	}

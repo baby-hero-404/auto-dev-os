@@ -183,10 +183,10 @@ func ValidateSearchReplace(blocks []EditBlock, basePath string) []ValidationErro
 
 		content := string(contentBytes)
 
-		// If search block is empty, it means create or append. In Aider style, creating a new file has empty search.
-		// For now we enforce search must exist.
+		// If search block is empty, it means create or overwrite entire file.
+		// In Aider style, creating/overwriting a file has empty search.
 		if block.Search == "" {
-			continue // Or validate it's an empty file.
+			continue
 		}
 
 		// Normalize newlines for counting

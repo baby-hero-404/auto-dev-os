@@ -75,10 +75,25 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			}
 		}
 
-		// Delete the entire repository directory (containing the main clone and worktrees)
-		repoPath := filepath.Join(codeDir, repoName)
-		if err := os.RemoveAll(repoPath); err != nil {
-			observability.Warn(ctx, "failed to remove repository during partial cleanup", "path", repoPath, "error", err)
+		// Clean up worktrees to save space, but KEEP the main repository clone.
+		repoMain := wp.RepoMain(taskID, repoName).String()
+		if _, err := os.Stat(wtParentDir); err == nil && worktrees != nil {
+			for _, wtEntry := range worktrees {
+				if !wtEntry.IsDir() {
+					continue
+				}
+				role := wtEntry.Name()
+				wtAbs := filepath.Join(wtParentDir, role)
+
+				// Remove worktree cleanly via Git
+				rmCmd := exec.CommandContext(ctx, "git", "-C", repoMain, "worktree", "remove", "-f", wtAbs)
+				if rmErr := rmCmd.Run(); rmErr != nil {
+					// Fallback: just delete the directory
+					_ = os.RemoveAll(wtAbs)
+				}
+			}
+			// Delete the worktrees parent directory as it should be empty now
+			_ = os.RemoveAll(wtParentDir)
 		}
 	}
 

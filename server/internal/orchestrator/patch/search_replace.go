@@ -131,8 +131,8 @@ func ApplySearchReplace(blocks []EditBlock, basePath string) error {
 			replace := strings.ReplaceAll(block.Replace, "\r\n", "\n")
 
 			if search == "" {
-				// Append or create
-				content += replace
+				// Overwrite entire file (create or replace)
+				content = replace
 			} else {
 				count := strings.Count(content, search)
 				if count == 0 {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -30,7 +31,7 @@ func TestWriteLLMCallTrace_ChronologicalFormat(t *testing.T) {
 	parsed := map[string]any{"result": "success"}
 
 	// 1. Write first trace (call-001-plan)
-	orch.writeLLMCallTrace(ctx, task, agent, "plan", messages, resp, parsed)
+	orch.writeLLMCallTrace(ctx, task, agent, "plan", messages, resp, parsed, 1, time.Millisecond)
 
 	traceRoot := filepath.Join(ws.Root, "logs", "llm")
 
@@ -66,28 +67,28 @@ func TestWriteLLMCallTrace_ChronologicalFormat(t *testing.T) {
 	}
 
 	// 2. Write second trace (call-002-code)
-	orch.writeLLMCallTrace(ctx, task, agent, "code", messages, resp, parsed)
+	orch.writeLLMCallTrace(ctx, task, agent, "code", messages, resp, parsed, 1, time.Millisecond)
 	dir2 := filepath.Join(traceRoot, "call-002-code")
 	if _, err := os.Stat(dir2); os.IsNotExist(err) {
 		t.Fatalf("Expected directory %s to exist", dir2)
 	}
 
 	// 3. Write third trace (call-003-review) simulating loopback
-	orch.writeLLMCallTrace(ctx, task, agent, "review", messages, resp, parsed)
+	orch.writeLLMCallTrace(ctx, task, agent, "review", messages, resp, parsed, 1, time.Millisecond)
 	dir3 := filepath.Join(traceRoot, "call-003-review")
 	if _, err := os.Stat(dir3); os.IsNotExist(err) {
 		t.Fatalf("Expected directory %s to exist", dir3)
 	}
 
 	// 4. Verify global numbering continues
-	orch.writeLLMCallTrace(ctx, task, agent, "fix", messages, resp, parsed)
+	orch.writeLLMCallTrace(ctx, task, agent, "fix", messages, resp, parsed, 1, time.Millisecond)
 	dir4 := filepath.Join(traceRoot, "call-004-fix")
 	if _, err := os.Stat(dir4); os.IsNotExist(err) {
 		t.Fatalf("Expected directory %s to exist", dir4)
 	}
 
 	// 5. Verify 5th trace (call-005-review) simulating second cycle
-	orch.writeLLMCallTrace(ctx, task, agent, "review", messages, resp, parsed)
+	orch.writeLLMCallTrace(ctx, task, agent, "review", messages, resp, parsed, 1, time.Millisecond)
 	dir5 := filepath.Join(traceRoot, "call-005-review")
 	if _, err := os.Stat(dir5); os.IsNotExist(err) {
 		t.Fatalf("Expected directory %s to exist", dir5)

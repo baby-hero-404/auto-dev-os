@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
@@ -31,7 +32,7 @@ func (t *SearchReplaceTool) Capabilities() []tool.Capability { return []tool.Cap
 
 // Description returns a description for the LLM.
 func (t *SearchReplaceTool) Description() string {
-	return "Apply a targeted search-and-replace edit to a file. Finds the exact 'search' block and replaces it with 'replace'. Supports dry_run mode to preview changes."
+	return "Apply a targeted search-and-replace edit to a file. Finds the exact 'search' block and replaces it with 'replace'. To rewrite the entire file, pass an empty string \"\" for 'search'. Supports dry_run mode to preview changes."
 }
 
 // Schema returns the JSON schema for tool inputs.
@@ -41,7 +42,7 @@ func (t *SearchReplaceTool) Schema() json.RawMessage {
 		"required": ["path", "search", "replace"],
 		"properties": {
 			"path":    {"type": "string", "description": "Workspace-relative file path"},
-			"search":  {"type": "string", "description": "Exact text to find (must match once)"},
+			"search":  {"type": "string", "description": "Exact text to find (must match once). Leave as empty string \"\" to replace the entire file contents."},
 			"replace": {"type": "string", "description": "Replacement text"},
 			"dry_run": {"type": "boolean", "default": false, "description": "Preview without applying"},
 			"verify":  {"type": "boolean", "default": true, "description": "Run post-edit verification"}
@@ -64,9 +65,6 @@ func (t *SearchReplaceTool) Execute(ctx context.Context, call tool.Call) (tool.R
 	if path == "" {
 		return tool.Result{Success: false, Message: "missing required 'path' parameter"}, nil
 	}
-	if search == "" {
-		return tool.Result{Success: false, Message: "missing required 'search' parameter"}, nil
-	}
 
 	fullPath, err := tool.SafeWorkspacePath(call.Workspace, path)
 	if err != nil {
@@ -78,38 +76,65 @@ func (t *SearchReplaceTool) Execute(ctx context.Context, call tool.Call) (tool.R
 		}, nil
 	}
 
-	data, err := os.ReadFile(fullPath)
+	var data []byte
+	var fileExisted bool
+
+	data, err = os.ReadFile(fullPath)
 	if err != nil {
-		return tool.Result{
-			Success: false,
-			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", File: path, Message: fmt.Sprintf("cannot read file: %v", err)},
-			},
-		}, nil
+		if os.IsNotExist(err) {
+			if search == "" {
+				fileExisted = false
+				data = []byte{}
+			} else {
+				return tool.Result{
+					Success: false,
+					Diagnostics: []tool.Diagnostic{
+						{
+							Severity: "error",
+							File:     path,
+							Message:  fmt.Sprintf("File %q does not exist. To create it, use the create_file tool, or call search_replace with an empty search parameter (search: \"\") to write the initial file content.", path),
+						},
+					},
+				}, nil
+			}
+		} else {
+			return tool.Result{
+				Success: false,
+				Diagnostics: []tool.Diagnostic{
+					{Severity: "error", File: path, Message: fmt.Sprintf("cannot read file: %v", err)},
+				},
+			}, nil
+		}
+	} else {
+		fileExisted = true
 	}
 
 	content := string(data)
 	hashBefore := tool.Sha256Hash(data)
 
-	count := strings.Count(content, search)
-	if count == 0 {
-		return tool.Result{
-			Success: false,
-			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", File: path, Message: "search block not found in file"},
-			},
-		}, nil
+	var updated string
+	if search == "" {
+		updated = replace
+	} else {
+		count := strings.Count(content, search)
+		if count == 0 {
+			return tool.Result{
+				Success: false,
+				Diagnostics: []tool.Diagnostic{
+					{Severity: "error", File: path, Message: "search block not found in file"},
+				},
+			}, nil
+		}
+		if count > 1 {
+			return tool.Result{
+				Success: false,
+				Diagnostics: []tool.Diagnostic{
+					{Severity: "error", File: path, Message: fmt.Sprintf("ambiguous: search block found %d times", count)},
+				},
+			}, nil
+		}
+		updated = strings.Replace(content, search, replace, 1)
 	}
-	if count > 1 {
-		return tool.Result{
-			Success: false,
-			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", File: path, Message: fmt.Sprintf("ambiguous: search block found %d times", count)},
-			},
-		}, nil
-	}
-
-	updated := strings.Replace(content, search, replace, 1)
 
 	if dryRun {
 		return tool.Result{
@@ -119,6 +144,17 @@ func (t *SearchReplaceTool) Execute(ctx context.Context, call tool.Call) (tool.R
 				"diff_preview": tool.GenerateDiffPreview(search, replace, path),
 			},
 		}, nil
+	}
+
+	if !fileExisted {
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			return tool.Result{
+				Success: false,
+				Diagnostics: []tool.Diagnostic{
+					{Severity: "error", File: path, Message: fmt.Sprintf("failed to create directory structure: %v", err)},
+				},
+			}, nil
+		}
 	}
 
 	if err := os.WriteFile(fullPath, []byte(updated), 0o644); err != nil {
@@ -144,7 +180,11 @@ func (t *SearchReplaceTool) Execute(ctx context.Context, call tool.Call) (tool.R
 
 		if hasError {
 			// Rollback to original content
-			_ = os.WriteFile(fullPath, data, 0o644)
+			if fileExisted {
+				_ = os.WriteFile(fullPath, data, 0o644)
+			} else {
+				_ = os.Remove(fullPath)
+			}
 			return tool.Result{
 				Success:     false,
 				Message:     "edit rolled back due to verification failure",

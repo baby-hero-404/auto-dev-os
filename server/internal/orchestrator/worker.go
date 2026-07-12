@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
@@ -163,11 +164,21 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				}
 			}
 
-			if event.Status == workflow.StepStatusSuccess && (event.StepID == workflow.StepCodeBackend || event.StepID == workflow.StepCodeFrontend || event.StepID == workflow.StepFix) {
+			isCodeStep := strings.HasPrefix(event.StepID, workflow.StepCodeBackend) ||
+				strings.HasPrefix(event.StepID, workflow.StepCodeFrontend) ||
+				event.StepID == workflow.StepFix
+			// Skip checkpoint creation for steps that were skipped (no worktree was created)
+			stepWasSkipped := false
+			if event.Output != nil {
+				if s, _ := event.Output["status"].(string); s == "skipped" {
+					stepWasSkipped = true
+				}
+			}
+			if event.Status == workflow.StepStatusSuccess && isCodeStep && !stepWasSkipped {
 				worktreeSuffix := ""
-				if event.StepID == workflow.StepCodeBackend {
+				if strings.HasPrefix(event.StepID, workflow.StepCodeBackend) {
 					worktreeSuffix = "-be-worktree"
-				} else if event.StepID == workflow.StepCodeFrontend {
+				} else if strings.HasPrefix(event.StepID, workflow.StepCodeFrontend) {
 					worktreeSuffix = "-fe-worktree"
 				}
 				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Creating git checkpoint commit for step %s", event.StepID))
@@ -428,7 +439,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		if errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
 			finalStatus = models.WorkflowJobStatusPaused
 			finalErr = err.Error()
-		} else if errors.Is(err, context.Canceled) {
+		} else if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled || (err != nil && (strings.Contains(err.Error(), "signal: killed") || strings.Contains(err.Error(), "context canceled"))) {
 			// Check database state to see if it was paused or cancelled by user
 			if latestJob, jErr := o.workflows.LatestByTaskID(context.Background(), task.ID); jErr == nil && latestJob != nil {
 				if latestJob.Status == models.WorkflowJobStatusPaused {

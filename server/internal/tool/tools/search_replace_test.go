@@ -154,4 +154,86 @@ func TestSearchReplaceTool(t *testing.T) {
 	if string(data) != initialContent {
 		t.Errorf("rollback failed, content is %q", string(data))
 	}
+
+	// Test 6: Rewrite entire file by passing search: ""
+	resRewrite, err := srt.Execute(context.Background(), tool.Call{
+		Input: map[string]any{
+			"path":    "code.go",
+			"search":  "",
+			"replace": "package main\n\nfunc main() {\n\tprintln(\"rewritten completely\")\n}\n",
+		},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute rewrite test: %v", err)
+	}
+	if !resRewrite.Success {
+		t.Errorf("expected success for empty search rewrite, got %v", resRewrite.Message)
+	}
+	data, _ = os.ReadFile(filePath)
+	expectedRewrite := "package main\n\nfunc main() {\n\tprintln(\"rewritten completely\")\n}\n"
+	if string(data) != expectedRewrite {
+		t.Errorf("expected rewritten content %q, got %q", expectedRewrite, string(data))
+	}
+}
+
+func TestSearchReplaceTool_NonExistentFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "sr-test-nonexistent")
+	if err != nil {
+		t.Fatalf("failed to create tmp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srt := &SearchReplaceTool{}
+	nonExistentPath := "nonexistent.go"
+
+	// Case 1: Non-empty search string on non-existent file -> should return helpful diagnostic
+	resErr, err := srt.Execute(context.Background(), tool.Call{
+		Input: map[string]any{
+			"path":    nonExistentPath,
+			"search":  "println(\"hello\")",
+			"replace": "println(\"world\")",
+		},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute: %v", err)
+	}
+	if resErr.Success {
+		t.Errorf("expected failure for non-existent file with non-empty search")
+	}
+	if len(resErr.Diagnostics) == 0 {
+		t.Fatalf("expected diagnostics on failure")
+	}
+	msg := resErr.Diagnostics[0].Message
+	if !strings.Contains(msg, "does not exist") || !strings.Contains(msg, "create_file") {
+		t.Errorf("expected helpful diagnostic message, got %q", msg)
+	}
+	if strings.Contains(msg, "no such file or directory") {
+		t.Errorf("raw OS error should not be leaked, got %q", msg)
+	}
+
+	// Case 2: Empty search string on non-existent file -> should create the file
+	resCreate, err := srt.Execute(context.Background(), tool.Call{
+		Input: map[string]any{
+			"path":    nonExistentPath,
+			"search":  "",
+			"replace": "package main\n",
+		},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute: %v", err)
+	}
+	if !resCreate.Success {
+		t.Errorf("expected success when creating a file with empty search, got: %s", resCreate.Message)
+	}
+	fullPath := filepath.Join(tmpDir, nonExistentPath)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		t.Fatalf("expected file to be created: %v", err)
+	}
+	if string(data) != "package main\n" {
+		t.Errorf("expected file content to be 'package main\\n', got %q", string(data))
+	}
 }

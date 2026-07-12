@@ -185,6 +185,13 @@ func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager 
 		if setter, ok := o.prompts.(interface{ SetBaseTools([]llm.ToolDefinition) }); ok {
 			setter.SetBaseTools(o.registry.Definitions())
 		}
+		if metaSetter, ok := o.prompts.(interface {
+			SetModelMetadataProvider(llm.MetadataProvider)
+		}); ok {
+			if metaProv, ok := o.llm.(llm.MetadataProvider); ok {
+				metaSetter.SetModelMetadataProvider(metaProv)
+			}
+		}
 	}
 
 	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)
@@ -494,6 +501,3 @@ func (o *Orchestrator) CancelJob(ctx context.Context, taskID string) error {
 	o.wake()
 	return nil
 }
-
-
-

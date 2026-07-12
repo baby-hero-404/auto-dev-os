@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
@@ -19,6 +22,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // AnalyzeStep implements Step for the analysis phase.
@@ -92,7 +96,11 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
+		
+		plannerAgent := *s.rt.Agent
+		plannerAgent.Role = models.AgentRolePlanner
+		
+		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, fmt.Errorf("assemble prompt: %w", err)
 		}
@@ -162,7 +170,11 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, s.rt.Agent, nil, plannerTools)
+		
+		plannerAgent := *s.rt.Agent
+		plannerAgent.Role = models.AgentRolePlanner
+		
+		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, err
 		}
@@ -176,19 +188,53 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 	return messages, nil
 }
 
+type analyzeTemplateData struct {
+	AvailableSkills []llm.ToolDefinition
+	RepoContext    string
+	WorkspaceFiles string
+}
+
 func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workflow.StepContext) string {
-	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
-	var repoContext string
-	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
-		if contextJSON, err := json.Marshal(contextOut); err == nil {
-			repoContext = string(contextJSON)
+	data := analyzeTemplateData{}
+	
+	if s.prompts != nil {
+		if skills, err := s.prompts.ListAllSkills(ctx, *s.rt.Task); err == nil {
+			data.AvailableSkills = skills
 		}
 	}
-	if repoContext != "" {
-		instruction += "\n\n=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===\n" + repoContext
+
+	if contextOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
+		data.RepoContext = formatRepoContext(contextOut)
 	}
 	if files, err := s.listAnalyzeFiles(ctx); err == nil && files != "" && files != "No files found in workspace." {
-		instruction += "\n\n=== Workspace Files ===\n" + files
+		data.WorkspaceFiles = files
+	}
+
+	tmplPath := filepath.Join("internal", "prompts", "templates", "analyze_instruction.tmpl")
+	tmplBytes, err := os.ReadFile(tmplPath)
+	if err != nil {
+		// Fallback for unit tests
+		tmplPath = filepath.Join("..", "..", "prompts", "templates", "analyze_instruction.tmpl")
+		tmplBytes, err = os.ReadFile(tmplPath)
+	}
+	if err == nil {
+		tmpl, err := template.New("analyze").Parse(string(tmplBytes))
+		if err == nil {
+			var buf bytes.Buffer
+			if err := tmpl.Execute(&buf, data); err == nil {
+				return buf.String()
+			}
+		}
+	}
+
+	// Fallback
+	instruction := "Analyze this task and output the proposed specification as a valid JSON object matching the schema and template requested in the system instructions."
+	instruction += "\nCRITICAL: If all requirements are clear and you have no NEW questions, you MUST return an empty array `[]` for `clarification_questions`. DO NOT repeat questions that have already been answered in the context."
+	if data.RepoContext != "" {
+		instruction += "\n\n=== UNTRUSTED REPOSITORY-CONTROLLED CONTEXT (potentially outdated or invalid) ===\n" + data.RepoContext
+	}
+	if data.WorkspaceFiles != "" {
+		instruction += "\n\n=== Workspace Files ===\n" + data.WorkspaceFiles
 	}
 	return instruction
 }
@@ -217,7 +263,9 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 			RouteName:  routeName,
 		})
 
+		callStart := time.Now()
 		resp, err := s.llm.ChatWithOptions(routeCtx, messages, llm.ChatOptions{Tools: analyzeTools, ToolChoice: "auto"})
+		callLatency := time.Since(callStart)
 		if err != nil {
 			return nil, fmt.Errorf("llm tool loop call failed: %w", err)
 		}
@@ -225,7 +273,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 
 		if len(resp.ToolCalls) > 0 {
 			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls})
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls}, i+1, callLatency)
 			}
 			messages = append(messages, llm.Message{
 				Role:      "assistant",
@@ -247,7 +295,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		parsedJSON, parseErr := llmrunner.ParseJSONMarkdown(resp.Content)
 		if parseErr != nil {
 			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content})
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content}, i+1, callLatency)
 			}
 			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output is invalid JSON: %v", i+1, parseErr))
 			content := resp.Content
@@ -266,7 +314,7 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		}
 
 		if s.traces != nil {
-			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON)
+			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON, i+1, callLatency)
 		}
 
 		if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
@@ -316,6 +364,15 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		}
 		if _, ok := parsedJSON["specs_md"].(string); !ok {
 			missingFields = append(missingFields, "specs_md")
+		}
+		if _, ok := parsedJSON["execution_units"].([]any); !ok {
+			missingFields = append(missingFields, "execution_units")
+		}
+		if _, ok := parsedJSON["required_skills"].([]any); !ok {
+			missingFields = append(missingFields, "required_skills")
+		}
+		if _, ok := parsedJSON["required_skills_map"].(map[string]any); !ok {
+			missingFields = append(missingFields, "required_skills_map")
 		}
 
 		if len(missingFields) > 0 {
@@ -523,7 +580,9 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 		return "Error: tool registry not configured"
 	}
 
-	workspacePath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
+	osPaths := paths.NewOSWorkspacePaths(s.workspaceRoot)
+	workspacePath := osPaths.TaskRoot(s.rt.Task.ID).String()
+
 	if s.wkspace != nil {
 		if ws, err := s.wkspace.LoadTaskWorkspace(ctx, s.rt.Task); err == nil && ws != nil && len(ws.Repos) > 0 {
 			for _, repo := range ws.Repos {
@@ -531,7 +590,7 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 					continue
 				}
 				if repo.Paths.Main != "" {
-					workspacePath = filepath.Join(ws.Root, repo.Paths.Main)
+					workspacePath = osPaths.RepoMain(s.rt.Task.ID, repo.Name).String()
 					break
 				}
 			}
@@ -566,3 +625,142 @@ func (s *AnalyzeStep) executeAnalyzeTool(ctx context.Context, toolName, argument
 	return res.Output
 }
 
+func formatRepoContext(contextOut map[string]any) string {
+	var sb strings.Builder
+
+	// 1. Current Branches
+	if branches, ok := contextOut["current_branches"].(map[string]any); ok && len(branches) > 0 {
+		sb.WriteString("### Current Branches\n")
+		for repo, branch := range branches {
+			sb.WriteString(fmt.Sprintf("- **%s**: `%v`\n", repo, branch))
+		}
+		sb.WriteString("\n")
+	} else if branches, ok := contextOut["current_branches"].(map[string]string); ok && len(branches) > 0 {
+		sb.WriteString("### Current Branches\n")
+		for repo, branch := range branches {
+			sb.WriteString(fmt.Sprintf("- **%s**: `%s`\n", repo, branch))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 2. Git Logs
+	if logs, ok := contextOut["git_logs"].(map[string]any); ok && len(logs) > 0 {
+		sb.WriteString("### Git Logs (recent commits)\n")
+		for repo, log := range logs {
+			sb.WriteString(fmt.Sprintf("- **%s**:\n  ```\n  %v\n  ```\n", repo, log))
+		}
+		sb.WriteString("\n")
+	} else if logs, ok := contextOut["git_logs"].(map[string]string); ok && len(logs) > 0 {
+		sb.WriteString("### Git Logs (recent commits)\n")
+		for repo, log := range logs {
+			sb.WriteString(fmt.Sprintf("- **%s**:\n  ```\n  %s\n  ```\n", repo, log))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 3. Test Commands
+	if cmds, ok := contextOut["test_commands"].([]any); ok && len(cmds) > 0 {
+		sb.WriteString("### Detected Test Commands\n")
+		for _, cmd := range cmds {
+			sb.WriteString(fmt.Sprintf("- `%v`\n", cmd))
+		}
+		sb.WriteString("\n")
+	} else if cmds, ok := contextOut["test_commands"].([]string); ok && len(cmds) > 0 {
+		sb.WriteString("### Detected Test Commands\n")
+		for _, cmd := range cmds {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", cmd))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 4. CI Configs
+	if configs, ok := contextOut["ci_configs"].([]any); ok && len(configs) > 0 {
+		sb.WriteString("### CI Configurations\n")
+		for _, config := range configs {
+			sb.WriteString(fmt.Sprintf("- `%v`\n", config))
+		}
+		sb.WriteString("\n")
+	} else if configs, ok := contextOut["ci_configs"].([]string); ok && len(configs) > 0 {
+		sb.WriteString("### CI Configurations\n")
+		for _, config := range configs {
+			sb.WriteString(fmt.Sprintf("- `%s`\n", config))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 5. Conventions
+	if convs, ok := contextOut["conventions"].(map[string]any); ok && len(convs) > 0 {
+		sb.WriteString("### Repository Conventions\n")
+		for file, content := range convs {
+			sb.WriteString(fmt.Sprintf("#### File: `%s`\n```\n%v\n```\n", file, content))
+		}
+		sb.WriteString("\n")
+	} else if convs, ok := contextOut["conventions"].(map[string]string); ok && len(convs) > 0 {
+		sb.WriteString("### Repository Conventions\n")
+		for file, content := range convs {
+			sb.WriteString(fmt.Sprintf("#### File: `%s`\n```\n%s\n```\n", file, content))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 6. Architectures
+	if archs, ok := contextOut["architectures"].(map[string]any); ok && len(archs) > 0 {
+		sb.WriteString("### Architectural Guidelines\n")
+		for repo, content := range archs {
+			sb.WriteString(fmt.Sprintf("#### Repository: **%s**\n%v\n", repo, content))
+		}
+		sb.WriteString("\n")
+	} else if archs, ok := contextOut["architectures"].(map[string]string); ok && len(archs) > 0 {
+		sb.WriteString("### Architectural Guidelines\n")
+		for repo, content := range archs {
+			sb.WriteString(fmt.Sprintf("#### Repository: **%s**\n%s\n", repo, content))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 7. Contributings
+	if contribs, ok := contextOut["contributings"].(map[string]any); ok && len(contribs) > 0 {
+		sb.WriteString("### Contributing Guidelines\n")
+		for repo, content := range contribs {
+			sb.WriteString(fmt.Sprintf("#### Repository: **%s**\n%v\n", repo, content))
+		}
+		sb.WriteString("\n")
+	} else if contribs, ok := contextOut["contributings"].(map[string]string); ok && len(contribs) > 0 {
+		sb.WriteString("### Contributing Guidelines\n")
+		for repo, content := range contribs {
+			sb.WriteString(fmt.Sprintf("#### Repository: **%s**\n%s\n", repo, content))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 8. Context Cache directory tree (if any)
+	if cacheJSON, ok := contextOut["context_cache"].(string); ok && cacheJSON != "" {
+		var cache struct {
+			DirectoryTree    string `json:"directory_tree"`
+			RepoMap          string `json:"repo_map"`
+			SemanticSnippets []struct {
+				Path      string  `json:"path"`
+				StartLine int     `json:"start_line"`
+				EndLine   int     `json:"end_line"`
+				Content   string  `json:"content"`
+				Relevance float64 `json:"relevance"`
+				Retriever string  `json:"retriever"`
+			} `json:"semantic_snippets"`
+		}
+		if err := json.Unmarshal([]byte(cacheJSON), &cache); err == nil {
+			if cache.RepoMap != "" {
+				sb.WriteString("### Repository Map\n```\n")
+				sb.WriteString(cache.RepoMap)
+				sb.WriteString("\n```\n\n")
+			}
+			if len(cache.SemanticSnippets) > 0 {
+				sb.WriteString("### Relevant Code Snippets\n")
+				for i, sn := range cache.SemanticSnippets {
+					sb.WriteString(fmt.Sprintf("#### Snippet %d: `%s:%d-%d` (relevance: %.2f, source: %s)\n```\n%s\n```\n\n", i+1, sn.Path, sn.StartLine, sn.EndLine, sn.Relevance, sn.Retriever, sn.Content))
+				}
+			}
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}

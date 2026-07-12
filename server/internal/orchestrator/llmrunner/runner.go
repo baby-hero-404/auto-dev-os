@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
+	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -29,8 +29,17 @@ type Runner struct {
 	Projects                ProjectResolver
 	ReadAffectedFileContent func(context.Context, *models.Task, string) (string, bool)
 	SaveArtifact            func(context.Context, string, string, string, string, any) error
-	WriteTrace              func(context.Context, *models.Task, *models.Agent, string, []llm.Message, *llm.Response, map[string]any)
+	WriteTrace              func(context.Context, *models.Task, *models.Agent, string, []llm.Message, *llm.Response, map[string]any, int, time.Duration)
 	Log                     func(context.Context, string, *string, string, string)
+
+	// Tools and ToolExecutor enable the agentic tool-call loop (Issue 1+2). When both are set,
+	// Run() drives a native ChatWithOptions tool loop instead of the single-shot Chat() path.
+	Tools        []llm.ToolDefinition
+	ToolExecutor ToolExecutor
+}
+
+func (r Runner) isAgentic() bool {
+	return len(r.Tools) > 0 && r.ToolExecutor != nil
 }
 
 func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
@@ -55,40 +64,59 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		var b strings.Builder
 		b.WriteString("\n\n### Workspace Affected Files ###\n")
 		for _, file := range analysis.AffectedFiles {
+			displayPath := paths.WorkspaceToRepoRelative(file.File)
 			if content, ok := r.ReadAffectedFileContent(ctx, task, file.File); ok {
-				displayPath := paths.WorkspaceToRepoRelative(file.File)
 				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", displayPath, content))
+			} else {
+				b.WriteString(fmt.Sprintf("\n--- %s [NEW FILE — does not exist yet] ---\nThis file needs to be created. Use the create_file tool.\n", displayPath))
 			}
 		}
 		fullInstruction += b.String()
 	}
 
-	if requiresStrictJSON(stepID) {
-		fullInstruction += "\n\nCRITICAL REQUIREMENT: Do NOT output any tool calls, function calls, or markdown block thoughts. You do NOT have tool execution capabilities in this single-shot step. You MUST output ONLY a valid JSON object matching the requested format directly (or inside a ```json ``` block)."
-	}
-	if requiresPatch(stepID) {
-		fullInstruction += "\n\nCRITICAL REQUIREMENT: The patch/diff field MUST contain a valid Unified Git Diff (starting with 'diff --git') representing all source code changes. Do NOT output raw file contents. Do NOT include any text outside the JSON structure."
+	agentic := r.isAgentic()
+	if agentic {
+		if requiresPatch(stepID) {
+			fullInstruction += "\n\nCRITICAL REQUIREMENT: Use the provided tools (e.g. search_replace, create_file) to make the required code changes directly in the workspace. Use run_tests/run_build/run_lint to verify your work before finishing. When done, respond with a JSON object containing a 'summary' field describing what you changed. Do NOT output a patch or diff — your tool calls already applied the changes."
+		}
+	} else {
+		if requiresStrictJSON(stepID) {
+			fullInstruction += "\n\nCRITICAL REQUIREMENT: Do NOT output any tool calls, function calls, or markdown block thoughts. You do NOT have tool execution capabilities in this single-shot step. You MUST output ONLY a valid JSON object matching the requested format directly (or inside a ```json ``` block)."
+		}
+		if requiresPatch(stepID) {
+			fullInstruction += "\n\nCRITICAL REQUIREMENT: The patch/diff field MUST contain a valid Unified Git Diff (starting with 'diff --git') representing all source code changes. Do NOT output raw file contents. Do NOT include any text outside the JSON structure."
+		}
 	}
 	messages = append(messages, llm.Message{Role: "user", Content: "Workflow step: " + stepID + "\n\n" + fullInstruction})
 
 	r.save(ctx, jobID, task.ID, stepID, "prompt", messages)
 
 	ctx = llm.WithRouteOptions(ctx, llm.RouteOptions{
-		Complexity:      task.Complexity,
-		OrgID:           agent.OrgID,
-		ProjectID:       task.ProjectID,
-		AgentID:         agent.ID,
-		TaskID:          task.ID,
-		RouteName:       r.routeName(ctx, task, agent),
-		ExcludeModelID:  llm.ExcludeModelIDFromContext(ctx),
+		Complexity:     task.Complexity,
+		OrgID:          agent.OrgID,
+		ProjectID:      task.ProjectID,
+		AgentID:        agent.ID,
+		TaskID:         task.ID,
+		RouteName:      r.routeName(ctx, task, agent),
+		ExcludeModelID: llm.ExcludeModelIDFromContext(ctx),
 	})
+
+	if agentic {
+		return r.runAgentic(ctx, task, agent, jobID, stepID, messages)
+	}
+
 	var resp *llm.Response
 	var parsed map[string]any
+	var finalAttempt int
+	var callLatency time.Duration
 
 	for attempt := 1; attempt <= 3; attempt++ {
+		finalAttempt = attempt
 		var chatErr error
 		for chatAttempt := 1; chatAttempt <= 3; chatAttempt++ {
+			callStart := time.Now()
 			resp, chatErr = r.Provider.Chat(ctx, messages)
+			callLatency = time.Since(callStart)
 			if chatErr == nil {
 				break
 			}
@@ -106,7 +134,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 
 		parsedJSON, parseErr := ParseJSONMarkdown(resp.Content)
 		if parseErr == nil {
-			if schemaErr := r.validateSchema(stepID, parsedJSON); schemaErr != nil {
+			if schemaErr := r.validateSchema(stepID, parsedJSON, false); schemaErr != nil {
 				parseErr = schemaErr
 			} else if bizErr := r.validateBusiness(stepID, parsedJSON); bizErr != nil {
 				parseErr = bizErr
@@ -165,7 +193,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 
 	r.save(ctx, jobID, task.ID, stepID, "llm_response", parsed)
 	if r.WriteTrace != nil {
-		r.WriteTrace(ctx, task, agent, stepID, messages, resp, parsed)
+		r.WriteTrace(ctx, task, agent, stepID, messages, resp, parsed, finalAttempt, callLatency)
 	}
 
 	return map[string]any{
@@ -178,8 +206,90 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 	}, nil
 }
 
-func (r Runner) validateSchema(stepID string, parsed map[string]any) error {
+// runAgentic drives the native tool-calling loop (RunToolLoop) instead of the single-shot
+// Chat() path, for steps where the caller resolved tools and a ToolExecutor (Issue 1+2).
+func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID string, messages []llm.Message) (map[string]any, error) {
+	var lastResp *llm.Response
+
+	parsed, _, err := RunToolLoop(ctx, ToolLoopConfig{
+		Messages:      messages,
+		Tools:         r.Tools,
+		MaxIterations: 8,
+		Chat: func(ctx context.Context, msgs []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			var resp *llm.Response
+			var chatErr error
+			for chatAttempt := 1; chatAttempt <= 3; chatAttempt++ {
+				resp, chatErr = r.Provider.ChatWithOptions(ctx, msgs, opts)
+				if chatErr == nil {
+					break
+				}
+				if isTransientError(chatErr) && chatAttempt < 3 {
+					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
+					time.Sleep(time.Duration(chatAttempt) * 2 * time.Second)
+					continue
+				}
+				break
+			}
+			if chatErr == nil {
+				lastResp = resp
+			}
+			return resp, chatErr
+		},
+		ExecuteTool: r.ToolExecutor,
+		Validate: func(parsed map[string]any) error {
+			if schemaErr := r.validateSchema(stepID, parsed, true); schemaErr != nil {
+				return schemaErr
+			}
+			if bizErr := r.validateBusiness(stepID, parsed); bizErr != nil {
+				return bizErr
+			}
+			return nil
+		},
+		OnCall: func(iteration int, msgs []llm.Message, resp *llm.Response, parsed map[string]any, latency time.Duration) {
+			if r.WriteTrace != nil {
+				r.WriteTrace(ctx, task, agent, stepID, msgs, resp, parsed, iteration, latency)
+			}
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agentic tool loop failed: %w", err)
+	}
+
+	r.save(ctx, jobID, task.ID, stepID, "llm_response", parsed)
+
+	content := ""
+	var promptTokens, outputTokens int
+	model := ""
+	if lastResp != nil {
+		content = lastResp.Content
+		promptTokens = lastResp.PromptTokens
+		outputTokens = lastResp.OutputTokens
+		model = lastResp.Model
+	}
+
+	return map[string]any{
+		"status":        "llm_completed",
+		"model":         model,
+		"content":       content,
+		"parsed":        parsed,
+		"prompt_tokens": promptTokens,
+		"output_tokens": outputTokens,
+	}, nil
+}
+
+func (r Runner) validateSchema(stepID string, parsed map[string]any, agentic bool) error {
 	if requiresPatch(stepID) {
+		if agentic {
+			// Edits are already applied to the workspace via tool calls; the LLM only needs
+			// to confirm completion with a summary (Issue 1+2: drop the patch/diff contract).
+			if summary, ok := parsed["summary"].(string); !ok || strings.TrimSpace(summary) == "" {
+				return &ClassifiedParseError{
+					Kind:    ParseSchemaError,
+					Message: "missing required 'summary' field in JSON response",
+				}
+			}
+			return nil
+		}
 		p := ""
 		if pat, ok := parsed["patch"].(string); ok {
 			p = pat

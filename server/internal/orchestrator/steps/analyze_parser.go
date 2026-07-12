@@ -184,6 +184,20 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 			}
 		}
 	}
+	if skillsMap, ok := parsedFinal["required_skills_map"].(map[string]any); ok {
+		analysis.RequiredSkillsMap = make(map[string][]string)
+		for role, v := range skillsMap {
+			if arr, ok := v.([]any); ok {
+				var list []string
+				for _, item := range arr {
+					if s, ok := item.(string); ok {
+						list = append(list, s)
+					}
+				}
+				analysis.RequiredSkillsMap[role] = list
+			}
+		}
+	}
 	if domains, ok := parsedFinal["risk_domains"].([]any); ok {
 		for _, item := range domains {
 			if s, ok := item.(string); ok {

@@ -3,9 +3,9 @@ package steps
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -131,11 +131,12 @@ type CheckpointLister interface {
 // PromptAssembler builds LLM prompts. Used by: analyze, context_load.
 type PromptAssembler interface {
 	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
+	ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error)
 }
 
 // TraceRecorder writes LLM call traces. Used by: analyze.
 type TraceRecorder interface {
-	WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult)
+	WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, retryAttempt int, latency time.Duration)
 }
 
 // ReviewerAssigner optionally assigns a specialized reviewer agent. Used by: review.
@@ -288,42 +289,4 @@ func isFrontendFile(file string) bool {
 // AffectedFileReader reads files from a task's workspace/worktrees.
 type AffectedFileReader interface {
 	ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool)
-}
-
-// InjectAffectedFilesContext reads and appends all affected files' full content to instruction.
-func InjectAffectedFilesContext(ctx context.Context, taskID string, tasks TaskRepository, rtTask *models.Task, reader AffectedFileReader, instruction *string) {
-	if reader == nil || tasks == nil {
-		return
-	}
-	task, err := tasks.GetByID(ctx, taskID)
-	if err != nil || task == nil {
-		return
-	}
-	var analysis models.TaskAnalysis
-	if len(task.Analysis) > 0 {
-		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
-			return
-		}
-	}
-	if len(analysis.AffectedFiles) == 0 {
-		return
-	}
-
-	var sb strings.Builder
-	sb.WriteString("\n\n### Workspace Affected Files ###\n")
-	totalLen := 0
-	maxTotalLen := 80_000
-
-	for _, af := range analysis.AffectedFiles {
-		if content, ok := reader.ReadAffectedFileContent(ctx, rtTask, af.File); ok {
-			formatted := fmt.Sprintf("\n### File: %s\n```\n%s\n```\n", af.File, content)
-			if totalLen+len(formatted) > maxTotalLen {
-				sb.WriteString(fmt.Sprintf("\n### File: %s\n[Content truncated to fit token budget]\n", af.File))
-				break
-			}
-			sb.WriteString(formatted)
-			totalLen += len(formatted)
-		}
-	}
-	*instruction += sb.String()
 }

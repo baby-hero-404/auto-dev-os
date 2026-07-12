@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -22,11 +23,15 @@ func (m *mockPromptAssembler) AssembleForAgent(ctx context.Context, task models.
 	return m.messages, m.tools, m.err
 }
 
+func (m *mockPromptAssembler) ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error) {
+	return m.tools, m.err
+}
+
 type mockTraceRecorder struct {
 	called bool
 }
 
-func (m *mockTraceRecorder) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult) {
+func (m *mockTraceRecorder) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, retryAttempt int, latency time.Duration) {
 	m.called = true
 }
 
@@ -106,6 +111,8 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
   ],
   "clarification_questions": [],
   "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [],
   "proposal_md": "## Proposal",
   "specs_md": "## ADDED Requirements",
   "design_md": "## Design",

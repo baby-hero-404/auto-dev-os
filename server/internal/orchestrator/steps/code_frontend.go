@@ -7,13 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"path/filepath"
-
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
-	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
-	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // FrontendAgentAssigner defines the optional hook to assign a role-specific frontend agent.
@@ -177,232 +172,36 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		}
 	}
 
-	instructionBase := "Implement the frontend changes when applicable. Return JSON with files_changed, summary, and patch text when available.\nIMPORTANT: For the patch text, you MUST generate a valid Unified Diff. Ensure that your hunk headers (@@) have the exact correct line counts matching the original file."
+	instruction, _, ctx := buildCodingInstruction(ctx, stepCtx, codingInstructionParams{
+		Task:            s.rt.Task,
+		Workspace:       s.workspace,
+		IsEasy:          t != nil && t.Complexity == models.TaskComplexityEasy,
+		Role:            "frontend",
+		SubtaskKey:      "frontend",
+		InstructionVerb: "Implement the frontend changes when applicable, using the available tools (e.g. search_replace, create_file) to edit files directly. Use run_tests/run_build/run_lint to verify your work before finishing.",
+		PRFeedback:      prFeedback,
+	})
 
-	var pathCtx *paths.AgentPathContext
-	repoContext := ""
-	var physicalRoot string
-	if s.workspace != nil {
-		if ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task); ws != nil {
-			var useRepoPrefix bool
-			var repoName string
-			role := "frontend"
-
-			if len(ws.Repos) == 1 {
-				repoName = ws.Repos[0].Name
-				useRepoPrefix = false
-				if t != nil && t.Complexity == models.TaskComplexityEasy {
-					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoMain(s.rt.Task.ID, repoName).String()
-				} else {
-					physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).RepoWorktreeDir(s.rt.Task.ID, repoName, role).String()
-				}
-				repoContext = "\nIMPORTANT: Your workspace root IS the repository root.\nAll file paths MUST be relative (e.g., internal/model/commit.go).\nDo NOT prefix with the repository name.\nYour diff paths MUST be relative to the repository root, e.g., --- a/filepath. DO NOT include the repository name in the path."
-			} else {
-				useRepoPrefix = true
-				physicalRoot = paths.NewOSWorkspacePaths(filepath.Dir(ws.Root)).CodeRoot(s.rt.Task.ID).String()
-				var names []string
-				for _, r := range ws.Repos {
-					names = append(names, r.Name)
-				}
-				repoContext = fmt.Sprintf(" You are working on multiple repositories: %s. Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath).", strings.Join(names, ", "))
-			}
-			pathCtx = paths.NewAgentPathContext(physicalRoot, useRepoPrefix, repoName, role)
-			ctx = context.WithValue(ctx, paths.AgentPathContextKey, pathCtx)
-		}
-	}
-	if repoContext == "" {
-		repoContext = " Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath)."
-	}
-	instruction := instructionBase + repoContext + " DO NOT rewrite the entire file unless creating a new file."
-	if prFeedback != "" {
-		instruction += fmt.Sprintf("\n\nNote: The previous PR was rejected. Address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
-	}
-
-	// Perform repository structure scan (Task 2.1) (REQ-M02)
-	var tree string
-	if contextLoadOut, ok := stepCtx.Inputs[workflow.StepContextLoad]; ok {
-		if cacheJSON, ok := contextLoadOut["context_cache"].(string); ok && cacheJSON != "" {
-			var cache models.ContextCache
-			if err := json.Unmarshal([]byte(cacheJSON), &cache); err == nil && cache.DirectoryTree != "" {
-				tree = cache.DirectoryTree
-			}
-		}
-	}
-	if tree == "" && physicalRoot != "" {
-		if t, err := ScanDirectory(physicalRoot, 3, 200); err == nil && t != "" {
-			tree = t
-		}
-	}
-	if tree != "" {
-		instruction += fmt.Sprintf("\n\n=== Repository Structure ===\n%s\n", tree)
-	}
-	// Inject role-specific subtasks from Plan output
-	if planOut, ok := stepCtx.Inputs[workflow.StepPlan]; ok {
-		if subtasks, ok := planOut["subtasks"].(map[string]any); ok {
-			if feTasks, ok := subtasks["frontend"].([]any); ok && len(feTasks) > 0 {
-				var taskIdx = -1
-				if idx := strings.LastIndex(stepCtx.StepID, "_"); idx != -1 {
-					if parsedIdx, err := strconv.Atoi(stepCtx.StepID[idx+1:]); err == nil {
-						taskIdx = parsedIdx
-					}
-				}
-
-				if taskIdx >= 0 && taskIdx < len(feTasks) {
-					instruction += fmt.Sprintf("\n\n## Your Assigned Subtask:\n%s\n", feTasks[taskIdx])
-				} else {
-					instruction += "\n\n## Your Assigned Subtasks:\n"
-					for i, t := range feTasks {
-						instruction += fmt.Sprintf("%d. %s\n", i+1, t)
-					}
-				}
-			}
-		}
-	}
-
-	// Inject files created/modified by prior steps (Task 2.4)
-	var priorFiles []string
-	seenPriorFiles := make(map[string]bool)
-	for inputStepID, stepOut := range stepCtx.Inputs {
-		if strings.HasPrefix(inputStepID, workflow.StepCodeBackend) || strings.HasPrefix(inputStepID, workflow.StepCodeFrontend) {
-			if fc, ok := stepOut["files_changed"]; ok {
-				var filesList []string
-				if fl, ok := fc.([]any); ok {
-					for _, f := range fl {
-						if str, ok := f.(string); ok {
-							filesList = append(filesList, str)
-						}
-					}
-				} else if fl, ok := fc.([]string); ok {
-					filesList = fl
-				}
-				for _, f := range filesList {
-					if !seenPriorFiles[f] {
-						seenPriorFiles[f] = true
-						priorFiles = append(priorFiles, f)
-					}
-				}
-			}
-		}
-	}
-	if len(priorFiles) > 0 {
-		instruction += "\n\n### Files Created/Modified by Prior Steps ###\n"
-		for _, f := range priorFiles {
-			instruction += fmt.Sprintf("- %s\n", f)
-		}
-	}
-
-	var out map[string]any
-	maxRetries := 3
-	baseInstruction := instruction
-	var retryErrorMsg string
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		currentInstruction := baseInstruction
-		if attempt >= 3 {
-			currentInstruction += "\n\nCRITICAL: Due to persistent Unified Diff failures, you MUST now output your changes in SEARCH/REPLACE block format instead of a Unified Diff. Do NOT output a unified diff patch. Use the following format for each modification:\n<<<<<<< SEARCH\n[exact original code lines here]\n=======\n[replacement code lines here]\n>>>>>>> REPLACE\n"
-		}
-		if retryErrorMsg != "" {
-			currentInstruction += retryErrorMsg
-		}
-		if attempt >= 2 && s.worktree != nil {
-			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("Resetting worktree before retry attempt %d", attempt))
-			if errReset := s.worktree.ResetRoleWorktrees(ctx, s.rt.Task, frontendAgent, worktreeSuffix); errReset != nil {
-				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("failed to reset worktree: %v", errReset))
-				return nil, fmt.Errorf("worktree corrupted: failed to reset worktree: %w", errReset)
-			}
-		}
-		llmCtx := ctx
-		if attempt >= 2 {
-			llmCtx = prompts.WithRetry(llmCtx)
-		}
-		if attempt >= 3 {
-			llmCtx = prompts.WithSearchReplace(llmCtx)
-		}
-		out, err = s.llm.RunLLMStep(llmCtx, s.rt.Task, frontendAgent, s.rt.JobID, stepCtx.StepID, currentInstruction)
-		if err != nil {
-			return nil, err
-		}
-
-		retryNeeded := false
-		if parsed, ok := out["parsed"].(map[string]any); ok {
-			p := patch.ExtractPatch(parsed)
-			if p != "" && s.patcher != nil {
-				// Validate
-				validationErrs := s.patcher.Validate(ctx, s.rt.Task, p, worktreeSuffix)
-				if len(validationErrs) > 0 {
-					if attempt < maxRetries {
-						errMsg := ""
-						for _, ve := range validationErrs {
-							errMsg += "- " + ve.Error() + "\n"
-						}
-						retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed validation. Please fix the following errors:\n%s\nOutput the patch again.", errMsg)
-						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Patch validation failed (attempt %d/%d). Retrying...", attempt, maxRetries))
-						retryNeeded = true
-					} else {
-						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "Patch validation failed after max retries")
-						out["patch_apply_error"] = "Patch validation failed: " + validationErrs[0].Error()
-					}
-				} else {
-					// Validation passed, apply patch
-					if s.artifacts != nil {
-						_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, stepCtx.StepID, "patch", p)
-					}
-					if applyErr := s.patcher.ApplyPatch(ctx, s.rt.Task, frontendAgent, stepCtx.StepID, p, worktreeSuffix); applyErr != nil {
-						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to apply patch generated by LLM (attempt %d/%d): %v", attempt, maxRetries, applyErr))
-						
-						if pErr, ok := applyErr.(*patch.PolicyViolationError); ok {
-							if pErr.Severity == patch.SeverityCritical {
-								s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("CRITICAL Security Boundary Violation: %s. Pausing task for human review.", pErr.ErrorMsg))
-								return nil, fmt.Errorf("%w: %s", workflow.ErrPaused, pErr.ErrorMsg)
-							}
-							if attempt >= 2 {
-								s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("Repeated Execution Boundary Violation (attempt %d): %s. Pausing task.", attempt, pErr.ErrorMsg))
-								return nil, fmt.Errorf("%w: repeated boundary violations: %s", workflow.ErrPaused, pErr.ErrorMsg)
-							}
-
-							jsonErrBytes, _ := json.MarshalIndent(pErr, "", "  ")
-							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply due to an Execution Boundary Violation:\n```json\n%s\n```\nPlease regenerate your patch without modifying files outside the execution boundary.", string(jsonErrBytes))
-							retryNeeded = true
-							out["patch_apply_error"] = pErr.Error()
-							continue
-						}
-
-						out["patch_apply_error"] = applyErr.Error()
-						updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, applyErr)
-						if attempt < maxRetries {
-							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
-							InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
-							retryNeeded = true
-						} else {
-							s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", "Patch apply failed after max retries")
-							return nil, fmt.Errorf("failed to apply patch: %w", applyErr)
-						}
-					} else {
-						// Patch applied cleanly. Now let's run targeted tests to verify!
-						if s.tester != nil && s.diff != nil {
-							if repoHostPath, err := s.diff.GetTaskRepoHostPath(ctx, s.rt.Task); err == nil {
-								if changedFiles, diffErr := s.diff.GetChangedFiles(ctx, s.rt.Task, frontendAgent, repoHostPath, worktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
-									if _, errT := s.tester.RunTargetedTests(ctx, s.rt.Task, frontendAgent, s.rt.JobID, "code_frontend_test", changedFiles, worktreeSuffix); errT != nil {
-										s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("targeted tests failed (attempt %d/%d): %v", attempt, maxRetries, errT))
-										updateAffectedFilesWithErrors(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, errT)
-										if attempt < maxRetries {
-											retryErrorMsg = fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
-											InjectAffectedFilesContext(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, s.fileReader, &retryErrorMsg)
-											retryNeeded = true
-										} else {
-											s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", "Targeted tests failed after max retries")
-											return nil, fmt.Errorf("targeted tests failed: %w", errT)
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		if !retryNeeded {
-			break
-		}
+	out, _, err := runPatchRetryLoop(ctx, patchRetryConfig{
+		Task:           s.rt.Task,
+		Agent:          frontendAgent,
+		JobID:          s.rt.JobID,
+		StepID:         stepCtx.StepID,
+		WorktreeSuffix: worktreeSuffix,
+		TestLabel:      "code_frontend_test",
+		MaxRetries:     3,
+		Agentic:        true,
+		LLM:            s.llm,
+		Worktree:       s.worktree,
+		Patcher:        s.patcher,
+		Diff:           s.diff,
+		Artifacts:      s.artifacts,
+		Tester:         s.tester,
+		Tasks:          s.tasks,
+		Log:            s.log,
+	}, instruction)
+	if err != nil {
+		return nil, err
 	}
 	if s.diff != nil {
 		if diffText, diffErr := s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, frontendAgent, stepCtx.StepID, worktreeSuffix); diffErr == nil && diffText != "" {

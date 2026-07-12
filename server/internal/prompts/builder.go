@@ -398,7 +398,7 @@ func (a *PromptAssembler) resolveSkills(ctx context.Context, task models.Task, a
 }
 
 // collect gathers all prompt sections for the given task and agent.
-func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *models.Agent, tools []llm.ToolDefinition) ([]PromptSection, error) {
+func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *models.Agent, tools []llm.ToolDefinition, promptBudget int) ([]PromptSection, error) {
 	stepID := stepIDFromCtx(ctx)
 	var sections []PromptSection
 
@@ -714,6 +714,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 				snippets = snippets[:maxSnippets]
 			}
 			snippets = deduplicateSnippets(snippets)
+			if isCodingStep(stepID) || stepID == workflow.StepReview {
+				snippets = filterAffectedFileSnippets(snippets, analysis.AffectedFiles)
+			}
 			contextBlock = formatContextSnippets(snippets)
 			for _, s := range snippets {
 				activeFiles = append(activeFiles, s.Path)
@@ -734,6 +737,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 			snippets, err := a.ctxEngine.RetrieveContext(ctx, query, maxSnippets)
 			if err == nil {
 				snippets = deduplicateSnippets(snippets)
+				if isCodingStep(stepID) || stepID == workflow.StepReview {
+					snippets = filterAffectedFileSnippets(snippets, analysis.AffectedFiles)
+				}
 				contextBlock = formatContextSnippets(snippets)
 				for _, s := range snippets {
 					activeFiles = append(activeFiles, s.Path)
@@ -765,7 +771,7 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 			for _, sec := range sections {
 				usedTokens += sec.Tokens
 			}
-			maxMapTokens := 8192 - usedTokens
+			maxMapTokens := promptBudget - usedTokens
 			if maxMapTokens > 2048 {
 				maxMapTokens = 2048
 			} else if maxMapTokens < 256 {
@@ -1006,5 +1012,3 @@ func toolMetadata(name string) (category string, example string) {
 		return "other", `{}`
 	}
 }
-
-

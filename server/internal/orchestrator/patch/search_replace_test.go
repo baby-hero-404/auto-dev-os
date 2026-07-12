@@ -273,3 +273,58 @@ func TestApplySearchReplace_ValidationBubbling(t *testing.T) {
 		t.Errorf("Expected error to contain 'search block not found', got %q", err.Error())
 	}
 }
+
+func TestApplySearchReplace_EmptySearchOverwriteAndCreate(t *testing.T) {
+	dir := t.TempDir()
+
+	// Case 1: Existing file + empty search -> should overwrite content entirely
+	existingFilePath := "existing.txt"
+	existingFullPath := filepath.Join(dir, existingFilePath)
+	err := os.WriteFile(existingFullPath, []byte("original file content\n"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocks := []EditBlock{
+		{
+			Filepath: existingFilePath,
+			Search:   "",
+			Replace:  "new overwritten content\n",
+		},
+	}
+
+	err = ApplySearchReplace(blocks, dir)
+	if err != nil {
+		t.Fatalf("Failed to apply search_replace overwrite: %v", err)
+	}
+
+	content, _ := os.ReadFile(existingFullPath)
+	if string(content) != "new overwritten content\n" {
+		t.Errorf("Expected file to be overwritten, got %q", string(content))
+	}
+
+	// Case 2: Non-existent file + empty search -> should create the file with content
+	newFilePath := "newfile.txt"
+	newFullPath := filepath.Join(dir, newFilePath)
+
+	blocksNew := []EditBlock{
+		{
+			Filepath: newFilePath,
+			Search:   "",
+			Replace:  "created file content\n",
+		},
+	}
+
+	err = ApplySearchReplace(blocksNew, dir)
+	if err != nil {
+		t.Fatalf("Failed to apply search_replace create: %v", err)
+	}
+
+	newContent, err := os.ReadFile(newFullPath)
+	if err != nil {
+		t.Fatalf("Expected file to be created: %v", err)
+	}
+	if string(newContent) != "created file content\n" {
+		t.Errorf("Expected created file to have content %q, got %q", "created file content\n", string(newContent))
+	}
+}

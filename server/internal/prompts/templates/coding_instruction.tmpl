@@ -1,0 +1,27 @@
+{{.InstructionVerb}}{{if .RepoContext}} {{.RepoContext}}{{else}} Your diff paths MUST include the repository name prefix (e.g., --- a/repo-name/filepath).{{end}} DO NOT rewrite the entire file unless creating a new file. If a file in the affected list is marked '[NEW FILE — does not exist yet]', you MUST use the 'create_file' tool to create it. Do not use 'search_replace' with a non-empty search string on files that do not exist yet.
+
+{{if .PRFeedback}}
+Note: The previous PR was rejected. Address the following PR rejection feedback:
+
+{{.PRFeedback}}
+{{end}}
+
+{{if .Tree}}
+=== Repository Structure ===
+{{.Tree}}
+{{end}}
+
+{{if .AssignedSubtask}}
+## Your Assigned Subtask:
+{{.AssignedSubtask}}
+{{else if .AssignedSubtasks}}
+## Your Assigned Subtasks:
+{{range $index, $task := .AssignedSubtasks}}{{add $index 1}}. {{$task}}
+{{end}}
+{{end}}
+
+{{if .PriorFiles}}
+### Files Created/Modified by Prior Steps ###
+{{range .PriorFiles}}- {{.}}
+{{end}}
+{{end}}

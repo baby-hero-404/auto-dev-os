@@ -1,6 +1,6 @@
-# 5.8. PR & Human Review
+# 09. PR & Human Review
 
-**Status:** Implemented / Planned assistant enhancements  
+**Status:** 🟡 In Progress (implemented; AI PR assistant planned)  
 **Owner docs:** `docs/ARCHITECTURE.md`  
 **Code areas:** `server/internal/handler/pr.go`, `server/internal/orchestrator/steps/`, `server/internal/service/task.go`, `web/src/` PR/review UI  
 **Blocking decisions:** How much AI explanation should be generated automatically vs on reviewer request.  
@@ -94,7 +94,7 @@ Mỗi PR được tạo tự động theo template chuẩn:
 *   PR không conflict với target branch.
 *   Nếu `review_limit_exceeded: true` → reviewer phải explicitly acknowledge warning trước khi approve.
 
-> **PR ≠ Task hoàn thành.** Task ở trạng thái `pr_ready` cho đến khi reviewer approve. Chỉ sau merge thành công, task mới chuyển sang `merged` (hoàn thành). Xem chi tiết tại §5.7 Task Completion Policy.
+> **PR ≠ Task hoàn thành.** Task ở trạng thái `pr_ready` cho đến khi reviewer approve. Chỉ sau merge thành công, task mới chuyển sang `merged` (hoàn thành). Xem đầy đủ vòng đời tại §07 Task System — "Vòng Đời Task" (nguồn canonical).
 
 ---
 

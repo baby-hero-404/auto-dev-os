@@ -1,7 +1,7 @@
-# Feature 5.2b: Skill System (Git-Sync Architecture)
+# 03. Skill System (Git-Sync Architecture)
 
-**Status:** Active  
-**Owner docs:** `docs/features/5.2b-skill-system.md` (this file)  
+**Status:** 🟢 Implemented  
+**Owner docs:** `docs/features/product/03-skill-system.md` (this file)  
 **Code areas:** `server/pkg/models`, `server/internal/service/skill.go`, `server/internal/prompts`, `web/src/app/skills`
 
 ## 1. Tổng Quan & Tiêu Chí Nghiệm Thu (Acceptance Criteria)

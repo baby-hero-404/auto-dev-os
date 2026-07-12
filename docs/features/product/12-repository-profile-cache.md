@@ -1,8 +1,10 @@
-# 5.11. Repository Profile Cache (Bộ Nhớ Ngữ Cảnh Repository)
+# 12. Repository Profile Cache (Bộ Nhớ Ngữ Cảnh Repository)
 
-**Status:** Partially Implemented (cache load/generate in context_load, invalidation planned)  
-**Owner docs:** `docs/ARCHITECTURE.md`, `docs/features/5.7-workflow-engine.md`  
-**Code areas:** `server/internal/orchestrator/steps/context_load.go` (profile loading, generation, caching), `server/.data/repositories/<repo_hash>/profile.json` (cache storage)  
+**Status:** 🔵 Proposed (corrected 2026-07-12 — see audit note below; not "In Progress")  
+**Owner docs:** `docs/ARCHITECTURE.md`, `docs/features/product/08-workflow-engine.md`  
+**Code areas:** `server/internal/orchestrator/steps/context_load.go` (profile loading, generation, caching), `server/.data/repositories/<repo_hash>/profile.json` (cache storage — not yet built, see audit note)  
+
+> **Audit note (2026-07-12):** This exact mechanism (SHA-256-of-normalized-URL cache key, `server/.data/repositories/<repo_hash>/profile.json`, a "Profiling Agent" for missing `ARCHITECTURE.md`/`CONTRIBUTING.md`) does **not exist** in the codebase — this doc's design is entirely aspirational, not "cache load/generate implemented" as previously stated. What *does* exist is a different, unrelated caching system: an AST/semantic code-index cache at `server/.data/database/global_cache/global_cache_{repo_name}_{commit_hash}.db` (`context_load.go:88-134`, `context/provider/provider.go:472-490`), keyed by **repo name + git commit hash** (not a URL hash), used to pre-warm RAG/context retrieval — not to store an architecture/convention profile for repos missing docs. That system's commit-hash-keyed filenames also mean it already has invalidation "for free" (a new commit misses the cache and rebuilds), the opposite of this doc's claim that invalidation is the missing piece. Do not confuse the two when implementing this feature.
 **Acceptance criteria:**  
 1. Khi bước `Context Load` phát hiện thiếu tài liệu (`ARCHITECTURE.md`, `CONTRIBUTING.md`, quy chuẩn linter), hệ thống tự động khởi tạo Agent phân tích cấu trúc mã nguồn.
 2. Kết quả phân tích (cấu trúc thư mục, domain logic, convention mặc định) được lưu và cache bên ngoài tại thư mục của server (`server/.data/repositories/<repo_hash>/profile.json`).
@@ -13,7 +15,7 @@
 
 ## A. Tổng Quan & Mục Tiêu
 
-Để Agent viết code và phân tích yêu cầu chính xác, bước `Context Load` (§5.7 Step 0) cần nạp đầy đủ thông tin về cấu trúc thư mục, quy tắc thiết kế và coding conventions của mã nguồn hiện tại. 
+Để Agent viết code và phân tích yêu cầu chính xác, bước `Context Load` (§08 Step 0) cần nạp đầy đủ thông tin về cấu trúc thư mục, quy tắc thiết kế và coding conventions của mã nguồn hiện tại. 
 
 Tuy nhiên, phần lớn các repository mới hoặc chưa hoàn thiện tài liệu thường thiếu các tệp như `ARCHITECTURE.md` hay `.golangci.yml`. Để giải quyết vấn đề này mà không làm ảnh hưởng (gây ô nhiễm Git commit) đến repository gốc, hệ thống triển khai cơ chế **Repository Profile Cache**:
 

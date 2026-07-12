@@ -1,7 +1,7 @@
-# 5.7. Workflow Engine
+# 08. Workflow Engine
 
-**Status:** Implemented / Planned multi-agent expansion  
-**Owner docs:** `docs/ARCHITECTURE.md`; `docs/features/5.3-agent-system.md` for orchestration patterns  
+**Status:** 🟡 In Progress (implemented; multi-agent expansion planned)  
+**Owner docs:** `docs/ARCHITECTURE.md`; `docs/features/product/04-agent-system.md` for orchestration patterns  
 **Code areas:** `server/internal/workflow`, `server/internal/orchestrator`, `server/internal/sandbox`, `server/internal/gitops`  
 **Blocking decisions:** Durable workflow engine choice for future scale: keep current engine, Temporal, or LangGraph-style graph orchestration.  
 **Acceptance criteria:** Task can progress through context loading, analysis, planning, coding, review, fix, testing, PR creation, and human review with persisted workflow state and bounded review loops.
@@ -13,6 +13,8 @@
 ## Workflow Chạy Như Thế Nào?
 
 Khi một task được tạo, Workflow Engine sẽ tự động điều phối các Agent qua một chuỗi bước (DAG — Directed Acyclic Graph). Mỗi bước chỉ chạy khi các bước phụ thuộc đã hoàn thành:
+
+> **Audit note (2026-07-12):** Các "Step 0"–"Step 12" dưới đây là mô tả khái niệm (conceptual), không phải 13 node DAG cố định trong code. `server/internal/workflow/step.go` chỉ định nghĩa 10 `StepDefinition` (`context_load, analyze, plan, code_backend, code_frontend, merge, review, fix, test, pr`); code steps được mở rộng động (numeric suffix) cho công việc song song. "Human Gate" là một `workflow.PauseError` ném ra từ trong bước Analyze (`analyze.go`), không phải một node DAG riêng; "Human Final Review" và "Merge & Complete" cũng được xử lý bằng control flow ngoài DAG chứ không phải bước tường minh.
 
 ```
 Step 0: Nạp ngữ cảnh (Context Load)
@@ -202,16 +204,7 @@ Khi workflow dừng, toàn bộ trạng thái được lưu (checkpoint). Khi ti
 
 ## Task Completion Policy
 
-> **PR ≠ Task hoàn thành.**
-
-| Trạng thái | Ý nghĩa |
-|:-----------|:---------|
-| `pr_ready` | PR đã tạo, chờ human review. Task **chưa** hoàn thành. |
-| `human_review` | Con người đang review PR. |
-| `merged` | PR đã được merge. Task **hoàn thành**. |
-| `failed` | Task thất bại (reject, quá giới hạn retry, lỗi không recover). |
-
-Task chỉ chuyển sang `merged` (hoàn thành) khi: con người explicitly approve PR **và** merge thành công vào target branch.
+> **PR ≠ Task hoàn thành.** Workflow Engine chỉ tạo PR ở Step 10 — task vẫn giữ ở `pr_ready`/`human_review` cho đến khi con người approve **và** merge thành công. Xem đầy đủ 12 trạng thái vòng đời tại §07 Task System — "Vòng Đời Task" (nguồn canonical).
 
 ---
 
@@ -228,7 +221,7 @@ Task chỉ chuyển sang `merged` (hoàn thành) khi: con người explicitly ap
 *   **Review-fix limit:** Giới hạn số vòng lặp review → fix, cấu hình qua `max_review_fix_cycles` (mặc định: 3). Khi vượt giới hạn → skip fix, đẩy sang testing + đánh dấu cảnh báo.
 
 **Planned hardening:**
-*   **Notification:** Task `failed` → thông báo cho người tạo task qua Web UI (và chat nếu cấu hình §5.10).
+*   **Notification:** Task `failed` → thông báo cho người tạo task qua Web UI (và chat nếu cấu hình §11).
 *   **Timeout per step:** Giới hạn thời gian tối đa cho mỗi bước workflow, tránh treo vô hạn.
 
 ---

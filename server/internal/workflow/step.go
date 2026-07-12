@@ -153,6 +153,11 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 		}
 	}
 
+	idToIndex := make(map[string]int)
+	for i, u := range units {
+		idToIndex[u.ID] = i
+	}
+
 	var beIndex, feIndex int
 	var allStepIDs []string
 
@@ -178,8 +183,10 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 
 		var dependsOn []string
 		for _, dep := range unit.Dependencies {
-			if mapped, ok := idToStepID[dep]; ok {
-				dependsOn = append(dependsOn, mapped)
+			if depIdx, ok := idToIndex[dep]; ok && depIdx < idx {
+				if mapped, ok := idToStepID[dep]; ok {
+					dependsOn = append(dependsOn, mapped)
+				}
 			}
 		}
 

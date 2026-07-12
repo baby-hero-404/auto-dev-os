@@ -1,6 +1,6 @@
-# 5.1. Unified AI Gateway
+# 01. Unified AI Gateway
 
-**Status:** Partial Baseline / Planned Hardening  
+**Status:** 🟡 In Progress (baseline implemented; hardening planned)  
 **Owner docs:** `docs/ARCHITECTURE.md`  
 **Code areas:** `server/pkg/llm` (router, providers), `server/internal/service/credential_pool.go`, `server/internal/service/provider_model.go`, `web/src/` provider settings UI  
 **Blocking decisions:** Final REST API shape for credentials, frontend provider settings UX, audit-log coverage.  

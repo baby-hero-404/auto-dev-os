@@ -44,7 +44,7 @@ func TestOrchestrator_StepAnalyze(t *testing.T) {
 				AutonomyLevel: models.AgentAutonomyAutonomous,
 			},
 			llmResponses: map[string]string{
-				"": `{"complexity":"medium","primary_category":"backend","spec_status":"approved","clarification_questions":[],"affected_files":[],"execution_phases":[],"system_prompt":"mock","proposal_md":"## Proposal","specs_md":"## Specs","execution_boundaries":{"allowed":["."]},"acceptance_criteria":[{"id":"AC-1","expected":"ok"}],"required_skills":[],"required_skills_map":{},"execution_units":[]}`,
+				"": `{"complexity":"medium","primary_category":"backend","spec_status":"approved","clarification_questions":[],"affected_files":[],"execution_phases":[],"system_prompt":"mock","proposal_md":"## Proposal","specs_md":"## Specs","design_md":"## Design","execution_boundaries":{"allowed":["."]},"acceptance_criteria":[{"id":"AC-1","expected":"ok"}],"required_skills":[],"required_skills_map":{},"execution_units":[]}`,
 			},
 			assert: func(t *testing.T, task *models.Task, res map[string]any, err error, mockLLM *mockLLMProvider, runtime *mockAnalyzeSandboxRuntime) {
 				if err != nil {
@@ -144,7 +144,7 @@ func TestOrchestrator_StepAnalyze(t *testing.T) {
 				AutonomyLevel: models.AgentAutonomyAutonomous,
 			},
 			llmResponses: map[string]string{
-				"": `{"complexity":"hard","primary_category":"backend","scope":"test","affected_files":[],"risks":[],"risk_domains":[],"execution_phases":[],"clarification_questions":[],"required_skills":[],"required_skills_map":{},"execution_units":[],"proposal_md":"## P","specs_md":"## S","acceptance_criteria":[{"id":"AC-1","expected":"ok"}],"execution_boundaries":{"allowed":["src/"]}}`,
+				"": `{"complexity":"hard","primary_category":"backend","scope":"test","affected_files":[],"risks":[],"risk_domains":[],"execution_phases":[],"clarification_questions":[],"required_skills":[],"required_skills_map":{},"execution_units":[],"proposal_md":"## P","specs_md":"## S","design_md":"## D","acceptance_criteria":[{"id":"AC-1","expected":"ok"}],"execution_boundaries":{"allowed":["src/"]}}`,
 			},
 			assert: func(t *testing.T, task *models.Task, res map[string]any, err error, mockLLM *mockLLMProvider, runtime *mockAnalyzeSandboxRuntime) {
 				if err == nil {

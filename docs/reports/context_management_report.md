@@ -2,7 +2,7 @@
 snapshot_date: 2026-07-06
 scope: Context Management Engine Architectural Proposal
 confidence: High (Derived from conceptual analysis)
-status: Proposed (Mapping to docs/features/5.13-context-management.md)
+status: Implemented (Mapping to docs/features/engineering/01-context-management.md — audited 2026-07-12, already built)
 ---
 # AI Coding Agent Context Management MVP
 ### Go + Tree-sitter + Repository Map

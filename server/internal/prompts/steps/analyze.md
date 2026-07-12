@@ -83,8 +83,7 @@ The JSON object MUST have the following structure:
       "expected": "HTTP 201"
     }
   ],
-  "clarification_questions": ["questions", "if", "more", "details", "are", "needed.", "DO NOT ask questions that have already been answered in the Clarification section of the task description."],
-  "required_skills": ["legacy list of skill names required for this task"],
+  "clarification_questions": ["questions", "if", "more", "details", "are", "needed.", "DO NOT ask questions that have already been answered in the === Answers to Clarification Questions === section."],
   "required_skills_map": {
     "backend": ["list of skills for backend role, e.g. golang-best-practices, database-design"],
     "frontend": ["list of skills for frontend role, e.g. react-patterns, tailwind-patterns"],
@@ -169,3 +168,4 @@ You MUST structure the execution_units array following these strict guidelines:
    - `max_files`: Provide an accurate number of files modified/created (typically 1 to 4).
    - `max_risk`: Specify LOW, MEDIUM, or HIGH risk depending on the files changed (high risk for migrations, configs, major API exports).
    - `estimated_tokens`: Base it on the files involved (typically 4000-8000 tokens).
+6. **Required Skills Map**: For `required_skills_map`, you MUST strictly use the agent role names as keys (e.g., "backend", "frontend", "qa", "reviewer"). Do NOT use task names, numbers, or titles as keys. Every key in `required_skills_map` MUST be a standard role name.

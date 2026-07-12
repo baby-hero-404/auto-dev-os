@@ -1,17 +1,20 @@
-# Feature Specification: Execution Unit & Dynamic Scheduler DAG
+# 05. Execution Unit & Dynamic Scheduler DAG
 
-## 1. Overview
-Tài liệu này đặc tả cơ chế chuyển đổi kiến trúc từ việc sử dụng các "Phases" (nhóm task tĩnh, được phân loại dựa theo keyword heuristic) sang một mô hình **Execution Unit & Dynamic Scheduler DAG**. 
+**Status:** 🟢 Implemented (audited 2026-07-12: `ExecutionUnit`/`ExecutionProfile`/`ExecutionConstraints` in `pkg/models/task.go`, cost+cycle validation in `policy/scheduler_policy.go`, DAG scheduling wired via `workflow.DynamicDAGWorkflow` in `steps/plan.go` and `worker.go` — exceeds this doc's Phase 1-3 scope, e.g. adds automatic Analyze retry on validation failure)
+**Owner docs:** `docs/features/engineering/05-execution-unit-dag.md` (this file); `docs/features/product/08-workflow-engine.md` for how Plan fits the wider workflow
+**Code areas:** `server/internal/orchestrator/steps/plan.go`, `server/pkg/models` (`ExecutionUnit`, `ExecutionPhases`)
+
+**Mục tiêu:** Đặc tả cơ chế chuyển đổi kiến trúc từ việc sử dụng các "Phases" (nhóm task tĩnh, được phân loại dựa theo keyword heuristic) sang một mô hình **Execution Unit & Dynamic Scheduler DAG**.
 Trong mô hình này, kết quả của bước `Analyze` (OpenSpec) sẽ chứa các thông số siêu dữ liệu (metadata) chi tiết (bao gồm Role, Skill, Rủi ro, và Khối lượng công việc) để bước `Plan` đóng vai trò là một Runtime Scheduler thực thụ.
 
 ---
 
-## 2. Feature 1: Execution Profile & Constraints
+## 1. Feature 1: Execution Profile & Constraints
 
-### 2.1 Vấn đề
+### 1.1 Vấn đề
 Hệ thống hiện tại định nghĩa `ExecutionPhases` chỉ bao gồm tên phase và danh sách task. Bước `Plan` phải dùng kỹ thuật regex/keyword matching để đoán xem một Phase nên giao cho Agent Backend hay Frontend. Điều này rất "brittle" (dễ vỡ) và không hỗ trợ việc nạp kỹ năng (Skill JIT).
 
-### 2.2 Thiết kế Cơ chế
+### 1.2 Thiết kế Cơ chế
 - Đổi khái niệm `ExecutionPhase` thành **Execution Unit (Task DAG Node)**.
 - Bổ sung **Execution Profile**:
   - `agent`: Role trực tiếp đảm nhận (ví dụ: `backend`, `frontend`, `devops`).
@@ -44,12 +47,12 @@ Ví dụ cấu trúc JSON đầu ra của Analyze:
 
 ---
 
-## 3. Feature 2: Granularity Control & Phase Cost (Kiểm soát Độ mịn)
+## 2. Feature 2: Granularity Control & Phase Cost (Kiểm soát Độ mịn)
 
-### 3.1 Vấn đề
+### 2.1 Vấn đề
 LLM (Analyze Agent) đôi khi gộp quá nhiều thay đổi vào một Phase, gây hiện tượng tràn bộ nhớ Context (Token Bloat) khi Code Agent thực thi. Ngược lại, đôi khi LLM lại chia quá nhỏ từng file thành từng Phase, khiến hệ thống tốn thời gian chạy quá nhiều Agent.
 
-### 3.2 Thiết kế Cơ chế 2 Lớp (Two-Layer Validation)
+### 2.2 Thiết kế Cơ chế 2 Lớp (Two-Layer Validation)
 Việc kiểm soát được chia thành hai lớp: Lớp Prompts (Hướng dẫn AI) và Lớp Code Runtime (Hàng rào chặn).
 
 #### Lớp 1: Prompt Validation (Analyze Step)
@@ -73,7 +76,7 @@ Hệ thống Plan sẽ không còn đoán keyword nữa, mà trở thành một 
 
 ---
 
-## 4. Tóm lược Kiến trúc Mới
+## 3. Tóm lược Kiến trúc Mới
 Sự phân tách trách nhiệm (Separation of Concerns) giờ đây trở nên tuyệt đối:
 1. **Analyze (AI)**: Đóng vai trò là Kiến trúc sư (Architect), quyết định **"Làm cái gì"**, và "Yêu cầu ai (Agent nào) làm".
 2. **Plan (Core Engine)**: Đóng vai trò là Điều phối viên (Scheduler), quyết định **"Chạy như thế nào"**, kiểm tra vi phạm chính sách (Policy/Cost) và phân phối xuống các Sandbox.

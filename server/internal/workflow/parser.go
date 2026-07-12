@@ -7,7 +7,11 @@ import (
 var frontendSignals = []string{"frontend", "ui", "component", "page", "view", "style", "css", "layout", "giao diện", "giao dien"}
 var backendSignals = []string{"backend", "server", "api", "database", "db", "migration", "model", "service", "handler", "cơ sở dữ liệu", "co so du lieu"}
 
-func classifyHeading(heading string) string {
+// ClassifyHeading is the single source of truth for bucketing a TasksMD heading into
+// "frontend" or "backend". Any other code that needs to know which role a heading
+// belongs to (e.g. prompts.extractSpecsSectionForSubtask) must call this rather than
+// keep a separate keyword list, or the two classifications can drift apart (REQ-M01).
+func ClassifyHeading(heading string) string {
 	lower := strings.ToLower(heading)
 	for _, signal := range frontendSignals {
 		if strings.Contains(lower, signal) {
@@ -67,7 +71,7 @@ func ParseTasksMD(tasksMD string) map[string][]string {
 				sections = append(sections, *currentSection)
 			}
 			heading := strings.TrimPrefix(trimmed, "## ")
-			role := classifyHeading(heading)
+			role := ClassifyHeading(heading)
 			currentSection = &struct {
 				heading string
 				role    string
@@ -106,7 +110,7 @@ func ParseTasksMD(tasksMD string) map[string][]string {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "## ") {
 				heading := strings.ToLower(strings.TrimPrefix(trimmed, "## "))
-				currentRole = classifyHeading(heading)
+				currentRole = ClassifyHeading(heading)
 				continue
 			}
 			if isCheckboxLine(trimmed) && currentRole != "" {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -104,8 +105,24 @@ fi`,
 			paths.QuoteShellArg(userName),
 			paths.QuoteShellArg(userEmail),
 		)
-		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "commit_"+roleName, script, worktreeSuffix); err != nil {
-			return fmt.Errorf("failed to commit changes for repo %s: %w", repo.URL, err)
+		// commitSandbox failures are frequently transient (lock/IO contention in the sandbox);
+		// retry a few times before surfacing an error, since a failure here after a successful
+		// runPatchRetryLoop leaves the applied patch uncommitted and exposed to REQ-M04 data loss.
+		const maxCommitAttempts = 3
+		var lastErr error
+		for attempt := 1; attempt <= maxCommitAttempts; attempt++ {
+			if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "commit_"+roleName, script, worktreeSuffix); err != nil {
+				lastErr = err
+				if attempt < maxCommitAttempts {
+					time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+				}
+				continue
+			}
+			lastErr = nil
+			break
+		}
+		if lastErr != nil {
+			return fmt.Errorf("failed to commit changes for repo %s after %d attempts: %w", repo.URL, maxCommitAttempts, lastErr)
 		}
 	}
 	return nil
@@ -186,10 +203,21 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
 		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
 
+		// If a prior step's patch was applied but never committed (e.g. commitSandbox failed -
+		// REQ-M04), the dirty worktree state below is about to be discarded by checkout/reset/clean.
+		// Snapshot it onto a throwaway rescue branch first so the work is recoverable from git
+		// history rather than permanently lost, even though the active worktree still resets cleanly.
+		rescueBranch := fmt.Sprintf("rescue/%s-%d", task.ID, time.Now().UnixNano())
 		script := fmt.Sprintf(`set -e
+if [ -n "$(git -C %[1]s status --porcelain)" ]; then
+  git -C %[1]s add -A
+  git -C %[1]s commit -m "AutoCodeOS: rescue snapshot before checkpoint restore" -q --allow-empty
+  git -C %[1]s branch %[3]s
+  git -C %[1]s reset --hard HEAD~1
+fi
 git -C %[1]s checkout %[2]s
 git -C %[1]s reset --hard HEAD
-git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash))
+git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch))
 
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)

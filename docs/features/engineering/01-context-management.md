@@ -1,54 +1,51 @@
----
-description: Context Management Engine MVP
-owner: Auto Code OS Team
-code_areas: internal/context
----
-# Feature Specification: Context Management Engine
+# 01. Context Management Engine (Repository Map)
 
-## 1. Overview
-- **Feature Name:** Context Engine MVP (Repository Map)
-- **Status:** Planning / Proposed
-- **Primary Goal:** Cung cấp ngữ cảnh toàn cục (Global Context) của một dự án phần mềm cho LLM mà không làm tràn Context Window hoặc tiêu tốn token vô ích.
-- **Inspiration:** Aider's AST-based PageRank Repo Map.
-- **Language:** Go (Golang)
+**Status:** 🟢 Implemented (audited 2026-07-12: `server/internal/context/{source,parser,symbol,repomap,provider}/` all present, matching every module this doc describes)
+**Owner docs:** `docs/reports/context_management_report.md`
+**Code areas:** `server/internal/context/` (`source/`, `parser/`, `symbol/`, `repomap/`, `provider/`)
+**Inspiration:** Aider's AST-based PageRank Repo Map
 
-## 2. Core Problem
+**Mục tiêu:** Cung cấp ngữ cảnh toàn cục (Global Context) của một dự án phần mềm cho LLM mà không làm tràn Context Window hoặc tiêu tốn token vô ích.
+
+---
+
+## 1. Core Problem
 LLM không thể đọc toàn bộ codebase chứa hàng ngàn file. Gửi toàn bộ mã nguồn sẽ gây tràn RAM, ảo giác (hallucination) và tốn kém chi phí. 
 **Yêu cầu:** Hệ thống cần nén cấu trúc của toàn bộ dự án thành một "Bản đồ xương" (Skeleton Map) có kích thước dưới một ngưỡng token nhất định (ví dụ: 1024 tokens), nhưng vẫn đảm bảo chứa các file liên quan mật thiết nhất đến yêu cầu của người dùng.
 
-## 3. Core Capabilities (MVP Scope)
+## 2. Core Capabilities (MVP Scope)
 
 Tính năng này được chia thành 5 module cốt lõi hoạt động theo chuỗi (Pipeline):
 
-### 3.1. On-Demand Scanner & Cacher
+### 2.1. On-Demand Scanner & Cacher
 - Không dùng tiến trình chạy ngầm (No background watcher).
 - Khi có request, quét toàn bộ file trong project (bỏ qua `node_modules`, `.git`, v.v.).
 - Đọc `mtime` (thời gian sửa đổi cuối) của từng file.
 - **Cache Hit:** Nếu `mtime` không đổi -> Lấy dữ liệu AST từ SQLite Database.
 - **Cache Miss:** Nếu `mtime` thay đổi -> Đẩy qua Tree-sitter để parse lại.
 
-### 3.2. Tree-sitter Symbol Extractor
+### 2.2. Tree-sitter Symbol Extractor
 - Dùng các file truy vấn `.scm` để bóc tách 2 loại tag từ mã nguồn:
   - **`def` (Định nghĩa):** Tên class, struct, interface, function.
   - **`ref` (Lời gọi):** Những nơi mà các class/hàm đó được gọi tới.
 - Output: Danh sách các Symbols kèm theo vị trí dòng và tên file.
 
-### 3.3. MultiDiGraph & PageRank
+### 2.3. MultiDiGraph & PageRank
 - Khởi tạo đồ thị có hướng (Directed Graph) nối các file với nhau dựa trên dữ liệu `def` và `ref` thu được.
 - Trọng số cạnh (Edge weight) = $\sqrt{\text{số lần gọi}}$.
 - **Personalized PageRank:** Kích hoạt thuật toán PageRank để chấm điểm các file. Các file đang mở (Active workspace) hoặc được nhắc tên trong User Prompt (câu lệnh yêu cầu của người dùng) sẽ được cấp điểm khởi tạo cao (buff), từ đó lan truyền độ quan trọng ra các file phụ trợ xung quanh.
 
-### 3.4. Token Pruning (Cắt tỉa Token)
+### 2.4. Token Pruning (Cắt tỉa Token)
 - Sắp xếp các thẻ (Tags) theo điểm PageRank giảm dần.
 - Dùng **Tìm kiếm nhị phân (Binary Search)** để thử nghiệm cắt lấy Top N thẻ.
 - Render thử ra text và đếm Token (`tiktoken-go`). Lặp lại cho đến khi số lượng Token tiệm cận sát mức Token limit (vd: 1024 tokens) với biên độ sai số ~15%.
 
-### 3.5. AST Skeleton Renderer
+### 2.5. AST Skeleton Renderer
 - Lắp ráp các thẻ đã được chọn lọc lại thành dạng mã nguồn ảo.
 - In ra chữ ký hàm, tên class và cấu trúc thụt lề (indentation).
 - **Tuyệt đối ẩn đi thân hàm (function body)**.
 
-## 4. System Architecture (Go Layout)
+## 3. System Architecture (Go Layout)
 
 ```text
 internal/
@@ -70,7 +67,7 @@ internal/
             provider.go   # API kết nối với LLM Prompt Builder
 ```
 
-## 5. Acceptance Criteria (Tiêu chí nghiệm thu)
+## 4. Acceptance Criteria (Tiêu chí nghiệm thu)
 1. **Zero-overflow:** Hệ thống phải đảm bảo kết quả trả về không bao giờ vượt qua số token tối đa được cấu hình.
 2. **Deterministic Cache:** Việc quét lại một thư mục không có thay đổi mã nguồn phải trả về kết quả ngay lập tức (dưới 50ms nhờ SQLite Cache).
 3. **Graph Accuracy:** Nếu File A gọi hàm của File B, và File A đang được nhắc đến trong User Prompt, File B phải xuất hiện trong top đầu của Repo Map.
@@ -79,7 +76,7 @@ internal/
 6. **Lexer Fallback:** Với các ngôn ngữ không được Tree-sitter hỗ trợ, phải kích hoạt luồng fallback (dùng Regex/Lexer) để bắt tối thiểu các tên biến làm `ref` thay vì crash.
 7. **Cold Start Latency Budget:** Lần phân tích đầu tiên (Cache miss 100%) trên kho lưu trữ ~1,000 files không được vượt quá 10 giây (I/O bound).
 
-## 6. Dependencies
+## 5. Dependencies
 - `github.com/smacker/go-tree-sitter` (Bộ parse AST)
 - `github.com/mattn/go-sqlite3` (Lưu trữ Cache cục bộ)
 - `gonum.org/v1/gonum/graph` (Xử lý Đồ thị và PageRank)

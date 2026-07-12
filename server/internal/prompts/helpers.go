@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -189,26 +190,13 @@ func extractSpecsSectionForSubtask(specsMD, tasksMD string, subtaskIndex int, st
 	roleIdx := 0
 	headingNumber := ""
 
-	// frontendSignals and backendSignals (simplified for matching)
-	isRole := func(heading string, targetRole string) bool {
-		lower := strings.ToLower(heading)
-		if targetRole == "frontend" && (strings.Contains(lower, "frontend") || strings.Contains(lower, "ui") || strings.Contains(lower, "giao diện")) {
-			return true
-		}
-		if targetRole == "backend" && (strings.Contains(lower, "backend") || strings.Contains(lower, "server") || strings.Contains(lower, "api") || strings.Contains(lower, "database")) {
-			return true
-		}
-		// If it doesn't strongly match frontend, assume backend as default in the original parser
-		if targetRole == "backend" && !strings.Contains(lower, "frontend") && !strings.Contains(lower, "ui") && !strings.Contains(lower, "giao diện") {
-			return true
-		}
-		return false
-	}
-
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "## ") {
-			if isRole(trimmed, role) {
+			heading := strings.TrimPrefix(trimmed, "## ")
+			// Delegate to the same classifier ParseTasksMD uses (REQ-M01), so the index
+			// found here can never drift from the index used to bucket TasksMD by role.
+			if workflow.ClassifyHeading(heading) == role {
 				if roleIdx == subtaskIndex {
 					// Extract number from heading, e.g. "## 6. Thiết lập" -> "6"
 					re := regexp.MustCompile(`##\s*(\d+)[\.\s]`)

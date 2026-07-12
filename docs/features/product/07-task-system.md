@@ -1,6 +1,6 @@
-# 5.6. Task System
+# 07. Task System
 
-**Status:** ✅ Baseline Implemented / ⏳ Planned Integrations
+**Status:** 🟡 In Progress (baseline implemented; issue-tracker integrations planned)
 **Owner docs:** `docs/ARCHITECTURE.md`  
 **Code areas:** `server/internal/service/task.go`, `server/internal/repository`, `server/pkg/models`, `web/src/` task screens  
 **Blocking decisions:** External issue tracker priority: Jira, Linear, GitHub Issues, Notion.  
@@ -32,6 +32,7 @@ Bước 3: AI Phân Tích + Spec + Complexity
 Bước 4: Human Gate (có điều kiện)
    • Easy + Low-risk → auto-approve spec.
    • Easy + High-risk (auth, payment, data migration, security...) → DỪNG chờ con người.
+     (Danh sách đầy đủ risk domains: §08 Workflow Engine — "High-Risk Domains")
    • Medium/Hard → LUÔN dừng chờ con người review spec, plan, risks.
 
 Bước 5: AI Thực Thi → Test → PR
@@ -45,6 +46,8 @@ Bước 6: Con Người Duyệt & Merge
 ```
 
 ## Vòng Đời Task (12 Trạng Thái)
+
+> Bảng này là nguồn canonical cho toàn bộ vòng đời + chính sách hoàn thành task — được tham chiếu bởi §08 Workflow Engine ("Task Completion Policy") và §09 PR & Human Review thay vì lặp lại.
 
 ```
 todo → context_loading → analyzing → spec_review → coding ⟷ reviewing ⟷ fixing → testing → pr_ready → human_review → merged

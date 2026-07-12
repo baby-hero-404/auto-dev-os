@@ -127,6 +127,21 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 
 		instruction := "Fix review findings. Here is the current workspace diff:\n\n" + diffText + "\n\n"
 
+		var analysis models.TaskAnalysis
+		if len(s.rt.Task.Analysis) > 0 {
+			_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
+		}
+		if frozen := LoadFrozenContext(stepCtx, &analysis); frozen != nil {
+			if len(frozen.AcceptanceCriteria) > 0 {
+				acJSON, _ := json.MarshalIndent(frozen.AcceptanceCriteria, "", "  ")
+				instruction += "\n\nACCEPTANCE CRITERIA - Your fix MUST still satisfy these criteria:\n```json\n" + string(acJSON) + "\n```\n"
+			}
+			if len(frozen.ExecutionBoundaries) > 0 {
+				ebJSON, _ := json.MarshalIndent(frozen.ExecutionBoundaries, "", "  ")
+				instruction += "\n\nEXECUTION BOUNDARIES - Your fix MUST NOT violate these boundaries:\n```json\n" + string(ebJSON) + "\n```\n"
+			}
+		}
+
 		var findingsJSON string
 		if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
 			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {

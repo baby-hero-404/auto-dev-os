@@ -1,8 +1,8 @@
-# 5.9. Dashboard & Analytics
+# 10. Dashboard & Analytics
 
-**Status:** Implemented baseline / Planned observability expansion  
-**Owner docs:** `docs/ARCHITECTURE.md`; `docs/features/5.1-unified-ai-gateway.md` for gateway telemetry  
-**Code areas:** `server/internal/handler/analytics_dashboard`, `server/internal/service/analytics_dashboard`, `server/internal/handler/audit`, `web/src/` dashboard screens  
+**Status:** 🟡 In Progress (baseline implemented; observability expansion planned)  
+**Owner docs:** `docs/ARCHITECTURE.md`; `docs/features/product/01-unified-ai-gateway.md` for gateway telemetry  
+**Code areas:** `server/internal/handler/analytics_dashboard.go`, `server/internal/service/analytics_dashboard.go`, `server/internal/handler/audit.go`, `web/src/` dashboard screens  
 **Blocking decisions:** Langfuse/Helicone/OpenObserve integration depth vs custom telemetry only.  
 **Acceptance criteria:** Dashboard shows project/task/agent status and key metrics: success rate, retries, token usage, cost, latency, and failure reasons.
 
@@ -56,7 +56,7 @@ Mỗi sự kiện trong hệ thống được ghi lại đầy đủ:
 
 | Field | Ví dụ |
 |:------|:------|
-| `timestamp` | `2026-06-17T11:00:00Z` |
+| `created_at` | `2026-06-17T11:00:00Z` |
 | `user_id` | `user-123` (nếu do con người thao tác) |
 | `agent_id` | `agent-backend-01` (nếu do AI thao tác) |
 | `action` | `task.created`, `pr.approved`, `credential.rotated` |

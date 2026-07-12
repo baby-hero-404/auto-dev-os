@@ -589,7 +589,7 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 			for _, r := range rounds {
 				clarBuilder.WriteString(fmt.Sprintf("#### Round %d:\n%s\n\n", r.Round, r.Response))
 			}
-			sections = append(sections, NewPromptSection("Clarifications", clarBuilder.String(), 70, 20, false, "user"))
+			sections = append(sections, NewPromptSection("Clarifications", clarBuilder.String(), 70, 20, true, "user"))
 		}
 	}
 
@@ -597,9 +597,28 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 	if isReviewer {
 		// Strict Reviewer context (REQ-M02)
 		// Requirement (already added), AC, Coding Standards, Security Checklist, Performance Checklist, Diff
-		if analysis.SpecsMD != "" {
-			sections = append(sections, NewPromptSection("Acceptance Criteria", "=== Acceptance Criteria ===\n"+analysis.SpecsMD, 40, 30, false, "user"))
+		var reviewContextBuilder strings.Builder
+		if len(analysis.AcceptanceCriteria) > 0 {
+			reviewContextBuilder.WriteString("=== Acceptance Criteria ===\n```json\n")
+			acJSON, _ := json.MarshalIndent(analysis.AcceptanceCriteria, "", "  ")
+			reviewContextBuilder.WriteString(string(acJSON))
+			reviewContextBuilder.WriteString("\n```\n\n")
+		} else if analysis.SpecsMD != "" {
+			reviewContextBuilder.WriteString("=== Acceptance Criteria ===\n")
+			reviewContextBuilder.WriteString(analysis.SpecsMD)
+			reviewContextBuilder.WriteString("\n\n")
 		}
+
+		if len(analysis.ExecutionBoundaries) > 0 {
+			reviewContextBuilder.WriteString("=== Execution Boundaries ===\n")
+			boundJSON, _ := json.MarshalIndent(analysis.ExecutionBoundaries, "", "  ")
+			reviewContextBuilder.WriteString("```json\n" + string(boundJSON) + "\n```\n")
+		}
+
+		if reviewContextBuilder.Len() > 0 {
+			sections = append(sections, NewPromptSection("Execution Contract", reviewContextBuilder.String(), 40, 30, false, "user"))
+		}
+
 		// Diff: construct from memories or task description if no git provider
 		if task.Description != "" && strings.Contains(strings.ToLower(task.Description), "diff") {
 			sections = append(sections, NewPromptSection("Git Diff", "=== Diff ===\n"+task.Description, 40, 35, false, "user"))
@@ -642,6 +661,16 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 					if len(analysis.Tasks) > 0 {
 						manifest["tasks"] = analysis.Tasks
 					}
+					// StepFix has no subtask index (unlike code_backend/code_frontend), so it never
+					// receives AC/EB via extractSpecsSectionForSubtask either - include them here (REQ-M05).
+					if stepID == workflow.StepFix {
+						if len(analysis.AcceptanceCriteria) > 0 {
+							manifest["acceptance_criteria"] = analysis.AcceptanceCriteria
+						}
+						if len(analysis.ExecutionBoundaries) > 0 {
+							manifest["execution_boundaries"] = analysis.ExecutionBoundaries
+						}
+					}
 					manifestJSON, _ = json.MarshalIndent(manifest, "", "  ")
 				} else {
 					manifest := map[string]any{
@@ -667,7 +696,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 				}
 
 				if len(manifestJSON) > 0 {
-					sections = append(sections, NewPromptSection("Execution Manifest", "## Execution Manifest (JSON):\n```json\n"+string(manifestJSON)+"\n```\n\n", 40, 35, false, "user"))
+					// IsImmutable=true: this is the execution contract (affected files, tasks, acceptance
+					// criteria, boundaries) and must survive optimizeBudget's pruning (REQ-M02).
+					sections = append(sections, NewPromptSection("Execution Manifest", "## Execution Manifest (JSON):\n```json\n"+string(manifestJSON)+"\n```\n\n", 40, 35, true, "user"))
 				}
 			}
 		}

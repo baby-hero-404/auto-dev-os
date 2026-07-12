@@ -365,13 +365,33 @@ func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Mess
 		if _, ok := parsedJSON["specs_md"].(string); !ok {
 			missingFields = append(missingFields, "specs_md")
 		}
+		if _, ok := parsedJSON["design_md"].(string); !ok {
+			missingFields = append(missingFields, "design_md")
+		}
 		if _, ok := parsedJSON["execution_units"].([]any); !ok {
 			missingFields = append(missingFields, "execution_units")
 		}
-		if _, ok := parsedJSON["required_skills"].([]any); !ok {
-			missingFields = append(missingFields, "required_skills")
-		}
-		if _, ok := parsedJSON["required_skills_map"].(map[string]any); !ok {
+		if _, ok := parsedJSON["required_skills_map"].(map[string]any); ok {
+			validRoles := map[string]bool{
+				"planner":              true,
+				"backend":              true,
+				"frontend":             true,
+				"reviewer":             true,
+				"qa":                   true,
+				"security-auditor":     true,
+				"db-architect":         true,
+				"documentation-writer": true,
+			}
+			var invalidKeys []string
+			for k := range parsedJSON["required_skills_map"].(map[string]any) {
+				if !validRoles[strings.ToLower(k)] {
+					invalidKeys = append(invalidKeys, k)
+				}
+			}
+			if len(invalidKeys) > 0 {
+				missingFields = append(missingFields, fmt.Sprintf("required_skills_map (keys must strictly be role names, e.g., backend, frontend, qa, reviewer, devops, but got: %v)", invalidKeys))
+			}
+		} else {
 			missingFields = append(missingFields, "required_skills_map")
 		}
 

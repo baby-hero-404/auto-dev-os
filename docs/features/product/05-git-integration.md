@@ -1,6 +1,6 @@
-# 5.4. Git Integration
+# 05. Git Integration
 
-**Status:** Implemented  
+**Status:** 🟢 Implemented  
 **Owner docs:** `docs/ARCHITECTURE.md`  
 **Code areas:** `server/internal/gitops`, `server/internal/workflow`, `server/internal/orchestrator`, `web/`  
 **Blocking decisions:** GitLab/Bitbucket/Gitea priority order.  
@@ -32,7 +32,7 @@
 
 6. Push lên branch mới
    • Single agent:  feature/{task_id}
-   • Parallel agents (§5.7 ownership):
+   • Parallel agents (§08 ownership):
      - Backend: feature/{task_id}-be
      - Frontend: feature/{task_id}-fe
      - Integration: feature/{task_id} (merge BE + FE vào đây trước PR)
@@ -40,7 +40,7 @@
 7. Tạo Pull Request
    ├── Tiêu đề: "AutoCodeOS: {task.title}"
    ├── PR URL được lưu → Task chuyển sang pr_ready (chưa hoàn thành)
-   └── Task chỉ hoàn thành sau khi human approve + merge (§5.7)
+   └── Task chỉ hoàn thành sau khi human approve + merge (§08)
 ```
 
 ## Credential Resolution (3 lớp ưu tiên)

@@ -133,16 +133,4 @@ Verify your changes using the following targets:
 ---
 
 ## 📝 Features & Architecture References
-Refer to the following feature logs under `docs/features/` to understand component specifications:
-*   [5.1: Unified AI Gateway](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.1-unified-ai-gateway.md)
-*   [5.2a: Rule System](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.2a-rule-system.md)
-*   [5.2b: Skill System](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.2b-skill-system.md)
-*   [5.3: Agent System](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.3-agent-system.md)
-*   [5.4: Git Integration](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.4-git-integration.md)
-*   [5.5: Project System](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.5-project-system.md)
-*   [5.6: Task System](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.6-task-system.md)
-*   [5.7: Workflow Engine](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.7-workflow-engine.md)
-*   [5.8: PR Human Review](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.8-pr-human-review.md)
-*   [5.9: Dashboard Analytics](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.9-dashboard-analytics.md)
-*   [5.10: Multi-Channel Interaction](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.10-multi-channel-interaction.md)
-*   [5.12: Patch Engine Abstraction](file:///home/ubuntu/my_projects/auto_code_os/docs/features/5.12-patch-engine-abstraction.md)
+Component specifications live under `docs/features/`, organized as product features, engineering RFCs, and hardening plans — see the full index (with status legend) at [`docs/features/README.md`](docs/features/README.md).

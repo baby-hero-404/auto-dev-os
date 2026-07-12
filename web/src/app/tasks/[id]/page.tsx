@@ -18,10 +18,22 @@ export default function TaskRedirectPage({ params }: { params: Promise<{ id: str
   );
 
   useEffect(() => {
+    if (!session) {
+      router.replace("/");
+      return;
+    }
     if (workflow?.task?.project_id) {
       router.replace(`/projects/${workflow.task.project_id}/tasks/${taskID}`);
     }
-  }, [workflow, taskID, router]);
+  }, [workflow, taskID, router, session]);
+
+  if (!session) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-950 font-mono text-sm text-slate-400">
+        Redirecting to login...
+      </div>
+    );
+  }
 
   return (
     <div className="grid min-h-screen place-items-center bg-slate-950 font-mono text-sm text-slate-400">

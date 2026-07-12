@@ -1,6 +1,6 @@
-# 5.10. Multi-Channel Interaction (Remote Coding Sessions)
+# 11. Multi-Channel Interaction (Remote Coding Sessions)
 
-**Status:** 🔜 Coming Soon — Deferred until core features stabilize.  
+**Status:** ⚪ Deferred (until core features stabilize)  
 **Owner docs:** Create a dedicated plan before implementation.  
 **Code areas:** `server/internal/handler`, `server/internal/service`, future integrations for Discord/Telegram/Slack  
 **Blocking decisions:** First channel to support, auth model for chat commands, approval semantics for remote actions.  

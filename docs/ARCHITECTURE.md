@@ -65,7 +65,7 @@ auto_code_os/
 ├── docs/                   # Documentation
 │   ├── ARCHITECTURE.md     # This file
 │   ├── ROADMAP.md          # Full product roadmap
-│   ├── features/           # Feature-specific documentation (§5.1-§5.11)
+│   ├── features/           # Feature-specific documentation (product/01-13, engineering/01-05, hardening/01)
 │   └── references/         # Learning reports & external project analysis
 │
 ├── references/              # Open-source reference projects (git cloned)
@@ -159,7 +159,7 @@ auto_code_os/
 
 ## 4.1 Task Lifecycle — Complexity & Risk-based Branching
 
-> Aligns with the SDLC workflow in `docs/ROADMAP.md` §2 and `docs/features/5.7-workflow-engine.md`.
+> Aligns with the SDLC workflow in `docs/ROADMAP.md` §2 and `docs/features/product/08-workflow-engine.md`.
 
 ```
                     ┌─────────────────────┐

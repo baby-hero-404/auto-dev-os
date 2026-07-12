@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -100,5 +101,51 @@ The sync must do Y.
 	section2 := extractSpecsSectionForSubtask(specsMD, tasksMD, 1, "code_backend_1")
 	if !strings.Contains(section2, "2. Sync") || strings.Contains(section2, "1. Init") {
 		t.Errorf("Expected section 2, got %q", section2)
+	}
+}
+
+// TestExtractSpecsSectionForSubtask_ClassificationMatchesParseTasksMD guards against the
+// isRole/classifyHeading drift from REQ-M01: a heading like "Build Login Page" is bucketed
+// as frontend by ParseTasksMD (via the "page" signal) but the old local isRole closure in
+// extractSpecsSectionForSubtask didn't recognize "page" and defaulted it to backend,
+// desynchronizing the backend heading index from the one ParseTasksMD actually used.
+func TestExtractSpecsSectionForSubtask_ClassificationMatchesParseTasksMD(t *testing.T) {
+	tasksMD := `
+## 1. Setup Database Handler
+- [ ] Task 1
+## 2. Build Login Page
+- [ ] Task 2
+## 3. Create API Endpoint
+- [ ] Task 3
+`
+	specsMD := `
+## ADDED Requirements
+### Requirement: 1. Setup Database Handler
+Backend subtask one.
+### Requirement: 2. Build Login Page
+Frontend subtask.
+### Requirement: 3. Create API Endpoint
+Backend subtask two.
+`
+
+	subtasks := workflow.ParseTasksMD(tasksMD)
+	if len(subtasks["backend"]) != 2 || len(subtasks["frontend"]) != 1 {
+		t.Fatalf("expected ParseTasksMD to bucket 2 backend + 1 frontend, got backend=%d frontend=%d", len(subtasks["backend"]), len(subtasks["frontend"]))
+	}
+
+	// The 2nd backend subtask (index 1) is "Create API Endpoint" (heading #3), NOT
+	// "Build Login Page" (heading #2), which belongs to frontend.
+	section := extractSpecsSectionForSubtask(specsMD, tasksMD, 1, "code_backend_1")
+	if !strings.Contains(section, "3. Create API Endpoint") {
+		t.Errorf("expected 2nd backend subtask to resolve to heading 3, got %q", section)
+	}
+	if strings.Contains(section, "2. Build Login Page") {
+		t.Errorf("backend subtask incorrectly matched the frontend-classified heading: %q", section)
+	}
+
+	// The 1st frontend subtask (index 0) is "Build Login Page" (heading #2).
+	feSection := extractSpecsSectionForSubtask(specsMD, tasksMD, 0, "code_frontend_0")
+	if !strings.Contains(feSection, "2. Build Login Page") {
+		t.Errorf("expected 1st frontend subtask to resolve to heading 2, got %q", feSection)
 	}
 }

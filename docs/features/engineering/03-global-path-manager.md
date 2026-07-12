@@ -1,18 +1,21 @@
-# Feature Specification: Global Path Management System
+# 03. Global Path Management System
 
-## 1. Overview
-Tài liệu này đặc tả cơ chế quản lý đường dẫn (Path Management) toàn cục dành cho Auto Code OS theo chuẩn **Domain-Driven Design (DDD)**.
+**Status:** 🟢 Implemented (audited 2026-07-12: `server/pkg/paths/{types,fs,interfaces,registry,testing}.go` all present, matching this doc's design; the Phase 2 backward-compat deprecation wrapper was skipped rather than left as a shim, otherwise built as specified)
+**Owner docs:** `docs/features/engineering/03-global-path-manager.md` (this file)
+**Code areas:** `server/pkg/paths` (`PathManager`, `PathRegistry`, `Directory`/`File` value objects)
+
+**Mục tiêu:** Đặc tả cơ chế quản lý đường dẫn (Path Management) toàn cục dành cho Auto Code OS theo chuẩn **Domain-Driven Design (DDD)**.
 Hệ thống giải quyết triệt để vấn đề "God Object" và "Service Locator", thay thế việc thao tác chuỗi (raw strings) bằng các **Pure Value Object** bất biến (`Directory`, `File`), đồng thời cách ly hoàn toàn các side-effect của hệ điều hành vào một Interface `FileSystem` để đảm bảo khả năng Unit Test thuần túy trên RAM (`fstest.MapFS`).
 
 ---
 
-## 2. Feature 1: Immutable Semantic Value Objects & Interface Segregation
+## 1. Feature 1: Immutable Semantic Value Objects & Interface Segregation
 
-### 2.1 Vấn đề
+### 1.1 Vấn đề
 Hệ thống hiện tại truyền đường dẫn dưới dạng chuỗi (string) như `DataRoot`, `WorkspaceRoot` lơ lửng khắp nơi. Các lập trình viên thường xuyên sử dụng `filepath.Join` thủ công, dẫn đến dễ sai sót, lộn xộn giữa File và Directory, cũng như dính lỗi bảo mật Directory Traversal (chui ra khỏi thư mục gốc bằng `../../`). 
 Đồng thời, việc nhét tất cả các Domain (Workspace, Prompt, Skill, Log) vào chung một Object `Manager` khổng lồ gây ra hiệu ứng "God Object", vi phạm nguyên lý Interface Segregation Principle (ISP).
 
-### 2.2 Thiết kế Cơ chế
+### 1.2 Thiết kế Cơ chế
 - **Value Objects Bất biến (Immutable):**
   - Định nghĩa các kiểu dữ liệu ngữ nghĩa rõ ràng: `Directory` và `File`. Các object này là bất biến (immutable), không chứa con trỏ, và không bao giờ tự thay đổi trạng thái.
   - Ví dụ: `RolePrompt(role string)` sẽ trả về một `File`, còn `TaskRoot(taskID string)` trả về `Directory`. Không dùng chung chung.
@@ -24,12 +27,12 @@ Hệ thống hiện tại truyền đường dẫn dưới dạng chuỗi (strin
 
 ---
 
-## 3. Feature 2: Side-Effect Decoupling (FileSystem Abstraction)
+## 2. Feature 2: Side-Effect Decoupling (FileSystem Abstraction)
 
-### 3.1 Vấn đề
+### 2.1 Vấn đề
 Trước đây, cấu trúc thư mục tự thân nó gọi thẳng tới OS (`os.MkdirAll`, `os.Stat` nằm bên trong hàm của `PathManager`). Việc mix (trộn lẫn) giữa Value Object và I/O Operation vi phạm nguyên tắc DDD. Khủng khiếp hơn, điều này bắt buộc các Unit Test (Scheduler, Worker) phải tạo ra file/folder thật trên ổ cứng để chạy, khiến việc test chậm chạp và dễ đụng độ nhau (Race Condition).
 
-### 3.2 Thiết kế Cơ chế
+### 2.2 Thiết kế Cơ chế
 - **FileSystem Interface:**
   - Định nghĩa một Interface `FileSystem` chịu trách nhiệm duy nhất về side-effects:
     ```go
@@ -46,7 +49,7 @@ Trước đây, cấu trúc thư mục tự thân nó gọi thẳng tới OS (`o
 
 ---
 
-## 4. Lộ trình Triển khai (Implementation Phasing)
+## 3. Lộ trình Triển khai (Implementation Phasing)
 
 - **Phase 1: Định nghĩa Lõi Hệ Thống (Introduce)**
   - Viết code cho package `pkg/paths`, bao gồm `types.go` (chứa `Directory`, `File`), `fs.go` (chứa `FileSystem`), và `interfaces.go`.

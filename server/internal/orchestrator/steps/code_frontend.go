@@ -263,17 +263,19 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 					}
 				}
 				if taskIdx >= 0 && taskIdx < len(feTasks) {
-					taskText := feTasks[taskIdx].(string)
-
-					err := updateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
-						if updatedTasksMD, ok := updateTaskSubtaskMarkdown(analysis.TasksMD, taskText); ok {
-							analysis.TasksMD = updatedTasksMD
-							return true
+					if taskText, ok := feTasks[taskIdx].(string); ok {
+						err := updateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
+							if updatedTasksMD, ok := updateTaskSubtaskMarkdown(analysis.TasksMD, taskText); ok {
+								analysis.TasksMD = updatedTasksMD
+								return true
+							}
+							return false
+						})
+						if err != nil {
+							s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to update tasks_md status: %v", err))
 						}
-						return false
-					})
-					if err != nil {
-						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to update tasks_md status: %v", err))
+					} else {
+						s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("plan subtask at index %d is not a string, skipping tasks_md update", taskIdx))
 					}
 				}
 			}

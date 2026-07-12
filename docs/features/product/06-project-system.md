@@ -1,8 +1,8 @@
-# 5.5. Project System
+# 06. Project System
 
-**Status:** Implemented (AI Defaults, Rules/Skills Isolation) / Planned enhancements (RAG Knowledge Base, Members)  
+**Status:** 🟡 In Progress (AI defaults + rules/skills isolation implemented; RAG knowledge base + members planned)  
 **Owner docs:** `docs/ARCHITECTURE.md`  
-**Code areas:** `server/internal/service/project`, `server/internal/repository`, `server/pkg/models`, `web/src/` project screens  
+**Code areas:** `server/internal/service/project.go`, `server/internal/repository`, `server/pkg/models`, `web/src/` project screens  
 **Blocking decisions:** RAG integration scope for Knowledge Base.  
 **Acceptance criteria:** (Target Achieved) Project contains shared configuration, rules/skills (isolated on disk), knowledge base folder, and AI workflow defaults.
 
@@ -16,7 +16,7 @@ Hiện tại, Project là trung tâm quản lý AI development thực thụ:
 
 ```
 Project
- ├── Repositories[]          — Git repos liên kết (§5.4)
+ ├── Repositories[]          — Git repos liên kết (§05)
  ├── Rules[]                 — Project-specific rules (cô lập trên đĩa)
  ├── Skills[]                — Project-specific skills (cô lập trên đĩa)
  ├── Knowledge Base          — Thư mục `docs/` của dự án
@@ -29,7 +29,7 @@ Project
 ```
 1. Tạo Project → Nhập tên, mô tả.
 
-2. Cấu hình Git → Gắn Repository, chọn Git Account + default branch (§5.4)
+2. Cấu hình Git → Gắn Repository, chọn Git Account + default branch (§05)
 
 3. Cấu hình AI Defaults → Điều chỉnh trong mục "Project Settings" (xem bảng bên dưới)
 
@@ -46,9 +46,9 @@ Cấu hình mặc định cho tất cả task trong project (task có thể over
 |:--------|:---------|:------|
 | `default_model_level` | `balanced` | Model Level mặc định cho Agent Planner |
 | `default_autonomy` | `supervised` | Mức tự chủ mặc định của Agent |
-| `auto_review_policy` | `complexity_based` | Easy tasks can auto-approve spec; high-risk files/domains still force human review regardless of complexity (§5.7) |
+| `auto_review_policy` | `complexity_based` | Easy tasks can auto-approve spec; high-risk files/domains still force human review regardless of complexity (§08) |
 | `max_retries` | `3` | Số lần retry tối đa trước khi task chuyển `failed` |
-| `max_review_fix_cycles` | `3` | Số vòng lặp Review → Fix → Re-review tối đa. Khi vượt quá → skip fix, đẩy sang testing + cảnh báo (§5.7) |
+| `max_review_fix_cycles` | `3` | Số vòng lặp Review → Fix → Re-review tối đa. Khi vượt quá → skip fix, đẩy sang testing + cảnh báo (§08) |
 | `default_branch` | `main` | Branch mặc định để tạo PR target |
 
 ## D. Knowledge Base (Partially Implemented)

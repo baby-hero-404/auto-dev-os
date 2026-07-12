@@ -1,6 +1,6 @@
-# 5.12. Patch Engine Abstraction
+# 13. Patch Engine Abstraction
 
-**Status:** Implemented  
+**Status:** 🟢 Implemented  
 **Owner docs:** `docs/ARCHITECTURE.md`  
 **Code areas:** `server/internal/orchestrator/patch/` (engine, applier, validator, search_replace, helpers, types)  
 **Acceptance criteria:**

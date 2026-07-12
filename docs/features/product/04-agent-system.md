@@ -1,7 +1,7 @@
-# 5.3. Agent System (Role-Based Capability Agents)
+# 04. Agent System (Role-Based Capability Agents)
 
-**Status:** Implemented baseline / Next hardening  
-**Owner docs:** `docs/features/5.3-agent-system.md` (this file); `docs/ARCHITECTURE.md`  
+**Status:** 🟡 In Progress (baseline implemented; hardening planned)  
+**Owner docs:** `docs/features/product/04-agent-system.md` (this file); `docs/ARCHITECTURE.md`  
 **Code areas:** `server/pkg/models/agent.go`, `server/internal/repository/agent.go`, `server/internal/service/agent.go`, `server/internal/orchestrator`, `web/src/` agent CRUD UI  
 **Blocking decisions:** Whether migration drops legacy agent rows or backfills; default role template set.  
 **Acceptance criteria:** Agent config uses Role, Goal, Context Config, Autonomy Level, and Model Level Group. (Baseline) Orchestrator filters tools based on agent roles. (Target) Orchestrator only exposes tools from skills dynamically loaded by Agent Planner via JIT Loading.
@@ -34,7 +34,7 @@ Mỗi Agent được định nghĩa bởi 5 tham số cốt lõi:
 | **Context Config** | Giới hạn context | `{"max_input_tokens": 100000, "rag_sources": ["codebase", "docs"]}` |
 | **Autonomy Level** | Mức tự chủ | `autonomous` / `supervised` / `approval_required` |
 
-> **Nguyên tắc quan trọng (Planned Target):** Agent **không** được gắn chặt với danh sách skill cụ thể. Thay vào đó, **Agent Planner** phân tích task → chọn model level → nạp skill cần thiết qua JIT Loading (§5.2b) cho mỗi sub-task. Hiện tại (Baseline), hệ thống lọc công cụ dựa trên static role-based tool templates của Agent.
+> **Nguyên tắc quan trọng (Planned Target):** Agent **không** được gắn chặt với danh sách skill cụ thể. Thay vào đó, **Agent Planner** phân tích task → chọn model level → nạp skill cần thiết qua JIT Loading (§03) cho mỗi sub-task. Hiện tại (Baseline), hệ thống lọc công cụ dựa trên static role-based tool templates của Agent.
 
 ## B. Orchestration Patterns (Multi-Agent)
 
@@ -49,32 +49,20 @@ Orchestrator hỗ trợ các mẫu phối hợp đa Agent sau:
 | **Group Chat** | Nhiều Agent tranh luận tìm giải pháp | *Planned Target* |
 | **Cross-Harness Review** | 2+ Agent kiểm tra chéo code lẫn nhau | *Planned Target* |
 
-**Luồng điều phối theo complexity hiện tại:**
-```
-Task nhận vào → Context Load (checkout repo, đọc conventions, CI config)
-  → Analyze + Spec + Complexity + Risk Assessment
-  │
-  ├── Easy + Low-risk  → Auto-approve spec → Sequential (1 agent)
-  ├── Easy + High-risk → Human Gate → Sequential (1 agent)
-  ├── Medium           → Human Gate → Fan-out (BE + FE trên branch riêng) + Reviewer
-  └── Hard             → Human Gate → Fan-out + Cross-Harness Review + Reviewer
-  │
-  → Mỗi Agent chạy trong Sandbox cách ly, branch riêng nếu song song
-  → Merge integration branch → Agent Review → Fix (bounded: max N vòng)
-  → Full test + lint + build → Tạo PR (pr_ready)
-  → Human Final Review → Merge (task hoàn thành)
-```
+Việc pattern nào (Sequential/Fan-out) được chọn cho từng task phụ thuộc vào complexity (Easy/Medium/Hard) và risk assessment — xem bảng đầy đủ tại §08 Workflow Engine — "Workflow Thay Đổi Theo Độ Phức Tạp" và sơ đồ "Parallel Coding & Ownership" (nguồn canonical cho luồng điều phối theo step).
 
 ## C. Agent Assignment & Gateway Integration
 
-*   **Model routing:** Agent chỉ cần chọn Level (Fast/Balanced/Powerful). Gateway resolve model cụ thể (§5.1).
+*   **Model routing:** Agent chỉ cần chọn Level (Fast/Balanced/Powerful). Gateway resolve model cụ thể (§01).
 *   **Assignment Strategy:**
     *   **Auto-Join:** Agent tự động tham gia tất cả project trong Organization.
     *   **Manual Add:** Agent chỉ tham gia project khi được chỉ định.
 
 ## D. Self-Improving Learning Loop
 
-Agent có khả năng tự cải thiện qua vòng lặp học tập:
+> **Audit note (2026-07-12):** Đây là *Planned Target*, không phải hành vi hiện tại. `server/pkg/models/skill.go` chưa có status field, và không có `DRAFT`/`ACTIVE` constant nào trong codebase — cơ chế Skill Extraction → Human Gate → Promote mô tả dưới đây chưa tồn tại. Cái đã có (`server/internal/orchestrator/learning/`) là confidence scoring + rule/prompt-patch suggestions, khác với "trích xuất skill mới" như mô tả.
+
+Agent có khả năng tự cải thiện qua vòng lặp học tập (Planned Target):
 
 1.  **Task thành công** → hệ thống verify success criteria (test pass, review approved).
 2.  **Skill Extraction** → Trích xuất các bước thực hiện thành Skill mới ở trạng thái `DRAFT`.
@@ -84,7 +72,7 @@ Agent có khả năng tự cải thiện qua vòng lặp học tập:
 
 ## E. Quy Tắc Bắt Buộc
 
-*   Agent phải tuân thủ Rule System (§5.2a).
+*   Agent phải tuân thủ Rule System (§02).
 *   Backend validate chặt khi tạo Agent: reject provider không hợp lệ, role không nằm trong allowlist.
 *   Tách biệt `model_route` (input config) và `resolved_model` (chỉ dùng cho telemetry).
 

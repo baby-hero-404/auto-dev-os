@@ -1,8 +1,8 @@
-# 5.2a. Rule System
+# 02. Rule System
 
-**Status:** Implemented baseline / Next hardening  
-**Owner docs:** `docs/features/5.2a-rule-system.md` (this file)  
-**Code areas:** `server/pkg/models/rule.go`, `server/internal/service/rule.go`, `server/internal/orchestrator/prompt.go`, `server/internal/repository/rule.go`  
+**Status:** 🟡 In Progress (baseline implemented; hardening planned)  
+**Owner docs:** `docs/features/product/02-rule-system.md` (this file)  
+**Code areas:** `server/pkg/models/rule.go`, `server/internal/service/rule.go`, `server/internal/prompts/{builder,assembler,rules}.go` (prompt assembly), `server/internal/repository/rule.go`  
 **Blocking decisions:** Final precedence model for global vs project rules and how conflicts are reported to users.  
 **Acceptance criteria:** Global rules are immutable in agent system context, project rules are injected by task/project context, and conflicting local rules are rejected.
 
@@ -53,7 +53,7 @@ Hướng dẫn và ràng buộc dành riêng cho một công việc cụ thể.
 ## B. Cơ Chế Thực Thi
 
 *   **Prompt Assembly:** Trước mỗi request đến LLM, Orchestrator tổng hợp quy tắc theo thứ tự: `Global Rules` → `Agent Role Constraints` → `Project Rules` → `Task Rules`. Quy tắc cấp cao được đặt trước, tạo nền tảng không thể ghi đè.
-    *   **Agent Role Constraints (Ràng buộc vai trò):** Là các giới hạn và quy tắc ứng xử đặc thù gắn liền với vai trò của từng Agent (§5.3). Ví dụ: *Backend Specialist* chỉ được phép code logic server, *Reviewer Agent* chỉ được phép đánh giá/nhận xét lỗi mà không được tự ý sửa code, *QA Engineer* chỉ tập trung viết và chạy test. Việc chèn lớp ràng buộc này giúp AI luôn hoạt động đúng chức trách, không làm thay việc của vai trò khác.
+    *   **Agent Role Constraints (Ràng buộc vai trò):** Là các giới hạn và quy tắc ứng xử đặc thù gắn liền với vai trò của từng Agent (§04). Ví dụ: *Backend Specialist* chỉ được phép code logic server, *Reviewer Agent* chỉ được phép đánh giá/nhận xét lỗi mà không được tự ý sửa code, *QA Engineer* chỉ tập trung viết và chạy test. Việc chèn lớp ràng buộc này giúp AI luôn hoạt động đúng chức trách, không làm thay việc của vai trò khác.
 *   **Conflict Detection:** Reviewer Agent kiểm tra code có vi phạm quy tắc hay không. Nếu vi phạm → từ chối duyệt PR và yêu cầu sửa.
 
 ---

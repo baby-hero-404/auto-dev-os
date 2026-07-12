@@ -174,8 +174,20 @@ func TestIsRateLimitErrorSupportsTypedStatusAndStringFallback(t *testing.T) {
 	if !isTransientError(errors.New("provider quota exceeded")) {
 		t.Fatalf("expected quota string to be rate limit")
 	}
-	if isTransientError(errors.New("connection refused")) {
-		t.Fatalf("did not expect generic connection error to be rate limit")
+	// REQ-M05: network-level errors are now classified as transient at the gateway layer
+	// too (previously only the outer llmrunner layer recognized these, so the credential
+	// never got cooled down at the point of failure). See pkg/llm/transient_error.go.
+	if !isTransientError(errors.New("connection refused")) {
+		t.Fatalf("expected generic connection error to now be classified as transient (REQ-M05)")
+	}
+	if !isTransientError(errors.New("context deadline exceeded")) {
+		t.Fatalf("expected timeout error to be classified as transient")
+	}
+	if !isTransientError(errors.New("unexpected EOF")) {
+		t.Fatalf("expected EOF error to be classified as transient")
+	}
+	if isTransientError(errors.New("invalid api key")) {
+		t.Fatalf("did not expect a non-transient auth error to be classified as transient")
 	}
 }
 
@@ -481,5 +493,91 @@ func TestAIGatewayWaitAndRetry(t *testing.T) {
 	}
 	if duration >= 1*time.Second {
 		t.Errorf("expected quick cancellation, took %v", duration)
+	}
+}
+
+func TestAIGatewayChatWithOptions_HarnessIndependenceExcludesModel(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-openai", Provider: "openai", APIKey: "sk-openai"},
+		{ID: "cred-anthropic", Provider: "anthropic", APIKey: "sk-anthropic"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{
+		{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true},
+		{Provider: "anthropic", ModelName: "claude-3-5-sonnet", Priority: 1, LevelGroup: "balanced", IsActive: true},
+	}}
+
+	calledGPT4o := false
+	calledClaude := false
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			if model == "gpt-4o" {
+				calledGPT4o = true
+				return &fakeProvider{name: "openai", resp: &llm.Response{Content: "coder model", Model: "gpt-4o"}}, nil
+			}
+			if model == "claude-3-5-sonnet" {
+				calledClaude = true
+				return &fakeProvider{name: "anthropic", resp: &llm.Response{Content: "reviewer model", Model: "claude-3-5-sonnet"}}, nil
+			}
+			return nil, errors.New("unexpected model")
+		},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1", ExcludeModelID: "gpt-4o"})
+	ctx, trace := llm.WithRouteTrace(ctx)
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "review this"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if calledGPT4o {
+		t.Error("excluded model gpt-4o should never have been called")
+	}
+	if !calledClaude {
+		t.Error("expected the non-excluded model claude-3-5-sonnet to be used")
+	}
+	if resp.Model != "claude-3-5-sonnet" {
+		t.Fatalf("expected response from claude-3-5-sonnet, got: %+v", resp)
+	}
+	if trace.SelfReviewFallback {
+		t.Error("SelfReviewFallback should be false when an alternative model was available and used")
+	}
+}
+
+func TestAIGatewayChatWithOptions_HarnessIndependenceGracefulFallback(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-openai", Provider: "openai", APIKey: "sk-openai"},
+	}}
+	// Only one model configured in this level group, and it's the one we want to exclude.
+	resolver := &fakeResolver{models: []models.ProviderModel{
+		{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true},
+	}}
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "fallback response", Model: "gpt-4o"}}, nil
+		},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1", ExcludeModelID: "gpt-4o"})
+	ctx, trace := llm.WithRouteTrace(ctx)
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "review this"}})
+	if err != nil {
+		t.Fatalf("expected graceful fallback to succeed, got error: %v", err)
+	}
+	if resp.Content != "fallback response" {
+		t.Fatalf("expected fallback response, got: %+v", resp)
+	}
+	if !trace.SelfReviewFallback {
+		t.Error("expected SelfReviewFallback to be true when no alternative model exists")
+	}
+	if trace.ExcludedModel != "gpt-4o" {
+		t.Errorf("expected ExcludedModel to be gpt-4o, got %q", trace.ExcludedModel)
+	}
+	if trace.ActualModel != "gpt-4o" {
+		t.Errorf("expected ActualModel to be gpt-4o (reused), got %q", trace.ActualModel)
 	}
 }

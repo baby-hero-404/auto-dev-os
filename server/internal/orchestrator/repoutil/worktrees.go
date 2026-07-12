@@ -177,7 +177,7 @@ git -C %[1]s status --porcelain | grep '^??' | cut -c 4- | while read -r file; d
     esac
   fi
 done
-git -C %[1]s commit -m %[2]s --allow-empty
+git -C %[1]s commit -q -m %[2]s --allow-empty
 git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitMsg))
 
 		res, err := m.RunSandboxStepInWorktree(ctx, task, agent, "checkpoint_"+stepID, script, worktreeSuffix)
@@ -185,7 +185,10 @@ git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.
 			return "", fmt.Errorf("failed to create checkpoint commit for repo %s: %w", repo.URL, err)
 		}
 		if stdout, ok := res["stdout"].(string); ok {
-			lastCommitHash = strings.TrimSpace(stdout)
+			lines := strings.Split(strings.TrimSpace(stdout), "\n")
+			if len(lines) > 0 {
+				lastCommitHash = strings.TrimSpace(lines[len(lines)-1])
+			}
 		}
 	}
 	return lastCommitHash, nil

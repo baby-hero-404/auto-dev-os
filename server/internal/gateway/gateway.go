@@ -200,99 +200,146 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 		return nil, err
 	}
 
-	var failures []string
-	var retried bool
-
-	for {
-		failures = nil
+	// Harness Independence: split entries into eligible (not the excluded model)
+	// and excluded (the model to avoid, e.g. the coder model for a Review call).
+	// The excluded set is only used as a graceful last resort — see below.
+	var eligibleEntries, excludedEntries []models.ComboEntry
+	if opts.ExcludeModelID != "" {
 		for _, entry := range entries {
-			currentEntry := entry
-			lastEntry = &currentEntry
-			excluded := map[string]bool{}
-			for {
-				var cred *service.DecryptedCredential
-				cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, entry.Model, g.strategy, excluded)
-				if errors.Is(err, service.ErrNoCredentialsAvailable) {
-					failures = append(failures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
-					break
-				}
-				if err != nil {
-					failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
-					break
-				}
-				lastCred = cred
+			if entry.Model == opts.ExcludeModelID {
+				excludedEntries = append(excludedEntries, entry)
+			} else {
+				eligibleEntries = append(eligibleEntries, entry)
+			}
+		}
+	} else {
+		eligibleEntries = entries
+	}
 
-				var provider llm.Provider
-				provider, err = g.providerFactory(cred, entry.Model)
-				if err != nil {
-					failures = append(failures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
-					break
-				}
-				attempts := 4
-				for attempt := 0; attempt < attempts; attempt++ {
-					resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
-					if err == nil {
+	var failures []string
+
+	attempt := func(candidateEntries []models.ComboEntry) (*llm.Response, error) {
+		var attemptFailures []string
+		var retried bool
+
+		for {
+			attemptFailures = nil
+			for _, entry := range candidateEntries {
+				currentEntry := entry
+				lastEntry = &currentEntry
+				excluded := map[string]bool{}
+				for {
+					var cred *service.DecryptedCredential
+					cred, err = g.credentialPool.SelectCredential(ctx, opts.OrgID, entry.Provider, entry.Model, g.strategy, excluded)
+					if errors.Is(err, service.ErrNoCredentialsAvailable) {
+						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s: no credentials", entry.Provider, entry.Model))
 						break
 					}
-					if isTransientError(err) && attempt < attempts-1 {
-						backoff := time.Duration(1000*(1<<attempt)) * time.Millisecond
-						log.Printf("[AIGateway] Transient error calling %s/%s: %v. Retrying in %v (attempt %d/%d)...", entry.Provider, entry.Model, err, backoff, attempt+1, attempts)
-						timer := time.NewTimer(backoff)
-						select {
-						case <-ctx.Done():
-							timer.Stop()
-							err = ctx.Err()
-							return nil, err
-						case <-timer.C:
+					if err != nil {
+						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
+						break
+					}
+					lastCred = cred
+
+					var provider llm.Provider
+					provider, err = g.providerFactory(cred, entry.Model)
+					if err != nil {
+						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
+						break
+					}
+					attempts := 4
+					for callAttempt := 0; callAttempt < attempts; callAttempt++ {
+						resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
+						if err == nil {
+							break
 						}
-						continue
+						if isTransientError(err) && callAttempt < attempts-1 {
+							backoff := time.Duration(1000*(1<<callAttempt)) * time.Millisecond
+							log.Printf("[AIGateway] Transient error calling %s/%s: %v. Retrying in %v (attempt %d/%d)...", entry.Provider, entry.Model, err, backoff, callAttempt+1, attempts)
+							timer := time.NewTimer(backoff)
+							select {
+							case <-ctx.Done():
+								timer.Stop()
+								return nil, ctx.Err()
+							case <-timer.C:
+							}
+							continue
+						}
+						break
 					}
-					break
-				}
-				if err != nil {
-					failures = append(failures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
-					if isTransientError(err) {
-						_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
-						excluded[cred.ID] = true
-						continue
+					if err != nil {
+						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
+						if isTransientError(err) {
+							_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
+							excluded[cred.ID] = true
+							continue
+						}
+						break
 					}
-					break
-				}
-				if resp.Model == "" {
-					resp.Model = entry.Model
-				}
-				return resp, nil
-			}
-		}
-
-		if !retried {
-			var lowestCD time.Duration = -1
-			var lowestCredID string
-			for _, entry := range entries {
-				cd, credID, cdErr := g.credentialPool.GetMinCooldown(ctx, opts.OrgID, entry.Provider, entry.Model)
-				if cdErr == nil && cd >= 0 {
-					if lowestCD == -1 || cd < lowestCD {
-						lowestCD = cd
-						lowestCredID = credID
+					if resp.Model == "" {
+						resp.Model = entry.Model
 					}
+					return resp, nil
 				}
 			}
 
-			if lowestCD > 0 && lowestCD < 30*time.Second {
-				log.Printf("All credentials in cooldown. Waiting %ds for credential %s...", int(lowestCD.Seconds()), lowestCredID)
-				timer := time.NewTimer(lowestCD)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					err = ctx.Err()
-					return nil, err
-				case <-timer.C:
+			if !retried {
+				var lowestCD time.Duration = -1
+				var lowestCredID string
+				for _, entry := range candidateEntries {
+					cd, credID, cdErr := g.credentialPool.GetMinCooldown(ctx, opts.OrgID, entry.Provider, entry.Model)
+					if cdErr == nil && cd >= 0 {
+						if lowestCD == -1 || cd < lowestCD {
+							lowestCD = cd
+							lowestCredID = credID
+						}
+					}
 				}
-				retried = true
-				continue
+
+				if lowestCD > 0 && lowestCD < 30*time.Second {
+					log.Printf("All credentials in cooldown. Waiting %ds for credential %s...", int(lowestCD.Seconds()), lowestCredID)
+					timer := time.NewTimer(lowestCD)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return nil, ctx.Err()
+					case <-timer.C:
+					}
+					retried = true
+					continue
+				}
 			}
+			break
 		}
-		break
+		failures = append(failures, attemptFailures...)
+		return nil, fmt.Errorf("exhausted: %s", strings.Join(attemptFailures, "; "))
+	}
+
+	if len(eligibleEntries) > 0 {
+		if resp, respErr := attempt(eligibleEntries); respErr == nil {
+			return resp, nil
+		} else if errors.Is(respErr, context.Canceled) || errors.Is(respErr, context.DeadlineExceeded) {
+			err = respErr
+			return nil, err
+		}
+	}
+
+	// Graceful Harness Independence fallback: every eligible model failed (or
+	// none existed because the excluded model was the only one configured for
+	// this level group). Reuse the excluded model rather than blocking the task.
+	if len(excludedEntries) > 0 {
+		log.Printf("[AIGateway] Harness Independence fallback: forcing review using the original coder model (%s)", opts.ExcludeModelID)
+		if resp, respErr := attempt(excludedEntries); respErr == nil {
+			if trace := llm.RouteTraceFromCtx(ctx); trace != nil {
+				trace.SelfReviewFallback = true
+				trace.ExcludedModel = opts.ExcludeModelID
+				trace.ActualModel = resp.Model
+			}
+			return resp, nil
+		} else if errors.Is(respErr, context.Canceled) || errors.Is(respErr, context.DeadlineExceeded) {
+			err = respErr
+			return nil, err
+		}
 	}
 
 	err = fmt.Errorf("ai gateway exhausted routes: %s", strings.Join(failures, "; "))
@@ -350,18 +397,10 @@ func providerFromCredential(cred *service.DecryptedCredential, model string) (ll
 	}
 }
 
+// isTransientError delegates to the single canonical classifier (REQ-M05) — do not
+// reintroduce a separate copy of this logic here.
 func isTransientError(err error) bool {
-	var statusErr interface{ HTTPStatusCode() int }
-	if errors.As(err, &statusErr) {
-		statusCode := statusErr.HTTPStatusCode()
-		return statusCode == 429 || statusCode == 402 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "status 429") || strings.Contains(msg, "status 402") ||
-		strings.Contains(msg, "status 500") || strings.Contains(msg, "status 502") ||
-		strings.Contains(msg, "status 503") || strings.Contains(msg, "status 504") ||
-		strings.Contains(msg, "rate limit") || strings.Contains(msg, "quota") ||
-		strings.Contains(msg, "temporarily unavailable") || strings.Contains(msg, "high demand")
+	return llm.IsTransientError(err)
 }
 
 func levelGroupForComplexity(complexity string) string {

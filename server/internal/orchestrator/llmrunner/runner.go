@@ -211,7 +211,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID string, messages []llm.Message) (map[string]any, error) {
 	var lastResp *llm.Response
 
-	parsed, _, err := RunToolLoop(ctx, ToolLoopConfig{
+	parsed, _, partial, err := RunToolLoop(ctx, ToolLoopConfig{
 		Messages:      messages,
 		Tools:         r.Tools,
 		MaxIterations: 8,
@@ -255,6 +255,33 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		return nil, fmt.Errorf("agentic tool loop failed: %w", err)
 	}
 
+	if partial != nil && partial.Partial {
+		// Iteration budget exhausted, but real edits already landed in the workspace — surface
+		// this as a partial result (Issue 6) instead of a hard failure, so the caller
+		// (patchRetryConfig) can decide whether to checkpoint + targeted-test the salvaged
+		// edits rather than discarding completed work.
+		r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: agentic tool loop exhausted its iteration budget but %d edit(s) were already applied; surfacing as a partial result", stepID, len(partial.EditsApplied)))
+		content := ""
+		var promptTokens, outputTokens int
+		model := ""
+		if lastResp != nil {
+			content = lastResp.Content
+			promptTokens = lastResp.PromptTokens
+			outputTokens = lastResp.OutputTokens
+			model = lastResp.Model
+		}
+		return map[string]any{
+			"status":            "llm_partial",
+			"model":             model,
+			"content":           content,
+			"prompt_tokens":     promptTokens,
+			"output_tokens":     outputTokens,
+			"tool_loop_partial": true,
+			"edits_applied":     partial.EditsApplied,
+			"files_read":        partial.FilesRead,
+		}, nil
+	}
+
 	r.save(ctx, jobID, task.ID, stepID, "llm_response", parsed)
 
 	content := ""
@@ -267,6 +294,11 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		model = lastResp.Model
 	}
 
+	var filesRead []string
+	if partial != nil {
+		filesRead = partial.FilesRead
+	}
+
 	return map[string]any{
 		"status":        "llm_completed",
 		"model":         model,
@@ -274,6 +306,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		"parsed":        parsed,
 		"prompt_tokens": promptTokens,
 		"output_tokens": outputTokens,
+		"files_read":    filesRead,
 	}, nil
 }
 
@@ -399,21 +432,11 @@ func requiresPatch(stepID string) bool {
 		stepID == workflow.StepFix
 }
 
+// isTransientError delegates to the single canonical classifier (REQ-M05) — do not
+// reintroduce a separate copy of this logic here. Network errors (timeout, connection
+// refused, EOF) are now classified identically at both this layer and the gateway layer,
+// so the credential/model pair actually gets cooled down at the point of failure instead of
+// only being retried by this outer, credential-unaware layer.
 func isTransientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "429") ||
-		strings.Contains(msg, "500") ||
-		strings.Contains(msg, "502") ||
-		strings.Contains(msg, "503") ||
-		strings.Contains(msg, "504") ||
-		strings.Contains(msg, "rate limit") ||
-		strings.Contains(msg, "limit exceeded") ||
-		strings.Contains(msg, "resource exhausted") ||
-		strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "deadline exceeded") ||
-		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "eof")
+	return llm.IsTransientError(err)
 }

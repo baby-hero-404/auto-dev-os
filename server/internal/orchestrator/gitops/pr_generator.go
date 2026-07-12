@@ -57,6 +57,7 @@ func (g *PRGenerator) GenerateSummary(
 	testResult map[string]any,
 	riskDomains []string,
 	reviewLimitExceeded bool,
+	selfReviewFallback bool,
 ) *models.PRSummary {
 	title := fmt.Sprintf("AutoCodeOS: %s", task.Title)
 
@@ -115,6 +116,9 @@ func (g *PRGenerator) GenerateSummary(
 	body.WriteString(fmt.Sprintf("- **Reason:** %s\n", riskReason))
 	if reviewLimitExceeded {
 		body.WriteString("- ⚠️ **Review Limit Warning:** The review-fix cycle limit has been exceeded. Please review carefully.\n")
+	}
+	if selfReviewFallback {
+		body.WriteString("- ⚠️ **Self-Review Warning:** No alternative model was available, so this PR was reviewed by the same model that wrote the code (Harness Independence fallback). Please review carefully.\n")
 	}
 	body.WriteString("\n")
 
@@ -223,6 +227,7 @@ func (g *PRGenerator) GenerateSummary(
 		RiskReason:          riskReason,
 		RiskDomains:         riskDomains,
 		ReviewLimitExceeded: reviewLimitExceeded,
+		SelfReviewFallback:  selfReviewFallback,
 		Status:              models.PRStatusOpen,
 	}
 }

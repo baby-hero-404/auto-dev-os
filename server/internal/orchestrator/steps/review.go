@@ -80,11 +80,11 @@ func getCoderModel(ctx context.Context, lister CheckpointLister, taskID string) 
 
 // ReviewStep implements Step for the automated review phase.
 type ReviewStep struct {
-	rt          StepRuntime
-	tasks       TaskReader
-	projects    ProjectReader
-	llm         LLMRunner
-	diff        DiffCapturer
+	rt               StepRuntime
+	tasks            TaskReader
+	projects         ProjectReader
+	llm              LLMRunner
+	diff             DiffCapturer
 	artifacts        ArtifactSaver
 	assigner         ReviewerAssigner
 	checkpoints      CheckpointReader
@@ -243,17 +243,26 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		}
 
 		// Harness Independence: Exclude the model used in the preceding coding step
+		var routeTrace *llm.RouteTrace
 		coderModel := getCoderModel(ctx, s.checkpointLister, s.rt.Task.ID)
 		if coderModel != "" {
 			if s.log != nil {
 				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("harness independence: excluding coder model %s for review", coderModel))
 			}
 			ctx = llm.WithExcludeModelID(ctx, coderModel)
+			ctx, routeTrace = llm.WithRouteTrace(ctx)
 		}
 
 		out, err := s.llm.RunLLMStep(ctx, s.rt.Task, reviewerAgent, s.rt.JobID, workflow.StepReview, instruction)
 		if err != nil {
 			return nil, err
+		}
+		if routeTrace != nil && routeTrace.SelfReviewFallback {
+			if s.log != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("harness independence fallback: reviewed by the same model that wrote the code (%s) — no alternative model was available", routeTrace.ActualModel))
+			}
+			out["self_review_fallback"] = true
+			out["self_review_fallback_model"] = routeTrace.ActualModel
 		}
 		hasFindings := false
 		if parsed, ok := out["parsed"].(map[string]any); ok {

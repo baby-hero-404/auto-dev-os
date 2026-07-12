@@ -41,6 +41,17 @@ type providerModelSeeder interface {
 	Create(ctx context.Context, orgID string, input models.CreateProviderModelInput) (*models.ProviderModel, error)
 }
 
+// cooldownCacheTTL bounds how long a replica's in-process view of a (credential, model)
+// cooldown can be stale relative to the persisted store before it's refreshed. This lets
+// SelectCredential avoid a DB round-trip on every call while still letting a cooldown set
+// by one replica become visible to others within a bounded, documented window (REQ-M04).
+const cooldownCacheTTL = 15 * time.Second
+
+type cooldownCacheEntry struct {
+	until     time.Time
+	fetchedAt time.Time
+}
+
 type CredentialPoolService struct {
 	repo             *repository.ProviderCredentialRepo
 	cipher           *SecretCipher
@@ -49,7 +60,7 @@ type CredentialPoolService struct {
 	seeder           providerModelSeeder
 	mu               sync.Mutex
 	rrCounters       map[string]int
-	modelCooldowns   map[string]time.Time
+	modelCooldowns   map[string]cooldownCacheEntry
 	recoveryCounter  int64
 }
 
@@ -61,7 +72,7 @@ func NewCredentialPoolService(repo *repository.ProviderCredentialRepo, cipher *S
 		cipher:           cipher,
 		connectionTester: testProviderConnection,
 		rrCounters:       map[string]int{},
-		modelCooldowns:   map[string]time.Time{},
+		modelCooldowns:   map[string]cooldownCacheEntry{},
 	}
 }
 
@@ -261,4 +272,3 @@ func keySuffix(key string) string {
 func (s *CredentialPoolService) GetRecoveryCount() int64 {
 	return atomic.LoadInt64(&s.recoveryCounter)
 }
-

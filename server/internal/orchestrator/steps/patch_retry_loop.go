@@ -47,6 +47,17 @@ func (cfg patchRetryConfig) logf(ctx context.Context, level, format string, args
 	cfg.Log.Log(ctx, cfg.Task.ID, &cfg.JobID, level, fmt.Sprintf(format, args...))
 }
 
+// filesReadNote renders a compact "already read" hint for the next retry attempt's
+// instruction, so the model doesn't have to re-discover file contents it already read in the
+// discarded prior attempt's conversation (Issue 6 retry carry-forward — each outer retry
+// rebuilds messages from scratch, so this is the only continuity across attempts).
+func filesReadNote(filesRead []string) string {
+	if len(filesRead) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n\nFor reference, you already read these files in your previous attempt (their content is unlikely to have changed unless you edited them): %s", strings.Join(filesRead, ", "))
+}
+
 // runPatchRetryLoop drives the LLM call plus patch validate/apply/targeted-test retry loop
 // shared by code_backend, code_frontend, and fix. It returns the last LLM step result and
 // whether a patch was successfully applied (and, if tests ran, passed) by the time the loop
@@ -91,6 +102,60 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 
 		retryNeeded := false
 		if cfg.Agentic {
+			filesReadPrevAttempt, _ := out["files_read"].([]string)
+
+			if toolLoopPartial, _ := out["tool_loop_partial"].(bool); toolLoopPartial {
+				// The tool loop exhausted its iteration budget, but real edits already landed
+				// in the workspace — salvage them: snapshot the worktree BEFORE testing so a
+				// hung/corrupting test run can be reverted to the salvaged state instead of
+				// losing the edits or leaving the worktree undefined (Issue 6).
+				editsApplied, _ := out["edits_applied"].([]string)
+				cfg.logf(ctx, "warn", "tool loop exhausted its iteration budget but %d edit(s) were applied; attempting to salvage as a partial result (attempt %d/%d)", len(editsApplied), attempt, maxRetries)
+
+				var salvageHash string
+				if cfg.Worktree != nil {
+					hash, ckErr := cfg.Worktree.CreateGitCheckpoint(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_salvage", cfg.WorktreeSuffix)
+					if ckErr != nil {
+						cfg.logf(ctx, "error", "failed to create salvage checkpoint before testing partial result: %v", ckErr)
+					} else {
+						salvageHash = hash
+					}
+				}
+
+				testsOK := true
+				if cfg.Tester != nil && cfg.Diff != nil {
+					if repoHostPath, errRP := cfg.Diff.GetTaskRepoHostPath(ctx, cfg.Task); errRP == nil {
+						if changedFiles, diffErr := cfg.Diff.GetChangedFiles(ctx, cfg.Task, cfg.Agent, repoHostPath, cfg.WorktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
+							if _, errT := cfg.Tester.RunTargetedTests(ctx, cfg.Task, cfg.Agent, cfg.JobID, cfg.TestLabel, changedFiles, cfg.WorktreeSuffix); errT != nil {
+								testsOK = false
+								cfg.logf(ctx, "warn", "targeted tests failed on salvaged partial result (attempt %d/%d): %v", attempt, maxRetries, errT)
+								if salvageHash != "" && cfg.Worktree != nil {
+									if restoreErr := cfg.Worktree.RestoreGitCheckpoint(ctx, cfg.Task, cfg.Agent, salvageHash, cfg.WorktreeSuffix); restoreErr != nil {
+										cfg.logf(ctx, "error", "failed to restore salvage checkpoint after failed test run: %v", restoreErr)
+									}
+								}
+								updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)
+								if attempt < maxRetries {
+									retryErrorMsg = fmt.Sprintf("\n\nYour previous attempt ran out of iterations partway through, and the salvaged partial edits failed automated tests:\n%v\nPlease continue fixing this.", errT)
+									retryErrorMsg += filesReadNote(filesReadPrevAttempt)
+									retryNeeded = true
+								} else {
+									cfg.logf(ctx, "error", "Targeted tests failed on salvaged partial result after max retries")
+									return nil, false, fmt.Errorf("targeted tests failed on salvaged partial result: %w", errT)
+								}
+							}
+						}
+					}
+				}
+				if testsOK {
+					patchApplied = true
+				}
+				if !retryNeeded {
+					break
+				}
+				continue
+			}
+
 			// Edits were already applied via native tool calls inside the agentic loop; the
 			// only remaining gate is the same targeted-test verification used by the
 			// diff-based path below. A non-empty 'summary' is required as confirmation that
@@ -107,6 +172,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 								updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)
 								if attempt < maxRetries {
 									retryErrorMsg = fmt.Sprintf("\n\nYour changes applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and use the available tools to fix it.", errT)
+									retryErrorMsg += filesReadNote(filesReadPrevAttempt)
 									retryNeeded = true
 								} else {
 									cfg.logf(ctx, "error", "Targeted tests failed after max retries")

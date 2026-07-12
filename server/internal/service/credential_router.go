@@ -26,9 +26,7 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 			continue
 		}
 		if model != "" {
-			s.mu.Lock()
-			cooldownUntil, onCooldown := s.modelCooldowns[cred.ID+":"+model]
-			s.mu.Unlock()
+			cooldownUntil, onCooldown := s.getModelCooldown(ctx, cred.ID, model)
 			if onCooldown && cooldownUntil.After(now) {
 				continue
 			}
@@ -67,12 +65,19 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 
 func (s *CredentialPoolService) SetCooldown(ctx context.Context, id string, model string, until time.Time) error {
 	if model != "" {
+		// Write-through: persist synchronously so the cooldown survives a restart and is
+		// visible to other replicas (REQ-M04). A persistence failure is logged but must not
+		// block this replica from still respecting the cooldown locally.
+		if err := s.repo.UpsertModelCooldown(ctx, id, model, until); err != nil {
+			slog.Error("failed to persist model cooldown, relying on in-process cache only for this replica", "id", id, "model", model, "error", err)
+		}
+
 		s.mu.Lock()
-		s.modelCooldowns[id+":"+model] = until
-		// Prune expired cooldowns periodically to prevent map growth
+		s.modelCooldowns[id+":"+model] = cooldownCacheEntry{until: until, fetchedAt: time.Now()}
+		// Prune expired cache entries periodically to prevent map growth
 		now := time.Now()
 		for k, v := range s.modelCooldowns {
-			if now.After(v) {
+			if now.After(v.until) {
 				delete(s.modelCooldowns, k)
 			}
 		}
@@ -149,9 +154,7 @@ func (s *CredentialPoolService) GetMinCooldown(ctx context.Context, orgID, provi
 
 		// Check model-specific cooldown
 		if model != "" {
-			s.mu.Lock()
-			mc, ok := s.modelCooldowns[cred.ID+":"+model]
-			s.mu.Unlock()
+			mc, ok := s.getModelCooldown(ctx, cred.ID, model)
 			if ok && mc.After(now) {
 				if mc.After(cooldownUntil) {
 					cooldownUntil = mc
@@ -175,4 +178,37 @@ func (s *CredentialPoolService) GetMinCooldown(ctx context.Context, orgID, provi
 		return 0, "", nil
 	}
 	return minCooldown, minCredID, nil
+}
+
+// getModelCooldown returns the current cooldown-until time for a (credential, model) pair
+// and whether it's actively on cooldown, reading from the in-process cache when fresh
+// (within cooldownCacheTTL) and falling through to the persisted store otherwise (REQ-M04).
+// On a persisted-store read error, it falls back to a stale cache entry if one exists, or
+// treats the pair as not-on-cooldown (fail open) rather than blocking credential selection.
+func (s *CredentialPoolService) getModelCooldown(ctx context.Context, credentialID, model string) (time.Time, bool) {
+	key := credentialID + ":" + model
+
+	s.mu.Lock()
+	entry, ok := s.modelCooldowns[key]
+	fresh := ok && time.Since(entry.fetchedAt) < cooldownCacheTTL
+	s.mu.Unlock()
+
+	if fresh {
+		return entry.until, entry.until.After(time.Now())
+	}
+
+	until, err := s.repo.GetModelCooldown(ctx, credentialID, model)
+	if err != nil {
+		slog.Warn("failed to read persisted model cooldown, falling back to cache/fail-open", "credential_id", credentialID, "model", model, "error", err)
+		if ok {
+			return entry.until, entry.until.After(time.Now())
+		}
+		return time.Time{}, false
+	}
+
+	s.mu.Lock()
+	s.modelCooldowns[key] = cooldownCacheEntry{until: until, fetchedAt: time.Now()}
+	s.mu.Unlock()
+
+	return until, until.After(time.Now())
 }

@@ -1,8 +1,10 @@
 package prompts
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,8 +150,8 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "AttachesSemanticCodeContextForPlanner",
-			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Improve task analysis", Description: "Use service code context."},
+			name:  "AttachesSemanticCodeContextForPlanner",
+			task:  models.Task{ID: "task-1", ProjectID: "project-1", Title: "Improve task analysis", Description: "Use service code context."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRolePlanner},
 			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
 				if !engine.called {
@@ -165,8 +167,8 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "AttachesSemanticCodeContextForBackend",
-			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."},
+			name:  "AttachesSemanticCodeContextForBackend",
+			task:  models.Task{ID: "task-1", ProjectID: "project-1", Title: "Implement API", Description: "Backend change."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
 			assertMsg: func(t *testing.T, messages []llm.Message, tools []llm.ToolDefinition, engine *MockContextEngine) {
 				if !engine.called {
@@ -178,8 +180,8 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "UsesRoleMatchedSkills",
-			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Fix bug", Description: "Fix the failing tests."},
+			name:  "UsesRoleMatchedSkills",
+			task:  models.Task{ID: "task-1", ProjectID: "project-1", Title: "Fix bug", Description: "Fix the failing tests."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend},
 			dynamicTools: []llm.ToolDefinition{
 				{Name: "search_code"},
@@ -209,8 +211,8 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "WithNoAssignedSkillsLoadsSafeDefaultTools",
-			task: models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."},
+			name:  "WithNoAssignedSkillsLoadsSafeDefaultTools",
+			task:  models.Task{ID: "task-1", ProjectID: "project-1", Title: "Write docs", Description: "Document the workflow."},
 			agent: &models.Agent{ID: "agent-1", Role: models.AgentRoleQA},
 			dynamicTools: []llm.ToolDefinition{
 				{Name: "read_file"},
@@ -594,8 +596,8 @@ func (s *spyContextEngine) GetRepoMap(ctx context.Context, activeFiles []string,
 }
 
 func (s *spyContextEngine) IndexWorkspace(ctx context.Context) error { return nil }
-func (s *spyContextEngine) Close() error                           { return nil }
-func (s *spyContextEngine) GetGlobalCacheDir() string              { return "" }
+func (s *spyContextEngine) Close() error                             { return nil }
+func (s *spyContextEngine) GetGlobalCacheDir() string                { return "" }
 func (s *spyContextEngine) BuildGlobalCache(repoAbsPath, repoName, commitHash string) error {
 	return nil
 }
@@ -608,10 +610,10 @@ func TestPromptAssembler_BypassCacheAndBoostRAGOnRetry(t *testing.T) {
 	assembler := NewPromptAssembler(testBaseTools(), engine)
 
 	task := models.Task{
-		ID:          "t-123",
-		Title:       "Repair login page",
-		Description: "Login form fails to load styles.",
-		Analysis:    json.RawMessage(`{"affected_files":[{"file":"web/login.go"}]}`),
+		ID:             "t-123",
+		Title:          "Repair login page",
+		Description:    "Login form fails to load styles.",
+		Analysis:       json.RawMessage(`{"affected_files":[{"file":"web/login.go"}]}`),
 		Clarifications: json.RawMessage(`[]`),
 	}
 
@@ -726,5 +728,43 @@ func TestAssembleToolDescriptions(t *testing.T) {
 
 	if trace.ToolTokens <= 0 {
 		t.Fatalf("expected ToolTokens to be tracked and > 0, got %d", trace.ToolTokens)
+	}
+}
+
+// TestPromptAssembler_MalformedAnalysisJSON_LogsWarning verifies that a corrupt
+// task.Analysis blob no longer silently disappears (REQ-M03): collect() must still
+// produce a prompt (degraded gracefully) AND log a warning identifying the failure,
+// instead of just proceeding with a zero-value TaskAnalysis with no trace at all.
+func TestPromptAssembler_MalformedAnalysisJSON_LogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prevLogger)
+
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
+
+	task := models.Task{
+		ID:        "task-malformed",
+		ProjectID: "project-1",
+		Title:     "Fix bug",
+		Analysis:  json.RawMessage(`{not valid json`),
+	}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
+
+	messages, _, err := assembler.AssembleForAgent(context.Background(), task, agent, nil, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent returned error for malformed Analysis, expected graceful degradation: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected AssembleForAgent to still produce messages despite malformed Analysis")
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "failed to unmarshal task.Analysis") {
+		t.Errorf("expected a log entry about the unmarshal failure, got log output: %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "task-malformed") {
+		t.Errorf("expected the log entry to identify the task ID, got log output: %q", logOutput)
 	}
 }

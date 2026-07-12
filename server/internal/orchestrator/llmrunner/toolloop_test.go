@@ -31,7 +31,7 @@ func TestRunToolLoop_ExecutesToolCallsThenAccepts(t *testing.T) {
 		},
 	}
 
-	parsed, messages, err := RunToolLoop(context.Background(), cfg)
+	parsed, messages, _, err := RunToolLoop(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRunToolLoop_ValidateRejectsThenAccepts(t *testing.T) {
 		},
 	}
 
-	parsed, _, err := RunToolLoop(context.Background(), cfg)
+	parsed, _, _, err := RunToolLoop(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRunToolLoop_ExhaustsIterationBudget(t *testing.T) {
 		},
 	}
 
-	_, _, err := RunToolLoop(context.Background(), cfg)
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected an error when the iteration budget is exhausted")
 	}
@@ -118,7 +118,7 @@ func TestRunToolLoop_ToolExecutorErrorAbortsImmediately(t *testing.T) {
 		},
 	}
 
-	_, _, err := RunToolLoop(context.Background(), cfg)
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected tool executor error to abort the loop")
 	}
@@ -135,7 +135,7 @@ func TestRunToolLoop_ChatErrorPropagates(t *testing.T) {
 		},
 	}
 
-	_, _, err := RunToolLoop(context.Background(), cfg)
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected chat error to propagate")
 	}
@@ -166,7 +166,7 @@ func TestRunToolLoop_CircuitBreaker(t *testing.T) {
 		},
 	}
 
-	parsed, messages, err := RunToolLoop(context.Background(), cfg)
+	parsed, messages, _, err := RunToolLoop(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,5 +199,150 @@ func TestRunToolLoop_CircuitBreaker(t *testing.T) {
 	}
 	if parsed["summary"] != "done" {
 		t.Errorf("expected parsed summary 'done', got %v", parsed)
+	}
+}
+
+// TestRunToolLoop_CircuitBreaker_NeverGivesUpTerminatesAtMaxIterations reproduces the
+// scenario the "i--" loophole used to hide: a model that keeps re-issuing the exact same
+// already-blocked call must still hit maxIterations, not loop indefinitely.
+func TestRunToolLoop_CircuitBreaker_NeverGivesUpTerminatesAtMaxIterations(t *testing.T) {
+	calls := 0
+	toolExecCalls := 0
+
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "search_replace"}},
+		MaxIterations: 5,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			// The model NEVER gives up and NEVER produces a final answer — it keeps
+			// calling search_replace on the same nonexistent path forever.
+			return &llm.Response{
+				ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "search_replace", Arguments: `{"path":"nonexistent.go"}`}},
+			}, nil
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			toolExecCalls++
+			return "Error: File \"nonexistent.go\" does not exist.", nil
+		},
+	}
+
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected the loop to terminate with an error once maxIterations is reached")
+	}
+	if !strings.Contains(err.Error(), "exceeded max iterations") {
+		t.Fatalf("expected an iteration-budget-exceeded error, got: %v", err)
+	}
+	// Exactly MaxIterations chat calls — the loop must NOT run past this just because
+	// later rounds were all circuit-breaker-blocked (the old "i--" bug would have let
+	// this run forever).
+	if calls != 5 {
+		t.Errorf("expected exactly 5 chat calls (MaxIterations), got %d", calls)
+	}
+	// Only the first 2 calls actually reach the tool executor; the rest are blocked.
+	if toolExecCalls != 2 {
+		t.Errorf("expected ExecuteTool to be called exactly 2 times before the breaker engages, got %d", toolExecCalls)
+	}
+}
+
+// TestRunToolLoop_CircuitBreaker_ThrottlesPathlessTools verifies the breaker also
+// applies to tools with no "path" argument (e.g. run_tests/run_build), keyed on their
+// "command" argument instead.
+func TestRunToolLoop_CircuitBreaker_ThrottlesPathlessTools(t *testing.T) {
+	calls := 0
+	toolExecCalls := 0
+
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "run_tests"}},
+		MaxIterations: 5,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			return &llm.Response{
+				ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_tests", Arguments: `{"command":"go test ./broken/..."}`}},
+			}, nil
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			toolExecCalls++
+			return "Error: build failed, package does not compile.", nil
+		},
+	}
+
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected the loop to terminate once maxIterations is reached")
+	}
+	if toolExecCalls != 2 {
+		t.Errorf("expected the path-less tool to be throttled after 2 failures, got %d executions", toolExecCalls)
+	}
+	if calls != 5 {
+		t.Errorf("expected exactly 5 chat calls, got %d", calls)
+	}
+}
+
+// TestRunToolLoop_ExhaustionWithEditsAppliedReturnsPartialResult verifies that when the
+// iteration budget runs out but at least one edit call succeeded, RunToolLoop returns a
+// partial ToolLoopResult (nil error) instead of a hard failure (Issue 6).
+func TestRunToolLoop_ExhaustionWithEditsAppliedReturnsPartialResult(t *testing.T) {
+	calls := 0
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "search_replace"}, {Name: "read_file"}},
+		MaxIterations: 3,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			switch calls {
+			case 1:
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "read_file", Arguments: `{"path":"a.go"}`}},
+				}, nil
+			default:
+				// The model never produces a final answer — keeps editing forever.
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call-n", Name: "search_replace", Arguments: `{"path":"a.go"}`}},
+				}, nil
+			}
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			return "ok", nil
+		},
+	}
+
+	parsed, _, result, err := RunToolLoop(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("expected nil error for a partial result, got: %v", err)
+	}
+	if parsed != nil {
+		t.Errorf("expected nil parsed JSON for a partial result, got: %v", parsed)
+	}
+	if result == nil || !result.Partial {
+		t.Fatalf("expected a partial ToolLoopResult, got: %+v", result)
+	}
+	if len(result.EditsApplied) != 2 || result.EditsApplied[0] != "a.go" {
+		t.Errorf("expected 2 edits applied to a.go, got: %v", result.EditsApplied)
+	}
+	if len(result.FilesRead) != 1 || result.FilesRead[0] != "a.go" {
+		t.Errorf("expected a.go to be recorded as read, got: %v", result.FilesRead)
+	}
+}
+
+// TestRunToolLoop_ExhaustionWithNoEditsReturnsHardError verifies the pre-existing behavior is
+// preserved: exhaustion with zero successful edits is still a hard failure, not a partial result.
+func TestRunToolLoop_ExhaustionWithNoEditsReturnsHardError(t *testing.T) {
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		MaxIterations: 2,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			return &llm.Response{Content: `not json`}, nil
+		},
+	}
+
+	_, _, result, err := RunToolLoop(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected a hard error when no edits were applied")
+	}
+	if result != nil && result.Partial {
+		t.Errorf("did not expect a partial result when no edits were applied, got: %+v", result)
 	}
 }

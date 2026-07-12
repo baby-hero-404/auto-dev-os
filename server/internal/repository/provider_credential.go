@@ -2,11 +2,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ProviderCredentialRepo struct{ db *gorm.DB }
@@ -145,6 +147,44 @@ func (r *ProviderCredentialRepo) GetExpiredCooldowns(ctx context.Context) ([]mod
 		return nil, fmt.Errorf("get expired cooldowns: %w", err)
 	}
 	return creds, nil
+}
+
+// UpsertModelCooldown persists a per-(credential, model) cooldown so it survives process
+// restarts and is visible to other API replicas (REQ-M04), unlike the pure in-memory map
+// this replaces as the source of truth for CredentialPoolService.SelectCredential.
+func (r *ProviderCredentialRepo) UpsertModelCooldown(ctx context.Context, credentialID, model string, until time.Time) error {
+	cooldown := models.CredentialCooldown{
+		CredentialID:  credentialID,
+		Model:         model,
+		CooldownUntil: until,
+		UpdatedAt:     time.Now(),
+	}
+	err := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "credential_id"}, {Name: "model"}},
+			DoUpdates: clause.AssignmentColumns([]string{"cooldown_until", "updated_at"}),
+		}).
+		Create(&cooldown).Error
+	if err != nil {
+		return fmt.Errorf("upsert model cooldown: %w", err)
+	}
+	return nil
+}
+
+// GetModelCooldown returns the persisted cooldown-until time for a (credential, model)
+// pair, or the zero time if none is set (not currently cooling down).
+func (r *ProviderCredentialRepo) GetModelCooldown(ctx context.Context, credentialID, model string) (time.Time, error) {
+	var cooldown models.CredentialCooldown
+	err := r.db.WithContext(ctx).
+		Where("credential_id = ? AND model = ?", credentialID, model).
+		First(&cooldown).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get model cooldown: %w", err)
+	}
+	return cooldown.CooldownUntil, nil
 }
 
 func (r *ProviderCredentialRepo) Delete(ctx context.Context, orgID string, id string) error {

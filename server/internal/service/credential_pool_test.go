@@ -167,8 +167,12 @@ func TestCredentialPoolService_SelectCredentialModelCooldown(t *testing.T) {
 		{ID: "cred-2", OrgID: "org-1", Provider: "openai", Label: "default", EncryptedKey: encryptedKey, Status: models.ProviderCredentialStatusActive, Priority: 2},
 	}
 
-	// 1. Initially, SelectCredential for "gpt-4o" should return "cred-1" (since priority 1 < 2)
+	// 1. Initially, SelectCredential for "gpt-4o" should return "cred-1" (since priority 1 < 2).
+	// Both credentials are cache-misses for the (cred, "gpt-4o") cooldown, so each triggers a
+	// persisted-store read that finds nothing (REQ-M04).
 	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	expectGetModelCooldownNotFound(mock, "cred-1", "gpt-4o")
+	expectGetModelCooldownNotFound(mock, "cred-2", "gpt-4o")
 	cred, err := svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o", StrategyFillFirst, nil)
 	if err != nil {
 		t.Fatalf("SelectCredential failed: %v", err)
@@ -177,11 +181,18 @@ func TestCredentialPoolService_SelectCredentialModelCooldown(t *testing.T) {
 		t.Fatalf("expected cred-1, got %s", cred.ID)
 	}
 
-	// 2. Put "cred-1" on cooldown for model "gpt-4o"
-	svc.SetCooldown(context.Background(), "cred-1", "gpt-4o", time.Now().Add(5*time.Minute))
+	// 2. Put "cred-1" on cooldown for model "gpt-4o" — this must persist, not just update the
+	// in-memory map (REQ-M04).
+	expectUpsertModelCooldown(mock)
+	if err := svc.SetCooldown(context.Background(), "cred-1", "gpt-4o", time.Now().Add(5*time.Minute)); err != nil {
+		t.Fatalf("SetCooldown failed: %v", err)
+	}
 
-	// 3. SelectCredential for "gpt-4o" should now skip "cred-1" and return "cred-2"
+	// 3. SelectCredential for "gpt-4o" should now skip "cred-1" and return "cred-2". cred-1's
+	// cooldown is served from the fresh in-process cache (no DB read); cred-2 is still a cache
+	// miss and reads through to the persisted store.
 	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	expectGetModelCooldownNotFound(mock, "cred-2", "gpt-4o")
 	cred, err = svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o", StrategyFillFirst, nil)
 	if err != nil {
 		t.Fatalf("SelectCredential failed: %v", err)
@@ -191,8 +202,10 @@ func TestCredentialPoolService_SelectCredentialModelCooldown(t *testing.T) {
 	}
 
 	// 4. SelectCredential for another model, say "gpt-4o-mini", should still return "cred-1"
-	// since the cooldown is model-specific!
+	// since the cooldown is model-specific! Both are fresh cache misses for this model.
 	expectListActiveProviderCredentials(mock, "org-1", "openai", creds)
+	expectGetModelCooldownNotFound(mock, "cred-1", "gpt-4o-mini")
+	expectGetModelCooldownNotFound(mock, "cred-2", "gpt-4o-mini")
 	cred, err = svc.SelectCredential(context.Background(), "org-1", "openai", "gpt-4o-mini", StrategyFillFirst, nil)
 	if err != nil {
 		t.Fatalf("SelectCredential failed: %v", err)
@@ -204,6 +217,59 @@ func TestCredentialPoolService_SelectCredentialModelCooldown(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
 	}
+}
+
+// TestCredentialPoolService_ModelCooldownCacheTTL verifies the in-process cooldown cache
+// (REQ-M04): a fresh entry (within cooldownCacheTTL) is served without a DB read, and an
+// entry older than the TTL triggers exactly one fresh read from the persisted store.
+func TestCredentialPoolService_ModelCooldownCacheTTL(t *testing.T) {
+	svc, mock, _, cleanup := newCredentialPoolServiceForTest(t, "plain-key")
+	defer cleanup()
+
+	// Cache miss: reads through to the persisted store.
+	expectGetModelCooldownNotFound(mock, "cred-1", "gpt-4o")
+	if _, onCooldown := svc.getModelCooldown(context.Background(), "cred-1", "gpt-4o"); onCooldown {
+		t.Fatal("expected not on cooldown")
+	}
+
+	// Fresh cache hit: must NOT issue another query (no expectation set for it — if the code
+	// tried to query again, ExpectationsWereMet would fail below).
+	if _, onCooldown := svc.getModelCooldown(context.Background(), "cred-1", "gpt-4o"); onCooldown {
+		t.Fatal("expected not on cooldown (cache hit)")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB call on a fresh cache hit: %v", err)
+	}
+
+	// Simulate TTL expiry by rewinding the cache entry's fetchedAt past cooldownCacheTTL,
+	// then confirm the next read goes back to the persisted store exactly once.
+	svc.mu.Lock()
+	entry := svc.modelCooldowns["cred-1:gpt-4o"]
+	entry.fetchedAt = time.Now().Add(-cooldownCacheTTL - time.Second)
+	svc.modelCooldowns["cred-1:gpt-4o"] = entry
+	svc.mu.Unlock()
+
+	expectGetModelCooldownNotFound(mock, "cred-1", "gpt-4o")
+	if _, onCooldown := svc.getModelCooldown(context.Background(), "cred-1", "gpt-4o"); onCooldown {
+		t.Fatal("expected not on cooldown after TTL-triggered refresh")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expected exactly one refresh query after TTL expiry: %v", err)
+	}
+}
+
+func expectGetModelCooldownNotFound(mock sqlmock.Sqlmock, credentialID, model string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "credential_cooldowns" WHERE credential_id = $1 AND model = $2 ORDER BY "credential_cooldowns"."credential_id" LIMIT $3`)).
+		WithArgs(credentialID, model, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"credential_id", "model", "cooldown_until", "updated_at"}))
+}
+
+func expectUpsertModelCooldown(mock sqlmock.Sqlmock) {
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "credential_cooldowns" ("credential_id","model","cooldown_until","updated_at") VALUES ($1,$2,$3,$4) ON CONFLICT ("credential_id","model") DO UPDATE SET "cooldown_until"="excluded"."cooldown_until","updated_at"="excluded"."updated_at"`)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 }
 
 func expectListActiveProviderCredentials(mock sqlmock.Sqlmock, orgID, provider string, creds []models.ProviderCredential) {

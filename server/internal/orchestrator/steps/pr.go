@@ -228,12 +228,13 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 			}
 		}
 		reviewLimitExceeded := rejectionCount >= maxReviewFixCycles-1
+		selfReviewFallback := reviewSelfReviewFallback(checkpoints)
 
 		// Extract risk domains from task analysis
 		riskDomains := extractRiskDomains(s.rt.Task)
 
 		prGen := gitops.NewPRGenerator()
-		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded)
+		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded, selfReviewFallback)
 
 		prURL, err := s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
 		if err != nil {
@@ -311,4 +312,29 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		"branches": createdBranches,
 		"pr_urls":  createdPRs,
 	}, nil
+}
+
+// reviewSelfReviewFallback scans checkpoints for the most recent successful
+// review step and reports whether Harness Independence had to gracefully
+// fall back to reviewing with the same model that wrote the code (see
+// steps/review.go's RouteTrace handling).
+func reviewSelfReviewFallback(checkpoints []models.WorkflowCheckpoint) bool {
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		cp := checkpoints[i]
+		if cp.Step != workflow.StepReview {
+			continue
+		}
+		var state map[string]any
+		if json.Unmarshal(cp.State, &state) != nil {
+			continue
+		}
+		output, ok := state["output"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if flagged, _ := output["self_review_fallback"].(bool); flagged {
+			return true
+		}
+	}
+	return false
 }

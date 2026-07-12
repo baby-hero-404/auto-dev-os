@@ -70,6 +70,11 @@ type mockWorktreeManager struct {
 	setupBranch    func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool)
 	loadReposError error
 	setupCalled    bool
+
+	checkpointStepIDs []string // every stepID passed to CreateGitCheckpoint, in order
+	checkpointErr     error
+	restoredHashes    []string // every commitHash passed to RestoreGitCheckpoint, in order
+	restoreErr        error
 }
 
 func (m *mockWorktreeManager) LoadTargetRepositories(ctx context.Context, task *models.Task) ([]models.Repository, error) {
@@ -102,11 +107,16 @@ func (m *mockWorktreeManager) ResetRoleWorktrees(ctx context.Context, task *mode
 }
 
 func (m *mockWorktreeManager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
-	return "mock-commit-hash", nil
+	m.checkpointStepIDs = append(m.checkpointStepIDs, stepID)
+	if m.checkpointErr != nil {
+		return "", m.checkpointErr
+	}
+	return "mock-commit-hash-" + stepID, nil
 }
 
 func (m *mockWorktreeManager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error {
-	return nil
+	m.restoredHashes = append(m.restoredHashes, commitHash)
+	return m.restoreErr
 }
 
 func (m *mockWorktreeManager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo models.Repository) string {

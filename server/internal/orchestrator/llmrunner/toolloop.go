@@ -37,6 +37,22 @@ type ToolLoopConfig struct {
 	OnCall        ToolLoopHook
 }
 
+// editToolNames are the tools whose successful calls represent a real workspace mutation —
+// used to decide whether an exhausted loop has anything worth salvaging as a partial result.
+var editToolNames = map[string]bool{"search_replace": true, "create_file": true}
+
+// ToolLoopResult accompanies every RunToolLoop return (success, partial, or hard failure).
+// Partial is true only on iteration-budget exhaustion where at least one edit tool call
+// already succeeded, letting the caller salvage that work (e.g. checkpoint + targeted-test
+// it) instead of discarding it (Issue 6). FilesRead is populated on every path so a caller
+// that retries after this run can carry forward "already read" context instead of making the
+// model re-discover file contents from scratch (Issue 6 retry carry-forward).
+type ToolLoopResult struct {
+	Partial      bool
+	EditsApplied []string // discriminators (paths) touched by successful edit tool calls
+	FilesRead    []string // discriminators (paths) touched by successful read_file calls
+}
+
 // RunToolLoop drives a native tool-calling agentic loop: call the LLM with tools, execute any
 // requested tool calls and feed the results back, and repeat until the LLM returns a JSON
 // response that passes Validate or the iteration budget is exhausted.
@@ -45,7 +61,7 @@ type ToolLoopConfig struct {
 // branch -> execute -> append tool result -> continue; JSON branch -> parse -> validate ->
 // feedback -> continue) so review/coding steps can reuse it instead of only ever making a
 // single-shot Chat() call with no tool support (Issue 1+2).
-func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm.Message, error) {
+func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm.Message, *ToolLoopResult, error) {
 	maxIterations := cfg.MaxIterations
 	if maxIterations <= 0 {
 		maxIterations = 6
@@ -53,13 +69,15 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 	messages := cfg.Messages
 
 	failureCounts := make(map[string]int)
+	var editsApplied []string
+	var filesRead []string
 
 	for i := 0; i < maxIterations; i++ {
 		start := time.Now()
 		resp, err := cfg.Chat(ctx, messages, llm.ChatOptions{Tools: cfg.Tools, ToolChoice: "auto"})
 		latency := time.Since(start)
 		if err != nil {
-			return nil, messages, fmt.Errorf("llm tool loop call failed: %w", err)
+			return nil, messages, &ToolLoopResult{FilesRead: filesRead}, fmt.Errorf("llm tool loop call failed: %w", err)
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -67,37 +85,42 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 				cfg.OnCall(i+1, messages, resp, map[string]any{"tool_calls": resp.ToolCalls}, latency)
 			}
 			messages = append(messages, llm.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
-			anyExecuted := false
 			for _, call := range resp.ToolCalls {
-				path := extractPath(call.Arguments)
-				key := call.Name + ":" + path
+				discriminator := extractCallKey(call.Arguments)
+				key := call.Name + ":" + discriminator
 
-				if path != "" && failureCounts[key] >= 2 {
-					result := fmt.Sprintf("Error: You have called %s on %q multiple times without success. The file likely does not exist. Use create_file to create it first, then use search_replace to modify it.", call.Name, path)
+				if failureCounts[key] >= 2 {
+					var result string
+					if discriminator != "" {
+						result = fmt.Sprintf("Error: You have called %s on %q multiple times without success. The file likely does not exist. Use create_file to create it first, then use search_replace to modify it.", call.Name, discriminator)
+					} else {
+						result = fmt.Sprintf("Error: You have called %s multiple times without success. Stop repeating this exact call — try a different approach (e.g. a narrower test target, or inspect the error output more carefully before retrying).", call.Name)
+					}
 					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
 					continue
 				}
 
-				anyExecuted = true
 				result, toolErr := cfg.ExecuteTool(ctx, call.Name, call.Arguments)
 				if toolErr != nil {
-					return nil, messages, toolErr
+					return nil, messages, &ToolLoopResult{FilesRead: filesRead}, toolErr
 				}
 
 				if strings.HasPrefix(result, "Error:") {
-					if path != "" {
-						failureCounts[key]++
-					}
+					failureCounts[key]++
 				} else {
-					if path != "" {
-						failureCounts[key] = 0
+					failureCounts[key] = 0
+					if editToolNames[call.Name] && discriminator != "" {
+						editsApplied = append(editsApplied, discriminator)
+					}
+					if call.Name == "read_file" && discriminator != "" {
+						filesRead = append(filesRead, discriminator)
 					}
 				}
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
 			}
-			if !anyExecuted {
-				i--
-			}
+			// NOTE: a round where every call was blocked by the circuit breaker above
+			// still counts toward maxIterations (no i--) — otherwise a model that keeps
+			// repeating an already-blocked call never hits the iteration cap at all.
 			continue
 		}
 
@@ -134,18 +157,34 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 			}
 		}
 
-		return parsedJSON, messages, nil
+		return parsedJSON, messages, &ToolLoopResult{FilesRead: filesRead}, nil
 	}
 
-	return nil, messages, fmt.Errorf("exceeded max iterations (%d)", maxIterations)
+	if len(editsApplied) > 0 {
+		// Exhausted without a valid final answer, but real edits were already applied to the
+		// workspace — surface a partial result instead of discarding that work outright (Issue 6).
+		return nil, messages, &ToolLoopResult{Partial: true, EditsApplied: editsApplied, FilesRead: filesRead}, nil
+	}
+
+	return nil, messages, &ToolLoopResult{FilesRead: filesRead}, fmt.Errorf("exceeded max iterations (%d)", maxIterations)
 }
 
-func extractPath(argumentsJSON string) string {
+// extractCallKey returns a discriminator for the circuit breaker's per-call key.
+// Prefers "path" (read_file, search_replace, create_file, run_lint); falls back to
+// "command" for tools with no path concept (run_tests, run_build); returns "" if
+// neither is present, which still throttles repeat no-argument calls to the same tool.
+func extractCallKey(argumentsJSON string) string {
 	var args struct {
-		Path string `json:"path"`
+		Path    string `json:"path"`
+		Command string `json:"command"`
 	}
 	if err := json.Unmarshal([]byte(argumentsJSON), &args); err == nil {
-		return args.Path
+		if args.Path != "" {
+			return args.Path
+		}
+		if args.Command != "" {
+			return args.Command
+		}
 	}
 	return ""
 }

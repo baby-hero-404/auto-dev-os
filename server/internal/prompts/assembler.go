@@ -3,6 +3,7 @@ package prompts
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
@@ -200,7 +201,9 @@ func (a *PromptAssembler) AssembleForAgent(ctx context.Context, task models.Task
 	}
 	var analysis models.TaskAnalysis
 	if len(task.Analysis) > 0 {
-		_ = json.Unmarshal(task.Analysis, &analysis)
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			slog.Warn("AssemblePrompt: failed to unmarshal task.Analysis, task_rules metadata will be omitted", "task_id", task.ID, "error", err)
+		}
 	}
 	if len(analysis.TaskRules) > 0 {
 		metadata["task_rules"] = analysis.TaskRules

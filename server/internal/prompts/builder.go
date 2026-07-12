@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -327,7 +328,9 @@ func (a *PromptAssembler) resolveSkills(ctx context.Context, task models.Task, a
 
 	var analysis models.TaskAnalysis
 	if len(task.Analysis) > 0 {
-		_ = json.Unmarshal(task.Analysis, &analysis)
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			slog.Warn("resolveSkills: failed to unmarshal task.Analysis, scoring skills without it", "task_id", task.ID, "step_id", stepID, "error", err)
+		}
 	}
 
 	roleLower := ""
@@ -404,7 +407,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 
 	var analysis models.TaskAnalysis
 	if len(task.Analysis) > 0 {
-		_ = json.Unmarshal(task.Analysis, &analysis)
+		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+			slog.Warn("collect: failed to unmarshal task.Analysis, proceeding with empty analysis", "task_id", task.ID, "step_id", stepID, "error", err)
+		}
 	}
 
 	// Overwrite mutable analysis fields with FrozenContext if present (REQ-M01)
@@ -455,6 +460,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 
 	// 4. JIT Skills
 	resolvedJITSkills, err := a.resolveSkills(ctx, task, agent, stepID)
+	if err != nil {
+		slog.Warn("collect: failed to resolve JIT skills, proceeding without them", "task_id", task.ID, "step_id", stepID, "error", err)
+	}
 	if err == nil && len(resolvedJITSkills) > 0 {
 		var skBuilder strings.Builder
 		skBuilder.WriteString("# JIT Skills\n")
@@ -466,6 +474,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 
 	// 5. Layered Rules (REQ-005)
 	globalRules, projectRules, err := a.loadRules(ctx, task.ProjectID)
+	if err != nil {
+		slog.Error("collect: failed to load rules — prompt will be sent with NO global/role/project/task governance rules", "task_id", task.ID, "project_id", task.ProjectID, "step_id", stepID, "error", err)
+	}
 	if err == nil {
 		// Conflict Detection
 		localRules := append([]models.Rule{}, projectRules...)
@@ -766,6 +777,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 				query = strings.Join(errorPaths, " ") + "\n" + query
 			}
 			snippets, err := a.ctxEngine.RetrieveContext(ctx, query, maxSnippets)
+			if err != nil {
+				slog.Warn("collect: RetrieveContext failed, proceeding without semantic context", "task_id", task.ID, "step_id", stepID, "error", err)
+			}
 			if err == nil {
 				snippets = deduplicateSnippets(snippets)
 				if isCodingStep(stepID) || stepID == workflow.StepReview {
@@ -809,6 +823,9 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 				maxMapTokens = 256
 			}
 			repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
+			if err != nil {
+				slog.Warn("collect: GetRepoMap failed, proceeding without repository structure section", "task_id", task.ID, "step_id", stepID, "error", err)
+			}
 			if err == nil && repoMap != "" {
 				sections = append(sections, NewPromptSection("Repository Structure", "=== Repository Structure ===\n"+repoMap, 100, 5, false, "user"))
 			}

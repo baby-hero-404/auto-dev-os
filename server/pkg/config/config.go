@@ -30,6 +30,11 @@ type AuthConfig struct {
 	JWTSecret string `mapstructure:"jwt_secret"`
 }
 
+type GitConfig struct {
+	DefaultAgentName  string `mapstructure:"default_agent_name"`
+	DefaultAgentEmail string `mapstructure:"default_agent_email"`
+}
+
 type LLMConfig struct {
 	Provider               string  `mapstructure:"provider"`
 	Model                  string  `mapstructure:"model"`
@@ -93,6 +98,7 @@ type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Auth       AuthConfig       `mapstructure:"auth"`
+	Git        GitConfig        `mapstructure:"git"`
 	LLM        LLMConfig        `mapstructure:"llm"`
 	Sandbox    SandboxConfig    `mapstructure:"sandbox"`
 	Worker     WorkerConfig     `mapstructure:"worker"`
@@ -201,6 +207,13 @@ func normalize(cfg *Config) error {
 
 	if cfg.Worker.MaxPhaseCost <= 0 {
 		cfg.Worker.MaxPhaseCost = 8.0
+	}
+
+	if cfg.Git.DefaultAgentName == "" {
+		cfg.Git.DefaultAgentName = "AutoCodeOS Agent"
+	}
+	if cfg.Git.DefaultAgentEmail == "" {
+		cfg.Git.DefaultAgentEmail = "agent@autocode.os"
 	}
 
 	return nil

@@ -171,6 +171,8 @@ func run() error {
 		),
 		orchestrator.WithLLMTraceLogging(cfg.Logging.LLMTraceEnabled, cfg.Logging.LLMLogLevel),
 		orchestrator.WithContextEngine(ctxEngine),
+		orchestrator.WithGitConfig(cfg.Git),
+		orchestrator.WithDisableNetworking(cfg.Sandbox.DisableNetworking),
 	}
 
 	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {

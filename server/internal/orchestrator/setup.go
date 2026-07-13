@@ -124,9 +124,13 @@ func (o *Orchestrator) initRepoutil() {
 				})
 				return err
 			},
+			o.gitConfig.DefaultAgentName,
+			o.gitConfig.DefaultAgentEmail,
 		)
 	} else {
 		o.repoutil.WorkspaceRoot = o.workspaceRoot
+		o.repoutil.DefaultAgentName = o.gitConfig.DefaultAgentName
+		o.repoutil.DefaultAgentEmail = o.gitConfig.DefaultAgentEmail
 		o.repoutil.UpdateTaskAnalysis = func(ctx context.Context, taskID string, analysis json.RawMessage) error {
 			_, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{
 				Analysis: analysis,

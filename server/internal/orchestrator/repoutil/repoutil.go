@@ -23,6 +23,8 @@ type Manager struct {
 	SandboxGitGetPRDiff        func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error)
 	Log                        func(ctx context.Context, taskID string, jobID *string, level string, message string)
 	UpdateTaskAnalysis         func(ctx context.Context, taskID string, analysis json.RawMessage) error
+	DefaultAgentName           string
+	DefaultAgentEmail          string
 }
 
 func NewManager(
@@ -41,6 +43,8 @@ func NewManager(
 	sandboxGitGetPRDiff func(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error),
 	log func(ctx context.Context, taskID string, jobID *string, level string, message string),
 	updateTaskAnalysis func(ctx context.Context, taskID string, analysis json.RawMessage) error,
+	defaultAgentName string,
+	defaultAgentEmail string,
 ) *Manager {
 	return &Manager{
 		WorkspaceRoot:              workspaceRoot,
@@ -58,5 +62,7 @@ func NewManager(
 		SandboxGitGetPRDiff:        sandboxGitGetPRDiff,
 		Log:                        log,
 		UpdateTaskAnalysis:         updateTaskAnalysis,
+		DefaultAgentName:           defaultAgentName,
+		DefaultAgentEmail:          defaultAgentEmail,
 	}
 }

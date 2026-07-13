@@ -78,32 +78,20 @@ flock -u 9
 
 func (m *Manager) CommitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
 	commitMsg := fmt.Sprintf("AutoCodeOS [%s]: %s", roleLabel, task.Title)
-	userName := "AutoCodeOS Agent"
-	userEmail := "agent@autocode.os"
-	if agent != nil {
-		if agent.Name != "" {
-			userName = agent.Name
-		}
-		if agent.ID != "" {
-			userEmail = agent.ID + "@autocode.os"
-		}
-	}
-
 	for _, repo := range repos {
 		localPath := m.RepoHostPath(task, ws, repo)
 		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
 		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		script := fmt.Sprintf(`set -e
-git -C %[1]s config user.name %[3]s
-git -C %[1]s config user.email %[4]s
+%[3]s
 if [ -n "$(git -C %[1]s status --porcelain)" ]; then
     git -C %[1]s add .
     git -C %[1]s commit -m %[2]s
 fi`,
 			paths.QuoteShellArg(containerWorktreePath),
 			paths.QuoteShellArg(commitMsg),
-			paths.QuoteShellArg(userName),
-			paths.QuoteShellArg(userEmail),
+			identityScript,
 		)
 		// commitSandbox failures are frequently transient (lock/IO contention in the sandbox);
 		// retry a few times before surfacing an error, since a failure here after a successful
@@ -164,9 +152,11 @@ func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, ag
 		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
 		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
 
+		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		commitMsg := fmt.Sprintf("chore(auto-code-os): checkpoint %s", stepID)
 
 		script := fmt.Sprintf(`set -e
+%[3]s
 git -C %[1]s add -u
 git -C %[1]s status --porcelain | grep '^??' | cut -c 4- | while read -r file; do
   if [ -n "$file" ]; then
@@ -178,7 +168,7 @@ git -C %[1]s status --porcelain | grep '^??' | cut -c 4- | while read -r file; d
   fi
 done
 git -C %[1]s commit -q -m %[2]s --allow-empty
-git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitMsg))
+git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitMsg), identityScript)
 
 		res, err := m.RunSandboxStepInWorktree(ctx, task, agent, "checkpoint_"+stepID, script, worktreeSuffix)
 		if err != nil {
@@ -210,8 +200,10 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		// REQ-M04), the dirty worktree state below is about to be discarded by checkout/reset/clean.
 		// Snapshot it onto a throwaway rescue branch first so the work is recoverable from git
 		// history rather than permanently lost, even though the active worktree still resets cleanly.
+		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		rescueBranch := fmt.Sprintf("rescue/%s-%d", task.ID, time.Now().UnixNano())
 		script := fmt.Sprintf(`set -e
+%[4]s
 if [ -n "$(git -C %[1]s status --porcelain)" ]; then
   git -C %[1]s add -A
   git -C %[1]s commit -m "AutoCodeOS: rescue snapshot before checkpoint restore" -q --allow-empty
@@ -220,11 +212,30 @@ if [ -n "$(git -C %[1]s status --porcelain)" ]; then
 fi
 git -C %[1]s checkout %[2]s
 git -C %[1]s reset --hard HEAD
-git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch))
+git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript)
 
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)
 		}
 	}
 	return nil
+}
+
+func (m *Manager) gitIdentityScript(containerPath string, agent *models.Agent) string {
+	userName := m.DefaultAgentName
+	userEmail := m.DefaultAgentEmail
+	if agent != nil {
+		if agent.Name != "" {
+			userName = agent.Name
+		}
+		if agent.ID != "" {
+			userEmail = agent.ID + "@autocode.os"
+		}
+	}
+	return fmt.Sprintf(`git -C %[1]s config user.name %[2]s
+git -C %[1]s config user.email %[3]s`,
+		paths.QuoteShellArg(containerPath),
+		paths.QuoteShellArg(userName),
+		paths.QuoteShellArg(userEmail),
+	)
 }

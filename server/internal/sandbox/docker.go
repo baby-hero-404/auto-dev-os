@@ -153,7 +153,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 	networkMode := container.NetworkMode("none")
 	if req.NetworkMode == NetworkModeBridge || (req.NetworkMode == NetworkModeDefault && !r.config.DisableNetworking) {
-		networkMode = "bridge"
+		networkMode = "host"
 	}
 
 	createResp, err := r.client.ContainerCreate(ctx, &container.Config{

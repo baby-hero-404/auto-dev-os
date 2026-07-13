@@ -18,12 +18,17 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 	defer span.End()
 
 	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+	networkMode := sandbox.NetworkModeNone
+	if !o.disableNetworking {
+		networkMode = sandbox.NetworkModeBridge
+	}
+
 	result, err := o.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:      task.ID,
 		AgentID:     agent.ID,
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", command},
-		NetworkMode: sandbox.NetworkModeNone,
+		NetworkMode: networkMode,
 		Timeout:     5 * time.Minute,
 	})
 	if err != nil {
@@ -58,12 +63,18 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
 	defer span.End()
+
+	networkMode := sandbox.NetworkModeNone
+	if !o.disableNetworking {
+		networkMode = sandbox.NetworkModeBridge
+	}
+
 	result, err := o.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:      task.ID,
 		AgentID:     agent.ID,
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", wrappedCommand},
-		NetworkMode: sandbox.NetworkModeNone,
+		NetworkMode: networkMode,
 		Timeout:     5 * time.Minute,
 	})
 	if err != nil {

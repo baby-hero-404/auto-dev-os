@@ -66,44 +66,49 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 		if role == "assistant" {
 			role = "model"
 		}
+		var currentParts []geminiPart
 		if role == "tool" {
-			contents = append(contents, geminiContent{
-				Role: "function",
-				Parts: []geminiPart{{
-					FunctionResponse: &geminiFunctionResponse{
-						Name: msg.ToolName,
-						ID:   msg.ToolCallID,
-						Response: map[string]any{
-							"content": msg.Content,
-						},
+			role = "user"
+			currentParts = []geminiPart{{
+				FunctionResponse: &geminiFunctionResponse{
+					Name: msg.ToolName,
+					ID:   msg.ToolCallID,
+					Response: map[string]any{
+						"content": msg.Content,
 					},
-				}},
-			})
-			continue
-		}
-		parts := []geminiPart{}
-		if msg.Content != "" {
-			parts = append(parts, geminiPart{Text: msg.Content})
+				},
+			}}
+		} else {
+			if msg.Content != "" {
+				currentParts = append(currentParts, geminiPart{Text: msg.Content})
+			}
 		}
 		for _, call := range msg.ToolCalls {
 			var args map[string]any
 			if call.Arguments != "" {
 				_ = json.Unmarshal([]byte(call.Arguments), &args)
 			}
-			parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{
-				Name:             call.Name,
-				Args:             args,
-				ID:               call.ID,
+			currentParts = append(currentParts, geminiPart{
+				FunctionCall: &geminiFunctionCall{
+					Name: call.Name,
+					Args: args,
+					ID:   call.ID,
+				},
 				ThoughtSignature: call.ThoughtSignature,
-			}})
+			})
 		}
-		if len(parts) == 0 {
-			parts = []geminiPart{{Text: msg.Content}}
+		if len(currentParts) == 0 {
+			currentParts = []geminiPart{{Text: msg.Content}}
 		}
-		contents = append(contents, geminiContent{
-			Role:  role,
-			Parts: parts,
-		})
+		
+		if len(contents) > 0 && contents[len(contents)-1].Role == role {
+			contents[len(contents)-1].Parts = append(contents[len(contents)-1].Parts, currentParts...)
+		} else {
+			contents = append(contents, geminiContent{
+				Role:  role,
+				Parts: currentParts,
+			})
+		}
 	}
 
 	payload := geminiRequest{
@@ -162,7 +167,7 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 			argsBytes, _ := json.Marshal(part.FunctionCall.Args)
 			toolCalls = append(toolCalls, ToolCall{
 				ID:               part.FunctionCall.ID,
-				ThoughtSignature: part.FunctionCall.ThoughtSignature,
+				ThoughtSignature: part.ThoughtSignature,
 				Name:             part.FunctionCall.Name,
 				Arguments:        string(argsBytes),
 			})
@@ -211,13 +216,13 @@ type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
 }
 
 type geminiFunctionCall struct {
 	Name             string         `json:"name"`
-	Args             map[string]any `json:"args,omitempty"`
-	ID               string         `json:"id,omitempty"`
-	ThoughtSignature string         `json:"thoughtSignature,omitempty"`
+	Args map[string]any `json:"args,omitempty"`
+	ID   string         `json:"id,omitempty"`
 }
 
 type geminiFunctionResponse struct {
@@ -252,11 +257,11 @@ type geminiResponse struct {
 		Content struct {
 			Parts []struct {
 				Text         string `json:"text"`
+				ThoughtSignature string `json:"thoughtSignature,omitempty"`
 				FunctionCall *struct {
-					Name             string         `json:"name"`
-					Args             map[string]any `json:"args"`
-					ID               string         `json:"id,omitempty"`
-					ThoughtSignature string         `json:"thoughtSignature,omitempty"`
+					Name string         `json:"name"`
+					Args map[string]any `json:"args"`
+					ID   string         `json:"id,omitempty"`
 				} `json:"functionCall,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`

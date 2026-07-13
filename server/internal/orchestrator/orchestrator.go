@@ -16,6 +16,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
+	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -47,12 +48,14 @@ type Orchestrator struct {
 	wkspace         *wkspace.Manager
 	checkpoints     *checkpoint.Store
 	repoutil        *repoutil.Manager
-	llmTraceEnabled bool
-	llmLogLevel     string
-	maxPhaseCost    float64
-	wakeChan        chan struct{}
-	registry        *tool.Registry
-	capManager      *tool.CapabilityManager
+	disableNetworking bool
+	llmTraceEnabled   bool
+	llmLogLevel       string
+	maxPhaseCost      float64
+	wakeChan          chan struct{}
+	registry          *tool.Registry
+	capManager        *tool.CapabilityManager
+	gitConfig         config.GitConfig
 }
 
 func (o *Orchestrator) wake() {
@@ -76,6 +79,12 @@ func defaultWorkspaceRetention() WorkspaceRetention {
 }
 
 type Option func(*Orchestrator)
+
+func WithDisableNetworking(disabled bool) Option {
+	return func(o *Orchestrator) {
+		o.disableNetworking = disabled
+	}
+}
 
 func WithMemoryHooks(hooks MemoryRecorder) Option {
 	return func(o *Orchestrator) {
@@ -141,6 +150,12 @@ func WithWorkspaceRetention(retention, interval time.Duration) Option {
 func WithMaxPhaseCost(cost float64) Option {
 	return func(o *Orchestrator) {
 		o.maxPhaseCost = cost
+	}
+}
+
+func WithGitConfig(gitConfig config.GitConfig) Option {
+	return func(o *Orchestrator) {
+		o.gitConfig = gitConfig
 	}
 }
 

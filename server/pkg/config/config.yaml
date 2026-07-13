@@ -38,6 +38,10 @@ database:
 auth:
   jwt_secret: ""
 
+git:
+  default_agent_name: "AutoCodeOS Agent"
+  default_agent_email: "agent@autocode.os"
+
 sandbox:
   runtime: "docker"
   image: "auto-code-os-sandbox:latest"

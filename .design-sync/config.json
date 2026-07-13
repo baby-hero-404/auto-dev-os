@@ -20,5 +20,6 @@
   },
   "overrides": {
     "ConfirmDialog": { "cardMode": "single", "viewport": "560x640" }
-  }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
 }

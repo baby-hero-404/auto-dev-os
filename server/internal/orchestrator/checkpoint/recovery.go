@@ -43,6 +43,9 @@ func (s *Store) WithCheckpointRecovery(
 		}
 
 		if actualStepID != workflow.StepAnalyze {
+			if models.IsStateMachineEnabled(ctx) {
+				return runner(ctx, sc)
+			}
 			// Review and Fix should always run when the current job is Review.
 			if jobStep == workflow.StepReview &&
 				(actualStepID == workflow.StepReview || actualStepID == workflow.StepFix) {

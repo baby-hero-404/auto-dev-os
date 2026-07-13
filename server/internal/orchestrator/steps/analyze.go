@@ -294,6 +294,34 @@ func analyzeContractMissingFields(parsedJSON map[string]any) []string {
 	if _, ok := parsedJSON["execution_units"].([]any); !ok {
 		missingFields = append(missingFields, "execution_units")
 	}
+	
+	if irsAny, ok := parsedJSON["execution_irs"].([]any); !ok {
+		missingFields = append(missingFields, "execution_irs")
+	} else {
+		for i, irAny := range irsAny {
+			irMap, ok := irAny.(map[string]any)
+			if !ok {
+				missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d] (must be an object)", i))
+				continue
+			}
+			if _, ok := irMap["node_id"].(string); !ok {
+				missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d].node_id", i))
+			}
+			if intent, ok := irMap["intent"].(map[string]any); !ok {
+				missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d].intent", i))
+			} else {
+				if _, ok := intent["capability"].(string); !ok {
+					missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d].intent.capability", i))
+				}
+				if _, ok := intent["operation"].(string); !ok {
+					missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d].intent.operation", i))
+				}
+			}
+			if _, ok := irMap["budget"].(map[string]any); !ok {
+				missingFields = append(missingFields, fmt.Sprintf("execution_irs[%d].budget", i))
+			}
+		}
+	}
 	if _, ok := parsedJSON["required_skills_map"].(map[string]any); ok {
 		validRoles := map[string]bool{
 			"planner":              true,

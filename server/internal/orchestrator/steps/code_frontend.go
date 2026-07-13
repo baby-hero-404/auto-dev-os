@@ -199,6 +199,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		Tester:         s.tester,
 		Tasks:          s.tasks,
 		Log:            s.log,
+		Checkpoints:    s.checkpoints,
 	}, instruction)
 	if err != nil {
 		return nil, err

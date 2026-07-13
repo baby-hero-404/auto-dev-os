@@ -141,3 +141,29 @@ func (s *Store) SaveArtifact(ctx context.Context, jobID string, taskID string, s
 	}
 	return s.Artifacts.Create(ctx, artifact)
 }
+
+func (s *Store) GetLatestExecutionSnapshot(ctx context.Context, taskID string, step string) (*models.ExecutionSnapshot, bool) {
+	if s.Artifacts == nil {
+		return nil, false
+	}
+	arts, err := s.Artifacts.ListByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, false
+	}
+	var latest *models.WorkflowArtifact
+	for i := len(arts) - 1; i >= 0; i-- {
+		art := arts[i]
+		if (art.Step == step || strings.HasPrefix(art.Step, step+"_cycle_")) && art.Type == "execution_snapshot" {
+			latest = &art
+			break
+		}
+	}
+	if latest == nil {
+		return nil, false
+	}
+	var snap models.ExecutionSnapshot
+	if err := json.Unmarshal(latest.Payload, &snap); err == nil {
+		return &snap, true
+	}
+	return nil, false
+}

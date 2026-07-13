@@ -67,6 +67,107 @@ func classifyHeadingLocal(heading string) string {
 	return "backend"
 }
 
+// executionIROperationKeywords infers an ExecutionIR operation from a unit's
+// objective/task text. Checked in order; first match wins. ExecutionUnit
+// carries no explicit CRUD verb, so this is a best-effort heuristic — default
+// is "modify" since most units touch existing code.
+var executionIROperationKeywords = []struct {
+	keyword   string
+	operation string
+}{
+	{"delete", "delete"},
+	{"remove", "delete"},
+	{"refactor", "refactor"},
+	{"migrate", "refactor"},
+	{"create", "create"},
+	{"add", "create"},
+	{"implement", "create"},
+}
+
+func inferExecutionIROperation(unit models.ExecutionUnit) string {
+	text := strings.ToLower(unit.Objective + " " + strings.Join(unit.Tasks, " "))
+	for _, kw := range executionIROperationKeywords {
+		if strings.Contains(text, kw.keyword) {
+			return kw.operation
+		}
+	}
+	return "modify"
+}
+
+// executionIRBudgetForUnit derives phase budgets from a unit's declared file
+// scope: wider units get more discovery/implementation room. Validation stays
+// fixed since it only re-runs targeted tests, not full exploration.
+func executionIRBudgetForUnit(unit models.ExecutionUnit) models.PhaseBudgets {
+	maxFiles := unit.Constraints.MaxFiles
+	if maxFiles <= 0 {
+		maxFiles = 1
+	}
+	implementation := maxFiles * 3
+	if implementation < 6 {
+		implementation = 6
+	} else if implementation > 24 {
+		implementation = 24
+	}
+	discovery := maxFiles + 2
+	if discovery > 8 {
+		discovery = 8
+	}
+	return models.PhaseBudgets{Discovery: discovery, Implementation: implementation, Validation: 3}
+}
+
+// stringifyAcceptanceCriterion renders a free-form LLM acceptance-criterion
+// map as a single string. AcceptanceCriteria has no fixed schema (see
+// analyze_parser.go), so common candidate keys are tried before falling back
+// to the raw JSON so no data is silently dropped.
+func stringifyAcceptanceCriterion(m map[string]any) string {
+	for _, key := range []string{"criterion", "description", "text", "title"} {
+		if s, ok := m[key].(string); ok && s != "" {
+			return s
+		}
+	}
+	raw, _ := json.Marshal(m)
+	return string(raw)
+}
+
+// BuildExecutionIRs deterministically derives one ExecutionIR per
+// ExecutionUnit when the Planner hasn't already emitted them directly. This
+// mirrors MapLegacyPhasesToUnits: a pure mapping step, no LLM call, so
+// downstream state-machine execution always has a validated IR to compile
+// prompts from (REQ-001).
+func BuildExecutionIRs(analysis *models.TaskAnalysis) {
+	if len(analysis.ExecutionIRs) > 0 {
+		return
+	}
+	acceptance := make([]string, 0, len(analysis.AcceptanceCriteria))
+	for _, c := range analysis.AcceptanceCriteria {
+		acceptance = append(acceptance, stringifyAcceptanceCriterion(c))
+	}
+
+	for _, unit := range analysis.ExecutionUnits {
+		constraints := unit.Tasks
+		if constraints == nil {
+			constraints = []string{}
+		}
+		ir := models.ExecutionIR{
+			SchemaVersion: models.CurrentExecutionIRSchemaVersion,
+			NodeID:        unit.ID,
+			Intent: models.Intent{
+				Capability: unit.Objective,
+				Operation:  inferExecutionIROperation(unit),
+			},
+			Constraints: constraints,
+			Acceptance:  acceptance,
+			Budget:      executionIRBudgetForUnit(unit),
+		}
+		if err := models.ValidateExecutionIR(ir); err != nil {
+			// A derivation bug should not silently corrupt FrozenContext;
+			// skip the malformed IR rather than propagate it downstream.
+			continue
+		}
+		analysis.ExecutionIRs = append(analysis.ExecutionIRs, ir)
+	}
+}
+
 func MapLegacyPhasesToUnits(analysis *models.TaskAnalysis) {
 	if len(analysis.ExecutionUnits) > 0 {
 		return
@@ -122,6 +223,26 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 	} else {
 		// Backward Compatibility: Map legacy phases to units
 		MapLegacyPhasesToUnits(&analysis)
+	}
+
+	// Derive Execution IRs (REQ-001) when the Planner hasn't emitted them directly.
+	BuildExecutionIRs(&analysis)
+
+	targets, resolveErr := ResolveExecutionIRTargets(analysis)
+	analysis.ExecutionIRTargets = targets
+	if resolveErr != nil {
+		if models.IsStateMachineEnabled(ctx) {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("Plan intent resolution failed: %v", resolveErr))
+			specStatus := "paused"
+			_, _ = s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+				SpecStatus: &specStatus,
+			})
+			if s.status != nil {
+				_, _ = s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusSpecReview)
+			}
+			return nil, fmt.Errorf("intent resolution failed: %w", resolveErr)
+		}
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Plan: intent resolution incomplete: %v", resolveErr))
 	}
 
 	// Validate ExecutionUnits DAG
@@ -202,6 +323,8 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 		DesignMD:            analysis.DesignMD,
 		TasksMD:             analysis.TasksMD,
 		ExecutionUnits:      analysis.ExecutionUnits,
+		ExecutionIRs:        analysis.ExecutionIRs,
+		ExecutionIRTargets:  analysis.ExecutionIRTargets,
 		ExecutionBoundaries: analysis.ExecutionBoundaries,
 		AffectedFiles:       analysis.AffectedFiles,
 		AcceptanceCriteria:  analysis.AcceptanceCriteria,

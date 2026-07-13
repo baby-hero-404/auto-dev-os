@@ -107,6 +107,9 @@ func getDiffPrefixes(containerPath string) string {
 
 func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
 	prefixes := getDiffPrefixes(containerPath)
+	trackCmd := fmt.Sprintf("git -C %s add -N .", paths.QuoteShellArg(containerPath))
+	_, _ = c.RunSandboxStep(ctx, task, agent, "git_track_untracked", trackCmd)
+
 	cmd := fmt.Sprintf("git -C %s diff%s", paths.QuoteShellArg(containerPath), prefixes)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_diff", cmd)
 	if out != nil {
@@ -185,6 +188,7 @@ for repo in meta.get("repos", []):
         continue
     full_path = os.path.join(container_path, rel_path)
     if os.path.exists(os.path.join(full_path, ".git")):
+        subprocess.run(["git", "-C", full_path, "add", "-N", "."], capture_output=True)
         res = subprocess.run(["git", "-C", full_path, "diff", f"--src-prefix=a/{rel_path}/", f"--dst-prefix=b/{rel_path}/"], capture_output=True, text=True)
         if res.returncode == 0 and res.stdout.strip():
             diff_out.append(f"--- Repository: {name}\n{res.stdout}")

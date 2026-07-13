@@ -34,8 +34,10 @@ type Runner struct {
 
 	// Tools and ToolExecutor enable the agentic tool-call loop (Issue 1+2). When both are set,
 	// Run() drives a native ChatWithOptions tool loop instead of the single-shot Chat() path.
-	Tools        []llm.ToolDefinition
-	ToolExecutor ToolExecutor
+	Tools              []llm.ToolDefinition
+	ToolExecutor       ToolExecutor
+	CaptureDiff        func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error)
+	MaxToolResultChars int
 }
 
 func (r Runner) isAgentic() bool {
@@ -211,7 +213,21 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 // runAgentic drives the native tool-calling loop (RunToolLoop) instead of the single-shot
 // Chat() path, for steps where the caller resolved tools and a ToolExecutor (Issue 1+2).
 func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID string, messages []llm.Message) (map[string]any, error) {
+	if models.IsStateMachineEnabled(ctx) {
+		return r.runStateMachine(ctx, task, agent, jobID, stepID, messages)
+	}
+
 	var lastResp *llm.Response
+
+	var shadowSM *StateMachine
+	var resolvedTargets []string
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	ir := resolveExecutionIRForStep(&analysis, stepID)
+	shadowSM = NewStateMachine(ir.Budget)
+	resolvedTargets = analysis.ExecutionIRTargets[ir.NodeID]
 
 	parsed, _, partial, err := RunToolLoop(ctx, ToolLoopConfig{
 		Messages:      messages,
@@ -239,7 +255,24 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 			}
 			return resp, chatErr
 		},
-		ExecuteTool: r.ToolExecutor,
+		ExecuteTool: func(ctx context.Context, name string, argumentsJSON string) (string, error) {
+			if shadowSM != nil {
+				if checkErr := shadowSM.CheckTool(name); checkErr != nil {
+					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("[TELEMETRY-VIOLATION] Shadow state machine: tool %s is not permitted during state %s", name, shadowSM.Current()))
+				}
+				if (name == "search_replace" || name == "create_file") && len(resolvedTargets) > 0 {
+					var args struct {
+						Path string `json:"path"`
+					}
+					if err := json.Unmarshal([]byte(argumentsJSON), &args); err == nil && args.Path != "" {
+						if !pathMatchesTarget(args.Path, resolvedTargets) {
+							r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("[TELEMETRY-VIOLATION] Shadow state machine: out-of-scope write to %q (not in resolved targets: %v)", args.Path, resolvedTargets))
+						}
+					}
+				}
+			}
+			return r.ToolExecutor(ctx, name, argumentsJSON)
+		},
 		Validate: func(parsed map[string]any) error {
 			if schemaErr := r.validateSchema(stepID, parsed, true); schemaErr != nil {
 				return schemaErr
@@ -252,6 +285,9 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		OnCall: func(iteration int, msgs []llm.Message, resp *llm.Response, parsed map[string]any, latency time.Duration) {
 			if r.WriteTrace != nil {
 				r.WriteTrace(ctx, task, agent, stepID, msgs, resp, parsed, iteration, latency)
+			}
+			if shadowSM != nil && resp != nil {
+				updateShadowSM(shadowSM, resp, resolvedTargets, r, ctx, task.ID)
 			}
 		},
 	})

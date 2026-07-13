@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -80,5 +81,68 @@ func TestWithCheckpointRecovery_IgnoresStatusRestoreError(t *testing.T) {
 	_, err := wrapped(context.Background(), workflow.StepContext{})
 	if err != nil {
 		t.Fatalf("expected no error even when status restore fails, got %v", err)
+	}
+}
+
+type recoveryArtifactRepo struct {
+	artifacts []models.WorkflowArtifact
+}
+
+func (r *recoveryArtifactRepo) Create(ctx context.Context, artifact *models.WorkflowArtifact) error {
+	r.artifacts = append(r.artifacts, *artifact)
+	return nil
+}
+
+func (r *recoveryArtifactRepo) ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error) {
+	return r.artifacts, nil
+}
+
+func TestGetLatestExecutionSnapshot_ReturnsLatest(t *testing.T) {
+	snap1 := models.ExecutionSnapshot{ExecutionID: "step-1", CurrentState: "IMPLEMENTATION", PromptHash: "hash-1"}
+	payload1, _ := json.Marshal(snap1)
+	snap2 := models.ExecutionSnapshot{ExecutionID: "step-1", CurrentState: "VALIDATION", PromptHash: "hash-2"}
+	payload2, _ := json.Marshal(snap2)
+
+	repo := &recoveryArtifactRepo{
+		artifacts: []models.WorkflowArtifact{
+			{TaskID: "task-1", Step: "step-1", Type: "execution_snapshot", Payload: payload1},
+			{TaskID: "task-1", Step: "step-1_cycle_2", Type: "execution_snapshot", Payload: payload2},
+		},
+	}
+
+	store := &Store{Artifacts: repo}
+	gotSnap, exists := store.GetLatestExecutionSnapshot(context.Background(), "task-1", "step-1")
+	if !exists {
+		t.Fatal("expected snapshot to exist")
+	}
+	if gotSnap.PromptHash != "hash-2" {
+		t.Errorf("expected latest snapshot hash-2, got %s", gotSnap.PromptHash)
+	}
+	if gotSnap.CurrentState != "VALIDATION" {
+		t.Errorf("expected state VALIDATION, got %s", gotSnap.CurrentState)
+	}
+}
+
+func TestSaveArtifact_AutoCyclesStepName(t *testing.T) {
+	repo := &recoveryArtifactRepo{}
+	store := &Store{Artifacts: repo}
+
+	err := store.SaveArtifact(context.Background(), "job-1", "task-1", "step-1", "execution_snapshot", models.ExecutionSnapshot{PromptHash: "hash-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err = store.SaveArtifact(context.Background(), "job-1", "task-1", "step-1", "execution_snapshot", models.ExecutionSnapshot{PromptHash: "hash-2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(repo.artifacts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %d", len(repo.artifacts))
+	}
+	if repo.artifacts[0].Step != "step-1" {
+		t.Errorf("expected first artifact step step-1, got %s", repo.artifacts[0].Step)
+	}
+	if repo.artifacts[1].Step != "step-1_cycle_2" {
+		t.Errorf("expected second artifact step step-1_cycle_2, got %s", repo.artifacts[1].Step)
 	}
 }

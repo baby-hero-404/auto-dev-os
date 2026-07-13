@@ -1,0 +1,6 @@
+[
+  {
+    "role": "user",
+    "content": "=== Execution Contract ===\nNode ID: node_123\nCapability: UserRepository\nOperation: create\n\n=== Physical Targets (Write Scope) ===\n- internal/repository/user.go\n\n=== Constraints ===\n- Must use interface\n- Must include tests\n\n=== Acceptance Criteria ===\n- Tests pass\n- Implements methods\n\n=== Budgets ===\nDiscovery: 5 | Implementation: 10 | Validation: 5\n"
+  }
+]

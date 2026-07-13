@@ -188,6 +188,8 @@ type TaskAnalysis struct {
 	Risks                  []string            `json:"risks"`
 	ExecutionPhases        []ExecutionPhase    `json:"execution_phases,omitempty"`
 	ExecutionUnits         []ExecutionUnit     `json:"execution_units,omitempty"`
+	ExecutionIRs           []ExecutionIR       `json:"execution_irs,omitempty"`
+	ExecutionIRTargets     map[string][]string `json:"execution_ir_targets,omitempty"`
 	ExecutionBoundaries    []ExecutionBoundary `json:"execution_boundaries,omitempty"`
 	ExpandedBoundaries     []ExpandedBoundary  `json:"expanded_boundaries,omitempty"`
 	AcceptanceCriteria     []map[string]any    `json:"acceptance_criteria,omitempty"`
@@ -208,18 +210,20 @@ type TaskAnalysis struct {
 
 // FrozenContext holds the immutable execution contract for a workflow run.
 type FrozenContext struct {
-	SpecHash            string               `json:"spec_hash"`
-	ProposalMD          string               `json:"proposal_md"`
-	SpecsMD             string               `json:"specs_md"`
-	DesignMD            string               `json:"design_md"`
-	TasksMD             string               `json:"tasks_md"`
-	ExecutionUnits      []ExecutionUnit      `json:"execution_units"`
-	ExecutionBoundaries []ExecutionBoundary  `json:"execution_boundaries"`
-	AffectedFiles       []AffectedFile       `json:"affected_files"`
-	AcceptanceCriteria  []map[string]any     `json:"acceptance_criteria"`
-	ExecutionPhases     []ExecutionPhase     `json:"execution_phases"`
-	Risks               []string             `json:"risks"`
-	RiskDomains         []string             `json:"risk_domains"`
+	SpecHash            string              `json:"spec_hash"`
+	ProposalMD          string              `json:"proposal_md"`
+	SpecsMD             string              `json:"specs_md"`
+	DesignMD            string              `json:"design_md"`
+	TasksMD             string              `json:"tasks_md"`
+	ExecutionUnits      []ExecutionUnit     `json:"execution_units"`
+	ExecutionIRs        []ExecutionIR       `json:"execution_irs"`
+	ExecutionIRTargets  map[string][]string `json:"execution_ir_targets"`
+	ExecutionBoundaries []ExecutionBoundary `json:"execution_boundaries"`
+	AffectedFiles       []AffectedFile      `json:"affected_files"`
+	AcceptanceCriteria  []map[string]any    `json:"acceptance_criteria"`
+	ExecutionPhases     []ExecutionPhase    `json:"execution_phases"`
+	Risks               []string            `json:"risks"`
+	RiskDomains         []string            `json:"risk_domains"`
 }
 
 type ClarifyTaskInput struct {

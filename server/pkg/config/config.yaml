@@ -67,3 +67,9 @@ logging:
   file_root: "/tmp/auto-code-os/logs"
   llm_trace_enabled: true
   llm_log_level: "debug"
+
+execution:
+  state_machine_enabled: false
+  max_tool_result_chars: 8000
+
+

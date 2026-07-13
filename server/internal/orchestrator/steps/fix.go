@@ -179,6 +179,7 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 			Tester:         s.tests,
 			Tasks:          s.tasks,
 			Log:            s.log,
+			Checkpoints:    s.checkpoints,
 		}, instruction)
 		if err != nil {
 			return nil, err

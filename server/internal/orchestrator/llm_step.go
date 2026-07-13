@@ -2,6 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -53,6 +57,55 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 			return messages, err
 		}
 	}
+
+	if models.IsStateMachineEnabled(ctx) && o.checkpoints != nil && assemble != nil {
+		if snap, exists := o.checkpoints.GetLatestExecutionSnapshot(ctx, task.ID, stepID); exists {
+			messages, err := assemble(ctx, *task, agent, nil)
+			if err == nil {
+				rawMsgs, _ := json.Marshal(messages)
+				h := sha256.Sum256(rawMsgs)
+				currentPromptHash := hex.EncodeToString(h[:])
+				if currentPromptHash == snap.PromptHash {
+					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: PromptHash verified. Resuming with byte-identical execution state.", stepID))
+
+					// Apply snapshot diff to restore workspace
+					o.initRepoutil()
+					worktreeSuffix := ""
+					if task.Complexity != models.TaskComplexityEasy {
+						if strings.HasPrefix(stepID, workflow.StepCodeBackend) {
+							worktreeSuffix = "-be-worktree"
+						} else if strings.HasPrefix(stepID, workflow.StepCodeFrontend) {
+							worktreeSuffix = "-fe-worktree"
+						}
+					}
+
+					if errReset := o.repoutil.ResetRoleWorktrees(ctx, task, agent, worktreeSuffix); errReset != nil {
+						o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to reset worktree for resume: %v", errReset))
+					} else if snap.WorkspaceDiff != "" {
+						if errApply := o.repoutil.ApplyPatch(ctx, task, agent, stepID+"_restore", snap.WorkspaceDiff, worktreeSuffix); errApply != nil {
+							o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to restore snapshot diff for resume: %v", errApply))
+						}
+					}
+
+					var latestResponse map[string]any
+					if arts, err := o.checkpoints.Artifacts.ListByTaskID(ctx, task.ID); err == nil {
+						for i := len(arts) - 1; i >= 0; i-- {
+							art := arts[i]
+							if (art.Step == stepID || strings.HasPrefix(art.Step, stepID+"_cycle_")) && art.Type == "llm_response" {
+								_ = json.Unmarshal(art.Payload, &latestResponse)
+								break
+							}
+						}
+					}
+					if latestResponse != nil {
+						return latestResponse, nil
+					}
+				} else {
+					o.log(ctx, task.ID, nil, "warn", fmt.Sprintf("step %s: PromptHash mismatch (current: %s, stored: %s). Replaying execution state instead of skipping.", stepID, currentPromptHash, snap.PromptHash))
+				}
+			}
+		}
+	}
 	runner := llmrunner.Runner{
 		WorkspaceRoot:           o.workspaceRoot,
 		Provider:                o.llm,
@@ -62,6 +115,11 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		SaveArtifact:            o.checkpoints.SaveArtifact,
 		WriteTrace:              o.writeLLMCallTrace,
 		Log:                     o.log,
+		MaxToolResultChars:      o.maxToolResultChars,
+		CaptureDiff: func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error) {
+			o.initRepoutil()
+			return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
+		},
 	}
 	if stepIsAgentic(stepID) && o.registry != nil && len(tools) > 0 {
 		agentID, agentRole := "", ""

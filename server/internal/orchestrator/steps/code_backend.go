@@ -175,6 +175,7 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		Tester:         s.tester,
 		Tasks:          s.tasks,
 		Log:            s.log,
+		Checkpoints:    s.checkpoints,
 	}, instruction)
 	if err != nil {
 		return nil, err

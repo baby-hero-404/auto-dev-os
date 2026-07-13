@@ -92,6 +92,22 @@ The JSON object MUST have the following structure:
       "dependencies": ["another_unit_id"]
     }
   ],
+  "execution_irs": [
+    {
+      "node_id": "unique_unit_id",
+      "intent": {
+        "capability": "CapabilityName",
+        "operation": "OperationDescription"
+      },
+      "constraints": ["Constraint 1", "Constraint 2"],
+      "acceptance": ["Acceptance 1", "Acceptance 2"],
+      "budget": {
+        "discovery": 5,
+        "implementation": 15,
+        "validation": 5
+      }
+    }
+  ],
   "execution_boundaries": [
     {
       "module": "repository",

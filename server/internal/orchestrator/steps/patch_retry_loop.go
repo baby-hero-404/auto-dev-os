@@ -30,14 +30,15 @@ type patchRetryConfig struct {
 	// post-hoc targeted-test verification gate still applies.
 	Agentic bool
 
-	LLM       LLMRunner
-	Worktree  WorktreeManager
-	Patcher   PatchApplier
-	Diff      DiffCapturer
-	Artifacts ArtifactSaver
-	Tester    TestRunner
-	Tasks     TaskRepository
-	Log       Logger
+	LLM         LLMRunner
+	Worktree    WorktreeManager
+	Patcher     PatchApplier
+	Diff        DiffCapturer
+	Artifacts   ArtifactSaver
+	Tester      TestRunner
+	Tasks       TaskRepository
+	Log         Logger
+	Checkpoints CheckpointLister
 }
 
 func (cfg patchRetryConfig) logf(ctx context.Context, level, format string, args ...any) {
@@ -113,7 +114,8 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 				cfg.logf(ctx, "warn", "tool loop exhausted its iteration budget but %d edit(s) were applied; attempting to salvage as a partial result (attempt %d/%d)", len(editsApplied), attempt, maxRetries)
 
 				var salvageHash string
-				if cfg.Worktree != nil {
+				var useGitSalvage = !models.IsStateMachineEnabled(ctx)
+				if useGitSalvage && cfg.Worktree != nil {
 					hash, ckErr := cfg.Worktree.CreateGitCheckpoint(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_salvage", cfg.WorktreeSuffix)
 					if ckErr != nil {
 						cfg.logf(ctx, "error", "failed to create salvage checkpoint before testing partial result: %v", ckErr)
@@ -129,9 +131,29 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 							if _, errT := cfg.Tester.RunTargetedTests(ctx, cfg.Task, cfg.Agent, cfg.JobID, cfg.TestLabel, changedFiles, cfg.WorktreeSuffix); errT != nil {
 								testsOK = false
 								cfg.logf(ctx, "warn", "targeted tests failed on salvaged partial result (attempt %d/%d): %v", attempt, maxRetries, errT)
-								if salvageHash != "" && cfg.Worktree != nil {
-									if restoreErr := cfg.Worktree.RestoreGitCheckpoint(ctx, cfg.Task, cfg.Agent, salvageHash, cfg.WorktreeSuffix); restoreErr != nil {
-										cfg.logf(ctx, "error", "failed to restore salvage checkpoint after failed test run: %v", restoreErr)
+								if useGitSalvage {
+									if salvageHash != "" && cfg.Worktree != nil {
+										if restoreErr := cfg.Worktree.RestoreGitCheckpoint(ctx, cfg.Task, cfg.Agent, salvageHash, cfg.WorktreeSuffix); restoreErr != nil {
+											cfg.logf(ctx, "error", "failed to restore salvage checkpoint after failed test run: %v", restoreErr)
+										}
+									}
+								} else {
+									if cfg.Worktree != nil {
+										if errReset := cfg.Worktree.ResetRoleWorktrees(ctx, cfg.Task, cfg.Agent, cfg.WorktreeSuffix); errReset != nil {
+											cfg.logf(ctx, "error", "failed to reset worktree before snapshot restore: %v", errReset)
+										} else if cfg.Checkpoints != nil && cfg.Patcher != nil {
+											if snapLister, ok := cfg.Checkpoints.(interface {
+												GetLatestExecutionSnapshot(ctx context.Context, taskID string, step string) (*models.ExecutionSnapshot, bool)
+											}); ok {
+												if snap, exists := snapLister.GetLatestExecutionSnapshot(ctx, cfg.Task.ID, cfg.StepID); exists && snap.WorkspaceDiff != "" {
+													if errApply := cfg.Patcher.ApplyPatch(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_restore", snap.WorkspaceDiff, cfg.WorktreeSuffix); errApply != nil {
+														cfg.logf(ctx, "error", "failed to restore snapshot diff: %v", errApply)
+													} else {
+														cfg.logf(ctx, "info", "successfully restored workspace from execution snapshot diff")
+													}
+												}
+											}
+										}
 									}
 								}
 								updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)

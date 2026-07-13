@@ -88,6 +88,11 @@ type LoggingConfig struct {
 	LLMLogLevel        string `mapstructure:"llm_log_level"`
 }
 
+type ExecutionConfig struct {
+	StateMachineEnabled bool `mapstructure:"state_machine_enabled"`
+	MaxToolResultChars  int  `mapstructure:"max_tool_result_chars"`
+}
+
 type AutoCodeOSConfig struct {
 	DataRoot string `mapstructure:"data_root"`
 }
@@ -104,6 +109,7 @@ type Config struct {
 	Worker     WorkerConfig     `mapstructure:"worker"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
+	Execution  ExecutionConfig  `mapstructure:"execution"`
 }
 
 //go:embed config.yaml
@@ -161,6 +167,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("logging.llm_trace_enabled", "LOG_LLM_TRACE_ENABLED")
 	v.BindEnv("logging.llm_log_level", "LOG_LLM_LOG_LEVEL")
 	v.BindEnv("sandbox.disable_networking", "SANDBOX_DISABLE_NETWORKING")
+	v.BindEnv("execution.state_machine_enabled", "EXECUTION_STATE_MACHINE_ENABLED")
 
 	v.SetConfigType("yaml")
 	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {
@@ -207,6 +214,10 @@ func normalize(cfg *Config) error {
 
 	if cfg.Worker.MaxPhaseCost <= 0 {
 		cfg.Worker.MaxPhaseCost = 8.0
+	}
+
+	if cfg.Execution.MaxToolResultChars <= 0 {
+		cfg.Execution.MaxToolResultChars = 8000
 	}
 
 	if cfg.Git.DefaultAgentName == "" {

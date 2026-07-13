@@ -48,14 +48,16 @@ type Orchestrator struct {
 	wkspace         *wkspace.Manager
 	checkpoints     *checkpoint.Store
 	repoutil        *repoutil.Manager
-	disableNetworking bool
-	llmTraceEnabled   bool
-	llmLogLevel       string
-	maxPhaseCost      float64
-	wakeChan          chan struct{}
-	registry          *tool.Registry
-	capManager        *tool.CapabilityManager
-	gitConfig         config.GitConfig
+	disableNetworking   bool
+	llmTraceEnabled     bool
+	llmLogLevel         string
+	maxPhaseCost        float64
+	stateMachineEnabled bool
+	maxToolResultChars  int
+	wakeChan            chan struct{}
+	registry            *tool.Registry
+	capManager          *tool.CapabilityManager
+	gitConfig           config.GitConfig
 }
 
 func (o *Orchestrator) wake() {
@@ -150,6 +152,18 @@ func WithWorkspaceRetention(retention, interval time.Duration) Option {
 func WithMaxPhaseCost(cost float64) Option {
 	return func(o *Orchestrator) {
 		o.maxPhaseCost = cost
+	}
+}
+
+func WithStateMachineEnabled(enabled bool) Option {
+	return func(o *Orchestrator) {
+		o.stateMachineEnabled = enabled
+	}
+}
+
+func WithMaxToolResultChars(chars int) Option {
+	return func(o *Orchestrator) {
+		o.maxToolResultChars = chars
 	}
 }
 

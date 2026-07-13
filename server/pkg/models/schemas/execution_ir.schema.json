@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auto-code-os/schemas/execution_ir.schema.json",
+  "title": "ExecutionIR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "node_id", "intent", "constraints", "acceptance", "budget"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Pinned contract version. A Planner emitting a different version fails validation.",
+      "const": "1.0"
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for the execution unit/node."
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "operation"],
+      "properties": {
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Semantic goal capability, e.g. UserRepository."
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["create", "modify", "delete", "refactor"]
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovery", "implementation", "validation"],
+      "properties": {
+        "discovery": { "type": "integer", "minimum": 0 },
+        "implementation": { "type": "integer", "minimum": 0 },
+        "validation": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

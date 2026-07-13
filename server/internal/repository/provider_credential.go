@@ -187,6 +187,20 @@ func (r *ProviderCredentialRepo) GetModelCooldown(ctx context.Context, credentia
 	return cooldown.CooldownUntil, nil
 }
 
+func (r *ProviderCredentialRepo) ListActiveModelCooldownsByCredentialIDs(ctx context.Context, credentialIDs []string) ([]models.CredentialCooldown, error) {
+	if len(credentialIDs) == 0 {
+		return nil, nil
+	}
+	var cooldowns []models.CredentialCooldown
+	err := r.db.WithContext(ctx).
+		Where("credential_id IN ? AND cooldown_until > NOW()", credentialIDs).
+		Find(&cooldowns).Error
+	if err != nil {
+		return nil, fmt.Errorf("list active model cooldowns: %w", err)
+	}
+	return cooldowns, nil
+}
+
 func (r *ProviderCredentialRepo) Delete(ctx context.Context, orgID string, id string) error {
 	result := r.db.WithContext(ctx).Where("org_id = ?", orgID).Delete(&models.ProviderCredential{}, "id = ?", id)
 	if result.Error != nil {

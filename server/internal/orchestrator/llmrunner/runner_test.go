@@ -4,10 +4,42 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+// TestCtxSleep_ReturnsWhenDurationElapses verifies the normal (non-canceled) path still waits
+// out the full duration before returning nil.
+func TestCtxSleep_ReturnsWhenDurationElapses(t *testing.T) {
+	start := time.Now()
+	if err := ctxSleep(context.Background(), 20*time.Millisecond); err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Errorf("expected to wait at least 20ms, only waited %v", elapsed)
+	}
+}
+
+// TestCtxSleep_ReturnsImmediatelyOnCancellation verifies ctxSleep (Task 4.3 / REQ-M09) returns
+// as soon as ctx is canceled instead of blocking for the full backoff duration like a plain
+// time.Sleep would — the whole point of switching the outer retry backoff to be ctx-aware.
+func TestCtxSleep_ReturnsImmediatelyOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := ctxSleep(ctx, 10*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected a non-nil error when ctx is already canceled")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected ctxSleep to return promptly on cancellation, took %v", elapsed)
+	}
+}
 
 type mockAgenticProvider struct {
 	calls        int

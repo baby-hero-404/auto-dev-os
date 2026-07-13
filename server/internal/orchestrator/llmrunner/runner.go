@@ -122,7 +122,9 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 			}
 			if isTransientError(chatErr) && chatAttempt < 3 {
 				r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
-				time.Sleep(time.Duration(chatAttempt) * 2 * time.Second)
+				if sleepErr := ctxSleep(ctx, time.Duration(chatAttempt)*2*time.Second); sleepErr != nil {
+					return nil, fmt.Errorf("llm call retry backoff interrupted: %w", sleepErr)
+				}
 				continue
 			}
 			break
@@ -225,7 +227,9 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 				}
 				if isTransientError(chatErr) && chatAttempt < 3 {
 					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
-					time.Sleep(time.Duration(chatAttempt) * 2 * time.Second)
+					if sleepErr := ctxSleep(ctx, time.Duration(chatAttempt)*2*time.Second); sleepErr != nil {
+						return nil, sleepErr
+					}
 					continue
 				}
 				break
@@ -439,4 +443,19 @@ func requiresPatch(stepID string) bool {
 // only being retried by this outer, credential-unaware layer.
 func isTransientError(err error) bool {
 	return llm.IsTransientError(err)
+}
+
+// ctxSleep waits for d or until ctx is done, whichever comes first (Task 4.3 / REQ-M09),
+// matching the ctx-aware backoff already used at the gateway layer (internal/gateway/gateway.go,
+// pkg/llm/router.go) instead of a plain time.Sleep that ignores cancellation and keeps this
+// outer retry loop blocked for the full backoff even after the caller has given up.
+func ctxSleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

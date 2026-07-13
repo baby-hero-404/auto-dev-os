@@ -173,6 +173,118 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
 	}
 }
 
+// sequencedLLMChatter returns a different queued response on each successive call, falling back
+// to the last response once the queue is exhausted — used to simulate a model that corrects its
+// output after corrective feedback within the same tool loop.
+type sequencedLLMChatter struct {
+	responses []*llm.Response
+	calls     int
+}
+
+func (m *sequencedLLMChatter) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
+	return m.ChatWithOptions(ctx, messages, llm.ChatOptions{})
+}
+
+func (m *sequencedLLMChatter) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+	idx := m.calls
+	if idx >= len(m.responses) {
+		idx = len(m.responses) - 1
+	}
+	m.calls++
+	return m.responses[idx], nil
+}
+
+// TestAnalyzeStep_ContractValidationRetriesThenSucceeds verifies that after migrating onto the
+// shared llmrunner.RunToolLoop (Task 4.2 / REQ-M08), the analyze step's execution-contract field
+// validation still drives a real retry: a spec JSON missing required fields must be rejected via
+// the Validate callback and fed back to the model, and a subsequent complete spec must be
+// accepted, exercising the exact mechanism validateAnalyzeSpec/analyzeContractMissingFields
+// implement.
+func TestAnalyzeStep_ContractValidationRetriesThenSucceeds(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "analyze-step-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:         "task-retry",
+		ProjectID:  "proj-retry",
+		Complexity: "easy",
+		Status:     models.TaskStatusTodo,
+	}
+
+	incompleteResponse := `{"complexity": "easy"}`
+	completeResponse := `
+{
+  "complexity": "easy",
+  "primary_category": "backend",
+  "scope": "Implement basic sum function",
+  "affected_files": ["math.go"],
+  "risks": [],
+  "risk_domains": [],
+  "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
+  "clarification_questions": [],
+  "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [],
+  "proposal_md": "## Proposal",
+  "specs_md": "## ADDED Requirements",
+  "design_md": "## Design",
+  "tasks_md": "## Tasks",
+  "execution_boundaries": {"allowed": ["."]},
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
+}`
+
+	chatter := &sequencedLLMChatter{
+		responses: []*llm.Response{
+			{Content: incompleteResponse, Model: "test-model"},
+			{Content: completeResponse, Model: "test-model"},
+		},
+	}
+
+	statusMock := &mockStatusUpdater{}
+	traceMock := &mockTraceRecorder{}
+
+	step := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", AutonomyLevel: "high"}, JobID: "j1"},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: "high"}},
+		chatter,
+		&mockPromptAssembler{},
+		&mockSandboxRunner{},
+		&mockArtifactSaver{},
+		statusMock,
+		traceMock,
+		&mockLogger{},
+		nil, // wkspace
+		nil, // containerPath
+		8.0, // maxCost
+		tools.DefaultRegistry(nil, nil),
+	)
+
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if chatter.calls != 2 {
+		t.Errorf("expected the loop to retry once after the incomplete spec (2 chat calls), got %d", chatter.calls)
+	}
+	if result["complexity"] != "easy" {
+		t.Errorf("expected complexity easy, got: %v", result["complexity"])
+	}
+
+	var analysis models.TaskAnalysis
+	if errUnmarshal := json.Unmarshal(task.Analysis, &analysis); errUnmarshal != nil {
+		t.Fatalf("failed to unmarshal saved analysis: %v", errUnmarshal)
+	}
+	if analysis.PrimaryCategory != "backend" {
+		t.Errorf("expected category backend from the eventually-accepted spec, got: %s", analysis.PrimaryCategory)
+	}
+}
+
 func TestNormalizeTaskID(t *testing.T) {
 	tests := []struct {
 		input         string

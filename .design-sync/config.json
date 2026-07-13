@@ -1,0 +1,24 @@
+{
+  "projectId": "380a35f5-e9fe-4510-9d66-e8b2c71189c9",
+  "shape": "package",
+  "pkg": "web",
+  "globalName": "AutoCodeOsUI",
+  "srcDir": "src/components/ui",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": ".ds-sync-cache/compiled.css",
+  "componentSrcMap": {
+    "Badge": "src/components/ui/badge.tsx",
+    "ConfirmDialog": "src/components/ui/confirm-dialog.tsx",
+    "EmptyState": "src/components/ui/empty-state.tsx",
+    "Markdown": "src/components/ui/markdown.tsx"
+  },
+  "dtsPropsFor": {
+    "Badge": "value: string | number;",
+    "ConfirmDialog": "isOpen: boolean;\n  title: string;\n  description: string;\n  confirmText?: string;\n  cancelText?: string;\n  variant?: \"danger\" | \"warning\" | \"info\";\n  isLoading?: boolean;\n  onConfirm: () => void | Promise<void>;\n  onClose: () => void;",
+    "EmptyState": "icon: React.ComponentType<{ size?: number; className?: string }>;\n  title: string;\n  description: string;",
+    "Markdown": "content: string;"
+  },
+  "overrides": {
+    "ConfirmDialog": { "cardMode": "single", "viewport": "560x640" }
+  }
+}

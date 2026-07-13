@@ -49,9 +49,10 @@ type ToolDefinition struct {
 
 // ToolCall represents a tool invocation requested by the LLM.
 type ToolCall struct {
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments,omitempty"`
+	ID               string `json:"id,omitempty"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments,omitempty"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // ChatOptions contains native tool definitions and choice constraints for the ChatWithOptions call.

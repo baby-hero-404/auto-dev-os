@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -71,6 +72,7 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 				Parts: []geminiPart{{
 					FunctionResponse: &geminiFunctionResponse{
 						Name: msg.ToolName,
+						ID:   msg.ToolCallID,
 						Response: map[string]any{
 							"content": msg.Content,
 						},
@@ -88,7 +90,12 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 			if call.Arguments != "" {
 				_ = json.Unmarshal([]byte(call.Arguments), &args)
 			}
-			parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{Name: call.Name, Args: args}})
+			parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{
+				Name:             call.Name,
+				Args:             args,
+				ID:               call.ID,
+				ThoughtSignature: call.ThoughtSignature,
+			}})
 		}
 		if len(parts) == 0 {
 			parts = []geminiPart{{Text: msg.Content}}
@@ -154,8 +161,10 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 		if part.FunctionCall != nil {
 			argsBytes, _ := json.Marshal(part.FunctionCall.Args)
 			toolCalls = append(toolCalls, ToolCall{
-				Name:      part.FunctionCall.Name,
-				Arguments: string(argsBytes),
+				ID:               part.FunctionCall.ID,
+				ThoughtSignature: part.FunctionCall.ThoughtSignature,
+				Name:             part.FunctionCall.Name,
+				Arguments:        string(argsBytes),
 			})
 			continue
 		}
@@ -166,7 +175,7 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 
 	content := strings.Join(contentParts, "\n")
 	if content == "" {
-		fmt.Printf("DEBUG: Gemini returned empty content. Raw response: %s\n", string(respBody))
+		slog.Debug("Gemini returned empty content", "raw_response", string(respBody))
 	}
 
 	return &Response{
@@ -205,13 +214,16 @@ type geminiPart struct {
 }
 
 type geminiFunctionCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args,omitempty"`
+	Name             string         `json:"name"`
+	Args             map[string]any `json:"args,omitempty"`
+	ID               string         `json:"id,omitempty"`
+	ThoughtSignature string         `json:"thoughtSignature,omitempty"`
 }
 
 type geminiFunctionResponse struct {
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
+	ID       string         `json:"id,omitempty"`
 }
 
 type geminiContent struct {
@@ -241,8 +253,10 @@ type geminiResponse struct {
 			Parts []struct {
 				Text         string `json:"text"`
 				FunctionCall *struct {
-					Name string         `json:"name"`
-					Args map[string]any `json:"args"`
+					Name             string         `json:"name"`
+					Args             map[string]any `json:"args"`
+					ID               string         `json:"id,omitempty"`
+					ThoughtSignature string         `json:"thoughtSignature,omitempty"`
 				} `json:"functionCall,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`

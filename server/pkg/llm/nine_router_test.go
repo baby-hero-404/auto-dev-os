@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNineRouter_Constructor(t *testing.T) {
@@ -20,6 +21,13 @@ func TestNineRouter_Constructor(t *testing.T) {
 
 	if nr.Name() != "9router" {
 		t.Errorf("expected Name to be '9router', got %q", nr.Name())
+	}
+
+	// Task 4.3 / REQ-M09: NineRouter previously had no client Timeout, unlike the other three
+	// providers (anthropic.go, openai.go, gemini.go), letting a hung 9router backend block a
+	// call indefinitely instead of failing over.
+	if nr.client.Timeout != 5*time.Minute {
+		t.Errorf("expected http.Client.Timeout to be 5 minutes matching the other providers, got %v", nr.client.Timeout)
 	}
 }
 

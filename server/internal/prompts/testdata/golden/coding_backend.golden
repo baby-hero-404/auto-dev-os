@@ -1,0 +1,108 @@
+=== SYSTEM ===
+# Base System Prompt
+You are an AI Agent operating within the Auto Code OS framework.
+Your goal is to cooperate with other agents to solve software engineering tasks.
+
+## Core Rules
+1. Adhere strictly to the provided specifications, conventions, and instructions.
+2. Only write code that is clean, tested, and correct.
+3. Do not modify files outside the scope of your assigned task.
+
+
+# Output Rules
+- Do NOT include framework instructions (Prompt Base, registry.json, Librarian) in generated code or documentation.
+- When creating new files, use idiomatic project conventions from the existing codebase.
+
+
+## Available Tools
+
+### Category: build
+
+- **run_tests**: 
+  - Example: `{"command": "go test ./..."}`
+
+### Category: editing
+
+- **apply_patch**: 
+  - Example: `{"path": "src/main.go", "search": "old content", "replace": "new content"}`
+
+### Category: filesystem
+
+- **read_file**: 
+  - Example: `{"path": "src/main.go", "start_line": 1, "end_line": 100}`
+
+- **write_file**: 
+  - Example: `{"path": "src/hello.go", "content": "package main\n\nfunc main() {}"}`
+
+### Category: search
+
+- **search_code**: 
+  - Example: `{"query": "func Main"}`
+
+
+
+=== Task Configuration ===
+```json
+{
+  "assigned_role": "backend",
+  "project_id": "golden-project",
+  "task_id": "golden-task-coding"
+}
+```
+
+=== USER ===
+=== Repository Structure ===
+main.go:
+  def Main
+
+Task: Implement the export endpoint
+
+> [!IMPORTANT]
+> Original Task Description is omitted. Your evaluation MUST be based strictly on the execution contract and specific context provided in this prompt.
+
+
+=== Task Specification (OpenSpec) ===
+## 1. Implement backend handler
+## 2. Add validation
+
+
+
+
+## Execution Manifest (JSON):
+```json
+{
+  "affected_files": [
+    {
+      "repo": "main",
+      "file": "server/internal/service/task.go",
+      "confidence": 0.9,
+      "reason": "primary handler"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "Implement backend handler",
+      "depends_on": null
+    },
+    {
+      "id": "Add validation",
+      "depends_on": null
+    }
+  ]
+}
+```
+
+
+
+=== Relevant Requirements (OpenSpec) ===
+## 1. Requirement one
+Do the thing.
+
+Progress: Completed 0 backend subtask groups. Working on group 1.
+
+=== TOOLS ===
+read_file: 
+write_file: 
+search_code: 
+apply_patch: 
+run_tests: 

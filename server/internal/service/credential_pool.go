@@ -156,8 +156,10 @@ func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID str
 		}
 	case "gemini":
 		defaults = []models.CreateProviderModelInput{
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 0},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 0},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 0},
+			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 1},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.5-flash", Priority: 0},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 1},
 			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 0},
 		}
 	}
@@ -179,6 +181,13 @@ func (s *CredentialPoolService) GetByID(ctx context.Context, id string) (*models
 		return nil, err
 	}
 	resp := cred.ToResponse("")
+	cooldowns, _ := s.repo.ListActiveModelCooldownsByCredentialIDs(ctx, []string{id})
+	if len(cooldowns) > 0 {
+		resp.ModelCooldowns = make(map[string]time.Time)
+		for _, cd := range cooldowns {
+			resp.ModelCooldowns[cd.Model] = cd.CooldownUntil
+		}
+	}
 	return &resp, nil
 }
 
@@ -187,9 +196,32 @@ func (s *CredentialPoolService) ListByOrg(ctx context.Context, orgID string) ([]
 	if err != nil {
 		return nil, err
 	}
+
+	credIDs := make([]string, 0, len(creds))
+	for _, cred := range creds {
+		credIDs = append(credIDs, cred.ID)
+	}
+
+	cooldowns, err := s.repo.ListActiveModelCooldownsByCredentialIDs(ctx, credIDs)
+	if err != nil {
+		slog.Error("failed to fetch model cooldowns for ListByOrg", "error", err)
+	}
+
+	cooldownMap := make(map[string]map[string]time.Time)
+	for _, cd := range cooldowns {
+		if cooldownMap[cd.CredentialID] == nil {
+			cooldownMap[cd.CredentialID] = make(map[string]time.Time)
+		}
+		cooldownMap[cd.CredentialID][cd.Model] = cd.CooldownUntil
+	}
+
 	out := make([]models.ProviderCredentialResponse, 0, len(creds))
 	for _, cred := range creds {
-		out = append(out, cred.ToResponse(""))
+		resp := cred.ToResponse("")
+		if cdMap, ok := cooldownMap[cred.ID]; ok {
+			resp.ModelCooldowns = cdMap
+		}
+		out = append(out, resp)
 	}
 	return out, nil
 }

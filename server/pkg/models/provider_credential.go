@@ -59,10 +59,11 @@ type ProviderCredentialResponse struct {
 	Priority      int             `json:"priority"`
 	Configured    bool            `json:"configured"`
 	KeySuffix     string          `json:"key_suffix,omitempty"`
-	CooldownUntil *time.Time      `json:"cooldown_until,omitempty"`
-	Metadata      json.RawMessage `json:"metadata,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	CooldownUntil  *time.Time           `json:"cooldown_until,omitempty"`
+	ModelCooldowns map[string]time.Time `json:"model_cooldowns,omitempty"`
+	Metadata       json.RawMessage      `json:"metadata,omitempty"`
+	CreatedAt      time.Time            `json:"created_at"`
+	UpdatedAt      time.Time            `json:"updated_at"`
 }
 
 func (c ProviderCredential) ToResponse(keySuffix string) ProviderCredentialResponse {

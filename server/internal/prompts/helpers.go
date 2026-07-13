@@ -57,14 +57,18 @@ func formatContextSnippets(snippets []models.ContextSnippet) string {
 	return b.String()
 }
 
-// deduplicateSnippets removes snippets that overlap >50% with an
-// already-kept snippet from the same file. Keeps the first occurrence.
+// snippetDedupOverlapThreshold is the line-range overlap fraction above which a snippet is
+// considered a duplicate of an already-kept snippet from the same file (REQ-M07).
+const snippetDedupOverlapThreshold = 0.5
+
+// deduplicateSnippets removes snippets that overlap more than snippetDedupOverlapThreshold with
+// an already-kept snippet from the same file. Keeps the first occurrence.
 func deduplicateSnippets(snippets []models.ContextSnippet) []models.ContextSnippet {
 	var result []models.ContextSnippet
 	for _, s := range snippets {
 		isDup := false
 		for _, kept := range result {
-			if kept.Path == s.Path && lineOverlap(kept, s) > 0.5 {
+			if kept.Path == s.Path && lineOverlap(kept, s) > snippetDedupOverlapThreshold {
 				isDup = true
 				break
 			}

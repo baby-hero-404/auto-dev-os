@@ -346,3 +346,150 @@ func TestRunToolLoop_ExhaustionWithNoEditsReturnsHardError(t *testing.T) {
 		t.Errorf("did not expect a partial result when no edits were applied, got: %+v", result)
 	}
 }
+
+// TestRunToolLoop_TruncatesLargeToolResult verifies a tool result exceeding maxToolResultChars
+// (e.g. a large run_tests stdout+stderr blob) is truncated with a visible marker before being
+// appended to message history, and the loop still completes successfully (Issue 7).
+func TestRunToolLoop_TruncatesLargeToolResult(t *testing.T) {
+	hugeOutput := strings.Repeat("x", maxToolResultChars+2000)
+
+	calls := 0
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "run_tests"}},
+		MaxIterations: 3,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			if calls == 1 {
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_tests", Arguments: `{"command":"go test ./..."}`}},
+				}, nil
+			}
+			return &llm.Response{Content: `{"summary":"done"}`}, nil
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			return hugeOutput, nil
+		},
+	}
+
+	parsed, messages, _, err := RunToolLoop(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("expected the loop to complete successfully despite a large tool result, got: %v", err)
+	}
+	if parsed["summary"] != "done" {
+		t.Errorf("expected parsed summary 'done', got %v", parsed)
+	}
+
+	var toolMsg string
+	for _, m := range messages {
+		if m.Role == "tool" {
+			toolMsg = m.Content
+			break
+		}
+	}
+	if toolMsg == "" {
+		t.Fatal("expected a tool result message in the final messages")
+	}
+	if len(toolMsg) >= len(hugeOutput) {
+		t.Errorf("expected the appended tool message to be shorter than the original %d-char output, got %d chars", len(hugeOutput), len(toolMsg))
+	}
+	if !strings.Contains(toolMsg, "truncated") {
+		t.Errorf("expected a visible truncation marker in the appended tool message, got: %q", toolMsg[len(toolMsg)-60:])
+	}
+}
+
+// TestRunToolLoop_ReadFileMemoization verifies a repeated read_file call on an already-read
+// (path, line-range) within the same loop returns a short "already read" note instead of the
+// full content again, without re-invoking the underlying tool (Issue 7).
+func TestRunToolLoop_ReadFileMemoization(t *testing.T) {
+	calls := 0
+	readExecutions := 0
+
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "read_file"}},
+		MaxIterations: 4,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			if calls <= 2 {
+				// Same path AND same line range both times.
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call", Name: "read_file", Arguments: `{"path":"a.go","start_line":1,"end_line":50}`}},
+				}, nil
+			}
+			return &llm.Response{Content: `{"summary":"done"}`}, nil
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			readExecutions++
+			return "the full file contents", nil
+		},
+	}
+
+	_, messages, _, err := RunToolLoop(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if readExecutions != 1 {
+		t.Errorf("expected read_file to actually execute only once for a repeated (path, range), got %d executions", readExecutions)
+	}
+
+	var memoMsg string
+	fullContentCount := 0
+	for _, m := range messages {
+		if m.Role != "tool" {
+			continue
+		}
+		if m.Content == "the full file contents" {
+			fullContentCount++
+		}
+		if strings.Contains(m.Content, "Already read at turn") {
+			memoMsg = m.Content
+		}
+	}
+	if fullContentCount != 1 {
+		t.Errorf("expected the full content to appear exactly once in message history, got %d times", fullContentCount)
+	}
+	if memoMsg == "" {
+		t.Error("expected an 'already read' note for the repeated call")
+	}
+}
+
+// TestRunToolLoop_ReadFileMemoization_DifferentRangeNotMemoized verifies memoization is keyed
+// on (path, line-range), not path alone — a different range on the same path must still execute.
+func TestRunToolLoop_ReadFileMemoization_DifferentRangeNotMemoized(t *testing.T) {
+	calls := 0
+	readExecutions := 0
+
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "read_file"}},
+		MaxIterations: 4,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			switch calls {
+			case 1:
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "read_file", Arguments: `{"path":"a.go","start_line":1,"end_line":50}`}},
+				}, nil
+			case 2:
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: "call-2", Name: "read_file", Arguments: `{"path":"a.go","start_line":100,"end_line":150}`}},
+				}, nil
+			default:
+				return &llm.Response{Content: `{"summary":"done"}`}, nil
+			}
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			readExecutions++
+			return "content", nil
+		},
+	}
+
+	_, _, _, err := RunToolLoop(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if readExecutions != 2 {
+		t.Errorf("expected both distinct line ranges to execute, got %d executions", readExecutions)
+	}
+}

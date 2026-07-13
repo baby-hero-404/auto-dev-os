@@ -96,10 +96,10 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		
+
 		plannerAgent := *s.rt.Agent
 		plannerAgent.Role = models.AgentRolePlanner
-		
+
 		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, fmt.Errorf("assemble prompt: %w", err)
@@ -149,7 +149,7 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 		return models.TaskAnalysis{}, false, err
 	}
 
-	parsedFinal, loopErr := s.runAnalyzeLLMLoop(ctx, messages)
+	parsedFinal, loopErr := s.runAnalyzeToolLoop(ctx, messages)
 	if loopErr != nil || parsedFinal == nil {
 		if loopErr == nil {
 			loopErr = fmt.Errorf("LLM returned empty or nil spec JSON")
@@ -158,6 +158,166 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 	}
 
 	return parseAnalysisFinal(parsedFinal), false, nil
+}
+
+// analyzeMaxIterations bounds the analyze step's tool loop (Task 4.2 / REQ-M08), matching the
+// iteration budget the step used before migrating onto the shared llmrunner.RunToolLoop.
+const analyzeMaxIterations = 6
+
+// buildAnalyzeRouteOptions resolves the model routing options for the analyze step's LLM calls.
+// Unlike the pre-migration hand-rolled loop, this is computed once per runAnalyzeToolLoop call
+// instead of once per iteration — none of its inputs (project, agent, task) change across
+// iterations of the same loop, so recomputing it every iteration was redundant work, not an
+// intentional behavior the migration needs to preserve.
+func (s *AnalyzeStep) buildAnalyzeRouteOptions(ctx context.Context) llm.RouteOptions {
+	routeName := s.rt.Agent.ModelLevelGroup
+	if s.projects != nil {
+		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
+			if s.rt.Agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
+				routeName = p.DefaultModelLevel
+			} else if (routeName == "" || routeName == "default") && p.DefaultModelLevel != "" {
+				routeName = p.DefaultModelLevel
+			}
+		}
+	}
+	return llm.RouteOptions{
+		Complexity: s.rt.Task.Complexity,
+		OrgID:      s.rt.Agent.OrgID,
+		ProjectID:  s.rt.Task.ProjectID,
+		AgentID:    s.rt.Agent.ID,
+		TaskID:     s.rt.Task.ID,
+		RouteName:  routeName,
+	}
+}
+
+// runAnalyzeToolLoop drives the analyze step's agentic spec-generation loop via the shared
+// llmrunner.RunToolLoop (Task 4.2 / REQ-M08) instead of a second hand-rolled implementation of
+// the same native-tool-calling/parse/validate/retry pattern already used by review/coding steps.
+// Analyze-specific behavior (the legacy JSON-embedded "tool_use" convention, execution-contract
+// field validation, and DAG/cost validation) is preserved via the Validate callback.
+func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Message) (map[string]any, error) {
+	routeOpts := s.buildAnalyzeRouteOptions(ctx)
+	iteration := 0
+
+	parsedFinal, _, _, err := llmrunner.RunToolLoop(ctx, llmrunner.ToolLoopConfig{
+		Messages:      messages,
+		Tools:         s.analyzeToolDefinitions(),
+		MaxIterations: analyzeMaxIterations,
+		Chat: func(callCtx context.Context, msgs []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			return s.llm.ChatWithOptions(llm.WithRouteOptions(callCtx, routeOpts), msgs, opts)
+		},
+		ExecuteTool: func(callCtx context.Context, name, argumentsJSON string) (string, error) {
+			return s.executeAnalyzeTool(callCtx, name, argumentsJSON), nil
+		},
+		Validate: func(parsed map[string]any) error {
+			return s.validateAnalyzeSpec(ctx, parsed, iteration)
+		},
+		OnCall: func(iter int, msgs []llm.Message, resp *llm.Response, parsed map[string]any, latency time.Duration) {
+			iteration = iter
+			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", iter, resp.Model))
+			if s.traces != nil {
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, msgs, resp, parsed, iter, latency)
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return parsedFinal, nil
+}
+
+// validateAnalyzeSpec is the llmrunner.ToolLoopValidator for the analyze step's spec JSON. It
+// preserves three behaviors from the pre-migration loop, checked in order: the legacy
+// JSON-embedded "tool_use" tool-call convention (distinct from a native resp.ToolCalls call),
+// execution-contract field completeness, and DAG/cost validation of the proposed execution
+// units. Returning a non-nil error feeds its message back to the LLM as corrective content and
+// continues the loop (via RunToolLoop); returning nil accepts parsedJSON as the final spec.
+func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[string]any, iteration int) error {
+	if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
+		toolName, _ := toolUse["name"].(string)
+		toolArgs, _ := toolUse["arguments"].(map[string]any)
+		argsBytes, _ := json.Marshal(toolArgs)
+		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("Agent requested legacy tool %s with args %v", toolName, toolArgs))
+		result := s.executeAnalyzeTool(ctx, toolName, string(argsBytes))
+		return fmt.Errorf("Tool %s result:\n%s\n\nPlease output either the next native tool call or the final spec JSON.", toolName, result)
+	}
+
+	if missingFields := analyzeContractMissingFields(parsedJSON); len(missingFields) > 0 {
+		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output missing required fields: %v", iteration, missingFields))
+		return fmt.Errorf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", "))
+	}
+
+	analysisDraft := parseAnalysisFinal(parsedJSON)
+	if len(analysisDraft.ExecutionUnits) > 0 {
+		if errVal := policy.ValidateDAG(analysisDraft.ExecutionUnits, s.maxCost); errVal != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: proposed execution plan failed DAG/cost validation: %v", iteration, errVal))
+			return fmt.Errorf("Your proposed execution plan failed DAG/cost validation checks. Error: %v\n\nPlease adjust the execution_units array by splitting units that exceed the cost limit (limit is %.1f, migration task is cost 5, file creation is cost 2, file modify is cost 1, plus max_risk multiplier). Ensure each unit is small, touches a maximum of 3-4 files, and has no cyclic dependencies. Re-output the corrected JSON specification.", errVal, s.maxCost)
+		}
+	}
+
+	return nil
+}
+
+// analyzeContractMissingFields reports which required execution-contract fields are absent (or
+// malformed) from the analyze step's parsed spec JSON.
+func analyzeContractMissingFields(parsedJSON map[string]any) []string {
+	var missingFields []string
+	if _, ok := parsedJSON["complexity"].(string); !ok {
+		missingFields = append(missingFields, "complexity")
+	}
+	if _, ok := parsedJSON["primary_category"].(string); !ok {
+		missingFields = append(missingFields, "primary_category")
+	}
+	if _, ok := parsedJSON["execution_phases"].([]any); !ok {
+		missingFields = append(missingFields, "execution_phases")
+	}
+	if _, ok := parsedJSON["affected_files"].([]any); !ok {
+		missingFields = append(missingFields, "affected_files")
+	}
+	if _, ok := parsedJSON["acceptance_criteria"].([]any); !ok {
+		missingFields = append(missingFields, "acceptance_criteria")
+	}
+	_, hasBoundariesArray := parsedJSON["execution_boundaries"].([]any)
+	_, hasBoundariesMap := parsedJSON["execution_boundaries"].(map[string]any)
+	if !hasBoundariesArray && !hasBoundariesMap {
+		missingFields = append(missingFields, "execution_boundaries")
+	}
+	if _, ok := parsedJSON["proposal_md"].(string); !ok {
+		missingFields = append(missingFields, "proposal_md")
+	}
+	if _, ok := parsedJSON["specs_md"].(string); !ok {
+		missingFields = append(missingFields, "specs_md")
+	}
+	if _, ok := parsedJSON["design_md"].(string); !ok {
+		missingFields = append(missingFields, "design_md")
+	}
+	if _, ok := parsedJSON["execution_units"].([]any); !ok {
+		missingFields = append(missingFields, "execution_units")
+	}
+	if _, ok := parsedJSON["required_skills_map"].(map[string]any); ok {
+		validRoles := map[string]bool{
+			"planner":              true,
+			"backend":              true,
+			"frontend":             true,
+			"reviewer":             true,
+			"qa":                   true,
+			"security-auditor":     true,
+			"db-architect":         true,
+			"documentation-writer": true,
+		}
+		var invalidKeys []string
+		for k := range parsedJSON["required_skills_map"].(map[string]any) {
+			if !validRoles[strings.ToLower(k)] {
+				invalidKeys = append(invalidKeys, k)
+			}
+		}
+		if len(invalidKeys) > 0 {
+			missingFields = append(missingFields, fmt.Sprintf("required_skills_map (keys must strictly be role names, e.g., backend, frontend, qa, reviewer, devops, but got: %v)", invalidKeys))
+		}
+	} else {
+		missingFields = append(missingFields, "required_skills_map")
+	}
+	return missingFields
 }
 
 func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction string) ([]llm.Message, error) {
@@ -170,10 +330,10 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 			profile := tool.DefaultRoleProfiles()["planner"]
 			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
 		}
-		
+
 		plannerAgent := *s.rt.Agent
 		plannerAgent.Role = models.AgentRolePlanner
-		
+
 		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, err
@@ -190,13 +350,13 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 
 type analyzeTemplateData struct {
 	AvailableSkills []llm.ToolDefinition
-	RepoContext    string
-	WorkspaceFiles string
+	RepoContext     string
+	WorkspaceFiles  string
 }
 
 func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workflow.StepContext) string {
 	data := analyzeTemplateData{}
-	
+
 	if s.prompts != nil {
 		if skills, err := s.prompts.ListAllSkills(ctx, *s.rt.Task); err == nil {
 			data.AvailableSkills = skills
@@ -237,206 +397,6 @@ func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workf
 		instruction += "\n\n=== Workspace Files ===\n" + data.WorkspaceFiles
 	}
 	return instruction
-}
-
-func (s *AnalyzeStep) runAnalyzeLLMLoop(ctx context.Context, messages []llm.Message) (map[string]any, error) {
-	maxIterations := 6
-	analyzeTools := s.analyzeToolDefinitions()
-
-	for i := 0; i < maxIterations; i++ {
-		routeName := s.rt.Agent.ModelLevelGroup
-		if s.projects != nil {
-			if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
-				if s.rt.Agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
-					routeName = p.DefaultModelLevel
-				} else if (routeName == "" || routeName == "default") && p.DefaultModelLevel != "" {
-					routeName = p.DefaultModelLevel
-				}
-			}
-		}
-		routeCtx := llm.WithRouteOptions(ctx, llm.RouteOptions{
-			Complexity: s.rt.Task.Complexity,
-			OrgID:      s.rt.Agent.OrgID,
-			ProjectID:  s.rt.Task.ProjectID,
-			AgentID:    s.rt.Agent.ID,
-			TaskID:     s.rt.Task.ID,
-			RouteName:  routeName,
-		})
-
-		callStart := time.Now()
-		resp, err := s.llm.ChatWithOptions(routeCtx, messages, llm.ChatOptions{Tools: analyzeTools, ToolChoice: "auto"})
-		callLatency := time.Since(callStart)
-		if err != nil {
-			return nil, fmt.Errorf("llm tool loop call failed: %w", err)
-		}
-		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", i+1, resp.Model))
-
-		if len(resp.ToolCalls) > 0 {
-			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"tool_calls": resp.ToolCalls}, i+1, callLatency)
-			}
-			messages = append(messages, llm.Message{
-				Role:      "assistant",
-				Content:   resp.Content,
-				ToolCalls: resp.ToolCalls,
-			})
-			for _, call := range resp.ToolCalls {
-				toolResult := s.executeAnalyzeTool(ctx, call.Name, call.Arguments)
-				messages = append(messages, llm.Message{
-					Role:       "tool",
-					ToolCallID: call.ID,
-					ToolName:   call.Name,
-					Content:    toolResult,
-				})
-			}
-			continue
-		}
-
-		parsedJSON, parseErr := llmrunner.ParseJSONMarkdown(resp.Content)
-		if parseErr != nil {
-			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, map[string]any{"raw_content": resp.Content}, i+1, callLatency)
-			}
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output is invalid JSON: %v", i+1, parseErr))
-			content := resp.Content
-			if content == "" {
-				content = "(empty response)"
-			}
-			messages = append(messages, llm.Message{
-				Role:    "assistant",
-				Content: content,
-			})
-			messages = append(messages, llm.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Your output was not valid JSON. Error: %v. Please correct the formatting/syntax and output strictly valid JSON matching the schema.", parseErr),
-			})
-			continue
-		}
-
-		if s.traces != nil {
-			s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, messages, resp, parsedJSON, i+1, callLatency)
-		}
-
-		if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
-			toolName, _ := toolUse["name"].(string)
-			toolArgs, _ := toolUse["arguments"].(map[string]any)
-			argsBytes, _ := json.Marshal(toolArgs)
-			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("Agent requested legacy tool %s with args %v", toolName, toolArgs))
-			content := resp.Content
-			if content == "" {
-				content = "(empty response)"
-			}
-			messages = append(messages, llm.Message{
-				Role:    "assistant",
-				Content: content,
-			})
-			messages = append(messages, llm.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Tool %s result:\n%s\n\nPlease output either the next native tool call or the final spec JSON.", toolName, s.executeAnalyzeTool(ctx, toolName, string(argsBytes))),
-			})
-			continue
-		}
-
-		// Contract Validation
-		var missingFields []string
-		if _, ok := parsedJSON["complexity"].(string); !ok {
-			missingFields = append(missingFields, "complexity")
-		}
-		if _, ok := parsedJSON["primary_category"].(string); !ok {
-			missingFields = append(missingFields, "primary_category")
-		}
-		if _, ok := parsedJSON["execution_phases"].([]any); !ok {
-			missingFields = append(missingFields, "execution_phases")
-		}
-		if _, ok := parsedJSON["affected_files"].([]any); !ok {
-			missingFields = append(missingFields, "affected_files")
-		}
-		if _, ok := parsedJSON["acceptance_criteria"].([]any); !ok {
-			missingFields = append(missingFields, "acceptance_criteria")
-		}
-		_, hasBoundariesArray := parsedJSON["execution_boundaries"].([]any)
-		_, hasBoundariesMap := parsedJSON["execution_boundaries"].(map[string]any)
-		if !hasBoundariesArray && !hasBoundariesMap {
-			missingFields = append(missingFields, "execution_boundaries")
-		}
-		if _, ok := parsedJSON["proposal_md"].(string); !ok {
-			missingFields = append(missingFields, "proposal_md")
-		}
-		if _, ok := parsedJSON["specs_md"].(string); !ok {
-			missingFields = append(missingFields, "specs_md")
-		}
-		if _, ok := parsedJSON["design_md"].(string); !ok {
-			missingFields = append(missingFields, "design_md")
-		}
-		if _, ok := parsedJSON["execution_units"].([]any); !ok {
-			missingFields = append(missingFields, "execution_units")
-		}
-		if _, ok := parsedJSON["required_skills_map"].(map[string]any); ok {
-			validRoles := map[string]bool{
-				"planner":              true,
-				"backend":              true,
-				"frontend":             true,
-				"reviewer":             true,
-				"qa":                   true,
-				"security-auditor":     true,
-				"db-architect":         true,
-				"documentation-writer": true,
-			}
-			var invalidKeys []string
-			for k := range parsedJSON["required_skills_map"].(map[string]any) {
-				if !validRoles[strings.ToLower(k)] {
-					invalidKeys = append(invalidKeys, k)
-				}
-			}
-			if len(invalidKeys) > 0 {
-				missingFields = append(missingFields, fmt.Sprintf("required_skills_map (keys must strictly be role names, e.g., backend, frontend, qa, reviewer, devops, but got: %v)", invalidKeys))
-			}
-		} else {
-			missingFields = append(missingFields, "required_skills_map")
-		}
-
-		if len(missingFields) > 0 {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output missing required fields: %v", i+1, missingFields))
-			content := resp.Content
-			if content == "" {
-				content = "(empty response)"
-			}
-			messages = append(messages, llm.Message{
-				Role:    "assistant",
-				Content: content,
-			})
-			messages = append(messages, llm.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", ")),
-			})
-			continue
-		}
-
-		// Option B+: Validate DAG and Cost Constraints deterministically during planning loop
-		analysisDraft := parseAnalysisFinal(parsedJSON)
-		if len(analysisDraft.ExecutionUnits) > 0 {
-			if errVal := policy.ValidateDAG(analysisDraft.ExecutionUnits, s.maxCost); errVal != nil {
-				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: proposed execution plan failed DAG/cost validation: %v", i+1, errVal))
-				content := resp.Content
-				if content == "" {
-					content = "(empty response)"
-				}
-				messages = append(messages, llm.Message{
-					Role:    "assistant",
-					Content: content,
-				})
-				messages = append(messages, llm.Message{
-					Role:    "user",
-					Content: fmt.Sprintf("Your proposed execution plan failed DAG/cost validation checks. Error: %v\n\nPlease adjust the execution_units array by splitting units that exceed the cost limit (limit is %.1f, migration task is cost 5, file creation is cost 2, file modify is cost 1, plus max_risk multiplier). Ensure each unit is small, touches a maximum of 3-4 files, and has no cyclic dependencies. Re-output the corrected JSON specification.", errVal, s.maxCost),
-				})
-				continue
-			}
-		}
-
-		return parsedJSON, nil
-	}
-
-	return nil, fmt.Errorf("exceeded max iterations (%d)", maxIterations)
 }
 
 func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, analysis *models.TaskAnalysis) {

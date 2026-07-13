@@ -167,6 +167,66 @@ func TestAIGatewayChatFallsBackToNextModel(t *testing.T) {
 	}
 }
 
+// TestAIGatewayChatTelemetry_RecordsPerAttempt verifies that a call falling over from one
+// provider/credential to another records one usage/cost row per attempt (Task 4.3 / REQ-M09),
+// not just a single row for the last attempt of the whole ChatWithOptions call.
+func TestAIGatewayChatTelemetry_RecordsPerAttempt(t *testing.T) {
+	recorder := &fakeUsageRecorder{ch: make(chan llm.UsageRecord, 2)}
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-openai", Provider: "openai", APIKey: "sk-openai"},
+		{ID: "cred-anthropic", Provider: "anthropic", APIKey: "sk-anthropic"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{
+		{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true},
+		{Provider: "anthropic", ModelName: "claude-3-5-sonnet", Priority: 1, LevelGroup: "balanced", IsActive: true},
+	}}
+
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Recorder:              recorder,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			if model == "gpt-4o" {
+				return &fakeProvider{name: "openai", err: errors.New("openai API down")}, nil
+			}
+			if model == "claude-3-5-sonnet" {
+				return &fakeProvider{name: "anthropic", resp: &llm.Response{Content: "anthropic ok", Model: "claude-3-5-sonnet", PromptTokens: 3, OutputTokens: 4}}, nil
+			}
+			return nil, errors.New("unexpected model")
+		},
+	})
+
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	// Recording happens in a background goroutine per attempt, so the two records may arrive
+	// in either order — key them by provider instead of asserting a fixed sequence.
+	byProvider := map[string]llm.UsageRecord{}
+	for i := 0; i < 2; i++ {
+		select {
+		case rec := <-recorder.ch:
+			byProvider[rec.Provider] = rec
+		case <-time.After(1 * time.Second):
+			t.Fatalf("timed out waiting for telemetry record %d/2", i+1)
+		}
+	}
+
+	openaiRec, ok := byProvider["openai"]
+	if !ok || openaiRec.Status != "failed" || openaiRec.CredentialID != "cred-openai" {
+		t.Errorf("expected a failed openai attempt record, got %+v (ok=%v)", openaiRec, ok)
+	}
+	anthropicRec, ok := byProvider["anthropic"]
+	if !ok || anthropicRec.Status != "ok" || anthropicRec.CredentialID != "cred-anthropic" {
+		t.Errorf("expected a successful anthropic attempt record, got %+v (ok=%v)", anthropicRec, ok)
+	}
+	if anthropicRec.PromptTokens != 3 || anthropicRec.OutputTokens != 4 {
+		t.Errorf("expected successful attempt's token usage recorded, got %+v", anthropicRec)
+	}
+}
+
 func TestIsRateLimitErrorSupportsTypedStatusAndStringFallback(t *testing.T) {
 	if !isTransientError(HTTPStatusError{StatusCode: 402}) {
 		t.Fatalf("expected typed 402 to be rate limit")

@@ -471,6 +471,7 @@ export type ProviderCredential = {
   configured: boolean;
   key_suffix?: string;
   cooldown_until?: string;
+  model_cooldowns?: Record<string, string>;
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -161,7 +162,7 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 	var excludedProvider Provider
 	for _, provider := range chain.Providers {
 		meta := metadataForProvider(provider)
-		
+
 		// Harness Independence isolation check
 		if opts.ExcludeModelID != "" && meta.Model == opts.ExcludeModelID {
 			excludedProvider = provider
@@ -188,7 +189,7 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 
 	// Graceful Fallback
 	if excludedProvider != nil {
-		fmt.Printf("WARNING: Harness Independence fallback: forcing review using the original coder model (%s)\n", opts.ExcludeModelID)
+		slog.Warn("Harness Independence fallback: forcing review using the original coder model", "excluded_model", opts.ExcludeModelID)
 		meta := metadataForProvider(excludedProvider)
 		resp, latency, err := g.chatWithRetry(ctx, excludedProvider, messages, chatOpts)
 		if err != nil {

@@ -41,6 +41,43 @@ type ToolLoopConfig struct {
 // used to decide whether an exhausted loop has anything worth salvaging as a partial result.
 var editToolNames = map[string]bool{"search_replace": true, "create_file": true}
 
+// maxToolResultChars bounds how much of a single tool result gets appended to the loop's
+// message history (~2000 tokens). Without this, a large run_tests/run_build/run_lint
+// stdout+stderr blob (unbounded at the tool layer, e.g. tools/run_tests.go) gets re-sent to the
+// LLM on every subsequent turn of the same loop, growing cost roughly quadratically with
+// iteration count (Issue 7).
+const maxToolResultChars = 8000
+
+// truncateToolResult caps s at maxToolResultChars, appending a visible marker so the LLM (and
+// anyone reading a trace) knows content was cut rather than mistaking it for the full output.
+func truncateToolResult(s string) string {
+	if len(s) <= maxToolResultChars {
+		return s
+	}
+	return s[:maxToolResultChars] + fmt.Sprintf("\n... [truncated %d chars]", len(s)-maxToolResultChars)
+}
+
+// readFileMemoArgs mirrors the subset of tools.ReadFileArgs that determines what content a
+// read_file call returns, used to key read-memoization within a single RunToolLoop run.
+type readFileMemoArgs struct {
+	Path       string `json:"path"`
+	StartLine  int    `json:"start_line"`
+	EndLine    int    `json:"end_line"`
+	AroundLine int    `json:"around_line"`
+	Radius     int    `json:"radius"`
+	MaxLines   int    `json:"max_lines"`
+}
+
+// readFileMemoKey returns a discriminator for a read_file call's (path, line-range), or "" if
+// the call has no path (in which case memoization is skipped rather than mis-keyed).
+func readFileMemoKey(argumentsJSON string) string {
+	var a readFileMemoArgs
+	if err := json.Unmarshal([]byte(argumentsJSON), &a); err != nil || a.Path == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s|%d|%d|%d|%d|%d", a.Path, a.StartLine, a.EndLine, a.AroundLine, a.Radius, a.MaxLines)
+}
+
 // ToolLoopResult accompanies every RunToolLoop return (success, partial, or hard failure).
 // Partial is true only on iteration-budget exhaustion where at least one edit tool call
 // already succeeded, letting the caller salvage that work (e.g. checkpoint + targeted-test
@@ -57,10 +94,13 @@ type ToolLoopResult struct {
 // requested tool calls and feed the results back, and repeat until the LLM returns a JSON
 // response that passes Validate or the iteration budget is exhausted.
 //
-// This generalizes the pattern pioneered by AnalyzeStep.runAnalyzeLLMLoop (native tool_calls
-// branch -> execute -> append tool result -> continue; JSON branch -> parse -> validate ->
-// feedback -> continue) so review/coding steps can reuse it instead of only ever making a
-// single-shot Chat() call with no tool support (Issue 1+2).
+// This generalizes the pattern originally pioneered by AnalyzeStep's own hand-rolled loop
+// (native tool_calls branch -> execute -> append tool result -> continue; JSON branch -> parse
+// -> validate -> feedback -> continue) so every step reuses one implementation instead of a
+// single-shot Chat() call with no tool support. AnalyzeStep itself now drives its
+// spec-generation loop through this function (Task 4.2 / REQ-M08), with its analyze-specific
+// checks (legacy "tool_use" convention, contract completeness, DAG/cost validation) wired in via
+// Validate.
 func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm.Message, *ToolLoopResult, error) {
 	maxIterations := cfg.MaxIterations
 	if maxIterations <= 0 {
@@ -69,6 +109,7 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 	messages := cfg.Messages
 
 	failureCounts := make(map[string]int)
+	readMemo := make(map[string]int) // (path, line-range) discriminator -> turn first read at
 	var editsApplied []string
 	var filesRead []string
 
@@ -88,6 +129,18 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 			for _, call := range resp.ToolCalls {
 				discriminator := extractCallKey(call.Arguments)
 				key := call.Name + ":" + discriminator
+
+				var readMemoKey string
+				if call.Name == "read_file" {
+					readMemoKey = readFileMemoKey(call.Arguments)
+					if readMemoKey != "" {
+						if turn, seen := readMemo[readMemoKey]; seen {
+							result := fmt.Sprintf("Already read at turn %d for this path/range — reusing that content instead of re-sending it. Refer back to your earlier read_file result for this path/range.", turn)
+							messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
+							continue
+						}
+					}
+				}
 
 				if failureCounts[key] >= 2 {
 					var result string
@@ -115,7 +168,11 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					if call.Name == "read_file" && discriminator != "" {
 						filesRead = append(filesRead, discriminator)
 					}
+					if readMemoKey != "" {
+						readMemo[readMemoKey] = i + 1
+					}
 				}
+				result = truncateToolResult(result)
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
 			}
 			// NOTE: a round where every call was blocked by the circuit breaker above

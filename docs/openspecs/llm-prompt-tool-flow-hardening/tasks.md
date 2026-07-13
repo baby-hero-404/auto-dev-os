@@ -73,28 +73,28 @@
 > Links to: REQ-001
 
 **Acceptance Criteria:**
-- [ ] `tool.Registry.Execute` (or a wrapping executor invoked by every call site, not just the boundary-checked one) receives the calling agent's role and rejects execution for tools not in that role's `DefaultRoleProfiles()` capability set.
-- [ ] Rejection returns a clean `Error:`-prefixed message consistent with existing tool error conventions (e.g. `tool_executor.go`'s formatting), not a raw Go error.
-- [ ] A test confirms a reviewer-role tool call to `search_replace` (an edit tool the reviewer profile doesn't include) is rejected before `patch.EvaluatePolicy` or any filesystem mutation runs.
-- [ ] Existing legitimate role/tool combinations (backend → `search_replace`, reviewer → `read_file`/`grep_search`/`git_diff`) continue to work unchanged.
+- [x] `tool.Registry.Execute` (or a wrapping executor invoked by every call site, not just the boundary-checked one) receives the calling agent's role and rejects execution for tools not in that role's `DefaultRoleProfiles()` capability set.
+- [x] Rejection returns a clean `Error:`-prefixed message consistent with existing tool error conventions (e.g. `tool_executor.go`'s formatting), not a raw Go error.
+- [x] A test confirms a reviewer-role tool call to `search_replace` (an edit tool the reviewer profile doesn't include) is rejected before `patch.EvaluatePolicy` or any filesystem mutation runs.
+- [x] Existing legitimate role/tool combinations (backend → `search_replace`, reviewer → `read_file`/`grep_search`/`git_diff`) continue to work unchanged.
 
 ### Task 3.2: Bound Tool-Loop Token Growth
 > Links to: REQ-M06
 
 **Acceptance Criteria:**
-- [ ] Tool results exceeding `maxToolResultChars` (per `design.md`) are truncated before being appended to the loop's message history, with a visible "truncated" marker.
-- [ ] `run_tests`/`run_build`/`run_lint` outputs specifically are covered (currently `tools/run_tests.go:125` appends unbounded stdout+stderr).
-- [ ] Within a single `RunToolLoop` invocation, a repeated `read_file` call on an already-read `(path, line-range)` returns a short "already read at turn N" note instead of the full content again.
-- [ ] A test with a run producing large tool output (>10K chars) confirms the appended message is truncated and the loop still completes successfully.
+- [x] Tool results exceeding `maxToolResultChars` (per `design.md`) are truncated before being appended to the loop's message history, with a visible "truncated" marker.
+- [x] `run_tests`/`run_build`/`run_lint` outputs specifically are covered (currently `tools/run_tests.go:125` appends unbounded stdout+stderr).
+- [x] Within a single `RunToolLoop` invocation, a repeated `read_file` call on an already-read `(path, line-range)` returns a short "already read at turn N" note instead of the full content again.
+- [x] A test with a run producing large tool output (>10K chars) confirms the appended message is truncated and the loop still completes successfully.
 
 ### Task 3.3: Decompose PromptAssembler.collect()
 > Links to: REQ-M07
 
 **Acceptance Criteria:**
-- [ ] Before refactoring: capture golden-file prompt snapshots for at least 3 representative (task, agent, step) combinations (one coding step, one review step, one analyze step).
-- [ ] `collect()` (`builder.go:401-824`) is split into named helper functions — at minimum: base/role prompt loading, layered rules assembly, reviewer-vs-general context routing, semantic context retrieval, repo map construction — each independently testable and each returning `(PromptSection, error)`.
-- [ ] No single function in `prompts/builder.go` exceeds ~150 lines after the split.
-- [ ] Golden-file snapshots from the "before" state match the "after" state byte-for-byte (or documented, intentional diffs only — e.g. newly-added error logging shouldn't change prompt *content*).
+- [x] Before refactoring: capture golden-file prompt snapshots for at least 3 representative (task, agent, step) combinations (one coding step, one review step, one analyze step).
+- [x] `collect()` (`builder.go:401-824`) is split into named helper functions — at minimum: base/role prompt loading, layered rules assembly, reviewer-vs-general context routing, semantic context retrieval, repo map construction — each independently testable and each returning `(PromptSection, error)`.
+- [x] No single function in `prompts/builder.go` exceeds ~150 lines after the split.
+- [x] Golden-file snapshots from the "before" state match the "after" state byte-for-byte (or documented, intentional diffs only — e.g. newly-added error logging shouldn't change prompt *content*).
 
 ## P3 — Low
 
@@ -102,22 +102,22 @@
 > Links to: REQ-M07
 
 **Acceptance Criteria:**
-- [ ] `Priority`/`RenderOrder` integer literals passed to `NewPromptSection(...)` throughout `collect()` (22+ call sites) are replaced with named constants (e.g. `PriorityBasePrompt`, `PriorityJITSkills`).
-- [ ] JIT skill limit (`builder.go:387`, currently `5`), scoring weights (`builder.go:355,364,367,372`), semantic snippet caps (`builder.go:739-741,756-758`, currently `8`/`4`), repo-map token clamps (`builder.go:806-809`, `2048`/`256`), and snippet dedup overlap threshold (`helpers.go:67`, `0.5`) are all named constants, following the existing pattern of `assembler.go:28,32` (`defaultPromptBudget`, `promptBudgetReserveRatio`).
+- [x] `Priority`/`RenderOrder` integer literals passed to `NewPromptSection(...)` throughout `collect()` (22+ call sites) are replaced with named constants (e.g. `PriorityBasePrompt`, `PriorityJITSkills`).
+- [x] JIT skill limit (`builder.go:387`, currently `5`), scoring weights (`builder.go:355,364,367,372`), semantic snippet caps (`builder.go:739-741,756-758`, currently `8`/`4`), repo-map token clamps (`builder.go:806-809`, `2048`/`256`), and snippet dedup overlap threshold (`helpers.go:67`, `0.5`) are all named constants, following the existing pattern of `assembler.go:28,32` (`defaultPromptBudget`, `promptBudgetReserveRatio`).
 
 ### Task 4.2: Migrate AnalyzeStep to Shared Tool Loop
 > Links to: REQ-M08
 
 **Acceptance Criteria:**
-- [ ] `AnalyzeStep` calls `llmrunner.RunToolLoop` instead of its own `runAnalyzeLLMLoop` (`analyze.go:242-440`).
-- [ ] `runAnalyzeLLMLoop` is deleted once migration is confirmed working (no dead code left behind).
-- [ ] Existing `analyze_test.go` suite passes against the migrated implementation; any analyze-specific behavior (contract field validation) is preserved via the shared loop's `Validate` callback mechanism.
+- [x] `AnalyzeStep` calls `llmrunner.RunToolLoop` instead of its own `runAnalyzeLLMLoop` (`analyze.go:242-440`).
+- [x] `runAnalyzeLLMLoop` is deleted once migration is confirmed working (no dead code left behind).
+- [x] Existing `analyze_test.go` suite passes against the migrated implementation; any analyze-specific behavior (contract field validation) is preserved via the shared loop's `Validate` callback mechanism.
 
 ### Task 4.3: Provider & Retry Reliability Cleanups
 > Links to: REQ-M09
 
 **Acceptance Criteria:**
-- [ ] `NineRouter`'s `http.Client` (`nine_router.go:31`) has an explicit `Timeout` matching the other three providers (5 minutes).
-- [ ] Outer retry backoff sleeps in `llmrunner/runner.go:125,228` use a ctx-aware wait (`select` on `ctx.Done()` / timer) instead of plain `time.Sleep`.
-- [ ] `AIGateway.ChatWithOptions` records one usage/cost row per attempted provider/credential (not only the last), matching the granularity already present in the unused `pkg/llm.Gateway` (`router.go:174-206`).
-- [ ] `fmt.Printf` calls in `gemini.go:169` and `router.go:191` are replaced with structured `slog` calls at the appropriate level.
+- [x] `NineRouter`'s `http.Client` (`nine_router.go:31`) has an explicit `Timeout` matching the other three providers (5 minutes).
+- [x] Outer retry backoff sleeps in `llmrunner/runner.go:125,228` use a ctx-aware wait (`select` on `ctx.Done()` / timer) instead of plain `time.Sleep`.
+- [x] `AIGateway.ChatWithOptions` records one usage/cost row per attempted provider/credential (not only the last), matching the granularity already present in the unused `pkg/llm.Gateway` (`router.go:174-206`).
+- [x] `fmt.Printf` calls in `gemini.go:169` and `router.go:191` are replaced with structured `slog` calls at the appropriate level.

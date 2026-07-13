@@ -32,13 +32,22 @@ func (r *Registry) Register(t Tool) {
 	r.tools[name] = t
 }
 
-// Execute executes a tool by name with the given context and call parameters.
+// Execute executes a tool by name with the given context and call parameters. Every call site
+// (not just the diff-path boundary check in boundary_tool_executor.go) is subject to a
+// role/capability check here, so a call to a tool outside call.AgentRole's DefaultRoleProfiles()
+// capability set is rejected before the tool's Execute (and any filesystem mutation) runs.
 func (r *Registry) Execute(ctx context.Context, name string, call Call) (Result, error) {
 	r.mu.RLock()
 	t, exists := r.tools[name]
 	r.mu.RUnlock()
 	if !exists {
 		return Result{}, fmt.Errorf("unknown tool: %s", name)
+	}
+	if !AllowedForRole(call.AgentRole, t.Capabilities()) {
+		return Result{
+			Success: false,
+			Message: fmt.Sprintf("Error: role %q is not authorized to use tool %q", call.AgentRole, name),
+		}, nil
 	}
 	return t.Execute(ctx, call)
 }

@@ -104,90 +104,10 @@ func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm
 }
 
 func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message, chatOpts llm.ChatOptions) (resp *llm.Response, err error) {
-	startTime := time.Now()
 	opts, _ := llm.RouteOptionsFromContext(ctx)
-	var lastEntry *models.ComboEntry
-	var lastCred *service.DecryptedCredential
-
-	defer func() {
-		if opts.OrgID == "" || g.recorder == nil {
-			return
-		}
-
-		record := llm.UsageRecord{
-			ProjectID: opts.ProjectID,
-			AgentID:   opts.AgentID,
-			TaskID:    opts.TaskID,
-			OrgID:     opts.OrgID,
-			LatencyMS: time.Since(startTime).Milliseconds(),
-		}
-
-		var provider, model, levelGroup string
-		if lastEntry != nil {
-			provider = lastEntry.Provider
-			model = lastEntry.Model
-			levelGroup = lastEntry.LevelGroup
-		} else if g.fallback != nil {
-			if metaProv, ok := g.fallback.(llm.MetadataProvider); ok {
-				meta := metaProv.Metadata()
-				provider = meta.Provider
-				model = meta.Model
-				levelGroup = meta.LevelGroup
-			} else {
-				provider = g.fallback.Name()
-				if g.cfg != nil {
-					model = g.cfg.LLM.Model
-				}
-			}
-		}
-
-		if provider == "" {
-			provider = "gateway"
-		}
-		if model == "" {
-			model = "unknown"
-		}
-		if levelGroup == "" {
-			levelGroup = "balanced"
-		}
-
-		record.Provider = provider
-		record.Model = model
-		record.LevelGroup = levelGroup
-
-		if lastCred != nil {
-			record.CredentialID = lastCred.ID
-		}
-
-		if err != nil {
-			record.Status = "failed"
-			record.Error = err.Error()
-		} else if resp != nil {
-			record.Status = "ok"
-			if resp.Model != "" {
-				record.Model = resp.Model
-				model = resp.Model
-			}
-			record.PromptTokens = resp.PromptTokens
-			record.OutputTokens = resp.OutputTokens
-
-			meta := llm.MetadataForModel(provider, model)
-			record.CostUSD = llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, meta)
-		}
-
-		ctxCopy := context.WithoutCancel(ctx)
-		bgCtx, cancel := context.WithTimeout(ctxCopy, 2*time.Second)
-
-		go func() {
-			defer cancel()
-			if recErr := g.recorder.RecordLLMUsage(bgCtx, record); recErr != nil {
-				log.Printf("[AIGateway] Telemetry record failed: %v", recErr)
-			}
-		}()
-	}()
 
 	if opts.OrgID == "" || g.credentialPool == nil {
-		resp, err = g.chatFallback(ctx, messages, chatOpts)
+		resp, err = g.chatFallback(ctx, opts, messages, chatOpts)
 		return resp, err
 	}
 
@@ -225,8 +145,6 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 		for {
 			attemptFailures = nil
 			for _, entry := range candidateEntries {
-				currentEntry := entry
-				lastEntry = &currentEntry
 				excluded := map[string]bool{}
 				for {
 					var cred *service.DecryptedCredential
@@ -239,7 +157,6 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
 						break
 					}
-					lastCred = cred
 
 					var provider llm.Provider
 					provider, err = g.providerFactory(cred, entry.Model)
@@ -248,6 +165,7 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 						break
 					}
 					attempts := 4
+					attemptStart := time.Now()
 					for callAttempt := 0; callAttempt < attempts; callAttempt++ {
 						resp, err = provider.ChatWithOptions(ctx, messages, chatOpts)
 						if err == nil {
@@ -260,6 +178,7 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 							select {
 							case <-ctx.Done():
 								timer.Stop()
+								g.recordAttemptUsage(ctx, opts, entry, cred, nil, ctx.Err(), attemptStart)
 								return nil, ctx.Err()
 							case <-timer.C:
 							}
@@ -268,6 +187,11 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 						break
 					}
 					if err != nil {
+						// One usage/cost row per attempted provider/credential (Task 4.3 /
+						// REQ-M09), matching the granularity already present in the unused
+						// pkg/llm.Gateway (router.go's per-provider g.record calls) — not just
+						// a single row for the last attempt of the whole call.
+						g.recordAttemptUsage(ctx, opts, entry, cred, nil, err, attemptStart)
 						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
 						if isTransientError(err) {
 							_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
@@ -279,6 +203,7 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 					if resp.Model == "" {
 						resp.Model = entry.Model
 					}
+					g.recordAttemptUsage(ctx, opts, entry, cred, resp, nil, attemptStart)
 					return resp, nil
 				}
 			}
@@ -346,11 +271,84 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 	return nil, err
 }
 
-func (g *AIGateway) chatFallback(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+func (g *AIGateway) chatFallback(ctx context.Context, routeOpts llm.RouteOptions, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
 	if g.fallback == nil {
 		return nil, fmt.Errorf("llm provider is not configured")
 	}
-	return g.fallback.ChatWithOptions(ctx, messages, opts)
+
+	entry := models.ComboEntry{Provider: g.fallback.Name()}
+	if metaProv, ok := g.fallback.(llm.MetadataProvider); ok {
+		meta := metaProv.Metadata()
+		entry = models.ComboEntry{Provider: meta.Provider, Model: meta.Model, LevelGroup: meta.LevelGroup}
+	} else if g.cfg != nil {
+		entry.Model = g.cfg.LLM.Model
+	}
+
+	start := time.Now()
+	resp, err := g.fallback.ChatWithOptions(ctx, messages, opts)
+	g.recordAttemptUsage(ctx, routeOpts, entry, nil, resp, err, start)
+	return resp, err
+}
+
+// recordAttemptUsage submits one telemetry row for a single attempted provider/credential
+// (Task 4.3 / REQ-M09), fired off in a background goroutine (detached via
+// context.WithoutCancel so a canceled caller context doesn't drop the record) so it never
+// blocks the retry loop that's actively trying other providers/credentials.
+func (g *AIGateway) recordAttemptUsage(ctx context.Context, opts llm.RouteOptions, entry models.ComboEntry, cred *service.DecryptedCredential, resp *llm.Response, attemptErr error, attemptStart time.Time) {
+	if opts.OrgID == "" || g.recorder == nil {
+		return
+	}
+
+	provider, model, levelGroup := entry.Provider, entry.Model, entry.LevelGroup
+	if provider == "" {
+		provider = "gateway"
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	if levelGroup == "" {
+		levelGroup = "balanced"
+	}
+
+	record := llm.UsageRecord{
+		ProjectID:  opts.ProjectID,
+		AgentID:    opts.AgentID,
+		TaskID:     opts.TaskID,
+		OrgID:      opts.OrgID,
+		Provider:   provider,
+		Model:      model,
+		LevelGroup: levelGroup,
+		LatencyMS:  time.Since(attemptStart).Milliseconds(),
+	}
+	if cred != nil {
+		record.CredentialID = cred.ID
+	}
+
+	if attemptErr != nil {
+		record.Status = "failed"
+		record.Error = attemptErr.Error()
+	} else if resp != nil {
+		record.Status = "ok"
+		if resp.Model != "" {
+			record.Model = resp.Model
+			model = resp.Model
+		}
+		record.PromptTokens = resp.PromptTokens
+		record.OutputTokens = resp.OutputTokens
+
+		meta := llm.MetadataForModel(provider, model)
+		record.CostUSD = llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, meta)
+	}
+
+	ctxCopy := context.WithoutCancel(ctx)
+	bgCtx, cancel := context.WithTimeout(ctxCopy, 2*time.Second)
+
+	go func() {
+		defer cancel()
+		if recErr := g.recorder.RecordLLMUsage(bgCtx, record); recErr != nil {
+			log.Printf("[AIGateway] Telemetry record failed: %v", recErr)
+		}
+	}()
 }
 
 func (g *AIGateway) routeEntries(ctx context.Context, opts llm.RouteOptions) ([]models.ComboEntry, error) {

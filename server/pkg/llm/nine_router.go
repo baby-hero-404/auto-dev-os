@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // NineRouter implements the Provider interface for a generic OpenAI-compatible gateway like 9router.
@@ -28,7 +29,7 @@ func NewNineRouter(apiKey, model, baseURL string) *NineRouter {
 		apiKey:  apiKey,
 		model:   model,
 		baseURL: baseURL,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 

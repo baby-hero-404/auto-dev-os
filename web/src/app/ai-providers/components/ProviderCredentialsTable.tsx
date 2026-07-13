@@ -102,11 +102,10 @@ export function ProviderCredentialsTable({
                     </span>
                   </td>
                   <td className="px-4 py-4">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all duration-150 ${
-                      testingState === "success" || testingState === "error"
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all duration-150 ${testingState === "success" || testingState === "error"
                         ? testStatusClass(testingState)
                         : statusClass(credential.status)
-                    }`}>
+                      }`}>
                       {testingState === "testing" && <Loader2 size={11} className="animate-spin" />}
                       {testingState === "success" && <span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse-dot" />}
                       {testingState === "error" && <span className="size-1.5 rounded-full bg-red-500 dark:bg-red-400 animate-pulse-dot" />}
@@ -121,6 +120,19 @@ export function ProviderCredentialsTable({
                       )}
                       {testingState === "testing" ? "testing" : testingState === "success" ? "success" : testingState === "error" ? "failure" : credential.status}
                     </span>
+                    {credential.model_cooldowns && Object.keys(credential.model_cooldowns).length > 0 && (
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {Object.entries(credential.model_cooldowns).map(([model, until]) => (
+                          <span
+                            key={model}
+                            className="text-[10px] text-amber-600 dark:text-amber-400 font-medium bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded w-max"
+                            title={`Rate limited until ${new Date(until).toLocaleTimeString()}`}
+                          >
+                            {model} cooldown
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     {isDeleting ? (

@@ -15,14 +15,20 @@ import (
 // that the boundary check does (or doesn't) let a call reach the underlying registry.
 type recordingTool struct {
 	name    string
+	caps    []tool.Capability
 	invoked bool
 }
 
-func (t *recordingTool) Name() string                    { return t.name }
-func (t *recordingTool) Description() string             { return "test tool" }
-func (t *recordingTool) Schema() json.RawMessage         { return json.RawMessage(`{}`) }
-func (t *recordingTool) Category() tool.Category         { return tool.CategoryEditing }
-func (t *recordingTool) Capabilities() []tool.Capability { return []tool.Capability{tool.CapEdit} }
+func (t *recordingTool) Name() string            { return t.name }
+func (t *recordingTool) Description() string     { return "test tool" }
+func (t *recordingTool) Schema() json.RawMessage { return json.RawMessage(`{}`) }
+func (t *recordingTool) Category() tool.Category { return tool.CategoryEditing }
+func (t *recordingTool) Capabilities() []tool.Capability {
+	if t.caps != nil {
+		return t.caps
+	}
+	return []tool.Capability{tool.CapEdit}
+}
 func (t *recordingTool) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
 	t.invoked = true
 	return tool.Result{Success: true, Output: "ok"}, nil
@@ -37,7 +43,7 @@ func newBoundaryTestRegistry(searchReplace, readFile *recordingTool) *tool.Regis
 
 func TestNewBoundaryCheckedToolExecutor_BlocksCriticalPathWithPause(t *testing.T) {
 	searchReplace := &recordingTool{name: "search_replace"}
-	readFile := &recordingTool{name: "read_file"}
+	readFile := &recordingTool{name: "read_file", caps: []tool.Capability{tool.CapRead}}
 	registry := newBoundaryTestRegistry(searchReplace, readFile)
 
 	task := &models.Task{ID: "task-1"}
@@ -60,7 +66,7 @@ func TestNewBoundaryCheckedToolExecutor_BlocksCriticalPathWithPause(t *testing.T
 
 func TestNewBoundaryCheckedToolExecutor_AllowsInBoundaryEdit(t *testing.T) {
 	searchReplace := &recordingTool{name: "search_replace"}
-	readFile := &recordingTool{name: "read_file"}
+	readFile := &recordingTool{name: "read_file", caps: []tool.Capability{tool.CapRead}}
 	registry := newBoundaryTestRegistry(searchReplace, readFile)
 
 	analysisJSON, _ := json.Marshal(models.TaskAnalysis{
@@ -88,7 +94,7 @@ func TestNewBoundaryCheckedToolExecutor_AllowsInBoundaryEdit(t *testing.T) {
 
 func TestNewBoundaryCheckedToolExecutor_OutsideBoundaryReturnsSoftError(t *testing.T) {
 	searchReplace := &recordingTool{name: "search_replace"}
-	readFile := &recordingTool{name: "read_file"}
+	readFile := &recordingTool{name: "read_file", caps: []tool.Capability{tool.CapRead}}
 	registry := newBoundaryTestRegistry(searchReplace, readFile)
 
 	analysisJSON, _ := json.Marshal(models.TaskAnalysis{
@@ -119,7 +125,7 @@ func TestNewBoundaryCheckedToolExecutor_OutsideBoundaryReturnsSoftError(t *testi
 
 func TestNewBoundaryCheckedToolExecutor_ReadOnlyToolsBypassBoundaryCheck(t *testing.T) {
 	searchReplace := &recordingTool{name: "search_replace"}
-	readFile := &recordingTool{name: "read_file"}
+	readFile := &recordingTool{name: "read_file", caps: []tool.Capability{tool.CapRead}}
 	registry := newBoundaryTestRegistry(searchReplace, readFile)
 
 	task := &models.Task{ID: "task-3"}

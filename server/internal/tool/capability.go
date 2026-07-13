@@ -62,3 +62,24 @@ func (cm *CapabilityManager) ToolsForRole(role string) []llm.ToolDefinition {
 	}
 	return cm.registry.ToolsForCapabilities(profile.Capabilities)
 }
+
+// AllowedForRole reports whether a tool exposing caps is executable by role, per
+// DefaultRoleProfiles() — the same source of truth CapabilityManager is normally constructed
+// with (see orchestrator.go), so execution-time enforcement (Registry.Execute) never rejects a
+// call that tool advertisement (ToolsForRole) would have offered. Unknown/empty roles get the
+// same read+search fallback used above.
+func AllowedForRole(role string, caps []Capability) bool {
+	profile, ok := DefaultRoleProfiles()[strings.ToLower(role)]
+	granted := profile.Capabilities
+	if !ok {
+		granted = []Capability{CapRead, CapSearch}
+	}
+	for _, c := range caps {
+		for _, g := range granted {
+			if c == g {
+				return true
+			}
+		}
+	}
+	return false
+}

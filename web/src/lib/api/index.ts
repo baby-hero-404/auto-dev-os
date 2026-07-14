@@ -52,6 +52,7 @@ export const api = {
   cancelTask: projects.tasks.cancel,
   taskWorkflow: projects.tasks.workflow,
   taskLogs: projects.tasks.logs,
+  streamTaskLogs: projects.tasks.streamLogs,
   approveTaskWorkflow: projects.tasks.approveWorkflow,
   approvePR: projects.tasks.approvePR,
   rejectPR: projects.tasks.rejectPR,

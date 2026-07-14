@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"sync/atomic"
+
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
-	"sync/atomic"
 )
 
 var ErrNoCredentialsAvailable = errors.New("no provider credentials available")
@@ -25,7 +26,7 @@ const (
 const (
 	testOpenAIModel    = "gpt-5.4-mini"
 	testAnthropicModel = "claude-haiku-4-5"
-	testGeminiModel    = "gemini-2.5-flash"
+	testGeminiModel    = "gemini-3.1-flash-lite"
 	testNineRouterMode = "balanced"
 )
 
@@ -89,6 +90,38 @@ func (s *CredentialPoolService) WithAudit(audit *AuditService) *CredentialPoolSe
 func (s *CredentialPoolService) withConnectionTester(tester credentialConnectionTester) *CredentialPoolService {
 	s.connectionTester = tester
 	return s
+}
+
+func (s *CredentialPoolService) TestConnectionInput(ctx context.Context, orgID string, input models.TestProviderCredentialInput) error {
+	provider := strings.ToLower(strings.TrimSpace(input.Provider))
+	if !isAllowedProvider(provider) {
+		return ErrValidation("unsupported provider")
+	}
+	apiKey := strings.TrimSpace(input.APIKey)
+	if apiKey == "" {
+		return ErrValidation("api_key is required")
+	}
+
+	// Check if this exact API key is already registered for this provider in this org
+	encryptedKey, err := s.cipher.Encrypt(apiKey)
+	if err == nil {
+		creds, _ := s.repo.ListByOrg(ctx, orgID)
+		for _, c := range creds {
+			if c.Provider == provider && c.EncryptedKey == encryptedKey {
+				return ErrValidation("This API key is already registered for this provider.")
+			}
+		}
+	}
+
+	if s.connectionTester == nil {
+		return nil
+	}
+	cred := models.ProviderCredential{
+		Provider:     provider,
+		EncryptedKey: "",
+		BaseURL:      strings.TrimSpace(input.BaseURL),
+	}
+	return s.connectionTester(ctx, cred, apiKey)
 }
 
 func (s *CredentialPoolService) Create(ctx context.Context, orgID string, input models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
@@ -159,8 +192,10 @@ func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID str
 			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 0},
 			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 1},
 			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.5-flash", Priority: 0},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 1},
-			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 0},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.0-flash", Priority: 1},
+			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 2},
+			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-3.1-pro", Priority: 0},
+			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 1},
 		}
 	}
 

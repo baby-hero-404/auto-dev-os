@@ -112,6 +112,16 @@ func (m *mockWorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]model
 	return []models.TaskLog{}, nil
 }
 
+func (m *mockWorkflowRepo) TailLogs(ctx context.Context, taskID string, n int) ([]models.TaskLog, error) {
+	return []models.TaskLog{}, nil
+}
+
+func (m *mockWorkflowRepo) SubscribeLogs(taskID string) chan models.TaskLog {
+	return nil
+}
+
+func (m *mockWorkflowRepo) UnsubscribeLogs(taskID string, ch chan models.TaskLog) {}
+
 func (m *mockWorkflowRepo) AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error) {
 	return "mock-conn", true, nil
 }

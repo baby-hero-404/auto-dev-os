@@ -88,6 +88,14 @@ export const repositories = {
   },
 };
 
+class StreamFatalError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`Stream failed: ${status}`);
+    this.status = status;
+  }
+}
+
 export const tasks = {
   list(projectID: string, token: string) {
     return request<Task[]>(`/projects/${projectID}/tasks`, { token });
@@ -157,6 +165,75 @@ export const tasks = {
   },
   logs(taskID: string, token: string) {
     return request<TaskLog[]>(`/tasks/${taskID}/logs`, { token });
+  },
+  async streamLogs(
+    taskID: string,
+    token: string,
+    signal: AbortSignal,
+    onLog: (log: TaskLog) => void,
+    onFatalError?: (err: Error) => void,
+  ) {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:32080/api/v1";
+    let retryDelay = 1000;
+
+    while (!signal.aborted) {
+      try {
+        const res = await fetch(`${API_BASE}/tasks/${taskID}/logs/stream`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal,
+        });
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403 || res.status === 404) {
+            throw new StreamFatalError(res.status);
+          }
+          throw new Error(`Stream failed: ${res.status}`);
+        }
+
+        retryDelay = 1000;
+        if (!res.body) throw new Error("No body");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          let currentEvent = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6);
+              if (currentEvent === "log") {
+                try {
+                  onLog(JSON.parse(dataStr));
+                } catch (e) {}
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError" || signal.aborted) {
+          return;
+        }
+        if (err instanceof StreamFatalError) {
+          onFatalError?.(err);
+          return;
+        }
+      }
+
+      if (signal.aborted) return;
+
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      retryDelay = Math.min(retryDelay * 2, 5000);
+    }
   },
   approveWorkflow(taskID: string, token: string) {
     return request<Task>(`/tasks/${taskID}/approve`, { method: "POST", token });

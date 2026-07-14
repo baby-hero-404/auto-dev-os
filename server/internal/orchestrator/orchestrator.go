@@ -383,6 +383,18 @@ func (o *Orchestrator) Logs(ctx context.Context, taskID string) ([]models.TaskLo
 	return o.workflows.ListLogs(ctx, taskID)
 }
 
+func (o *Orchestrator) TailLogs(ctx context.Context, taskID string, n int) ([]models.TaskLog, error) {
+	return o.workflows.TailLogs(ctx, taskID, n)
+}
+
+func (o *Orchestrator) SubscribeLogs(taskID string) chan models.TaskLog {
+	return o.workflows.SubscribeLogs(taskID)
+}
+
+func (o *Orchestrator) UnsubscribeLogs(taskID string, ch chan models.TaskLog) {
+	o.workflows.UnsubscribeLogs(taskID, ch)
+}
+
 func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models.Task, error) {
 	task, err := o.tasks.GetByID(ctx, taskID)
 	if err != nil {

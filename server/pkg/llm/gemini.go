@@ -100,7 +100,7 @@ func (g *Gemini) ChatWithOptions(ctx context.Context, messages []Message, opts C
 		if len(currentParts) == 0 {
 			currentParts = []geminiPart{{Text: msg.Content}}
 		}
-		
+
 		if len(contents) > 0 && contents[len(contents)-1].Role == role {
 			contents[len(contents)-1].Parts = append(contents[len(contents)-1].Parts, currentParts...)
 		} else {
@@ -220,7 +220,7 @@ type geminiPart struct {
 }
 
 type geminiFunctionCall struct {
-	Name             string         `json:"name"`
+	Name string         `json:"name"`
 	Args map[string]any `json:"args,omitempty"`
 	ID   string         `json:"id,omitempty"`
 }
@@ -256,9 +256,9 @@ type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Text         string `json:"text"`
+				Text             string `json:"text"`
 				ThoughtSignature string `json:"thoughtSignature,omitempty"`
-				FunctionCall *struct {
+				FunctionCall     *struct {
 					Name string         `json:"name"`
 					Args map[string]any `json:"args"`
 					ID   string         `json:"id,omitempty"`

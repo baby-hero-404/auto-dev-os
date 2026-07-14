@@ -237,6 +237,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/tasks/{taskID}/subtasks", taskH.CreateSubTask)
 			r.Post("/tasks/{taskID}/execute", workflowH.Execute)
 			r.Get("/tasks/{taskID}/logs", workflowH.Logs)
+			r.Get("/tasks/{taskID}/logs/stream", workflowH.StreamLogs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
 			r.Post("/tasks/{taskID}/restart", workflowH.Retry)

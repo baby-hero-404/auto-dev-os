@@ -136,23 +136,10 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		finalAttempt = attempt
+		callStart := time.Now()
 		var chatErr error
-		for chatAttempt := 1; chatAttempt <= 3; chatAttempt++ {
-			callStart := time.Now()
-			resp, chatErr = r.Provider.Chat(ctx, messages)
-			callLatency = time.Since(callStart)
-			if chatErr == nil {
-				break
-			}
-			if isTransientError(chatErr) && chatAttempt < 3 {
-				r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
-				if sleepErr := ctxSleep(ctx, time.Duration(chatAttempt)*2*time.Second); sleepErr != nil {
-					return nil, fmt.Errorf("llm call retry backoff interrupted: %w", sleepErr)
-				}
-				continue
-			}
-			break
-		}
+		resp, chatErr = r.Provider.Chat(ctx, messages)
+		callLatency = time.Since(callStart)
 		if chatErr != nil {
 			return nil, fmt.Errorf("llm call failed: %w", chatErr)
 		}
@@ -256,22 +243,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		Tools:         r.Tools,
 		MaxIterations: 8,
 		Chat: func(ctx context.Context, msgs []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
-			var resp *llm.Response
-			var chatErr error
-			for chatAttempt := 1; chatAttempt <= 3; chatAttempt++ {
-				resp, chatErr = r.Provider.ChatWithOptions(ctx, msgs, opts)
-				if chatErr == nil {
-					break
-				}
-				if isTransientError(chatErr) && chatAttempt < 3 {
-					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: llm chat call failed (attempt %d/3) with transient error: %v. Retrying in %d seconds...", stepID, chatAttempt, chatErr, chatAttempt*2))
-					if sleepErr := ctxSleep(ctx, time.Duration(chatAttempt)*2*time.Second); sleepErr != nil {
-						return nil, sleepErr
-					}
-					continue
-				}
-				break
-			}
+			resp, chatErr := r.Provider.ChatWithOptions(ctx, msgs, opts)
 			if chatErr == nil {
 				lastResp = resp
 			}
@@ -282,7 +254,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 				if checkErr := shadowSM.CheckTool(name); checkErr != nil {
 					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("[TELEMETRY-VIOLATION] Shadow state machine: tool %s is not permitted during state %s", name, shadowSM.Current()))
 				}
-				if (name == "search_replace" || name == "create_file") && len(resolvedTargets) > 0 {
+				if editToolNames[name] && len(resolvedTargets) > 0 {
 					var args struct {
 						Path string `json:"path"`
 					}
@@ -309,7 +281,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 				r.WriteTrace(ctx, task, agent, stepID, msgs, resp, parsed, iteration, latency)
 			}
 			if shadowSM != nil && resp != nil {
-				updateShadowSM(shadowSM, resp, resolvedTargets, r, ctx, task.ID)
+				r.updateShadowSM(ctx, shadowSM, resp, resolvedTargets, task.ID)
 			}
 		},
 	})
@@ -494,26 +466,3 @@ func requiresPatch(stepID string) bool {
 		stepID == workflow.StepFix
 }
 
-// isTransientError delegates to the single canonical classifier (REQ-M05) — do not
-// reintroduce a separate copy of this logic here. Network errors (timeout, connection
-// refused, EOF) are now classified identically at both this layer and the gateway layer,
-// so the credential/model pair actually gets cooled down at the point of failure instead of
-// only being retried by this outer, credential-unaware layer.
-func isTransientError(err error) bool {
-	return llm.IsTransientError(err)
-}
-
-// ctxSleep waits for d or until ctx is done, whichever comes first (Task 4.3 / REQ-M09),
-// matching the ctx-aware backoff already used at the gateway layer (internal/gateway/gateway.go,
-// pkg/llm/router.go) instead of a plain time.Sleep that ignores cancellation and keeps this
-// outer retry loop blocked for the full backoff even after the caller has given up.
-func ctxSleep(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}

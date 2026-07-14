@@ -24,14 +24,10 @@ export function useTaskWorkflow(taskID: string) {
     { refreshInterval: (latestWorkflow) => (isWorkflowTerminal(latestWorkflow?.job?.status) ? 0 : 2500) },
   );
 
-  const { data: fetchedLogs, mutate: mutateLogs } = useAuthedSWR(
-    taskID ? ["task-logs", taskID] : null,
-    (token) => api.taskLogs(taskID, token),
-    { refreshInterval: () => (isWorkflowTerminal(workflow?.job?.status) ? 0 : 3000) },
-  );
+
 
   const logs = useMemo(
-    () => realtimeLogs.filter((log) => log.streamId === taskID).slice(-200),
+    () => realtimeLogs.filter((log) => log.streamId === taskID),
     [realtimeLogs, taskID],
   );
 
@@ -39,10 +35,49 @@ export function useTaskWorkflow(taskID: string) {
     clearLogs(taskID);
   }, [clearLogs, taskID]);
 
+  const isTerminal = isWorkflowTerminal(workflow?.job?.status);
+
   useEffect(() => {
-    if (!fetchedLogs) return;
-    appendLogs(fetchedLogs.map((log) => toRealtimeLog(taskID, log)));
-  }, [appendLogs, fetchedLogs, taskID]);
+    if (!taskID || !token) return;
+
+    if (isTerminal) {
+      api.taskLogs(taskID, token).then(logs => {
+        if (logs) appendLogs(logs.map(log => toRealtimeLog(taskID, log)));
+      }).catch(console.error);
+      return;
+    }
+
+    const controller = new AbortController();
+    let pending: RealtimeLog[] = [];
+    let flushTimer: number | null = null;
+
+    const flush = () => {
+      if (pending.length) appendLogs(pending);
+      pending = [];
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+    };
+
+    api.streamTaskLogs(
+      taskID,
+      token,
+      controller.signal,
+      (log) => {
+        pending.push(toRealtimeLog(taskID, log));
+        if (flushTimer === null) {
+          flushTimer = window.setTimeout(flush, 50);
+        }
+      },
+      (err) => setError(`Log stream error: ${err.message}`),
+    ).catch(console.error);
+
+    return () => {
+      controller.abort();
+      flush();
+    };
+  }, [taskID, token, isTerminal, appendLogs]);
 
   const task = workflow?.task;
 
@@ -51,7 +86,7 @@ export function useTaskWorkflow(taskID: string) {
     setError("");
     try {
       await api.executeTask(taskID, token);
-      await Promise.all([mutateWorkflow(), mutateLogs()]);
+      await mutateWorkflow();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to execute workflow");
     }
@@ -62,7 +97,7 @@ export function useTaskWorkflow(taskID: string) {
     setError("");
     try {
       await api.analyzeTask(taskID, token);
-      await Promise.all([mutateWorkflow(), mutateLogs()]);
+      await mutateWorkflow();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to run analysis");
     }
@@ -73,7 +108,7 @@ export function useTaskWorkflow(taskID: string) {
     setError("");
     try {
       await api.retryTask(taskID, token);
-      await Promise.all([mutateWorkflow(), mutateLogs()]);
+      await mutateWorkflow();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to retry workflow");
     }
@@ -233,7 +268,6 @@ export function useTaskWorkflow(taskID: string) {
     deleteTask,
     updateTask,
     mutateWorkflow,
-    mutateLogs,
   };
 }
 

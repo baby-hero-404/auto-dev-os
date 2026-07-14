@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -75,5 +78,54 @@ func TestWorkflowHandler_Artifacts(t *testing.T) {
 	}
 	if resp[0].ID != "art-1" {
 		t.Errorf("expected art-1, got %s", resp[0].ID)
+	}
+}
+
+func TestStreamLogsLoop_NoLostLogsDuringTailRace(t *testing.T) {
+	ch := make(chan models.TaskLog, 10)
+	proceedTail := make(chan struct{})
+
+	tail := func() ([]models.TaskLog, error) {
+		<-proceedTail // block until the test says the tail read may finish
+		return []models.TaskLog{{ID: "hist-1", Message: "history"}}, nil
+	}
+
+	var mu sync.Mutex
+	var emitted []models.TaskLog
+	emit := func(log models.TaskLog) {
+		mu.Lock()
+		emitted = append(emitted, log)
+		mu.Unlock()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		_ = streamLogsLoop(ctx, ch, tail, emit)
+	}()
+
+	// Simulate a log broadcast arriving WHILE the tail read is still in flight — this is
+	// exactly the window where the pre-fix code raced two consumers on ch.
+	ch <- models.TaskLog{ID: "live-1", Message: "during tail"}
+	time.Sleep(20 * time.Millisecond) // let the background buffering goroutine consume it
+	close(proceedTail)                // let tail() return
+
+	time.Sleep(20 * time.Millisecond)
+	ch <- models.TaskLog{ID: "live-2", Message: "after tail"}
+	time.Sleep(20 * time.Millisecond)
+
+	cancel()
+	<-loopDone
+
+	mu.Lock()
+	defer mu.Unlock()
+	ids := make([]string, len(emitted))
+	for i, e := range emitted {
+		ids[i] = e.ID
+	}
+	want := []string{"hist-1", "live-1", "live-2"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("lost or misordered logs: got %v, want %v", ids, want)
 	}
 }

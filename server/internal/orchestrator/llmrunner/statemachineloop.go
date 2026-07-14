@@ -149,11 +149,23 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 		msgs = append(msgs, llm.Message{Role: "user", Content: phasePrompt})
 
 		// LLM call for the turn
+		callStart := time.Now()
 		resp, err := r.Provider.ChatWithOptions(ctx, msgs, llm.ChatOptions{Tools: allowedTools, ToolChoice: "auto"})
+		latency := time.Since(callStart)
 		if err != nil {
 			return nil, fmt.Errorf("llm state machine loop call failed in state %s: %w", currentState, err)
 		}
 		lastResp = resp
+
+		if r.WriteTrace != nil {
+			var tracedParsed map[string]any
+			if len(resp.ToolCalls) > 0 {
+				tracedParsed = map[string]any{"tool_calls": resp.ToolCalls}
+			} else {
+				tracedParsed = map[string]any{"raw_content": resp.Content}
+			}
+			r.WriteTrace(ctx, task, agent, stepID, msgs, resp, tracedParsed, sm.used[currentState]+1, latency)
+		}
 
 		if len(resp.ToolCalls) > 0 {
 			// Process tool calls
@@ -172,7 +184,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 				}
 
 				// 2. Write-Scope Validation (REQ-002 / REQ-M01)
-				if (call.Name == "search_replace" || call.Name == "create_file") && len(resolvedTargets) > 0 {
+				if editToolNames[call.Name] && len(resolvedTargets) > 0 {
 					if !pathMatchesTarget(discriminator, resolvedTargets) {
 						errMsg := fmt.Sprintf("Error: You are trying to modify %s, but your execution boundary and resolved intents only allow modifications to the following files: %s", discriminator, strings.Join(resolvedTargets, ", "))
 						r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("StateMachine blocked out-of-scope write to %q", discriminator))
@@ -218,7 +230,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 					failureCounts[key]++
 				} else {
 					failureCounts[key] = 0
-					if (call.Name == "search_replace" || call.Name == "create_file") && discriminator != "" {
+					if editToolNames[call.Name] && discriminator != "" {
 						editsApplied = append(editsApplied, discriminator)
 						editAppliedThisTurn = true
 					}
@@ -256,7 +268,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 				// If they passed, we wait until the LLM returns its final non-tool JSON response to call AdviseValidation(true).
 				checksPassed := true
 				for _, msg := range messages[len(messages)-len(resp.ToolCalls):] {
-					if strings.Contains(msg.Content, "Error:") {
+					if strings.HasPrefix(msg.Content, "Error:") {
 						checksPassed = false
 						break
 					}
@@ -366,7 +378,7 @@ func getToolNames(tools []llm.ToolDefinition) string {
 }
 
 // updateShadowSM advances the shadow StateMachine for parallel telemetry analysis.
-func updateShadowSM(shadowSM *StateMachine, resp *llm.Response, resolvedTargets []string, r Runner, ctx context.Context, taskID string) {
+func (r Runner) updateShadowSM(ctx context.Context, shadowSM *StateMachine, resp *llm.Response, resolvedTargets []string, taskID string) {
 	if shadowSM == nil {
 		return
 	}
@@ -378,7 +390,7 @@ func updateShadowSM(shadowSM *StateMachine, resp *llm.Response, resolvedTargets 
 	hasWriteTool := false
 	hasValidationTool := false
 	for _, call := range resp.ToolCalls {
-		if call.Name == "search_replace" || call.Name == "create_file" {
+		if editToolNames[call.Name] {
 			hasWriteTool = true
 		} else if call.Name == "run_tests" || call.Name == "run_lint" || call.Name == "run_build" {
 			hasValidationTool = true

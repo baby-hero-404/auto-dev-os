@@ -35,25 +35,10 @@ func (s *CredentialPoolService) TestConnection(ctx context.Context, orgID string
 	return nil
 }
 
-func (s *CredentialPoolService) TestConnectionInput(ctx context.Context, input models.TestProviderCredentialInput) error {
-	provider := strings.ToLower(strings.TrimSpace(input.Provider))
-	if !isAllowedProvider(provider) {
-		return ErrValidation("unsupported provider")
-	}
-	if strings.TrimSpace(input.APIKey) == "" {
-		return ErrValidation("api_key is required")
-	}
-	if s.connectionTester == nil {
-		return nil
-	}
-	return s.connectionTester(ctx, models.ProviderCredential{
-		Provider: provider,
-		BaseURL:  strings.TrimSpace(input.BaseURL),
-	}, strings.TrimSpace(input.APIKey))
-}
+
 
 func testProviderConnection(ctx context.Context, cred models.ProviderCredential, apiKey string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	apiKey = getAPIKeyOrEnvFallback(cred.Provider, apiKey)

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback } from "react";
-import { Sparkles, Check, AlertCircle } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
 import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
 import { useTaskDetail, isAffectedFile } from "./TaskDetailContext";
@@ -19,6 +19,8 @@ export function SpecPanel() {
     completedPlanSteps,
     togglePlanStep,
   } = useTaskDetail();
+
+  const [isExpandedOpen, setIsExpandedOpen] = useState(false);
 
   const handleSelectSummary = useCallback(() => setActiveSpecTab("summary"), [setActiveSpecTab]);
   const handleSelectProposal = useCallback(() => setActiveSpecTab("proposal"), [setActiveSpecTab]);
@@ -213,7 +215,7 @@ export function SpecPanel() {
                   <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                     Risks Assessment
                   </h3>
-                  <ul className="space-y-2">
+                  <ul className="space-y-2 max-h-[180px] overflow-y-auto pr-1.5 custom-scrollbar">
                     {analysisData.risks_details.map((risk, idx) => (
                       <li key={idx} className="flex flex-col gap-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-xs">
                         <div className="flex items-center justify-between">
@@ -234,7 +236,7 @@ export function SpecPanel() {
                   <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                     Risks
                   </h3>
-                  <ul className="space-y-1.5">
+                  <ul className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1.5 custom-scrollbar">
                     {analysisData.risks.map((risk, idx) => (
                       <li key={idx} className="flex items-start gap-2 text-xs text-content-muted">
                         <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
@@ -250,7 +252,7 @@ export function SpecPanel() {
                   <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                     Estimated Affected Files
                   </h3>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5 max-h-[110px] overflow-y-auto pr-1 custom-scrollbar">
                     {analysisData.affected_files.map((fileObj, idx) => {
                       const path = isAffectedFile(fileObj) ? fileObj.file : typeof fileObj === "string" ? fileObj : "";
                       const repo = isAffectedFile(fileObj) && fileObj.repo ? fileObj.repo : null;
@@ -273,7 +275,7 @@ export function SpecPanel() {
                   <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
                     Execution Boundaries
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1.5 custom-scrollbar">
                     {analysisData.execution_boundaries.map((boundary, idx) => (
                       <div key={idx} className="rounded-lg border border-stroke bg-surface p-3 text-[11px]">
                         <div className="flex items-center justify-between font-mono font-bold text-content mb-1">
@@ -300,39 +302,45 @@ export function SpecPanel() {
 
               {analysisData.expanded_boundaries && analysisData.expanded_boundaries.length > 0 && (
                 <div className="mt-4">
-                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                    JIT Expanded Boundaries (Audit Trail)
-                  </h3>
-                  <div className="space-y-2">
-                    {analysisData.expanded_boundaries.map((expanded, idx) => {
-                      const isHighRisk = expanded.risk === "HIGH" || expanded.risk === "CRITICAL";
-                      const isMediumRisk = expanded.risk === "MEDIUM";
-                      const riskColor = isHighRisk 
-                        ? "bg-red-500/10 text-red-500 border-red-500/20" 
-                        : isMediumRisk 
-                          ? "bg-amber-500/10 text-amber-500 border-amber-500/20" 
-                          : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-                      return (
-                        <div key={idx} className="rounded-lg border border-stroke bg-surface/50 p-2.5 text-[11px] flex flex-col gap-1.5">
-                          <div className="flex items-start justify-between">
-                            <span className="font-mono font-bold text-content break-all">{expanded.file}</span>
-                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${riskColor}`}>
-                              {expanded.risk || "LOW"}
-                            </span>
-                          </div>
-                          <p className="text-content-muted italic text-[10px]">{expanded.reason}</p>
-                          {expanded.capability && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span className="text-[9px] text-content-muted">Capability:</span>
-                              <span className="rounded bg-content/5 px-1 py-0.5 font-mono text-[9px] text-content font-bold">
-                                {expanded.capability}
+                  <button
+                    onClick={() => setIsExpandedOpen(!isExpandedOpen)}
+                    className="flex w-full items-center justify-between font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2 cursor-pointer hover:text-foreground transition-colors"
+                  >
+                    <span>JIT Expanded Boundaries (Audit Trail) ({analysisData.expanded_boundaries.length})</span>
+                    {isExpandedOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  {isExpandedOpen && (
+                    <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1.5 custom-scrollbar transition-all duration-300">
+                      {analysisData.expanded_boundaries.map((expanded, idx) => {
+                        const isHighRisk = expanded.risk === "HIGH" || expanded.risk === "CRITICAL";
+                        const isMediumRisk = expanded.risk === "MEDIUM";
+                        const riskColor = isHighRisk 
+                          ? "bg-red-500/10 text-red-500 border-red-500/20" 
+                          : isMediumRisk 
+                            ? "bg-amber-500/10 text-amber-500 border-amber-500/20" 
+                            : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                        return (
+                          <div key={idx} className="rounded-lg border border-stroke bg-surface/50 p-2.5 text-[11px] flex flex-col gap-1.5">
+                            <div className="flex items-start justify-between">
+                              <span className="font-mono font-bold text-content break-all">{expanded.file}</span>
+                              <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${riskColor}`}>
+                                {expanded.risk || "LOW"}
                               </span>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                            <p className="text-content-muted italic text-[10px]">{expanded.reason}</p>
+                            {expanded.capability && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className="text-[9px] text-content-muted">Capability:</span>
+                                <span className="rounded bg-content/5 px-1 py-0.5 font-mono text-[9px] text-content font-bold">
+                                  {expanded.capability}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -145,7 +145,7 @@ type ProviderCredentialService interface {
 	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
 	Delete(ctx context.Context, orgID string, id string) error
 	TestConnection(ctx context.Context, orgID string, id string) error
-	TestConnectionInput(ctx context.Context, input models.TestProviderCredentialInput) error
+	TestConnectionInput(ctx context.Context, orgID string, input models.TestProviderCredentialInput) error
 }
 
 type ProviderModelService interface {

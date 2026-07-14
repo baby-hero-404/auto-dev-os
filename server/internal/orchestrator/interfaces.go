@@ -89,6 +89,9 @@ type WorkflowRepository interface {
 	DeleteByTaskID(ctx context.Context, taskID string) error
 	CreateLog(ctx context.Context, log models.TaskLog) error
 	ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error)
+	TailLogs(ctx context.Context, taskID string, n int) ([]models.TaskLog, error)
+	SubscribeLogs(taskID string) chan models.TaskLog
+	UnsubscribeLogs(taskID string, ch chan models.TaskLog)
 	ResetStuckJobs(ctx context.Context) error
 	ResetAllRunningJobs(ctx context.Context) error
 	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)

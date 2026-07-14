@@ -23,13 +23,67 @@ import (
 
 var logMu sync.RWMutex
 
+type LogHub struct {
+	mu          sync.RWMutex
+	subscribers map[string]map[chan models.TaskLog]struct{}
+}
+
+func NewLogHub() *LogHub {
+	return &LogHub{
+		subscribers: make(map[string]map[chan models.TaskLog]struct{}),
+	}
+}
+
+func (h *LogHub) Subscribe(taskID string) chan models.TaskLog {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ch := make(chan models.TaskLog, 100)
+	if h.subscribers[taskID] == nil {
+		h.subscribers[taskID] = make(map[chan models.TaskLog]struct{})
+	}
+	h.subscribers[taskID][ch] = struct{}{}
+	return ch
+}
+
+func (h *LogHub) Unsubscribe(taskID string, ch chan models.TaskLog) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if subs, ok := h.subscribers[taskID]; ok {
+		delete(subs, ch)
+		if len(subs) == 0 {
+			delete(h.subscribers, taskID)
+		}
+	}
+	close(ch)
+}
+
+func (h *LogHub) Broadcast(taskID string, log models.TaskLog) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	subs, ok := h.subscribers[taskID]
+	if !ok {
+		return
+	}
+	for ch := range subs {
+		select {
+		case ch <- log:
+		default:
+			// slow subscriber, drop
+		}
+	}
+}
+
 type WorkflowRepo struct {
 	db       *gorm.DB
 	fileRoot string
+	LogHub   *LogHub
 }
 
 func NewWorkflowRepo(db *gorm.DB) *WorkflowRepo {
-	return &WorkflowRepo{db: db}
+	return &WorkflowRepo{
+		db: db,
+		LogHub: NewLogHub(),
+	}
 }
 
 func (r *WorkflowRepo) SetLogFileRoot(root string) {
@@ -191,18 +245,19 @@ func (r *WorkflowRepo) ResetAllRunningJobs(ctx context.Context) error {
 }
 
 func (r *WorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
-	if r.fileRoot == "" {
-		if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {
-			return fmt.Errorf("create task log: %w", err)
-		}
-		return nil
-	}
-
 	if log.ID == "" {
 		log.ID = uuid.New().String()
 	}
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now()
+	}
+
+	if r.fileRoot == "" {
+		if err := r.db.WithContext(ctx).Create(&log).Error; err != nil {
+			return fmt.Errorf("create task log: %w", err)
+		}
+		r.LogHub.Broadcast(log.TaskID, log)
+		return nil
 	}
 
 	logPath := filepath.Join(r.fileRoot, log.TaskID+".jsonl")
@@ -228,7 +283,107 @@ func (r *WorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error 
 		return fmt.Errorf("write log: %w", err)
 	}
 
+	r.LogHub.Broadcast(log.TaskID, log)
+
 	return nil
+}
+
+func (r *WorkflowRepo) TailLogs(ctx context.Context, taskID string, n int) ([]models.TaskLog, error) {
+	if r.fileRoot == "" {
+		var logs []models.TaskLog
+		if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).Order("created_at DESC").Limit(n).Find(&logs).Error; err != nil {
+			return nil, fmt.Errorf("tail task logs: %w", err)
+		}
+		for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
+			logs[i], logs[j] = logs[j], logs[i]
+		}
+		return logs, nil
+	}
+
+	logPath := filepath.Join(r.fileRoot, taskID+".jsonl")
+
+	logMu.RLock()
+	defer logMu.RUnlock()
+
+	f, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []models.TaskLog{}, nil
+		}
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat log file: %w", err)
+	}
+
+	var logs []models.TaskLog
+	var lines [][]byte
+
+	chunkSize := int64(32 * 1024)
+	fileSize := stat.Size()
+	var offset = fileSize
+	var leftover []byte
+
+	for offset > 0 && len(lines) < n {
+		readSize := chunkSize
+		if offset < chunkSize {
+			readSize = offset
+		}
+		offset -= readSize
+
+		buf := make([]byte, readSize)
+		if _, err := f.ReadAt(buf, offset); err != nil {
+			return nil, fmt.Errorf("read log file at offset: %w", err)
+		}
+
+		if len(leftover) > 0 {
+			buf = append(buf, leftover...)
+		}
+
+		parts := strings.Split(string(buf), "\n")
+		leftover = []byte(parts[0])
+
+		for i := len(parts) - 1; i >= 1; i-- {
+			line := strings.TrimSpace(parts[i])
+			if line != "" {
+				lines = append(lines, []byte(line))
+				if len(lines) == n {
+					break
+				}
+			}
+		}
+	}
+
+	if offset == 0 && len(lines) < n {
+		line := strings.TrimSpace(string(leftover))
+		if line != "" {
+			lines = append(lines, []byte(line))
+		}
+	}
+
+	for _, line := range lines {
+		var log models.TaskLog
+		if err := json.Unmarshal(line, &log); err == nil {
+			logs = append(logs, log)
+		}
+	}
+
+	for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
+		logs[i], logs[j] = logs[j], logs[i]
+	}
+
+	return logs, nil
+}
+
+func (r *WorkflowRepo) SubscribeLogs(taskID string) chan models.TaskLog {
+	return r.LogHub.Subscribe(taskID)
+}
+
+func (r *WorkflowRepo) UnsubscribeLogs(taskID string, ch chan models.TaskLog) {
+	r.LogHub.Unsubscribe(taskID, ch)
 }
 
 func (r *WorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]models.TaskLog, error) {

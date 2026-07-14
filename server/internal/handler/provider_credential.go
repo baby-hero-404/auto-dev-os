@@ -82,7 +82,8 @@ func (h *ProviderCredentialHandler) TestInput(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.svc.TestConnectionInput(r.Context(), input); err != nil {
+	orgID := chi.URLParam(r, "orgID")
+	if err := h.svc.TestConnectionInput(r.Context(), orgID, input); err != nil {
 		writeServiceError(w, err)
 		return
 	}

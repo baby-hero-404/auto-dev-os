@@ -58,9 +58,42 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		}
 	}
 
+	runner := llmrunner.Runner{
+		WorkspaceRoot:           o.workspaceRoot,
+		Provider:                o.llm,
+		AssemblePrompt:          assemble,
+		Projects:                o.projects,
+		ReadAffectedFileContent: o.readAffectedFileContent,
+		SaveArtifact:            o.checkpoints.SaveArtifact,
+		WriteTrace:              o.writeLLMCallTrace,
+		Log:                     o.log,
+		MaxToolResultChars:      o.maxToolResultChars,
+		CaptureDiff: func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error) {
+			o.initRepoutil()
+			return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
+		},
+		// o.llm is a router (Gateway/NineRouter) that picks the underlying model per-call from
+		// RouteOptions, so the serving provider isn't known until the call happens — "default"
+		// (plain-text sections) is the only rendering choice knowable up front. The "anthropic"
+		// tag-wrapped variant stays available on DefaultPromptCompiler for a future caller that
+		// does have that info (e.g. a fixed single-provider deployment).
+		Compiler: prompts.NewDefaultPromptCompiler("default"),
+	}
+	if stepIsAgentic(stepID) && o.registry != nil && len(tools) > 0 {
+		agentID, agentRole := "", ""
+		if agent != nil {
+			agentID, agentRole = agent.ID, agent.Role
+		}
+		workspace := o.resolveAgenticWorkspace(ctx, task, agenticWorkspaceRole(stepID))
+		runner.Tools = tools
+		runner.ToolExecutor = steps.NewBoundaryCheckedToolExecutor(o.registry, workspace, task, agentID, agentRole, o.tasks)
+	}
+
 	if models.IsStateMachineEnabled(ctx) && o.checkpoints != nil && assemble != nil {
 		if snap, exists := o.checkpoints.GetLatestExecutionSnapshot(ctx, task.ID, stepID); exists {
-			messages, err := assemble(ctx, *task, agent, nil)
+			// Reconstruct the exact same initial prompt Run() would build, so the hash is
+			// comparable to the one saveExecutionSnapshot computed (see BuildInitialMessages).
+			messages, err := runner.BuildInitialMessages(ctx, task, agent, stepID, instruction)
 			if err == nil {
 				rawMsgs, _ := json.Marshal(messages)
 				h := sha256.Sum256(rawMsgs)
@@ -105,30 +138,6 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 				}
 			}
 		}
-	}
-	runner := llmrunner.Runner{
-		WorkspaceRoot:           o.workspaceRoot,
-		Provider:                o.llm,
-		AssemblePrompt:          assemble,
-		Projects:                o.projects,
-		ReadAffectedFileContent: o.readAffectedFileContent,
-		SaveArtifact:            o.checkpoints.SaveArtifact,
-		WriteTrace:              o.writeLLMCallTrace,
-		Log:                     o.log,
-		MaxToolResultChars:      o.maxToolResultChars,
-		CaptureDiff: func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error) {
-			o.initRepoutil()
-			return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
-		},
-	}
-	if stepIsAgentic(stepID) && o.registry != nil && len(tools) > 0 {
-		agentID, agentRole := "", ""
-		if agent != nil {
-			agentID, agentRole = agent.ID, agent.Role
-		}
-		workspace := o.resolveAgenticWorkspace(ctx, task, agenticWorkspaceRole(stepID))
-		runner.Tools = tools
-		runner.ToolExecutor = steps.NewBoundaryCheckedToolExecutor(o.registry, workspace, task, agentID, agentRole, o.tasks)
 	}
 	return runner.Run(ctx, task, agent, jobID, stepID, instruction)
 }

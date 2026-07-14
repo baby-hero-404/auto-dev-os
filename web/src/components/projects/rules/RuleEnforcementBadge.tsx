@@ -1,3 +1,4 @@
+import { Badge, ruleEnforcementBadge } from "@/components/ui/badge";
 import type { Rule } from "@/lib/types";
 
 interface RuleEnforcementBadgeProps {
@@ -5,13 +6,10 @@ interface RuleEnforcementBadgeProps {
 }
 
 export function RuleEnforcementBadge({ enforcement }: RuleEnforcementBadgeProps) {
-  const cls =
-    enforcement === "strict"
-      ? "border-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-400"
-      : "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+  const meta = ruleEnforcementBadge(enforcement);
   return (
-    <span className={`rounded border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${cls}`}>
-      {enforcement}
-    </span>
+    <Badge variant={meta.variant} className="font-mono text-[9px] font-bold uppercase tracking-wider px-2 py-0.5">
+      {meta.label}
+    </Badge>
   );
 }

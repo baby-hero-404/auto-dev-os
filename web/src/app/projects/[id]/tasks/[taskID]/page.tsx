@@ -9,11 +9,11 @@ import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { SpecPanel } from "./components/SpecPanel";
 import { PRPanel } from "./components/PRPanel";
 import { WorkflowSidebar } from "./components/WorkflowSidebar";
-import { TaskActions } from "./components/TaskActions";
 import { RequestChangesModal } from "./components/RequestChangesModal";
 import { SpecReviewSection } from "@/components/projects/spec-review-section";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { useSession } from "@/lib/session";
+import type { Task, TaskAnalysis } from "@/lib/types";
 
 function TaskDetailContent() {
   const {
@@ -22,7 +22,6 @@ function TaskDetailContent() {
     logs,
     error,
     setError,
-    token,
     updateTask,
     execute,
     clarificationQuestions,
@@ -97,7 +96,6 @@ function TaskDetailContent() {
             <BoundaryResolutionControls
               errorMsg={workflow.job.last_error}
               task={task}
-              token={token}
               updateTask={updateTask}
               execute={execute}
               setError={setError}
@@ -159,9 +157,8 @@ export default function ProjectTaskDetailPage({
 
 interface BoundaryResolutionControlsProps {
   errorMsg: string;
-  task: any;
-  token: string;
-  updateTask: (fields: any) => Promise<boolean>;
+  task: Task | undefined;
+  updateTask: (fields: Partial<Task>) => Promise<boolean>;
   execute: () => Promise<void>;
   setError: (err: string) => void;
 }
@@ -169,7 +166,6 @@ interface BoundaryResolutionControlsProps {
 function BoundaryResolutionControls({
   errorMsg,
   task,
-  token,
   updateTask,
   execute,
   setError,
@@ -223,7 +219,7 @@ function BoundaryResolutionControls({
         };
       });
 
-      const currentAnalysis = task?.analysis || {};
+      const currentAnalysis = task?.analysis || ({} as Partial<TaskAnalysis>);
       const currentBoundaries = currentAnalysis.execution_boundaries || [];
       
       // Deduplicate boundaries by root and repo_name
@@ -240,14 +236,14 @@ function BoundaryResolutionControls({
       const updatedAnalysis = {
         ...currentAnalysis,
         execution_boundaries: mergedBoundaries,
-      };
+      } as TaskAnalysis;
 
       const ok = await updateTask({ analysis: updatedAnalysis });
       if (ok) {
         await execute();
       }
-    } catch (err: any) {
-      setError(err?.message || "Failed to expand boundaries");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to expand boundaries");
     } finally {
       setSubmitting(false);
     }
@@ -257,7 +253,7 @@ function BoundaryResolutionControls({
     if (!feedback.trim()) return;
     setSubmitting(true);
     try {
-      const currentAnalysis = task?.analysis || {};
+      const currentAnalysis = task?.analysis || ({} as Partial<TaskAnalysis>);
       const currentRules = currentAnalysis.task_rules || [];
       const feedbackLine = violatedFiles.length > 0 
         ? `Do not modify these files: ${violatedFiles.join(", ")}. Guidance: ${feedback.trim()}`
@@ -267,15 +263,15 @@ function BoundaryResolutionControls({
       const updatedAnalysis = {
         ...currentAnalysis,
         task_rules: updatedRules,
-      };
+      } as TaskAnalysis;
 
       const ok = await updateTask({ analysis: updatedAnalysis });
       if (ok) {
         setFeedback("");
         await execute();
       }
-    } catch (err: any) {
-      setError(err?.message || "Failed to submit feedback");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit feedback");
     } finally {
       setSubmitting(false);
     }
@@ -305,7 +301,7 @@ function BoundaryResolutionControls({
                 Option A: Approve Edits
               </h4>
               <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-                Authorize the agent to edit these directories by automatically appending them to the task's execution boundaries.
+                Authorize the agent to edit these directories by automatically appending them to the task&apos;s execution boundaries.
               </p>
             </div>
             <button

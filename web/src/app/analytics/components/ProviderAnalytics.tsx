@@ -1,6 +1,7 @@
+import type { TokenUsageSummary } from "@/lib/types";
 import { compactNumber, formatCost, formatLatency } from "../utils";
 
-export function ProviderAnalytics({ providerUsage }: { providerUsage: any[] }) {
+export function ProviderAnalytics({ providerUsage }: { providerUsage: TokenUsageSummary[] }) {
   return (
     <section className="mb-6 overflow-hidden rounded-lg border border-stroke bg-panel">
       <div className="border-b border-stroke p-5">

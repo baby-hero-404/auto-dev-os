@@ -20,13 +20,13 @@ export function EnforcementToggle({ value, onChange, disabled }: EnforcementTogg
           className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 cursor-pointer ${
             value === opt
               ? opt === "strict"
-                ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-400 font-semibold"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold"
+                ? "border-danger/40 bg-danger/10 text-danger font-semibold"
+                : "border-warning/40 bg-warning/10 text-warning font-semibold"
               : "border-stroke bg-card text-content-muted hover:text-foreground"
           }`}
           type="button"
         >
-          <span className={`size-1.5 rounded-full ${value === opt ? "bg-current animate-pulse" : "bg-slate-300 dark:bg-slate-700"}`} />
+          <span className={`size-1.5 rounded-full ${value === opt ? "bg-current animate-pulse" : "bg-stroke"}`} />
           {opt}
         </button>
       ))}

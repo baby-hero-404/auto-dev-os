@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact } from "../types";
+import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -112,7 +112,7 @@ export const tasks = {
   update(
     taskID: string,
     token: string,
-    input: { title?: string; description?: string; complexity?: string; priority?: number; labels?: string[]; agent_id?: string; repository_id?: string; analysis?: any; spec_status?: string },
+    input: { title?: string; description?: string; complexity?: string; priority?: number; labels?: string[]; agent_id?: string; repository_id?: string; analysis?: TaskAnalysis; spec_status?: string },
   ) {
     return request<Task>(`/tasks/${taskID}`, {
       method: "PATCH",

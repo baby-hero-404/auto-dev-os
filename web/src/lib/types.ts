@@ -247,10 +247,10 @@ export type TokenUsageSummary = {
   model: string;
   level_group: string;
   requests: number;
-  success_requests: number;
-  failed_requests: number;
-  prompt_tokens: number;
-  output_tokens: number;
+  success_requests?: number;
+  failed_requests?: number;
+  prompt_tokens?: number;
+  output_tokens?: number;
   total_tokens: number;
   cost_usd: number;
   avg_latency_ms: number;

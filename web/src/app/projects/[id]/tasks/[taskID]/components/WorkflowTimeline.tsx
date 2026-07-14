@@ -39,6 +39,16 @@ function getStepIcon(step: string) {
   return <Play size={13} />;
 }
 
+interface WorkflowTimelineNode {
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  steps: string[];
+  isGroup: boolean;
+  isExecutionPhase?: boolean;
+}
+
 export function WorkflowTimeline() {
   const {
     workflow,
@@ -53,10 +63,10 @@ export function WorkflowTimeline() {
   const activeStepName = useMemo(() => {
     if (!workflow?.job?.step) return null;
     return formatStepName(workflow.job.step, analysisData);
-  }, [workflow?.job?.step, analysisData]);
+  }, [workflow, analysisData]);
 
   const timelineNodes = useMemo(() => {
-    const nodes: any[] = [];
+    const nodes: WorkflowTimelineNode[] = [];
     let codeStepsAdded = false;
     const codeSteps = workflowSteps.filter(s => s.startsWith("code_"));
     const execPhases = analysisData?.execution_phases || [];
@@ -79,7 +89,7 @@ export function WorkflowTimeline() {
       
       let stepIdx = 0;
       for (let i = 0; i < numPhases; i++) {
-        let count = base + (remainder > 0 ? 1 : 0);
+        const count = base + (remainder > 0 ? 1 : 0);
         if (remainder > 0) remainder--;
         for (let j = 0; j < count; j++) {
           if (stepIdx < steps.length) {
@@ -97,7 +107,7 @@ export function WorkflowTimeline() {
           if (execPhases.length > 0) {
             const distributed = distributeSteps(codeSteps, execPhases.length);
             
-            execPhases.forEach((phase: any, index: number) => {
+            execPhases.forEach((phase: { phase?: string; tasks?: string[] }, index: number) => {
                const phaseSteps = distributed[index] || [];
                const phaseDesc = phase.phase ? phase.phase : (phase.tasks ? phase.tasks.join(", ") : "Execution phase");
                nodes.push({

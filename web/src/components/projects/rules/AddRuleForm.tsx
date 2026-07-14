@@ -1,10 +1,14 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { Rule } from "@/lib/types";
 import { EnforcementToggle } from "./EnforcementToggle";
 import { ApiError } from "@/lib/api";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Field } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
 
 interface AddRuleFormProps {
   onAddRule: (content: string, enforcement: Rule["enforcement"]) => Promise<Rule>;
@@ -41,40 +45,40 @@ export function AddRuleForm({ onAddRule, setNewRuleID, ruleError, setRuleError }
   }
 
   return (
-    <div className="rounded-lg border border-stroke bg-card p-5 h-fit">
-      <h3 className="font-sans font-semibold text-foreground mb-4">Add Project Rule</h3>
-      <form onSubmit={handleAddRule} className="space-y-4">
-        <div className="flex flex-col gap-1.5">
-          <label className="block text-xs font-mono font-bold uppercase tracking-wider text-content-muted">
-            Rule Guideline
-          </label>
-          <textarea
-            id="project-rule-content"
-            value={ruleContent}
-            onChange={(e) => setRuleContent(e.target.value)}
-            placeholder="e.g. Always write comprehensive unit tests using vitest for every new helper function."
-            className="min-h-[100px] w-full rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none resize-none transition"
-            disabled={isAddingRule}
-            required
-          />
-        </div>
+    <Card className="h-fit">
+      <CardHeader title="Add Project Rule" />
+      <CardContent>
+        <form onSubmit={handleAddRule} className="space-y-4">
+          <Field label="Rule Guideline" htmlFor="project-rule-content">
+            <Textarea
+              id="project-rule-content"
+              value={ruleContent}
+              onChange={(e) => setRuleContent(e.target.value)}
+              placeholder="e.g. Always write comprehensive unit tests using vitest for every new helper function."
+              disabled={isAddingRule}
+              required
+              className="min-h-[100px] resize-none"
+            />
+          </Field>
 
-        <EnforcementToggle value={ruleEnforcement} onChange={setRuleEnforcement} disabled={isAddingRule} />
+          <EnforcementToggle value={ruleEnforcement} onChange={setRuleEnforcement} disabled={isAddingRule} />
 
-        {ruleError && (
-          <div className="rounded border border-red-500/20 bg-red-500/10 p-2.5 text-xs text-red-200" role="alert">
-            {ruleError}
-          </div>
-        )}
+          {ruleError && (
+            <span className="text-xs text-danger font-medium leading-normal block" role="alert">
+              {ruleError}
+            </span>
+          )}
 
-        <button
-          type="submit"
-          disabled={isAddingRule || !ruleContent.trim()}
-          className="flex w-full items-center justify-center gap-2 rounded bg-brand-primary px-3 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-        >
-          {isAddingRule ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add Rule
-        </button>
-      </form>
-    </div>
+          <Button
+            type="submit"
+            disabled={isAddingRule || !ruleContent.trim()}
+            isLoading={isAddingRule}
+            className="w-full"
+          >
+            {!isAddingRule && <Plus size={14} />} Add Rule
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

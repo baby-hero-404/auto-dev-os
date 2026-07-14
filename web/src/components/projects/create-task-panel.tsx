@@ -262,7 +262,7 @@ export function CreateTaskPanel({
             Cancel
           </button>
           <button
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-5 py-2.5 text-sm font-semibold text-slate-950 hover:opacity-90 hover:shadow-md transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-primary-muted"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-5 py-2.5 text-sm font-semibold text-brand-primary-fg hover:opacity-90 hover:shadow-md transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-primary-muted"
             disabled={isSubmitting || !title.trim()}
             type="submit"
           >

@@ -139,6 +139,81 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_Run_PropagatesStateMachineEnabledFlag guards against the flag-gated
+// migration (docs/openspecs/execution-semantics-2026/tasks.md Task 2.2) silently becoming a
+// no-op: WithStateMachineEnabled(true) must actually reach models.IsStateMachineEnabled(ctx)
+// at LLM call time, not just get stored on the Orchestrator struct. Previously
+// o.stateMachineEnabled was read nowhere — the flag never made it into ctx via
+// models.StateMachineEnabledCtxKey, so enabling it in config had zero runtime effect.
+func TestOrchestrator_Run_PropagatesStateMachineEnabledFlag(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "orch-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:          "task-123",
+		ProjectID:   "proj-123",
+		Title:       "Test Task",
+		Description: "Write tests for the server package.",
+		Complexity:  models.TaskComplexityMedium,
+		SpecStatus:  models.TaskSpecStatusApproved,
+	}
+
+	job := &models.WorkflowJob{
+		ID:     "job-123",
+		TaskID: "task-123",
+		Status: models.WorkflowJobStatusQueued,
+	}
+
+	agent := &models.Agent{
+		ID:   "agent-123",
+		Name: "Test Agent",
+		Role: models.AgentRoleBackend,
+	}
+
+	repo := models.Repository{
+		ID:        "repo-123",
+		ProjectID: "proj-123",
+		URL:       "https://github.com/test/repo.git",
+		Branch:    "main",
+		Token:     "token-123",
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	workflowRepo := &mockWorkflowRepo{job: job}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+	sandboxRuntime := &mockSandboxRuntime{}
+	gitOps := &mockGitOpsClient{}
+	artifactRepo := &mockArtifactRepo{}
+	reposRepo := &mockRepositoriesRepo{repo: repo}
+
+	llmResponses := map[string]string{
+		"plan":          `{"plan": "step 1 plan"}`,
+		"code_backend":  `{"patch": "diff --git a/main.go b/main.go\n+backend code", "summary": "backend done"}`,
+		"code_frontend": `{"patch": "diff --git a/ui.js b/ui.js\n+frontend code", "summary": "frontend done"}`,
+		"review":        `{"findings": []}`,
+		"fix":           `{"patch": "diff --git a/main.go b/main.go\n+fixed code", "summary": "fixed bug"}`,
+	}
+	llmProvider := &mockLLMProvider{responses: llmResponses}
+
+	orch := New(taskRepo, workflowRepo, agentAssigner, sandboxRuntime,
+		WithLLMProvider(llmProvider),
+		WithGitOpsClient(gitOps),
+		WithArtifactRepository(artifactRepo),
+		WithRepositoryRepository(reposRepo),
+		WithWorkspaceRoot(tmpDir),
+		WithStateMachineEnabled(true),
+	)
+
+	orch.run(context.Background(), "job-123")
+
+	if !llmProvider.sawStateMachineEnabled {
+		t.Error("expected models.IsStateMachineEnabled(ctx) to be true during step execution when WithStateMachineEnabled(true) is set — the flag never reached ctx")
+	}
+}
+
 func TestOrchestrator_Run_ReleasesAgentWhenFailureOccursAfterAssign(t *testing.T) {
 	task := &models.Task{
 		ID:          "task-release",

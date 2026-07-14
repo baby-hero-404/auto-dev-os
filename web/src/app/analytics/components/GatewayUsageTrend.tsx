@@ -8,8 +8,9 @@ import {
   YAxis,
 } from "recharts";
 import { compactNumber, formatCost, formatLatency } from "../utils";
+import type { GatewayUsagePoint } from "@/lib/types";
 
-export function GatewayUsageTrend({ gatewayUsage }: { gatewayUsage: any[] }) {
+export function GatewayUsageTrend({ gatewayUsage }: { gatewayUsage: GatewayUsagePoint[] }) {
   return (
     <section className="mb-6 rounded-lg border border-stroke bg-panel p-5">
       <h3 className="mb-1 font-mono font-semibold">Gateway Usage Trend</h3>
@@ -39,6 +40,7 @@ export function GatewayUsageTrend({ gatewayUsage }: { gatewayUsage: any[] }) {
             <Tooltip
               contentStyle={{ background: "#0f172a", border: "1px solid rgba(148,163,184,0.22)", borderRadius: 8, fontSize: 12 }}
               labelFormatter={(v) => new Date(v).toLocaleDateString("en", { month: "long", day: "numeric" })}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               formatter={(value: any, name: any) => {
                 if (name === "cost_usd") return [formatCost(Number(value)), "Cost"];
                 if (name === "avg_latency_ms") return [formatLatency(Number(value)), "Avg Latency"];

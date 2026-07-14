@@ -38,16 +38,23 @@ type Runner struct {
 	ToolExecutor       ToolExecutor
 	CaptureDiff        func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error)
 	MaxToolResultChars int
+
+	// Compiler renders a node's ExecutionIR into the "Execution Contract" message (constraints,
+	// acceptance criteria, physical write-scope, budgets) that runStateMachine prepends once per
+	// node (design.md: State Machine -> Prompt Compiler -> LLM Node Executor). Optional — when
+	// nil, the state machine loop runs without it (legacy behavior, no contract message).
+	Compiler prompts.PromptCompiler
 }
 
 func (r Runner) isAgentic() bool {
 	return len(r.Tools) > 0 && r.ToolExecutor != nil
 }
 
-func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
-	if r.Provider == nil {
-		return nil, fmt.Errorf("llm provider is not configured")
-	}
+// BuildInitialMessages constructs the initial prompt for a step exactly as Run() does before
+// its first LLM call, without ever calling the LLM. It is the single source of truth for that
+// construction so the ExecutionSnapshot resume path (llm_step.go) can independently reconstruct
+// a comparable PromptHash (REQ-003) instead of hashing a different, non-comparable message set.
+func (r Runner) BuildInitialMessages(ctx context.Context, task *models.Task, agent *models.Agent, stepID, instruction string) ([]llm.Message, error) {
 	localPath := sandbox.WorkspacePath(r.WorkspaceRoot, task.ID)
 	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 	ctx = context.WithValue(ctx, prompts.StepIDCtxKey, stepID)
@@ -90,6 +97,21 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		}
 	}
 	messages = append(messages, llm.Message{Role: "user", Content: "Workflow step: " + stepID + "\n\n" + fullInstruction})
+	return messages, nil
+}
+
+func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
+	if r.Provider == nil {
+		return nil, fmt.Errorf("llm provider is not configured")
+	}
+	localPath := sandbox.WorkspacePath(r.WorkspaceRoot, task.ID)
+	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
+	ctx = context.WithValue(ctx, prompts.StepIDCtxKey, stepID)
+
+	messages, err := r.BuildInitialMessages(ctx, task, agent, stepID, instruction)
+	if err != nil {
+		return nil, err
+	}
 
 	r.save(ctx, jobID, task.ID, stepID, "prompt", messages)
 
@@ -103,7 +125,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		ExcludeModelID: llm.ExcludeModelIDFromContext(ctx),
 	})
 
-	if agentic {
+	if r.isAgentic() {
 		return r.runAgentic(ctx, task, agent, jobID, stepID, messages)
 	}
 

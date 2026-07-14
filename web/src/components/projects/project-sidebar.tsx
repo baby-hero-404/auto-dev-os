@@ -2,21 +2,22 @@
 
 import Link from "next/link";
 import { ArrowLeft, Bot, GitBranch, List, ShieldCheck, Settings } from "lucide-react";
+import { cn } from "@/lib/cn";
 
 type ProjectView = "tasks" | "agents" | "repositories" | "rules" | "settings";
 
 interface ProjectSidebarProps {
+  projectID: string;
   projectName: string;
   activeView: ProjectView;
-  onViewChange: (view: ProjectView) => void;
   rulesCount: number;
   agentsCount: number;
 }
 
 export function ProjectSidebar({
+  projectID,
   projectName,
   activeView,
-  onViewChange,
   rulesCount,
   agentsCount,
 }: ProjectSidebarProps) {
@@ -30,8 +31,14 @@ export function ProjectSidebar({
 
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-stroke bg-card p-4 md:flex">
-      {/* Title / Project Name */}
+      {/* Title / Project Name / Home Link */}
       <div className="mb-8 px-3 py-2">
+        <Link
+          href="/"
+          className="group mb-4 flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-widest text-content-muted/60 hover:text-brand-primary transition-colors"
+        >
+          <span>← Auto Code OS</span>
+        </Link>
         <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-content-muted/60">
           Current Project
         </div>
@@ -42,29 +49,39 @@ export function ProjectSidebar({
 
       {/* Navigation menu */}
       <nav className="flex-1 space-y-1">
-        {menuItems.map((item) => {
+        {menuItems.map((item, index) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
           return (
-            <button
+            <Link
               key={item.id}
-              onClick={() => onViewChange(item.id)}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150 cursor-pointer ${
+              href={`/projects/${projectID}?view=${item.id}`}
+              aria-current={isActive ? "page" : undefined}
+              className={cn(
+                "relative flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150 cursor-pointer",
                 isActive
-                  ? "bg-brand-primary/10 text-brand-primary shadow-[inset_3px_0_0_0_var(--accent)] font-semibold"
+                  ? "bg-brand-primary-muted text-brand-primary font-semibold"
                   : "text-content-muted hover:bg-surface hover:text-foreground"
-              }`}
+              )}
             >
+              {isActive && (
+                <div className="absolute left-0 top-2 bottom-2 w-0.75 rounded-r bg-brand-primary" />
+              )}
               <div className="flex items-center gap-2.5">
                 <Icon size={16} />
                 <span>{item.label}</span>
               </div>
-              {item.badge !== null && (
-                <span className="rounded bg-background border border-stroke px-1.5 py-0.5 text-[10px] font-semibold text-content-muted">
-                  {item.badge}
-                </span>
-              )}
-            </button>
+              <div className="flex items-center gap-1.5">
+                {item.badge !== null && (
+                  <span className="rounded bg-background border border-stroke px-1.5 py-0.5 text-[10px] font-semibold text-content-muted">
+                    {item.badge}
+                  </span>
+                )}
+                <kbd className="hidden rounded bg-stroke/30 px-1 py-0.5 text-[9px] font-mono text-content-muted lg:inline-block">
+                  {index + 1}
+                </kbd>
+              </div>
+            </Link>
           );
         })}
       </nav>

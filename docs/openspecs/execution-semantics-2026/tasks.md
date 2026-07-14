@@ -6,13 +6,13 @@
 ## P0 — Critical
 
 ### Task 1.1: Define Execution IR and Prompt Compiler
-> ⚠️ Status: Mostly Implemented — see note below
+> ✅ Status: Fully Implemented
 > Links to: REQ-001
 
 **Acceptance Criteria:**
 - [x] Define Go structs for `ExecutionIR` (+ `Intent`, `PhaseBudgets`) with `server/pkg/models/schemas/execution_ir.schema.json` (`additionalProperties: false`, `schema_version` pinned; Go decode via `DisallowUnknownFields`). — `pkg/models/ir.go`, embedded via `go:embed` (same pattern as `pkg/config/config.go`).
-- [x] Implement `PromptCompiler` interface with at least one provider-specific renderer. — `internal/prompts/compiler.go` (`default` + `anthropic`).
-- [x] Refactor Planner output schema (`steps/plan.go`) to emit `ExecutionIR` deterministically from `ExecutionUnits` as a fallback whenever the LLM doesn't supply one directly (`BuildExecutionIRs`, mirrors the existing `MapLegacyPhasesToUnits` pattern). `steps/analyze.go` is separately being changed (outside this task, in-flight elsewhere in the working tree as of 2026-07-13) to require `execution_irs` directly from the LLM — that path's own test suite (`analyze_step_test.go`) is not yet green, so treat direct LLM emission as unverified until that lands.
+- [x] Implement `PromptCompiler` interface with at least one provider-specific renderer. — `internal/prompts/compiler.go` (`default` + `anthropic`). Wired into the runtime: `llmrunner.Runner.Compiler` is set from `llm_step.go` and called once per node in `runStateMachine` (statemachineloop.go) to prepend the compiled Execution Contract (constraints/acceptance/write-scope/budgets) — previously built and golden-tested but never invoked by any runtime path (fixed 2026-07-14). `resolveExecutionIRForStep`'s no-IR fallback was also made schema-valid so `Compile()` doesn't error on the common no-`execution_irs` path. `anthropic` tag-wrapped rendering stays available on `DefaultPromptCompiler` but isn't selected at the call site, since `o.llm` is a router (Gateway/NineRouter) that only resolves to an underlying model per-call — the serving provider isn't known early enough to pick a renderer.
+- [x] Refactor Planner output schema (`steps/plan.go`) to emit `ExecutionIR` deterministically from `ExecutionUnits` as a fallback whenever the LLM doesn't supply one directly (`BuildExecutionIRs`, mirrors the existing `MapLegacyPhasesToUnits` pattern). `steps/analyze.go` requires `execution_irs` directly from the LLM; `analyze_step_test.go` is green (verified 2026-07-14).
 - [x] Invalid IR is rejected pre-compile with a structured field-level error (REQ-001 failure scenario). — `models.ValidateExecutionIR` / `ParseExecutionIR`, wired into `PromptCompiler.Compile`; see `TestDefaultPromptCompiler_Compile_InvalidIR`.
 - [x] Golden-file tests for compiled prompts per provider. — `internal/prompts/compiler_test.go` + `testdata/compiler_{default,anthropic}.golden`.
 

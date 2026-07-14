@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import type { RecentFailure } from "@/lib/types";
 
-export function RecentFailures({ recentFailures }: { recentFailures: any[] }) {
+export function RecentFailures({ recentFailures }: { recentFailures: RecentFailure[] }) {
   return (
     <section className="mb-6 overflow-hidden rounded-lg border border-stroke bg-panel">
       <div className="border-b border-stroke p-5">

@@ -221,9 +221,10 @@ func (m *mockAnalyzeSandboxRuntime) Prewarm(ctx context.Context) error {
 }
 
 type mockLLMProvider struct {
-	responses       map[string]string
-	responseQueue   []*llm.Response
-	lastChatOptions llm.ChatOptions
+	responses              map[string]string
+	responseQueue          []*llm.Response
+	lastChatOptions        llm.ChatOptions
+	sawStateMachineEnabled bool
 }
 
 func (m *mockLLMProvider) Name() string {
@@ -236,6 +237,9 @@ func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*ll
 
 func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
 	m.lastChatOptions = opts
+	if models.IsStateMachineEnabled(ctx) {
+		m.sawStateMachineEnabled = true
+	}
 	if len(m.responseQueue) > 0 {
 		resp := m.responseQueue[0]
 		m.responseQueue = m.responseQueue[1:]

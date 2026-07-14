@@ -1,14 +1,15 @@
 import { Loader2, Network, TrendingDown } from "lucide-react";
-import type { KnowledgeEdge } from "@/lib/types";
+import type { KnowledgeEdge, EpisodicMemory } from "@/lib/types";
 
 interface MemoryInspectorProps {
-  inspectingMemoryID: string;
-  detailData: any;
+  detailData: {
+    memory: EpisodicMemory;
+    edges?: KnowledgeEdge[];
+  } | undefined;
   onClose: () => void;
 }
 
 export function MemoryInspector({
-  inspectingMemoryID,
   detailData,
   onClose,
 }: MemoryInspectorProps) {

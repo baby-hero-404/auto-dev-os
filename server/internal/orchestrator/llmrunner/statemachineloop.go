@@ -28,9 +28,15 @@ func resolveExecutionIRForStep(analysis *models.TaskAnalysis, stepID string) mod
 	if len(analysis.ExecutionIRs) == 1 {
 		return analysis.ExecutionIRs[0]
 	}
-	// Fallback budget defaults
+	// Fallback budget defaults. Schema-valid (not just a budget stand-in) so it can still be
+	// passed to PromptCompiler.Compile — ValidateExecutionIR requires schema_version,
+	// intent.capability, intent.operation, and non-nil constraints/acceptance.
 	return models.ExecutionIR{
-		NodeID: "default",
+		SchemaVersion: models.CurrentExecutionIRSchemaVersion,
+		NodeID:        "default",
+		Intent:        models.Intent{Capability: stepID, Operation: "modify"},
+		Constraints:   []string{},
+		Acceptance:    []string{},
 		Budget: models.PhaseBudgets{
 			Discovery:      6,
 			Implementation: 12,
@@ -69,6 +75,25 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 	sm := NewStateMachine(ir.Budget)
 	r.log(ctx, task.ID, nil, "info", fmt.Sprintf("StateMachine initialized for node %s with budget: Discovery=%d, Implementation=%d, Validation=%d", ir.NodeID, ir.Budget.Discovery, ir.Budget.Implementation, ir.Budget.Validation))
 
+	resolvedTargets := analysis.ExecutionIRTargets[ir.NodeID]
+
+	// Compile the node's Execution Contract (constraints, acceptance criteria, physical write
+	// scope, budgets) once and prepend it, so the model actually sees the IR's constraints and
+	// acceptance criteria — previously nothing in this loop surfaced them (design.md: State
+	// Machine -> Prompt Compiler -> LLM Node Executor).
+	if r.Compiler != nil {
+		if contractMsgs, err := r.Compiler.Compile(ir, resolvedTargets); err != nil {
+			r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("PromptCompiler failed for node %s, continuing without execution contract: %v", ir.NodeID, err))
+		} else {
+			messages = append(messages, contractMsgs...)
+		}
+	}
+
+	// initialMessages is captured before the loop mutates messages, so the snapshot hash
+	// reflects the same prompt construction that a resume can independently reconstruct
+	// (see saveExecutionSnapshot and Runner.BuildInitialMessages).
+	initialMessages := append([]llm.Message{}, messages...)
+
 	var lastResp *llm.Response
 	var lastParsed map[string]any
 	var editsApplied []string
@@ -78,7 +103,10 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 	failureCounts := make(map[string]int)
 	readMemo := make(map[string]int)
 
-	resolvedTargets := analysis.ExecutionIRTargets[ir.NodeID]
+	// lastActiveState tracks the most recent non-terminal state so a terminal snapshot can
+	// record how many iterations of that phase actually ran (sm.used has no entry for
+	// terminal states themselves).
+	var lastActiveState NodeState
 
 	// Start in DISCOVERY
 	for {
@@ -86,6 +114,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 		if currentState.Terminal() {
 			break
 		}
+		lastActiveState = currentState
 
 		if currentState == StatePlanReady {
 			// Deterministic ResolvePlan gate (REQ-004). If the step reached here, targets were verified or warn-resolved.
@@ -296,7 +325,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 	r.log(ctx, task.ID, nil, "info", fmt.Sprintf("StateMachine execution ended in terminal state: %s", finalState))
 
 	if finalState == StateDone {
-		r.saveExecutionSnapshot(ctx, task, agent, jobID, stepID, messages, sm, toolHistory, finalState)
+		r.saveExecutionSnapshot(ctx, task, agent, jobID, stepID, initialMessages, sm, toolHistory, finalState, lastActiveState)
 		r.save(ctx, jobID, task.ID, stepID, "llm_response", lastParsed)
 		return map[string]any{
 			"status":        "llm_completed",
@@ -310,7 +339,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 	}
 
 	if finalState == StateSalvaged {
-		r.saveExecutionSnapshot(ctx, task, agent, jobID, stepID, messages, sm, toolHistory, finalState)
+		r.saveExecutionSnapshot(ctx, task, agent, jobID, stepID, initialMessages, sm, toolHistory, finalState, lastActiveState)
 		r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("%s: StateMachine implementation loop exhausted budget but %d edit(s) were applied; surfacing partial result", stepID, len(editsApplied)))
 		return map[string]any{
 			"status":            "llm_partial",
@@ -390,7 +419,7 @@ func (r Runner) truncateToolResult(s string) string {
 	return s[:maxChars] + fmt.Sprintf("\n... [truncated %d chars]", len(s)-maxChars)
 }
 
-func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID string, messages []llm.Message, sm *StateMachine, toolHistory []models.ToolCallRecord, finalState NodeState) {
+func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID string, initialMessages []llm.Message, sm *StateMachine, toolHistory []models.ToolCallRecord, finalState, lastActiveState NodeState) {
 	if r.CaptureDiff == nil || r.SaveArtifact == nil {
 		return
 	}
@@ -402,14 +431,17 @@ func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, ag
 		return
 	}
 
-	rawMsgs, _ := json.Marshal(messages)
+	// Hash the initial prompt (not the accumulated tool-call transcript) so a resume can
+	// independently reconstruct a comparable hash via Runner.BuildInitialMessages without
+	// replaying the LLM conversation.
+	rawMsgs, _ := json.Marshal(initialMessages)
 	h := sha256.Sum256(rawMsgs)
 	promptHash := hex.EncodeToString(h[:])
 
 	snapshot := models.ExecutionSnapshot{
 		ExecutionID:   stepID,
 		CurrentState:  string(finalState),
-		Iteration:     sm.used[finalState],
+		Iteration:     sm.used[lastActiveState],
 		WorkspaceDiff: diffText,
 		ToolHistory:   toolHistory,
 		PromptHash:    promptHash,

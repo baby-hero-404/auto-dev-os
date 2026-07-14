@@ -64,7 +64,7 @@ export function TaskPrReview({
             <button
               onClick={approvePR}
               disabled={submittingPR}
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-brand-primary-fg transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
             >
               <Check size={15} />
               Approve &amp; Merge

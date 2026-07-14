@@ -1,8 +1,9 @@
 "use client";
 
-import { GitBranch, Plus, ShieldCheck, Workflow, Bot, CheckCircle2, type LucideIcon } from "lucide-react";
-import type { Task } from "@/lib/types";
-import { workflowStageCounts } from "@/lib/utils/task-utils";
+import Link from "next/link";
+import { ChevronLeft, Copy, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 type ProjectView = "tasks" | "agents" | "repositories" | "rules" | "settings";
 
@@ -17,127 +18,83 @@ const projectViews: { id: ProjectView; label: string }[] = [
 interface ProjectHeaderProps {
   projectName: string;
   projectID: string;
-  repositoriesCount: number;
-  tasksCount: number;
-  agentsCount: number;
-  rulesCount: number;
-  completedTasksCount: number;
-  activeTasksCount: number;
   activeView: ProjectView;
-  onViewChange: (v: ProjectView) => void;
   onCreateTaskClick: () => void;
-  tasks: Task[];
 }
 
 export function ProjectHeader({
   projectName,
   projectID,
-  repositoriesCount,
-  tasksCount,
-  agentsCount,
-  rulesCount,
-  completedTasksCount,
-  activeTasksCount,
   activeView,
-  onViewChange,
   onCreateTaskClick,
-  tasks,
 }: ProjectHeaderProps) {
+  const handleCopyID = () => {
+    navigator.clipboard.writeText(projectID);
+    toast.success("Project ID copied to clipboard!");
+  };
+
   return (
     <header className="shrink-0 border-b border-stroke bg-card/95 px-5 py-4 shadow-sm md:px-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
+          {/* Row 1: Breadcrumb / Mobile back */}
           <div className="flex items-center gap-1.5 text-xs text-content-muted">
-            <span>Projects</span>
-            <span>/</span>
-            <span className="truncate font-semibold text-foreground">{projectName || "Loading..."}</span>
+            <Link href="/" className="hover:text-foreground transition-colors flex items-center gap-1">
+              <ChevronLeft size={14} className="md:hidden" />
+              <span>Projects</span>
+            </Link>
+            <span className="hidden md:inline">/</span>
+            <span className="truncate font-semibold text-foreground hidden md:inline">{projectName || "Loading..."}</span>
           </div>
+
+          {/* Row 2: Title & Copyable ID */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <h1 className="truncate text-2xl font-semibold tracking-tight text-foreground">
               {projectName || "Project workspace"}
             </h1>
-            <span className="rounded-md border border-stroke bg-surface px-2 py-0.5 font-mono text-[11px] text-content-muted">
-              {projectID.slice(0, 8)}
-            </span>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-content-muted">
-            <WorkspaceSignal icon={GitBranch} label={`${repositoriesCount} repos`} />
-            <WorkspaceSignal icon={Workflow} label={`${tasksCount} tasks`} />
-            <WorkspaceSignal icon={Bot} label={`${agentsCount} agents`} />
-            <WorkspaceSignal icon={ShieldCheck} label={`${rulesCount} rules`} />
-            <WorkspaceSignal icon={CheckCircle2} label={`${completedTasksCount}/${tasksCount} done`} />
+            <button
+              onClick={handleCopyID}
+              title="Copy Project ID"
+              className="flex items-center gap-1 rounded-md border border-stroke bg-surface px-2 py-0.5 font-mono text-[11px] text-content-muted hover:bg-stroke hover:text-foreground transition cursor-pointer"
+            >
+              <span>{projectID.slice(0, 8)}</span>
+              <Copy size={10} />
+            </button>
           </div>
         </div>
 
+        {/* Row 2: Right Action Button */}
         <div className="flex shrink-0 flex-wrap items-center gap-3">
-          <div className="hidden rounded-lg border border-stroke bg-background px-3 py-2 text-xs text-content-muted lg:block">
-            <span className="font-mono text-foreground">{activeTasksCount}</span> active now
-          </div>
-          <button
+          <Button
             onClick={onCreateTaskClick}
-            className="flex items-center gap-1.5 rounded-md bg-brand-primary px-3.5 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer"
-            type="button"
+            size="sm"
           >
             <Plus size={15} /> Create Task
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="mt-4 md:hidden">
-        <label htmlFor="project-view" className="sr-only">
-          Project view
-        </label>
-        <select
-          id="project-view"
-          value={activeView}
-          onChange={(event) => onViewChange(event.target.value as ProjectView)}
-          className="w-full rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground"
-        >
-          {projectViews.map((view) => (
-            <option key={view.id} value={view.id}>
-              {view.label}
-            </option>
-          ))}
-        </select>
+      {/* Row 3 (md:hidden): horizontal scrollable link tab strip */}
+      <div className="mt-4 overflow-x-auto pb-1 md:hidden">
+        <div className="flex border-b border-stroke min-w-max">
+          {projectViews.map((view) => {
+            const isActive = activeView === view.id;
+            return (
+              <Link
+                key={view.id}
+                href={`/projects/${projectID}?view=${view.id}`}
+                className={`px-4 py-2 text-sm font-medium transition ${
+                  isActive
+                    ? "text-brand-primary border-b-2 border-brand-primary font-semibold"
+                    : "text-content-muted hover:text-foreground"
+                }`}
+              >
+                {view.label}
+              </Link>
+            );
+          })}
+        </div>
       </div>
-
-      <WorkflowStageStrip tasks={tasks} />
     </header>
-  );
-}
-
-function WorkspaceSignal({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-stroke bg-surface px-2 py-1">
-      <Icon size={13} className="text-brand-primary" />
-      {label}
-    </span>
-  );
-}
-
-function WorkflowStageStrip({ tasks }: { tasks: Task[] }) {
-  const stages = workflowStageCounts(tasks);
-
-  return (
-    <div className="mt-4 overflow-x-auto pb-1">
-      <div className="flex min-w-max gap-2">
-        {stages.map((stage) => {
-          const hasTasks = stage.count > 0;
-          return (
-            <div
-              key={stage.label}
-              className={`flex min-w-28 items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs transition ${
-                hasTasks
-                  ? "border-brand-primary/30 bg-brand-primary-muted text-foreground"
-                  : "border-stroke bg-surface text-content-muted"
-              }`}
-            >
-              <span className="font-medium">{stage.label}</span>
-              <span className="font-mono font-semibold">{stage.count}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }

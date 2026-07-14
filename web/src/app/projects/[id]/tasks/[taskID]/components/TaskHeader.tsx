@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Edit2, Check, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge, taskStatusBadge } from "@/components/ui/badge";
 import { Markdown } from "@/components/ui/markdown";
 import { useTaskDetail } from "./TaskDetailContext";
 
@@ -22,18 +22,21 @@ export function TaskHeader() {
   const [editedDesc, setEditedDesc] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  // Sync state with task properties when task updates and we are not editing
-  useEffect(() => {
+  const [prevTaskTitle, setPrevTaskTitle] = useState(task?.title ?? "");
+  if (task?.title !== prevTaskTitle) {
+    setPrevTaskTitle(task?.title ?? "");
     if (!isEditingTitle && task?.title) {
       setEditedTitle(task.title);
     }
-  }, [task?.title, isEditingTitle]);
+  }
 
-  useEffect(() => {
+  const [prevTaskDesc, setPrevTaskDesc] = useState(task?.description ?? "");
+  if (task?.description !== prevTaskDesc) {
+    setPrevTaskDesc(task?.description ?? "");
     if (!isEditingDesc && task?.description) {
       setEditedDesc(task.description);
     }
-  }, [task?.description, isEditingDesc]);
+  }
 
   const handleStartEditTitle = useCallback(() => {
     setEditedTitle(task?.title ?? "");
@@ -93,7 +96,7 @@ export function TaskHeader() {
               <button
                 onClick={handleSaveTitle}
                 disabled={isSaving}
-                className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded border border-emerald-500/20 transition cursor-pointer"
+                className="p-2 bg-success/10 hover:bg-success/20 text-success rounded border border-success/20 transition cursor-pointer"
                 title="Save Title"
               >
                 <Check size={16} />
@@ -123,9 +126,15 @@ export function TaskHeader() {
           )}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {task && <Badge value={task.status} />}
+            {task && (() => {
+              const statusInfo = taskStatusBadge(task.status);
+              return <Badge variant={statusInfo.variant} value={statusInfo.label} />;
+            })()}
             {task?.spec_status && task.spec_status !== "none" && <Badge value={task.spec_status} />}
-            {workflow?.job && <Badge value={workflow.job.status} />}
+            {workflow?.job && (() => {
+              const jobStatusInfo = taskStatusBadge(workflow.job.status);
+              return <Badge variant={jobStatusInfo.variant} value={jobStatusInfo.label} />;
+            })()}
             {task && (
               <span className="rounded border border-stroke bg-surface px-2 py-0.5 text-xs font-medium text-content-muted">
                 Priority {task.priority}
@@ -183,8 +192,8 @@ export function TaskHeader() {
                 )}
               </div>
               {descriptionParts.context && (
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-content-muted">
-                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                <div className="rounded-lg border border-warning/20 bg-warning/5 p-3 text-xs text-content-muted">
+                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-warning">
                     Request history (Legacy)
                   </div>
                   <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
@@ -195,7 +204,7 @@ export function TaskHeader() {
 
               {task?.clarifications && task.clarifications.length > 0 && (
                 <div className="rounded-lg border border-stroke bg-surface/20 p-3 text-xs text-content-muted">
-                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-warning">
                     Clarification History
                   </div>
                   <div className="space-y-3">
@@ -205,7 +214,7 @@ export function TaskHeader() {
                           <span>Round {round.round}</span>
                           <span className="opacity-70">{new Date(round.timestamp).toLocaleString()}</span>
                         </div>
-                        <div className="pl-3 border-l-2 border-amber-500/30 space-y-1.5 text-xs text-foreground/90 bg-amber-500/[0.02] p-2 rounded-r">
+                        <div className="pl-3 border-l-2 border-warning/30 space-y-1.5 text-xs text-foreground/90 bg-warning/[0.02] p-2 rounded-r">
                           <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert">
                             <Markdown content={round.response} />
                           </div>

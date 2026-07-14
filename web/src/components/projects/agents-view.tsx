@@ -4,9 +4,10 @@ import { FormEvent, useState } from "react";
 import { Zap, Scale, Rocket } from "lucide-react";
 
 import type { Agent } from "@/lib/types";
-import { Badge } from "@/components/ui/badge";
+import { Badge, agentStatusBadge } from "@/components/ui/badge";
 import { api, ApiError } from "@/lib/api";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
+import { cn } from "@/lib/cn";
 
 type AgentsViewProps = {
   orgID: string;
@@ -154,7 +155,7 @@ export function AgentsView({
                 </select>
                 <button
                   disabled={!selectedStaff || isAssigning}
-                  className="rounded bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                  className="rounded bg-brand-primary px-4 py-2 text-sm font-semibold text-brand-primary-fg transition hover:opacity-90 disabled:opacity-50 cursor-pointer whitespace-nowrap"
                   type="submit"
                 >
                   {isAssigning ? "Assigning..." : "Assign Agent"}
@@ -199,37 +200,39 @@ function AgentCard({
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-primary/10 border border-brand-primary/20 text-[11px] font-bold text-brand-primary">
             {initials}
           </div>
-          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h4 className="truncate font-sans font-semibold text-foreground">{agent.name}</h4>
-              <span className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide border ${
-                agent.status === "offline"
-                  ? "bg-slate-500/10 text-slate-400 border-slate-500/20"
-                  : ["busy", "assigned", "running"].includes(agent.status)
-                  ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                  : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-              }`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${
-                  agent.status === "offline" ? "bg-slate-400" : ["busy", "assigned", "running"].includes(agent.status) ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
-                }`} />
-                {agent.status === "offline" ? "Offline" : ["busy", "assigned", "running"].includes(agent.status) ? "Working" : "Free"}
-              </span>
+              {(() => {
+                const statusInfo = agentStatusBadge(agent.status);
+                return (
+                  <Badge variant={statusInfo.variant} className="capitalize">
+                    <span className={cn("h-1.5 w-1.5 rounded-full mr-1",
+                      statusInfo.variant === "success" ? "bg-success" :
+                      statusInfo.variant === "neutral" ? "bg-content-muted" :
+                      "bg-brand-primary animate-pulse"
+                    )} />
+                    {statusInfo.label}
+                  </Badge>
+                );
+              })()}
             </div>
             <div className="mt-1 flex items-center gap-1">
-              <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                agent.model_level_group === "fast"
-                  ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                  : agent.model_level_group === "powerful"
-                  ? "bg-purple-500/10 text-purple-500 border border-purple-500/20"
-                  : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
-              }`}>
-                {agent.model_level_group === "fast" && <Zap size={10} className="inline mr-0.5" />}
-                {agent.model_level_group === "balanced" && <Scale size={10} className="inline mr-0.5" />}
-                {agent.model_level_group === "powerful" && <Rocket size={10} className="inline mr-0.5" />}
+              <Badge
+                variant={
+                  agent.model_level_group === "fast"
+                    ? "warning"
+                    : agent.model_level_group === "powerful"
+                    ? "purple"
+                    : "info"
+                }
+                className="uppercase text-[9px] font-bold"
+              >
+                {agent.model_level_group === "fast" && <Zap size={10} className="mr-0.5" />}
+                {agent.model_level_group === "balanced" && <Scale size={10} className="mr-0.5" />}
+                {agent.model_level_group === "powerful" && <Rocket size={10} className="mr-0.5" />}
                 {agent.model_level_group}
-              </span>
+              </Badge>
             </div>
-          </div>
         </div>
         <span className="rounded border border-stroke bg-card px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-content-muted shrink-0">
           {badge}

@@ -10,7 +10,15 @@ import {
 } from "recharts";
 import { compactNumber, formatCost } from "../utils";
 
-export function VirtualKeyAnalytics({ keyLabelUsage }: { keyLabelUsage: any[] }) {
+export interface KeyLabelUsage {
+  key_label: string;
+  success: number;
+  failed: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+export function VirtualKeyAnalytics({ keyLabelUsage }: { keyLabelUsage: KeyLabelUsage[] }) {
   return (
     <div className="mb-6 grid gap-5 lg:grid-cols-5">
       {/* Virtual Key Report */}

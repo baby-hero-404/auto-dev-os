@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { Bot, Cpu, FolderGit, GitPullRequest, Plus, ShieldCheck, Sparkles, Workflow } from "lucide-react";
+import { Bot, FolderGit, GitPullRequest, Plus, Workflow } from "lucide-react";
 import { Toaster } from "sonner";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -13,6 +13,8 @@ import { StatsCards } from "@/components/dashboard/stats-cards";
 import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { ProjectCard, ProjectCardsSkeleton } from "@/components/dashboard/home/project-card";
 import { CreateProjectModal } from "@/components/dashboard/home/create-project-modal";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default function Home() {
   const session = useSession();
@@ -85,19 +87,18 @@ export default function Home() {
             </p>
           </div>
           {projects.length > 0 && (
-            <button
+            <Button
               onClick={openProjectModal}
-              className="flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.2)] self-start sm:self-auto"
-              type="button"
+              className="self-start sm:self-auto"
             >
               <Plus size={16} />
               New Project
-            </button>
+            </Button>
           )}
         </div>
 
         {error && (
-          <p className="rounded-md border border-red-400/40 bg-red-950/40 p-3 text-sm text-red-100">
+          <p className="rounded-md border border-danger/20 bg-danger/5 p-3 text-sm text-danger">
             {error.message}
           </p>
         )}
@@ -105,23 +106,17 @@ export default function Home() {
         {isProjectsLoading ? (
           <ProjectCardsSkeleton />
         ) : projects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stroke bg-card p-12 text-center">
-            <div className="grid size-12 place-items-center rounded-xl bg-surface text-brand-primary">
-              <FolderGit size={24} />
-            </div>
-            <h3 className="mt-4 font-semibold text-foreground">No projects yet.</h3>
-            <p className="mt-2 max-w-sm text-sm text-content-muted">
-              Create your first project to start running AI tasks.
-            </p>
-            <button
-              onClick={openProjectModal}
-              className="mt-5 flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer"
-              type="button"
-            >
-              <Plus size={16} />
-              Create Project
-            </button>
-          </div>
+          <EmptyState
+            icon={FolderGit}
+            title="No projects yet."
+            description="Create your first project to start running AI tasks."
+            action={
+              <Button onClick={openProjectModal}>
+                <Plus size={16} />
+                Create Project
+              </Button>
+            }
+          />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {projects.map((project: Project) => (

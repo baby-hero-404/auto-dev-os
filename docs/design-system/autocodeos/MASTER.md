@@ -1,5 +1,11 @@
 # Design System Master File
 
+> [!WARNING]
+> **DEPRECATED:** This design system master file is legacy/stale and is preserved for historical reference only.
+> Do NOT use or follow this file for styling or color systems.
+> Strictly follow the new design conventions and token systems defined in [.design-sync/conventions.md](file:///home/ubuntu/my_projects/auto_code_os/.design-sync/conventions.md) and [.design-sync/NOTES.md](file:///home/ubuntu/my_projects/auto_code_os/.design-sync/NOTES.md).
+
+
 > **LOGIC:** When building a specific page, first check `docs/design-system/pages/[page-name].md`.
 > If that file exists, its rules **override** this Master file.
 > If not, strictly follow the rules below.

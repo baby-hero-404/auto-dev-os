@@ -1,6 +1,7 @@
+import type { AgentStats } from "@/lib/types";
 import { compactNumber, formatCost } from "../utils";
 
-export function AgentPerformanceTable({ agentStats }: { agentStats: any[] }) {
+export function AgentPerformanceTable({ agentStats }: { agentStats: AgentStats[] }) {
   return (
     <section className="overflow-hidden rounded-lg border border-stroke bg-panel">
       <div className="border-b border-stroke p-5">

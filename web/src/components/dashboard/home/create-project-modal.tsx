@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { GitAccount } from "@/lib/types";
 import { useRouter } from "next/navigation";
 import { ProjectInfoStep } from "./project-modal/ProjectInfoStep";
 import { LinkRepoStep } from "./project-modal/LinkRepoStep";
+import { Dialog } from "@/components/ui/dialog";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -36,8 +36,6 @@ export function CreateProjectModal({
   const [fetchedBranches, setFetchedBranches] = useState<string[]>([]);
   const [isFetchingBranches, setIsFetchingBranches] = useState(false);
   const [fetchBranchesError, setFetchBranchesError] = useState("");
-
-  if (!isOpen) return null;
 
   function resetProjectModal() {
     setModalStep(1);
@@ -150,65 +148,53 @@ export function CreateProjectModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300"
-        onClick={!isSubmitting ? handleClose : undefined}
-      />
-
-      <div className="relative w-full max-w-md transform overflow-hidden rounded-xl border border-stroke bg-card p-6 shadow-2xl transition-all duration-300 animate-modal-in">
-        <div className="flex items-center justify-between border-b border-stroke pb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">
-              {modalStep === 1 ? "Create New Project" : "Link a Repository"}
-            </h3>
-            <p className="mt-1 text-xs text-content-muted">Step {modalStep} of 2</p>
-          </div>
-          <button
-            onClick={handleClose}
-            className="rounded-md p-1 text-content-muted transition hover:bg-surface hover:text-foreground cursor-pointer"
-            disabled={isSubmitting}
-            type="button"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {modalStep === 1 ? (
-          <ProjectInfoStep
-            projectName={projectName}
-            setProjectName={setProjectName}
-            projectDescription={projectDescription}
-            setProjectDescription={setProjectDescription}
-            isSubmitting={isSubmitting}
-            creationError={creationError}
-            onNext={handleProjectInfoNext}
-            onCancel={handleClose}
-          />
-        ) : (
-          <LinkRepoStep
-            repoURL={repoURL}
-            setRepoURL={setRepoURL}
-            gitAccounts={gitAccounts}
-            selectedGitAccountID={selectedGitAccountID}
-            setSelectedGitAccountID={setSelectedGitAccountID}
-            isSubmitting={isSubmitting}
-            isFetchingBranches={isFetchingBranches}
-            onFetchBranches={handleFetchBranches}
-            fetchBranchesError={fetchBranchesError}
-            fetchedBranches={fetchedBranches}
-            repoBranch={repoBranch}
-            setRepoBranch={setRepoBranch}
-            creationError={creationError}
-            onBack={() => setModalStep(1)}
-            onSkip={() => createProjectWithOptionalRepo(false)}
-            onSubmit={(event) => {
-              event.preventDefault();
-              createProjectWithOptionalRepo(true);
-            }}
-          />
-        )}
+    <Dialog
+      open={isOpen}
+      onClose={handleClose}
+      title={modalStep === 1 ? "Create New Project" : "Link a Repository"}
+      description={`Step ${modalStep} of 2`}
+      dismissable={!isSubmitting}
+      size="md"
+    >
+      <div className="flex items-center justify-center gap-1.5 mb-4">
+        <div className={`h-1.5 rounded-full transition-all duration-300 ${modalStep === 1 ? "bg-brand-primary w-4" : "bg-stroke w-1.5"}`} />
+        <div className={`h-1.5 rounded-full transition-all duration-300 ${modalStep === 2 ? "bg-brand-primary w-4" : "bg-stroke w-1.5"}`} />
       </div>
-    </div>
+
+      {modalStep === 1 ? (
+        <ProjectInfoStep
+          projectName={projectName}
+          setProjectName={setProjectName}
+          projectDescription={projectDescription}
+          setProjectDescription={setProjectDescription}
+          isSubmitting={isSubmitting}
+          creationError={creationError}
+          onNext={handleProjectInfoNext}
+          onCancel={handleClose}
+        />
+      ) : (
+        <LinkRepoStep
+          repoURL={repoURL}
+          setRepoURL={setRepoURL}
+          gitAccounts={gitAccounts}
+          selectedGitAccountID={selectedGitAccountID}
+          setSelectedGitAccountID={setSelectedGitAccountID}
+          isSubmitting={isSubmitting}
+          isFetchingBranches={isFetchingBranches}
+          onFetchBranches={handleFetchBranches}
+          fetchBranchesError={fetchBranchesError}
+          fetchedBranches={fetchedBranches}
+          repoBranch={repoBranch}
+          setRepoBranch={setRepoBranch}
+          creationError={creationError}
+          onBack={() => setModalStep(1)}
+          onSkip={() => createProjectWithOptionalRepo(false)}
+          onSubmit={(event) => {
+            event.preventDefault();
+            createProjectWithOptionalRepo(true);
+          }}
+        />
+      )}
+    </Dialog>
   );
 }

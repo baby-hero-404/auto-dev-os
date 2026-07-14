@@ -215,7 +215,6 @@ export default function KnowledgePage() {
 
           {inspectingMemoryID && (
             <MemoryInspector
-              inspectingMemoryID={inspectingMemoryID}
               detailData={detailData}
               onClose={() => setInspectingMemoryID(null)}
             />

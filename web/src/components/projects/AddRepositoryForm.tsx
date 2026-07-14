@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState, useEffect } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -31,11 +31,13 @@ export function AddRepositoryForm({
   const [isFetchingBranches, setIsFetchingBranches] = useState(false);
   const [fetchBranchesError, setFetchBranchesError] = useState("");
 
-  useEffect(() => {
+  const [prevDefaultBranch, setPrevDefaultBranch] = useState(projectDefaultBranch);
+  if (projectDefaultBranch !== prevDefaultBranch) {
+    setPrevDefaultBranch(projectDefaultBranch);
     if (projectDefaultBranch) {
       setBranch(projectDefaultBranch);
     }
-  }, [projectDefaultBranch]);
+  }
 
   const isInputUrlValid = useMemo(() => {
     const trimmed = url.trim();
@@ -154,7 +156,7 @@ export function AddRepositoryForm({
                 disabled={isLinking}
               >
                 <option value="">Manual token / no account</option>
-                {gitAccounts.map((account: any) => (
+                {gitAccounts.map((account: { id: string; display_name: string }) => (
                   <option key={account.id} value={account.id}>
                     {account.display_name}
                   </option>
@@ -228,7 +230,7 @@ export function AddRepositoryForm({
         )}
 
         <button
-          className="flex w-full items-center justify-center gap-2 rounded bg-brand-primary px-3 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+          className="flex w-full items-center justify-center gap-2 rounded bg-brand-primary px-3 py-2.5 text-sm font-semibold text-brand-primary-fg transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
           type="submit"
           disabled={isLinking || !url.trim()}
         >

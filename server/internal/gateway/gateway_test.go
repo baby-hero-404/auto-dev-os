@@ -121,6 +121,106 @@ func TestAIGatewayChatRotatesCredentialOnRateLimit(t *testing.T) {
 	}
 }
 
+func TestAIGatewayChatRotatesOnNonTransientCredentialError(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+		{ID: "cred-2", Provider: "openai", APIKey: "sk-2"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	attempts := 0
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Cooldown:              time.Second,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			attempts++
+			if cred.ID == "cred-1" {
+				return &fakeProvider{name: "openai", err: errors.New("401 Unauthorized - invalid API key")}, nil
+			}
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", Model: "gpt-4o"}}, nil
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if resp.Content != "ok" || attempts != 2 {
+		t.Fatalf("expected second credential success, resp=%+v attempts=%d", resp, attempts)
+	}
+	if len(pool.cooldowns) != 1 || pool.cooldowns[0] != "cred-1:gpt-4o" {
+		t.Fatalf("expected first credential cooldown, got %v", pool.cooldowns)
+	}
+	if strings.Join(pool.selected, ",") != "cred-1,cred-2" {
+		t.Fatalf("unexpected credential selection order: %v", pool.selected)
+	}
+}
+
+func TestAIGatewayChatRotatesOnFactoryFailure(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+		{ID: "cred-2", Provider: "openai", APIKey: "sk-2"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	attempts := 0
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Cooldown:              time.Second,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			attempts++
+			if cred.ID == "cred-1" {
+				return nil, errors.New("factory decryption failed")
+			}
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", Model: "gpt-4o"}}, nil
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+	if resp.Content != "ok" || attempts != 2 {
+		t.Fatalf("expected second credential success, resp=%+v attempts=%d", resp, attempts)
+	}
+	// Note: factory failure doesn't call ChatWithOptions, but it still records failure and excludes the key.
+	if strings.Join(pool.selected, ",") != "cred-1,cred-2" {
+		t.Fatalf("unexpected credential selection order: %v", pool.selected)
+	}
+}
+
+func TestAIGatewayChatExhaustsAllCredentials(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+		{ID: "cred-2", Provider: "openai", APIKey: "sk-2"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	attempts := 0
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Cooldown:              time.Second,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			attempts++
+			return nil, errors.New("factory failed")
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "hello"}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exhausted") {
+		t.Fatalf("expected exhausted error, got: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected both credentials to be attempted, got %d", attempts)
+	}
+}
+
 func TestAIGatewayChatFallsBackToNextModel(t *testing.T) {
 	pool := &fakePool{credentials: []*service.DecryptedCredential{
 		{ID: "cred-openai", Provider: "openai", APIKey: "sk-openai"},
@@ -500,10 +600,10 @@ func TestAIGatewayWaitAndRetry(t *testing.T) {
 		t.Errorf("expected wait of at least 50ms, got %v", duration)
 	}
 
-	// Scenario 2: cooldown >= 30s (e.g., 30s), fails immediately without waiting.
+	// Scenario 2: cooldown >= 60s (e.g., 60s), fails immediately without waiting.
 	pool2 := &fakePool{
 		credentials: []*service.DecryptedCredential{},
-		minCooldown: 30 * time.Second,
+		minCooldown: 60 * time.Second,
 		minCredID:   "cred-2",
 	}
 	g2 := NewAIGateway(Options{
@@ -520,7 +620,7 @@ func TestAIGatewayWaitAndRetry(t *testing.T) {
 		t.Fatal("expected error immediately, got nil")
 	}
 	if duration >= 1*time.Second {
-		t.Errorf("expected immediate failure without 30s wait, took %v", duration)
+		t.Errorf("expected immediate failure without 60s wait, took %v", duration)
 	}
 
 	// Scenario 3: Context canceled during wait.
@@ -639,5 +739,87 @@ func TestAIGatewayChatWithOptions_HarnessIndependenceGracefulFallback(t *testing
 	}
 	if trace.ActualModel != "gpt-4o" {
 		t.Errorf("expected ActualModel to be gpt-4o (reused), got %q", trace.ActualModel)
+	}
+}
+
+func TestParseRetryDelay(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantD   time.Duration
+		wantOk  bool
+	}{
+		{
+			name:   "nil error",
+			err:    nil,
+			wantD:  0,
+			wantOk: false,
+		},
+		{
+			name:   "no retry info",
+			err:    errors.New("some regular API error"),
+			wantD:  0,
+			wantOk: false,
+		},
+		{
+			name:   "gemini google.rpc.RetryInfo JSON",
+			err:    errors.New(`Gemini API error (status 429): {"error": {"details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "48s"}]}}`),
+			wantD:  48 * time.Second,
+			wantOk: true,
+		},
+		{
+			name:   "gemini google.rpc.RetryInfo JSON float",
+			err:    errors.New(`Gemini API error (status 429): {"error": {"details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "48.258632014s"}]}}`),
+			wantD:  48258632014 * time.Nanosecond,
+			wantOk: true,
+		},
+		{
+			name:   "please retry text message",
+			err:    errors.New("Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests. Please retry in 48.258632014s."),
+			wantD:  48258632014 * time.Nanosecond,
+			wantOk: true,
+		},
+		{
+			name:   "retry-after header format JSON",
+			err:    errors.New(`{"error": "Rate limit exceeded", "retry-after": "15s"}`),
+			wantD:  15 * time.Second,
+			wantOk: true,
+		},
+		{
+			name:   "retry-after without suffix s",
+			err:    errors.New(`{"error": "Rate limit exceeded", "retry-after": "25"}`),
+			wantD:  25 * time.Second,
+			wantOk: true,
+		},
+		{
+			name:   "retry-after as unquoted number",
+			err:    errors.New(`{"error": "Rate limit exceeded", "retry-after": 35}`),
+			wantD:  35 * time.Second,
+			wantOk: true,
+		},
+		{
+			name:   "please retry text message with seconds word",
+			err:    errors.New("Please retry in 10 seconds."),
+			wantD:  10 * time.Second,
+			wantOk: true,
+		},
+		{
+			name:   "please retry text message without suffix",
+			err:    errors.New("Please retry in 8."),
+			wantD:  8 * time.Second,
+			wantOk: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotD, gotOk := parseRetryDelay(tc.err)
+			if gotOk != tc.wantOk {
+				t.Errorf("parseRetryDelay() gotOk = %v, wantOk = %v", gotOk, tc.wantOk)
+			}
+			if gotD != tc.wantD {
+				t.Errorf("parseRetryDelay() gotD = %v, want = %v", gotD, tc.wantD)
+			}
+		})
 	}
 }

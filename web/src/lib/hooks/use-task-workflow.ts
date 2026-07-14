@@ -3,7 +3,7 @@ import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { useRealtimeLogStore, type RealtimeLog } from "@/lib/store/use-realtime-log-store";
-import type { TaskLog } from "@/lib/types";
+import type { Task, TaskLog } from "@/lib/types";
 
 export function useTaskWorkflow(taskID: string) {
   const session = useSession();
@@ -191,7 +191,7 @@ export function useTaskWorkflow(taskID: string) {
     }
   }
 
-  async function updateTask(fields: any) {
+  async function updateTask(fields: Partial<Task>) {
     if (!token) return false;
     setError("");
     try {

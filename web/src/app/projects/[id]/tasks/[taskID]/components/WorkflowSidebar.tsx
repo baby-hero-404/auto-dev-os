@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo } from "react";
 import { Bot, Clock } from "lucide-react";
 import { useTaskDetail, formatStepName } from "./TaskDetailContext";
 import { TaskActions } from "./TaskActions";

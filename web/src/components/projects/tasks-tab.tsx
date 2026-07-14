@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, GitPullRequest, Search, SlidersHorizontal, Workflow } from "lucide-react";
 import type { Task, Agent } from "@/lib/types";
-import { Badge } from "@/components/ui/badge";
+import { Badge, taskStatusBadge } from "@/components/ui/badge";
 import { TaskAction } from "./task-action";
 import { isActiveTask, isFailedTask, needsReview } from "@/lib/utils/task-utils";
 import { formatRelativeTime } from "@/lib/utils/time";
@@ -136,7 +136,10 @@ export function TasksTab({
                         {task.title}
                       </h3>
                       <Badge value={task.complexity} />
-                      <Badge value={task.status} />
+                      {(() => {
+                        const statusInfo = taskStatusBadge(task.status);
+                        return <Badge variant={statusInfo.variant} value={statusInfo.label} />;
+                      })()}
                     </div>
                     <div className="mt-2 grid gap-2 text-xs text-content-muted sm:grid-cols-2 lg:grid-cols-4">
                       <TaskMeta icon={stage.icon} label={stage.label} accent={stage.accent} />
@@ -203,27 +206,28 @@ function getAgentAvatar(agentId?: string, agents: Agent[] = []) {
 }
 
 function getStatusDot(task: Task) {
-  if (isFailedTask(task)) return "bg-rose-500";
-  if (needsReview(task)) return "bg-amber-500 animate-pulse";
-  if (isActiveTask(task)) return "bg-emerald-500 animate-pulse-dot";
+  if (isFailedTask(task)) return "bg-danger";
+  if (needsReview(task)) return "bg-warning animate-pulse";
+  if (isActiveTask(task)) return "bg-success animate-pulse-dot";
   return "bg-slate-300 dark:bg-slate-700";
 }
 
 function getTaskStage(task: Task) {
   if (task.status === "merged") {
-    return { label: "Merged", icon: CheckCircle2, accent: "text-emerald-500" };
+    return { label: "Merged", icon: CheckCircle2, accent: "text-success" };
   }
   if (needsReview(task)) {
-    return { label: "Review gate", icon: GitPullRequest, accent: "text-amber-500" };
+    return { label: "Review gate", icon: GitPullRequest, accent: "text-warning" };
   }
   if (isFailedTask(task)) {
-    return { label: "Needs inspection", icon: AlertTriangle, accent: "text-rose-500" };
+    return { label: "Needs inspection", icon: AlertTriangle, accent: "text-danger" };
   }
   if (isActiveTask(task)) {
     return { label: "In workflow", icon: Workflow, accent: "text-brand-primary" };
   }
   return { label: "Ready", icon: Clock3, accent: "text-content-muted" };
 }
+
 
 function getPriorityLabel(priority: number) {
   if (priority >= 4) return "P1 Urgent";

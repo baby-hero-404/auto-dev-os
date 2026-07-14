@@ -12,6 +12,8 @@ import {
   isDoneStatus,
   latestActivity,
 } from "@/lib/utils/task-utils";
+import { Badge, projectStatusBadge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export interface ProjectCardProps {
   project: Project;
@@ -38,21 +40,6 @@ function CardStat({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    loading: "border-stroke bg-surface text-content-muted",
-    idle: "border-stroke bg-surface text-content-muted",
-    active: "border-cyan-400/20 bg-cyan-400/10 text-cyan-700 dark:text-cyan-300",
-    blocked: "border-red-400/20 bg-red-400/10 text-red-700 dark:text-red-300",
-    done: "border-emerald-400/20 bg-emerald-400/10 text-emerald-700 dark:text-emerald-300",
-  };
-
-  return (
-    <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${styles[status] || styles.idle}`}>
-      {status}
-    </span>
-  );
-}
 
 export function ProjectCard({ project, token }: ProjectCardProps) {
   const cardRef = useRef<HTMLAnchorElement>(null);
@@ -88,6 +75,7 @@ export function ProjectCard({ project, token }: ProjectCardProps) {
   const progress = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
   const status = tasks ? deriveProjectStatus(tasks) : deriveHydratedProjectStatus(doneTasks, totalTasks, hasHydratedCounts);
   const lastActivity = tasks ? latestActivity(tasks, project.updated_at) : project.updated_at;
+  const badgeInfo = projectStatusBadge(status);
 
   return (
     <Link
@@ -105,7 +93,7 @@ export function ProjectCard({ project, token }: ProjectCardProps) {
               {project.description || "No project description provided."}
             </p>
           </div>
-          <StatusBadge status={status} />
+          <Badge variant={badgeInfo.variant}>{badgeInfo.label}</Badge>
         </div>
 
         <div className="grid grid-cols-3 gap-2 text-xs text-content-muted">
@@ -138,21 +126,21 @@ export function ProjectCardsSkeleton() {
         <div key={item} className="min-h-[230px] rounded-lg border border-stroke bg-card p-5">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1 space-y-2">
-               <div className="skeleton-shimmer h-6 w-40 rounded" />
-               <div className="skeleton-shimmer h-4 w-full max-w-[260px] rounded" />
+               <Skeleton className="h-6 w-40" />
+               <Skeleton className="h-4 w-full max-w-[260px]" />
             </div>
-            <div className="skeleton-shimmer h-5 w-16 rounded" />
+            <Skeleton className="h-5 w-16" />
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div className="skeleton-shimmer h-14 rounded-md" />
-            <div className="skeleton-shimmer h-14 rounded-md" />
-            <div className="skeleton-shimmer h-14 rounded-md" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
           </div>
           <div className="mt-5">
-            <div className="skeleton-shimmer h-1.5 rounded-full" />
+            <Skeleton className="h-1.5 w-full rounded-full" />
             <div className="mt-3 flex items-center justify-between">
-               <div className="skeleton-shimmer h-3 w-20 rounded" />
-               <div className="skeleton-shimmer h-3 w-24 rounded" />
+               <Skeleton className="h-3 w-20" />
+               <Skeleton className="h-3 w-24" />
             </div>
           </div>
         </div>

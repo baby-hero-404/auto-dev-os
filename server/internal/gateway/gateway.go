@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -161,8 +162,9 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 					var provider llm.Provider
 					provider, err = g.providerFactory(cred, entry.Model)
 					if err != nil {
-						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s: %v", entry.Provider, entry.Model, err))
-						break
+						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s[%s]: factory failed: %v", entry.Provider, entry.Model, cred.ID, err))
+						excluded[cred.ID] = true
+						continue
 					}
 					attempts := 4
 					attemptStart := time.Now()
@@ -193,12 +195,29 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 						// a single row for the last attempt of the whole call.
 						g.recordAttemptUsage(ctx, opts, entry, cred, nil, err, attemptStart)
 						attemptFailures = append(attemptFailures, fmt.Sprintf("%s/%s[%s]: %v", entry.Provider, entry.Model, cred.ID, err))
+						excluded[cred.ID] = true
 						if isTransientError(err) {
+							cooldownDuration := g.cooldown
+							if d, ok := parseRetryDelay(err); ok {
+								cooldownDuration = d + 2*time.Second
+							} else {
+								msg := strings.ToLower(err.Error())
+								if strings.Contains(msg, "429") ||
+									strings.Contains(msg, "rate limit") ||
+									strings.Contains(msg, "quota") ||
+									strings.Contains(msg, "resource exhausted") {
+									if cooldownDuration > time.Minute {
+										cooldownDuration = time.Minute
+									}
+								}
+							}
+							_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(cooldownDuration))
+						} else {
+							// For non-transient errors (e.g., 401 Unauthorized, invalid key),
+							// cooldown this bad credential to prevent subsequent calls from picking it.
 							_ = g.credentialPool.SetCooldown(ctx, cred.ID, entry.Model, time.Now().Add(g.cooldown))
-							excluded[cred.ID] = true
-							continue
 						}
-						break
+						continue
 					}
 					if resp.Model == "" {
 						resp.Model = entry.Model
@@ -221,7 +240,7 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 					}
 				}
 
-				if lowestCD > 0 && lowestCD < 30*time.Second {
+				if lowestCD > 0 && lowestCD < 60*time.Second {
 					log.Printf("All credentials in cooldown. Waiting %ds for credential %s...", int(lowestCD.Seconds()), lowestCredID)
 					timer := time.NewTimer(lowestCD)
 					select {
@@ -410,4 +429,27 @@ func levelGroupForComplexity(complexity string) string {
 	default:
 		return llm.LevelBalanced
 	}
+}
+
+var (
+	retryDelayRegex  = regexp.MustCompile(`"(?:retryDelay|retry-after)":\s*"?([0-9.]+)[sS]?"?`)
+	pleaseRetryRegex = regexp.MustCompile(`[Pp]lease retry in ([0-9.]+)\s*(?:seconds|s)?`)
+)
+
+func parseRetryDelay(err error) (time.Duration, bool) {
+	if err == nil {
+		return 0, false
+	}
+	msg := err.Error()
+	if matches := retryDelayRegex.FindStringSubmatch(msg); len(matches) > 1 {
+		if d, parseErr := time.ParseDuration(matches[1] + "s"); parseErr == nil {
+			return d, true
+		}
+	}
+	if matches := pleaseRetryRegex.FindStringSubmatch(msg); len(matches) > 1 {
+		if d, parseErr := time.ParseDuration(matches[1] + "s"); parseErr == nil {
+			return d, true
+		}
+	}
+	return 0, false
 }

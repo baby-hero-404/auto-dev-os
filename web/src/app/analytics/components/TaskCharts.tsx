@@ -10,9 +10,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { TaskAnalytics, TaskStatusDistribution } from "@/lib/types";
 import { STATUS_COLORS } from "../utils";
 
-export function TaskCharts({ taskAnalytics }: { taskAnalytics: any }) {
+export function TaskCharts({ taskAnalytics }: { taskAnalytics: TaskAnalytics | undefined }) {
   return (
     <div className="mb-6 grid gap-5 lg:grid-cols-2">
       {/* Task Throughput Chart */}
@@ -71,7 +72,7 @@ export function TaskCharts({ taskAnalytics }: { taskAnalytics: any }) {
                   paddingAngle={2}
                   strokeWidth={0}
                 >
-                  {(taskAnalytics?.distribution ?? []).map((entry: any) => (
+                  {(taskAnalytics?.distribution ?? []).map((entry: TaskStatusDistribution) => (
                     <Cell key={entry.status} fill={STATUS_COLORS[entry.status] ?? "#475569"} />
                   ))}
                 </Pie>
@@ -82,7 +83,7 @@ export function TaskCharts({ taskAnalytics }: { taskAnalytics: any }) {
             </ResponsiveContainer>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-            {(taskAnalytics?.distribution ?? []).map((d: any) => (
+            {(taskAnalytics?.distribution ?? []).map((d: TaskStatusDistribution) => (
               <div key={d.status} className="flex items-center gap-2">
                 <span className="block size-2.5 rounded-full" style={{ background: STATUS_COLORS[d.status] ?? "#475569" }} />
                 <span className="text-content-muted">{d.status}</span>

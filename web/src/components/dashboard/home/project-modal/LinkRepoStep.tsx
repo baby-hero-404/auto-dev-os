@@ -2,8 +2,12 @@
 
 import { FormEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import type { GitAccount } from "@/lib/types";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Field } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
 
 interface LinkRepoStepProps {
   repoURL: string;
@@ -44,34 +48,32 @@ export function LinkRepoStep({
 }: LinkRepoStepProps) {
   return (
     <form
-      className="mt-4 flex flex-col gap-4"
+      className="mt-2 flex flex-col gap-4"
       onSubmit={onSubmit}
     >
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-content-muted">Repository URL</label>
-        <input
+      <Field label="Repository URL" htmlFor="repo-url" error={creationError}>
+        <Input
+          id="repo-url"
           value={repoURL}
           onChange={(e) => setRepoURL(e.target.value)}
           placeholder="https://github.com/org/repo.git"
-          className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand-primary transition"
           disabled={isSubmitting}
         />
-      </div>
+      </Field>
 
       {gitAccounts.length === 0 ? (
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-200">
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
           Connect a Git account before linking a repository.{" "}
-          <Link className="font-semibold underline underline-offset-2" href="/git-accounts">
+          <Link className="font-semibold underline underline-offset-2 hover:text-amber-800 dark:hover:text-amber-100" href="/git-accounts">
             Connect a Git account first
           </Link>
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-content-muted">Git Account</label>
-          <select
+        <Field label="Git Account" htmlFor="git-account">
+          <Select
+            id="git-account"
             value={selectedGitAccountID}
             onChange={(e) => setSelectedGitAccountID(e.target.value)}
-            className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand-primary transition"
             disabled={isSubmitting}
           >
             <option value="">Select an account</option>
@@ -80,89 +82,81 @@ export function LinkRepoStep({
                 {account.display_name} ({account.base_url ? "GitHub Enterprise" : "GitHub"})
               </option>
             ))}
-          </select>
-        </div>
+          </Select>
+        </Field>
       )}
 
       <div className="flex gap-2">
-        <button
+        <Button
           type="button"
           onClick={onFetchBranches}
           disabled={isFetchingBranches || !repoURL.trim() || !selectedGitAccountID}
-          className="rounded border border-stroke bg-slate-100 dark:bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5 transition cursor-pointer"
+          variant="secondary"
+          size="sm"
+          isLoading={isFetchingBranches}
         >
-          {isFetchingBranches ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {!isFetchingBranches && <RefreshCw size={13} />}
           Fetch Branches
-        </button>
+        </Button>
       </div>
 
       {fetchBranchesError && (
-        <p className="text-xs text-red-400">{fetchBranchesError}</p>
+        <span className="text-xs text-danger font-medium leading-normal">{fetchBranchesError}</span>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-content-muted">Branch</label>
+      <Field label="Branch" htmlFor="repo-branch">
         {fetchedBranches.length > 0 ? (
-          <select
+          <Select
+            id="repo-branch"
             value={repoBranch}
             onChange={(e) => setRepoBranch(e.target.value)}
-            className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand-primary transition cursor-pointer"
             disabled={isSubmitting}
           >
             {fetchedBranches.map((b) => (
               <option key={b} value={b}>{b}</option>
             ))}
-          </select>
+          </Select>
         ) : (
-          <input
+          <Input
+            id="repo-branch"
             value={repoBranch}
             onChange={(e) => setRepoBranch(e.target.value)}
             placeholder="main"
-            className="rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand-primary transition"
             disabled={isSubmitting}
           />
         )}
-      </div>
-
-      {creationError && (
-        <p className="rounded-md border border-red-500/20 bg-red-950/40 p-3 text-xs text-red-200">
-          {creationError}
-        </p>
-      )}
+      </Field>
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-stroke pt-4">
-        <button
+        <Button
+          variant="ghost"
           onClick={onBack}
-          className="inline-flex items-center gap-2 rounded-md border border-stroke bg-transparent px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-surface cursor-pointer disabled:opacity-50"
           disabled={isSubmitting}
           type="button"
+          size="sm"
         >
           <ArrowLeft size={16} />
           Back
-        </button>
+        </Button>
         <div className="flex flex-wrap justify-end gap-3">
-          <button
+          <Button
+            variant="secondary"
             onClick={onSkip}
-            className="rounded-md border border-stroke bg-transparent px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-surface cursor-pointer disabled:opacity-50"
             disabled={isSubmitting}
             type="button"
+            size="sm"
           >
             Skip for now
-          </button>
-          <button
-            className="flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer disabled:opacity-50"
+          </Button>
+          <Button
+            variant="primary"
             disabled={isSubmitting || !repoURL.trim() || gitAccounts.length === 0 || !selectedGitAccountID}
             type="submit"
+            size="sm"
+            isLoading={isSubmitting}
           >
-            {isSubmitting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Creating...
-              </>
-            ) : (
-              "Create"
-            )}
-          </button>
+            Create
+          </Button>
         </div>
       </div>
     </form>

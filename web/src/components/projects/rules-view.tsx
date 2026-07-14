@@ -8,6 +8,7 @@ import { RuleCard } from "./rules/RuleCard";
 import { AddRuleForm } from "./rules/AddRuleForm";
 import { RuleEnforcementBadge } from "./rules/RuleEnforcementBadge";
 import { RulesSkeleton } from "./rules/RulesSkeleton";
+import { Button } from "@/components/ui/button";
 
 interface RulesViewProps {
   rules: Rule[];
@@ -56,14 +57,15 @@ export function RulesView({
             <h2 className="font-sans text-lg font-semibold text-foreground">Behavioral Rules</h2>
           </div>
           {projectRules.length === 0 && (
-            <button
+            <Button
               onClick={handleSeedRules}
               disabled={isSeedingRules}
-              className="inline-flex items-center gap-1.5 rounded border border-stroke bg-surface px-2.5 py-1 text-xs font-semibold text-foreground transition hover:bg-surface/85 cursor-pointer disabled:opacity-50"
-              type="button"
+              isLoading={isSeedingRules}
+              variant="secondary"
+              size="sm"
             >
-              {isSeedingRules ? "Seeding..." : "Auto-seed Default Rules"}
-            </button>
+              Auto-seed Default Rules
+            </Button>
           )}
         </div>
 

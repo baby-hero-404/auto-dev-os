@@ -1,45 +1,140 @@
-"use client";
+import * as React from "react";
+import { cn } from "@/lib/cn";
 
-const colorMap: Record<string, string> = {
-  easy: "bg-emerald-400/10 text-emerald-300 border-emerald-400/20",
-  medium: "bg-amber-400/10 text-amber-300 border-amber-400/20",
-  hard: "bg-red-400/10 text-red-300 border-red-400/20",
-  todo: "bg-panel text-content-muted border-stroke",
-  context_loading: "bg-indigo-400/10 text-indigo-300 border-indigo-400/20",
-  analyzing: "bg-blue-400/10 text-blue-300 border-blue-400/20",
-  spec_review: "bg-purple-400/10 text-purple-300 border-purple-400/20",
-  planning: "bg-indigo-400/10 text-indigo-300 border-indigo-400/20",
-  coding: "bg-cyan-400/10 text-cyan-300 border-cyan-400/20",
-  reviewing: "bg-violet-400/10 text-violet-300 border-violet-400/20",
-  fixing: "bg-orange-400/10 text-orange-300 border-orange-400/20",
-  testing: "bg-teal-400/10 text-teal-300 border-teal-400/20",
-  pr_ready: "bg-purple-400/10 text-purple-300 border-purple-400/20",
-  human_review: "bg-yellow-400/10 text-yellow-300 border-yellow-400/20",
-  merged: "bg-emerald-400/10 text-emerald-300 border-emerald-400/20",
-  none: "bg-panel text-content-muted border-stroke",
-  draft: "bg-blue-400/10 text-blue-300 border-blue-400/20",
-  pending_review: "bg-amber-400/10 text-amber-300 border-amber-400/20",
-  changes_requested: "bg-orange-400/10 text-orange-300 border-orange-400/20",
-  approved: "bg-emerald-400/10 text-emerald-300 border-emerald-400/20",
-  auto_approved: "bg-emerald-400/10 text-emerald-300 border-emerald-400/20",
-  strict: "bg-emerald-400/10 text-emerald-300",
-  advisory: "bg-amber-400/10 text-amber-300",
-  active: "bg-emerald-400/10 text-emerald-300",
-  idle: "bg-panel text-content-muted border-stroke",
-  busy: "bg-cyan-400/10 text-cyan-300 border-cyan-400/20",
-  assigned: "bg-blue-400/10 text-blue-300 border-blue-400/20",
-  running: "bg-amber-400/10 text-amber-300 border-amber-400/20",
-  offline: "bg-panel text-content-muted border-stroke",
-};
+export interface BadgeProps {
+  children?: React.ReactNode;
+  value?: string | number;
+  variant?: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow";
+  className?: string;
+}
 
-const fallback = "bg-panel text-content";
+export function Badge({
+  children,
+  value,
+  variant = "neutral",
+  className,
+}: BadgeProps) {
+  const baseStyles = "inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium";
 
-export function Badge({ value }: { value: string | number }) {
-  const strVal = String(value);
-  const color = colorMap[strVal] ?? fallback;
+  const variants = {
+    neutral: "bg-secondary text-foreground border-stroke",
+    accent: "bg-brand-primary-muted text-brand-primary border-brand-primary/20",
+    success: "bg-success/10 text-success border-success/20",
+    warning: "bg-warning/10 text-warning border-warning/20",
+    danger: "bg-danger/10 text-danger border-danger/20",
+    info: "bg-info/10 text-info border-info/20",
+    purple: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
+    cyan: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+    orange: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
+    violet: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+    indigo: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
+    teal: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+    yellow: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
+  };
+
+  const content = children ?? (value !== undefined ? String(value).replaceAll("_", " ") : "");
+
   return (
-    <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${color}`}>
-      {strVal.replaceAll("_", " ")}
+    <span className={cn(baseStyles, variants[variant], className)}>
+      {content}
     </span>
   );
+}
+
+export function taskStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  const norm = status.toLowerCase();
+  switch (norm) {
+    case "todo":
+      return { variant: "neutral", label: "Todo" };
+    case "context_loading":
+      return { variant: "indigo", label: "Loading Context" };
+    case "analyzing":
+      return { variant: "info", label: "Analyzing" };
+    case "spec_review":
+      return { variant: "purple", label: "Spec Review" };
+    case "planning":
+      return { variant: "indigo", label: "Planning" };
+    case "coding":
+      return { variant: "cyan", label: "Coding" };
+    case "reviewing":
+      return { variant: "violet", label: "Reviewing" };
+    case "fixing":
+      return { variant: "orange", label: "Fixing" };
+    case "testing":
+      return { variant: "teal", label: "Testing" };
+    case "pr_ready":
+      return { variant: "purple", label: "PR Ready" };
+    case "human_review":
+      return { variant: "yellow", label: "Human Review" };
+    case "merged":
+      return { variant: "success", label: "Merged" };
+    default:
+      return { variant: "neutral", label: status.replaceAll("_", " ") };
+  }
+}
+
+export function prStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  const norm = status.toLowerCase();
+  switch (norm) {
+    case "draft":
+      return { variant: "info", label: "Draft" };
+    case "pending_review":
+      return { variant: "warning", label: "Pending Review" };
+    case "changes_requested":
+      return { variant: "danger", label: "Changes Requested" };
+    case "approved":
+      return { variant: "success", label: "Approved" };
+    case "auto_approved":
+      return { variant: "success", label: "Auto Approved" };
+    default:
+      return { variant: "neutral", label: status.replaceAll("_", " ") };
+  }
+}
+
+export function ruleEnforcementBadge(enforcement: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  const norm = enforcement.toLowerCase();
+  switch (norm) {
+    case "strict":
+      return { variant: "danger", label: "Strict" };
+    case "advisory":
+      return { variant: "warning", label: "Advisory" };
+    default:
+      return { variant: "neutral", label: enforcement };
+  }
+}
+
+export function agentStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  const norm = status.toLowerCase();
+  switch (norm) {
+    case "active":
+      return { variant: "success", label: "Active" };
+    case "idle":
+      return { variant: "neutral", label: "Idle" };
+    case "busy":
+      return { variant: "cyan", label: "Busy" };
+    case "offline":
+      return { variant: "neutral", label: "Offline" };
+    default:
+      return { variant: "neutral", label: status };
+  }
+}
+
+export function projectStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  const norm = status.toLowerCase();
+  switch (norm) {
+    case "active":
+      return { variant: "success", label: "Active" };
+    case "idle":
+      return { variant: "neutral", label: "Idle" };
+    case "busy":
+      return { variant: "cyan", label: "Busy" };
+    case "offline":
+      return { variant: "neutral", label: "Offline" };
+    case "assigned":
+      return { variant: "info", label: "Assigned" };
+    case "running":
+      return { variant: "warning", label: "Running" };
+    default:
+      return { variant: "neutral", label: status };
+  }
 }

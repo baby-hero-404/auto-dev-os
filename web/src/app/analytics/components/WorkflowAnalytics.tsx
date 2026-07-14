@@ -7,9 +7,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { WorkflowAnalytics as WorkflowAnalyticsType } from "@/lib/types";
 import { compactNumber, formatDuration } from "../utils";
 
-export function WorkflowAnalytics({ workflowAnalytics }: { workflowAnalytics: any }) {
+export function WorkflowAnalytics({ workflowAnalytics }: { workflowAnalytics: WorkflowAnalyticsType | undefined }) {
   return (
     <section className="mb-6 rounded-lg border border-stroke bg-panel p-5">
       <div className="mb-4 flex items-center justify-between">

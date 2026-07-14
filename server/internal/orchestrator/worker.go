@@ -24,6 +24,7 @@ import (
 func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.run")
 	defer span.End()
+	ctx = context.WithValue(ctx, models.StateMachineEnabledCtxKey, o.stateMachineEnabled)
 
 	var taskID string
 	var job *models.WorkflowJob

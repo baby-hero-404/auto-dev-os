@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, Suspense, useCallback } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertCircle, X } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
-import { isActiveTask, isDoneStatus } from "@/lib/utils/task-utils";
 import { CreateTaskPanel } from "@/components/projects/create-task-panel";
 import { TasksTab } from "@/components/projects/tasks-tab";
 import { ProjectStatusSummary } from "@/components/projects/project-status-summary";
@@ -17,6 +17,8 @@ import { RepositoriesView } from "@/components/projects/repositories-view";
 import { RulesView } from "@/components/projects/rules-view";
 import { ProjectProfile } from "@/components/projects/project-profile";
 import { ProjectHeader } from "@/components/projects/ProjectHeader";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 type ProjectView = "tasks" | "agents" | "repositories" | "rules" | "settings";
 
@@ -29,7 +31,9 @@ export default function ProjectDetailRoute({ params }: { params: Promise<{ id: s
       <main className="grid min-h-screen place-items-center p-6">
         <div className="rounded-lg border border-stroke bg-card p-6">
           <p className="mb-4 text-sm text-content-muted">Login from the dashboard before opening a project.</p>
-          <Link className="rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950" href="/">Back to login</Link>
+          <Button asChild variant="primary">
+            <Link href="/">Back to login</Link>
+          </Button>
         </div>
       </main>
     );
@@ -37,14 +41,31 @@ export default function ProjectDetailRoute({ params }: { params: Promise<{ id: s
 
   return (
     <ProjectProvider projectID={projectID}>
-      <ProjectDetailContent />
+      <Suspense fallback={
+        <div className="flex h-screen bg-background items-center justify-center">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
+        </div>
+      }>
+        <ProjectDetailContent />
+      </Suspense>
     </ProjectProvider>
   );
 }
 
 function ProjectDetailContent() {
-  const [activeView, setActiveView] = useState<ProjectView>("tasks");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
+
+  const rawView = searchParams.get("view");
+  const activeView: ProjectView = (rawView === "tasks" || rawView === "agents" || rawView === "repositories" || rawView === "rules" || rawView === "settings") ? rawView : "tasks";
+
+  const setActiveView = useCallback((view: ProjectView) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("view", view);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, pathname, router]);
 
   const {
     projectID,
@@ -69,9 +90,6 @@ function ProjectDetailContent() {
     handleUpdateProject,
     projectError,
   } = useProjectContext();
-  const activeTasks = tasks.filter((task) => isActiveTask(task)).length;
-  const completedTasks = tasks.filter((task) => isDoneStatus(task.status)).length;
-
   // Keyboard Shortcuts (1-5) for Switching Views
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -99,7 +117,7 @@ function ProjectDetailContent() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [setActiveView]);
 
   // Agents Actions
   async function handleAssignAgent(staff: Agent) {
@@ -150,9 +168,9 @@ function ProjectDetailContent() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ProjectSidebar
+        projectID={projectID}
         projectName={project?.name ?? ""}
         activeView={activeView}
-        onViewChange={setActiveView}
         rulesCount={rules.length}
         agentsCount={projectAgents.length}
       />
@@ -161,14 +179,7 @@ function ProjectDetailContent() {
         <ProjectHeader
           projectName={project?.name ?? ""}
           projectID={projectID}
-          repositoriesCount={repositories.length}
-          tasksCount={tasks.length}
-          agentsCount={projectAgents.length}
-          rulesCount={rules.length}
-          completedTasksCount={completedTasks}
-          activeTasksCount={activeTasks}
           activeView={activeView}
-          onViewChange={setActiveView}
           onCreateTaskClick={() => {
             taskActions.setTaskError("");
             if (repositories.length === 0) {
@@ -178,7 +189,6 @@ function ProjectDetailContent() {
             }
             setIsTaskPanelOpen(true);
           }}
-          tasks={tasks}
         />
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-surface/10 p-4 md:p-6">
@@ -194,20 +204,20 @@ function ProjectDetailContent() {
             </div>
           )}
           {projectError ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-red-500/20 bg-red-500/5 p-6 max-w-lg mx-auto mt-8">
-              <p className="font-sans text-base font-semibold text-red-600 dark:text-red-400">Failed to load project details.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-danger/20 bg-danger/5 p-6 max-w-lg mx-auto mt-8">
+              <p className="font-sans text-base font-semibold text-danger">Failed to load project details.</p>
               <p className="mt-1 text-xs text-content-muted mb-4">Please check your configuration or network and try again.</p>
-              <button
+              <Button
                 onClick={() => mutateProject()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 transition cursor-pointer"
+                size="sm"
               >
                 Retry Load
-              </button>
+              </Button>
             </div>
           ) : isProjectLoading ? (
             <div className="space-y-4">
-              <div className="skeleton-shimmer h-12 w-full rounded" />
-              <div className="skeleton-shimmer h-40 w-full rounded" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-40 w-full" />
             </div>
           ) : (
             <div className="space-y-6 animate-fade-in">

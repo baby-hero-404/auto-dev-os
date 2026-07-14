@@ -8,6 +8,12 @@ interface TaskMarkdownEditorProps {
   onClose: () => void;
 }
 
+function cleanProps<T extends { node?: unknown }>(props: T): Omit<T, "node"> {
+  const { node, ...rest } = props;
+  void node;
+  return rest;
+}
+
 export function TaskMarkdownEditor({ description, setDescription, onClose }: TaskMarkdownEditorProps) {
   return (
     <div className="absolute inset-4 z-20 flex flex-col rounded-xl border border-stroke bg-card shadow-2xl overflow-hidden animate-modal-in">
@@ -92,23 +98,23 @@ export function TaskMarkdownEditor({ description, setDescription, onClose }: Tas
             {description.trim() ? (
               <div className="space-y-3 font-sans break-words">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    h1: ({ node, ...props }) => <h1 className="text-base font-bold text-foreground border-b border-stroke pb-1 pt-2 first:mt-0" {...props} />,
-                    h2: ({ node, ...props }) => <h2 className="text-sm font-bold text-foreground border-b border-stroke/50 pb-0.5 pt-2 first:mt-0" {...props} />,
-                    h3: ({ node, ...props }) => <h3 className="text-xs font-bold text-foreground pt-1.5" {...props} />,
-                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 space-y-1 my-1" {...props} />,
-                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 space-y-1 my-1" {...props} />,
-                    li: ({ node, ...props }) => <li className="text-content font-medium" {...props} />,
-                    p: ({ node, ...props }) => <p className="text-content leading-relaxed my-1.5 font-medium" {...props} />,
-                    code: ({ node, ...props }) => <code className="bg-surface border border-stroke rounded px-1 py-0.5 font-mono text-[11px]" {...props} />,
-                    pre: ({ node, ...props }) => <pre className="bg-surface border border-stroke rounded-lg p-2.5 font-mono text-[11px] overflow-x-auto my-2" {...props} />,
-                    blockquote: ({ node, ...props }) => <blockquote className="border-l-2 border-brand-primary/40 pl-3 text-content-muted italic my-1.5" {...props} />,
-                    table: ({ node, ...props }) => <table className="w-full border-collapse border border-stroke text-[11px] my-2" {...props} />,
-                    th: ({ node, ...props }) => <th className="border border-stroke bg-surface p-1.5 text-left font-bold" {...props} />,
-                    td: ({ node, ...props }) => <td className="border border-stroke p-1.5" {...props} />,
-                    input: ({ node, ...props }) => <input type="checkbox" className="mr-1.5 cursor-pointer accent-brand-primary" disabled checked={props.checked} />,
-                  }}
+                   remarkPlugins={[remarkGfm]}
+                   components={{
+                     h1: (props) => <h1 className="text-base font-bold text-foreground border-b border-stroke pb-1 pt-2 first:mt-0" {...cleanProps(props)} />,
+                     h2: (props) => <h2 className="text-sm font-bold text-foreground border-b border-stroke/50 pb-0.5 pt-2 first:mt-0" {...cleanProps(props)} />,
+                     h3: (props) => <h3 className="text-xs font-bold text-foreground pt-1.5" {...cleanProps(props)} />,
+                     ul: (props) => <ul className="list-disc pl-4 space-y-1 my-1" {...cleanProps(props)} />,
+                     ol: (props) => <ol className="list-decimal pl-4 space-y-1 my-1" {...cleanProps(props)} />,
+                     li: (props) => <li className="text-content font-medium" {...cleanProps(props)} />,
+                     p: (props) => <p className="text-content leading-relaxed my-1.5 font-medium" {...cleanProps(props)} />,
+                     code: (props) => <code className="bg-surface border border-stroke rounded px-1 py-0.5 font-mono text-[11px]" {...cleanProps(props)} />,
+                     pre: (props) => <pre className="bg-surface border border-stroke rounded-lg p-2.5 font-mono text-[11px] overflow-x-auto my-2" {...cleanProps(props)} />,
+                     blockquote: (props) => <blockquote className="border-l-2 border-brand-primary/40 pl-3 text-content-muted italic my-1.5" {...cleanProps(props)} />,
+                     table: (props) => <table className="w-full border-collapse border border-stroke text-[11px] my-2" {...cleanProps(props)} />,
+                     th: (props) => <th className="border border-stroke bg-surface p-1.5 text-left font-bold" {...cleanProps(props)} />,
+                     td: (props) => <td className="border border-stroke p-1.5" {...cleanProps(props)} />,
+                     input: (props) => <input type="checkbox" className="mr-1.5 cursor-pointer accent-brand-primary" disabled checked={props.checked} />,
+                   }}
                 >
                   {description}
                 </ReactMarkdown>

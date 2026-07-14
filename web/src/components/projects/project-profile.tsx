@@ -1,8 +1,14 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { FormEvent, useEffect, useState } from "react";
-import { Save, Settings, Bot } from "lucide-react";
+import { FormEvent, useState } from "react";
+import { Save, Settings, Bot, RefreshCw } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import type { Project } from "@/lib/types";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select } from "@/components/ui/select";
+import { Field } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface ProjectProfileProps {
   project: Project | undefined;
@@ -32,7 +38,10 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
 
-  useEffect(() => {
+  // Render-phase prop synchronization to avoid cascading renders
+  const [prevProject, setPrevProject] = useState(project);
+  if (project !== prevProject) {
+    setPrevProject(project);
     if (project) {
       setName(project.name);
       setDescription(project.description);
@@ -43,7 +52,33 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
     }
-  }, [project]);
+  }
+
+  // Dirty state tracking (compares current inputs with stored project values)
+  const isDirty =
+    project?.name !== name ||
+    project?.description !== description ||
+    (project?.default_model_level ?? "balanced") !== defaultModelLevel ||
+    (project?.default_autonomy ?? "supervised") !== defaultAutonomy ||
+    (project?.auto_review_policy ?? "complexity_based") !== autoReviewPolicy ||
+    (project?.max_retries ?? 3) !== maxRetries ||
+    (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
+    (project?.default_branch ?? "main") !== defaultBranch;
+
+  function handleReset() {
+    if (project) {
+      setName(project.name);
+      setDescription(project.description);
+      setDefaultModelLevel(project.default_model_level ?? "balanced");
+      setDefaultAutonomy(project.default_autonomy ?? "supervised");
+      setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
+      setMaxRetries(project.max_retries ?? 3);
+      setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
+      setDefaultBranch(project.default_branch ?? "main");
+      setUpdateError("");
+      toast.info("Project settings reverted.");
+    }
+  }
 
   async function handleUpdateProject(e: FormEvent) {
     e.preventDefault();
@@ -60,8 +95,10 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
       });
+      toast.success("Project settings updated successfully.");
     } catch (err) {
       setUpdateError(err instanceof ApiError ? err.message : "Failed to update project");
+      toast.error(err instanceof ApiError ? err.message : "Failed to update project");
     } finally {
       setIsUpdating(false);
     }
@@ -72,128 +109,144 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       <form onSubmit={handleUpdateProject} className="space-y-6">
         
         {/* General Settings */}
-        <div className="rounded-lg border border-stroke bg-card p-5">
-          <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-3">
-            <Settings size={18} className="text-brand-primary" />
-            <h3 className="font-sans font-semibold text-foreground">General Settings</h3>
-          </div>
-          <div className="space-y-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Project Name</label>
-              <input
+        <Card>
+          <CardHeader
+            title="General Settings"
+            icon={<Settings size={18} className="text-brand-primary" />}
+          />
+          <CardContent className="space-y-4">
+            <Field label="Project Name" htmlFor="profile-name">
+              <Input
+                id="profile-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 required
                 disabled={isUpdating}
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Description</label>
-              <textarea
+            </Field>
+            <Field label="Description" htmlFor="profile-desc">
+              <Textarea
+                id="profile-desc"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="min-h-[100px] rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none resize-none transition-all"
                 disabled={isUpdating}
+                className="resize-none"
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Default Branch</label>
-              <input
+            </Field>
+            <Field label="Default Branch" htmlFor="profile-branch">
+              <Input
+                id="profile-branch"
                 value={defaultBranch}
                 onChange={(e) => setDefaultBranch(e.target.value)}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 placeholder="main"
                 required
                 disabled={isUpdating}
               />
-            </div>
-          </div>
-        </div>
+            </Field>
+          </CardContent>
+        </Card>
 
         {/* AI Workflow Defaults */}
-        <div className="rounded-lg border border-stroke bg-card p-5">
-          <div className="mb-4 flex items-center gap-2 border-b border-stroke pb-3">
-            <Bot size={18} className="text-brand-primary" />
-            <h3 className="font-sans font-semibold text-foreground">AI Workflow Defaults</h3>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Model Level</label>
-              <select
+        <Card>
+          <CardHeader
+            title="AI Workflow Defaults"
+            icon={<Bot size={18} className="text-brand-primary" />}
+          />
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Model Level" htmlFor="profile-model">
+              <Select
+                id="profile-model"
                 value={defaultModelLevel}
                 onChange={(e) => setDefaultModelLevel(e.target.value)}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 disabled={isUpdating}
               >
                 <option value="fast">Fast</option>
                 <option value="balanced">Balanced</option>
                 <option value="powerful">Powerful</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Autonomy</label>
-              <select
+              </Select>
+            </Field>
+            <Field label="Autonomy" htmlFor="profile-autonomy">
+              <Select
+                id="profile-autonomy"
                 value={defaultAutonomy}
                 onChange={(e) => setDefaultAutonomy(e.target.value)}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 disabled={isUpdating}
               >
                 <option value="supervised">Supervised (Requires Approval)</option>
                 <option value="autonomous">Autonomous</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Review Policy</label>
-              <select
+              </Select>
+            </Field>
+            <Field label="Review Policy" htmlFor="profile-policy">
+              <Select
+                id="profile-policy"
                 value={autoReviewPolicy}
                 onChange={(e) => setAutoReviewPolicy(e.target.value)}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 disabled={isUpdating}
               >
                 <option value="complexity_based">Complexity Based</option>
                 <option value="always_review">Always Review</option>
                 <option value="auto_merge">Auto Merge (No Review)</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Max Retries</label>
-              <input
+              </Select>
+            </Field>
+            <Field label="Max Retries" htmlFor="profile-retries">
+              <Input
+                id="profile-retries"
                 type="number"
                 min={0}
                 max={10}
                 value={maxRetries}
                 onChange={(e) => setMaxRetries(Number(e.target.value))}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 required
                 disabled={isUpdating}
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono font-bold uppercase tracking-wider text-content-muted">Max Review-Fix Cycles</label>
-              <input
+            </Field>
+            <Field label="Max Review-Fix Cycles" htmlFor="profile-cycles">
+              <Input
+                id="profile-cycles"
                 type="number"
                 min={1}
                 max={10}
                 value={maxReviewFixCycles}
                 onChange={(e) => setMaxReviewFixCycles(Number(e.target.value))}
-                className="rounded border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none transition-all"
                 required
                 disabled={isUpdating}
               />
-            </div>
-          </div>
-        </div>
+            </Field>
+          </CardContent>
+        </Card>
 
-        {updateError && <p className="text-xs text-red-400">{updateError}</p>}
-        <button
-          type="submit"
-          disabled={isUpdating}
-          className="flex items-center gap-2 rounded bg-brand-primary px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-        >
-          <Save size={16} />
-          {isUpdating ? "Saving..." : "Save Project Settings"}
-        </button>
+        {updateError && (
+          <span className="text-xs text-danger font-medium leading-normal block">{updateError}</span>
+        )}
+
+        {isDirty && (
+          <div className="rounded-md bg-warning/10 border border-warning/20 p-3 text-xs text-warning">
+            You have unsaved changes. Save or reset your changes before navigating away.
+          </div>
+        )}
+        
+        <div className="flex items-center gap-3">
+          <Button
+            type="submit"
+            disabled={isUpdating || !isDirty}
+            isLoading={isUpdating}
+          >
+            <Save size={16} />
+            Save Project Settings
+          </Button>
+
+          {isDirty && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleReset}
+              disabled={isUpdating}
+            >
+              <RefreshCw size={14} />
+              Reset Changes
+            </Button>
+          )}
+        </div>
       </form>
     </div>
   );

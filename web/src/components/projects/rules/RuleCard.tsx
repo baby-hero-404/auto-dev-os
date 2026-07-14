@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Edit3, Loader2, Save, Trash2, X } from "lucide-react";
+import { Check, Edit3, Trash2, X } from "lucide-react";
 import type { Rule } from "@/lib/types";
 import { RuleEnforcementBadge } from "./RuleEnforcementBadge";
 import { EnforcementToggle } from "./EnforcementToggle";
 import { ApiError } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface RuleCardProps {
   rule: Rule;
@@ -66,55 +69,51 @@ export function RuleCard({ rule, isNew, onUpdateRule, onDeleteRule, setRuleError
   }
 
   return (
-    <div
-      className={`rounded-lg border border-stroke bg-card p-4 text-sm transition duration-200 ${
-        isNew ? "animate-fade-in" : ""
-      } ${isDeleting ? "opacity-40" : ""}`}
-    >
-      {isEditing ? (
-        <div className="space-y-3">
-          <textarea
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            className="min-h-[72px] w-full resize-none rounded-md border border-stroke bg-surface px-3 py-2 text-sm text-foreground focus:border-brand-primary focus:outline-none"
-            disabled={isSaving}
-          />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <EnforcementToggle
-              value={editEnforcement}
-              onChange={setEditEnforcement}
+    <>
+      <div
+        className={`rounded-lg border border-stroke bg-card p-4 text-sm transition duration-200 ${
+          isNew ? "animate-fade-in" : ""
+        } ${isDeleting ? "opacity-40" : ""}`}
+      >
+        {isEditing ? (
+          <div className="space-y-3">
+            <Textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              className="min-h-[72px] resize-none"
               disabled={isSaving}
             />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setIsEditing(false)}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <EnforcementToggle
+                value={editEnforcement}
+                onChange={setEditEnforcement}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1 rounded border border-stroke px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface cursor-pointer disabled:opacity-50"
-                type="button"
-              >
-                <X size={13} /> Cancel
-              </button>
-              <button
-                onClick={handleUpdate}
-                disabled={isSaving || !editContent.trim()}
-                className="inline-flex items-center gap-1 rounded bg-brand-primary px-3 py-1.5 text-xs font-semibold text-slate-950 hover:opacity-90 transition cursor-pointer disabled:opacity-50"
-                type="button"
-              >
-                {isSaving ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Save size={13} />
-                )}
-                Save
-              </button>
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsEditing(false)}
+                  disabled={isSaving}
+                  size="sm"
+                >
+                  <X size={13} /> Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleUpdate}
+                  disabled={isSaving || !editContent.trim()}
+                  isLoading={isSaving}
+                  size="sm"
+                >
+                  Save
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : (
-        <>
+        ) : (
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="whitespace-pre-wrap text-foreground">{rule.content}</p>
+              <p className="whitespace-pre-wrap text-foreground leading-relaxed">{rule.content}</p>
               <div className="mt-2.5 flex items-center gap-2">
                 <RuleEnforcementBadge enforcement={rule.enforcement} />
                 <span className="rounded border border-stroke bg-surface px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-content-muted">
@@ -146,34 +145,20 @@ export function RuleCard({ rule, isNew, onUpdateRule, onDeleteRule, setRuleError
               </button>
             </div>
           </div>
+        )}
+      </div>
 
-          {confirmDelete && (
-            <div className="mt-3 flex flex-col gap-2 rounded-md border border-rose-500/20 bg-rose-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">
-                Are you sure you want to delete this rule?
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  className="inline-flex items-center gap-1 rounded bg-rose-500 px-3 py-1 text-xs font-semibold text-white hover:opacity-90 cursor-pointer"
-                  type="button"
-                >
-                  {isDeleting && <Loader2 size={12} className="animate-spin" />} Delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  disabled={isDeleting}
-                  className="rounded border border-stroke px-3 py-1 text-xs font-semibold text-foreground hover:bg-surface cursor-pointer"
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      <ConfirmDialog
+        isOpen={confirmDelete}
+        title="Delete Behavioral Rule"
+        description="Are you sure you want to delete this rule? This will stop enforcing this guideline on AI agent workflows in this project."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={isDeleting}
+        onConfirm={handleDelete}
+        onClose={() => setConfirmDelete(false)}
+      />
+    </>
   );
 }

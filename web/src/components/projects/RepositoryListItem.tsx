@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, Edit3, Loader2, RefreshCw, ShieldCheck, Trash2, X, AlertTriangle } from "lucide-react";
 import type { Repository } from "@/lib/types";
 import { api } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 
 interface RepositoryListItemProps {
   repo: Repository;
@@ -107,7 +108,7 @@ export function RepositoryListItem({
               <button
                 type="button"
                 onClick={handleSaveEditedName}
-                className="rounded bg-brand-primary p-1.5 text-slate-950 hover:opacity-90 transition cursor-pointer"
+                className="rounded bg-brand-primary p-1.5 text-brand-primary-fg hover:opacity-90 transition cursor-pointer"
                 title="Save repository name"
               >
                 <Check size={14} />
@@ -170,7 +171,7 @@ export function RepositoryListItem({
             <button
               type="button"
               onClick={handleSaveEditedBranch}
-              className="rounded bg-brand-primary p-1.5 text-slate-950 hover:opacity-90 transition cursor-pointer"
+              className="rounded bg-brand-primary p-1.5 text-brand-primary-fg hover:opacity-90 transition cursor-pointer"
               title="Save branch"
               disabled={isFetchingEditingBranches}
             >
@@ -200,9 +201,9 @@ export function RepositoryListItem({
             {!repo.last_validated_at && (
               <>
                 <span className="px-1.5 opacity-50">•</span>
-                <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                  <AlertTriangle size={10} /> Unverified
-                </span>
+                <Badge variant="warning">
+                  <AlertTriangle size={10} className="mr-1" /> Unverified
+                </Badge>
               </>
             )}
           </span>

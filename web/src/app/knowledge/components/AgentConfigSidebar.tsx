@@ -1,10 +1,11 @@
 import { Loader2 } from "lucide-react";
+import type { Agent } from "@/lib/types";
 
 interface AgentConfigSidebarProps {
   loadingAgents: boolean;
-  orgAgents: any[];
+  orgAgents: Agent[];
   activeAgentID: string;
-  selectedAgent: any;
+  selectedAgent: Agent | undefined;
   onSelectAgent: (id: string) => void;
 }
 

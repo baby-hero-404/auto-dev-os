@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -43,6 +44,9 @@ type AnalyzeStep struct {
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
 	maxCost       float64
 	registry      *tool.Registry
+	lastValidationError     error
+	lastValidationIteration int
+	lastAttemptIteration    int
 }
 
 func NewAnalyzeStep(
@@ -139,6 +143,9 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 }
 
 func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.StepContext) (models.TaskAnalysis, bool, error) {
+	s.lastValidationError = nil
+	s.lastValidationIteration = 0
+	s.lastAttemptIteration = 0
 	if s.llm == nil {
 		return deriveWorkflowAnalysis(s.rt.Task), true, nil
 	}
@@ -151,6 +158,9 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 
 	parsedFinal, loopErr := s.runAnalyzeToolLoop(ctx, messages)
 	if loopErr != nil || parsedFinal == nil {
+		if s.lastValidationError != nil && s.lastValidationIteration == s.lastAttemptIteration {
+			return models.TaskAnalysis{}, false, fmt.Errorf("failed to generate valid specification after retry iterations: %w", s.lastValidationError)
+		}
 		if loopErr == nil {
 			loopErr = fmt.Errorf("LLM returned empty or nil spec JSON")
 		}
@@ -214,6 +224,7 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 		},
 		OnCall: func(iter int, msgs []llm.Message, resp *llm.Response, parsed map[string]any, latency time.Duration) {
 			iteration = iter
+			s.lastAttemptIteration = iter
 			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", iter, resp.Model))
 			if s.traces != nil {
 				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, msgs, resp, parsed, iter, latency)
@@ -226,6 +237,60 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 	return parsedFinal, nil
 }
 
+func validateBoundaryCoverage(analysis models.TaskAnalysis) error {
+	isCovered := func(file string) bool {
+		cleanFile := path.Clean(file)
+		for _, b := range analysis.ExecutionBoundaries {
+			root := b.Root
+			if root == "" || root == "." || root == "./" {
+				return true
+			}
+			normRoot := path.Clean(root)
+			if !strings.HasSuffix(normRoot, "/") {
+				normRoot = normRoot + "/"
+			}
+			if strings.HasPrefix(cleanFile, normRoot) || cleanFile == path.Clean(root) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var uncovered []string
+	for _, aff := range analysis.AffectedFiles {
+		if !isCovered(aff.File) {
+			uncovered = append(uncovered, aff.File)
+		}
+	}
+	for _, unit := range analysis.ExecutionUnits {
+		for _, tf := range unit.TargetFiles {
+			if !isCovered(tf) {
+				found := false
+				for _, u := range uncovered {
+					if u == tf {
+						found = true
+						break
+					}
+				}
+				if !found {
+					uncovered = append(uncovered, tf)
+				}
+			}
+		}
+	}
+
+	if len(uncovered) > 0 {
+		var roots []string
+		for _, b := range analysis.ExecutionBoundaries {
+			roots = append(roots, b.Root)
+		}
+		rootsStr := strings.Join(roots, ", ")
+		return fmt.Errorf("Boundary coverage validation failed:\nexecution_boundaries do not cover: %s (declared roots: %s). Widen an existing boundary or add one so every affected/target file is covered.", strings.Join(uncovered, ", "), rootsStr)
+	}
+
+	return nil
+}
+
 // validateAnalyzeSpec is the llmrunner.ToolLoopValidator for the analyze step's spec JSON. It
 // preserves three behaviors from the pre-migration loop, checked in order: the legacy
 // JSON-embedded "tool_use" tool-call convention (distinct from a native resp.ToolCalls call),
@@ -233,6 +298,8 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 // units. Returning a non-nil error feeds its message back to the LLM as corrective content and
 // continues the loop (via RunToolLoop); returning nil accepts parsedJSON as the final spec.
 func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[string]any, iteration int) error {
+	s.lastValidationIteration = iteration
+
 	if toolUse, ok := parsedJSON["tool_use"].(map[string]any); ok {
 		toolName, _ := toolUse["name"].(string)
 		toolArgs, _ := toolUse["arguments"].(map[string]any)
@@ -244,17 +311,42 @@ func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[st
 
 	if missingFields := analyzeContractMissingFields(parsedJSON); len(missingFields) > 0 {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: output missing required fields: %v", iteration, missingFields))
-		return fmt.Errorf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", "))
+		err := fmt.Errorf("Your JSON output is missing the following required fields from the execution contract: %s. You MUST include them.", strings.Join(missingFields, ", "))
+		s.lastValidationError = err
+		return err
 	}
 
 	analysisDraft := parseAnalysisFinal(parsedJSON)
+
+	// Validate target_files presence first
+	var missingTargetUnits []string
+	for _, unit := range analysisDraft.ExecutionUnits {
+		if len(unit.TargetFiles) == 0 {
+			missingTargetUnits = append(missingTargetUnits, unit.ID)
+		}
+	}
+	if len(missingTargetUnits) > 0 {
+		err := fmt.Errorf("The following execution units have empty or missing target_files: %v", missingTargetUnits)
+		s.lastValidationError = err
+		return err
+	}
+
+	// Validate boundary coverage for affected files and target files
+	if err := validateBoundaryCoverage(analysisDraft); err != nil {
+		s.lastValidationError = err
+		return err
+	}
+
 	if len(analysisDraft.ExecutionUnits) > 0 {
 		if errVal := policy.ValidateDAG(analysisDraft.ExecutionUnits, s.maxCost); errVal != nil {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("StepAnalyze Iteration %d: proposed execution plan failed DAG/cost validation: %v", iteration, errVal))
-			return fmt.Errorf("Your proposed execution plan failed DAG/cost validation checks. Error: %v\n\nPlease adjust the execution_units array by splitting units that exceed the cost limit (limit is %.1f, migration task is cost 5, file creation is cost 2, file modify is cost 1, plus max_risk multiplier). Ensure each unit is small, touches a maximum of 3-4 files, and has no cyclic dependencies. Re-output the corrected JSON specification.", errVal, s.maxCost)
+			err := fmt.Errorf("Your proposed execution plan failed DAG/cost validation checks. Error: %v\n\nPlease adjust the execution_units array by splitting units that exceed the cost limit (limit is %.1f, migration task is cost 5, file creation is cost 2, file modify is cost 1, plus max_risk multiplier). Ensure each unit is small, touches a maximum of 3-4 files, and has no cyclic dependencies. Re-output the corrected JSON specification.", errVal, s.maxCost)
+			s.lastValidationError = err
+			return err
 		}
 	}
 
+	s.lastValidationError = nil
 	return nil
 }
 

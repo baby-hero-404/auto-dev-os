@@ -11,6 +11,7 @@ import (
 var ErrPaused = errors.New("workflow paused")
 var ErrWaitingApproval = errors.New("workflow waiting approval")
 var ErrReviewFixLoop = errors.New("review fix loop back")
+var ErrNoProgress = errors.New("step failed with no workspace progress")
 var ErrGraphChanged = errors.New("workflow graph changed dynamically")
 
 type PauseError struct {

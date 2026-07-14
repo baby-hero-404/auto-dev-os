@@ -2,9 +2,12 @@ package steps
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -200,3 +203,86 @@ func (m *sequenceTestRunner) RunTargetedTests(ctx context.Context, task *models.
 	outcome := m.results[idx]
 	return outcome.result, outcome.err
 }
+
+// TestRunPatchRetryLoop_ErrNoProgress verifies that when a step fails with zero edits applied,
+// the error is wrapped with workflow.ErrNoProgress.
+func TestRunPatchRetryLoop_ErrNoProgress(t *testing.T) {
+	task := &models.Task{ID: "task-1"}
+	agent := &models.Agent{ID: "agent-1"}
+
+	// LLM returns format error / validation error directly
+	llmRunner := &mockLLMRunner{
+		err: fmt.Errorf("mock LLM failure"),
+	}
+	worktree := &mockWorktreeManager{}
+	diff := &mockDiffCapturer{hostPath: "/repo", changed: nil}
+	tester := &mockTestRunner{}
+	tasks := &mockTaskReader{task: task}
+	logger := &mockLogger{}
+
+	cfg := patchRetryConfig{
+		Task:       task,
+		Agent:      agent,
+		JobID:      "job-1",
+		StepID:     "code_backend_0",
+		TestLabel:  "code_backend_test",
+		MaxRetries: 3,
+		Agentic:    true,
+		LLM:        llmRunner,
+		Worktree:   worktree,
+		Diff:       diff,
+		Tester:     tester,
+		Tasks:      tasks,
+		Log:        logger,
+	}
+
+	_, _, err := runPatchRetryLoop(context.Background(), cfg, "do the work")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, workflow.ErrNoProgress) {
+		t.Errorf("expected ErrNoProgress error, got %v", err)
+	}
+}
+
+func TestRunPatchRetryLoop_TransientErrorNoWrap(t *testing.T) {
+	task := &models.Task{ID: "task-1"}
+	agent := &models.Agent{ID: "agent-1"}
+
+	// LLM returns transient error (e.g. timeout / connection refused)
+	llmRunner := &mockLLMRunner{
+		err: fmt.Errorf("request timeout: gateway unavailable"),
+	}
+	worktree := &mockWorktreeManager{}
+	diff := &mockDiffCapturer{hostPath: "/repo", changed: nil}
+	tester := &mockTestRunner{}
+	tasks := &mockTaskReader{task: task}
+	logger := &mockLogger{}
+
+	cfg := patchRetryConfig{
+		Task:       task,
+		Agent:      agent,
+		JobID:      "job-1",
+		StepID:     "code_backend_0",
+		TestLabel:  "code_backend_test",
+		MaxRetries: 3,
+		Agentic:    true,
+		LLM:        llmRunner,
+		Worktree:   worktree,
+		Diff:       diff,
+		Tester:     tester,
+		Tasks:      tasks,
+		Log:        logger,
+	}
+
+	_, _, err := runPatchRetryLoop(context.Background(), cfg, "do the work")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if errors.Is(err, workflow.ErrNoProgress) {
+		t.Errorf("expected transient error to NOT be wrapped in ErrNoProgress, got %v", err)
+	}
+}
+

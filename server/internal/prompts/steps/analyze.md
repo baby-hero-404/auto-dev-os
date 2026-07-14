@@ -63,7 +63,8 @@ The JSON object MUST have the following structure:
         "estimated_tokens": 6000,
         "max_risk": "low" | "medium" | "high"
       },
-      "dependencies": ["another_unit_id"]
+      "dependencies": ["another_unit_id"],
+      "target_files": ["path/to/file1.go", "path/to/file2.go"] // Required. Array of files this execution unit will create or modify. Must be covered by execution_boundaries.
     }
   ],
   "execution_irs": [

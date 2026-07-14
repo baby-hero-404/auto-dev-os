@@ -587,7 +587,7 @@ func TestOrchestrator_StepReview_CycleCountIgnoresNonSuccessCheckpoints(t *testi
 	}
 	orch := New(&mockTaskRepo{task: task}, workflowRepo, &mockAgentAssigner{agent: agent}, &mockSandboxRuntime{},
 		WithLLMProvider(&mockLLMProvider{responses: map[string]string{
-			"Review": `{"findings":[{"severity":"high","file":"main.go","line":1,"recommendation":"fix it"}]}`,
+			workflow.StepReview: `{"findings":[{"severity":"high","file":"main.go","line":1,"recommendation":"fix it"}]}`,
 		}}),
 	)
 

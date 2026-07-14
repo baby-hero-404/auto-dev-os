@@ -102,6 +102,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 
 	failureCounts := make(map[string]int)
 	readMemo := make(map[string]int)
+	sg := newStallGuard()
 
 	// lastActiveState tracks the most recent non-terminal state so a terminal snapshot can
 	// record how many iterations of that phase actually ran (sm.used has no entry for
@@ -212,6 +213,11 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 					continue
 				}
 
+				if interceptResult, blocked := sg.Check(call.Name, call.Arguments); blocked {
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: interceptResult})
+					continue
+				}
+
 				// Execute tool
 				result, toolErr := r.ToolExecutor(ctx, call.Name, call.Arguments)
 				if toolErr != nil {
@@ -230,6 +236,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 					failureCounts[key]++
 				} else {
 					failureCounts[key] = 0
+					sg.RecordSuccess(call.Name, call.Arguments, sm.used[currentState]+1)
 					if editToolNames[call.Name] && discriminator != "" {
 						editsApplied = append(editsApplied, discriminator)
 						editAppliedThisTurn = true

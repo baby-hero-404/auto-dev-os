@@ -66,6 +66,9 @@ func (m *mockWorkflowRepo) UpdateJob(ctx context.Context, id string, updates map
 	if updates["status"] != nil {
 		m.job.Status = updates["status"].(string)
 	}
+	if updates["last_error"] != nil {
+		m.job.LastError = updates["last_error"].(string)
+	}
 	if updates["agent_id"] != nil {
 		agentID := updates["agent_id"].(string)
 		m.job.AgentID = &agentID
@@ -235,6 +238,8 @@ type mockLLMProvider struct {
 	responseQueue          []*llm.Response
 	lastChatOptions        llm.ChatOptions
 	sawStateMachineEnabled bool
+	calls                  []string
+	history                [][]llm.Message
 }
 
 func (m *mockLLMProvider) Name() string {
@@ -246,6 +251,7 @@ func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*ll
 }
 
 func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+	m.history = append(m.history, messages)
 	m.lastChatOptions = opts
 	if models.IsStateMachineEnabled(ctx) {
 		m.sawStateMachineEnabled = true
@@ -253,16 +259,25 @@ func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Me
 	if len(m.responseQueue) > 0 {
 		resp := m.responseQueue[0]
 		m.responseQueue = m.responseQueue[1:]
+		m.calls = append(m.calls, "queued")
 		return resp, nil
 	}
 	lastMsg := messages[len(messages)-1].Content
 	content := `{"patch": "diff --git a/main.go b/main.go\n"}`
+	matchedKey := ""
+	// Match on the "Workflow step: <id>" prefix that BuildInitialMessages/analyze.go always
+	// prepend, not a bare substring anywhere in the (large, assembled) prompt — a bare substring
+	// match is prone to false positives (e.g. a step's boilerplate mentioning "review" or "fix"
+	// in passing) and, combined with Go's randomized map iteration order, made this flaky: which
+	// key won depended on iteration order whenever more than one key's text appeared in the prompt.
 	for k, v := range m.responses {
-		if strings.Contains(lastMsg, k) {
+		if strings.Contains(lastMsg, "Workflow step: "+k) {
 			content = v
+			matchedKey = k
 			break
 		}
 	}
+	m.calls = append(m.calls, matchedKey)
 	return &llm.Response{
 		Model:        "mock-model",
 		Content:      content,

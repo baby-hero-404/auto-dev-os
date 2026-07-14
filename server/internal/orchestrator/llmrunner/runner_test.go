@@ -570,3 +570,58 @@ func TestRunner_Run_StateMachineMode_FallbackIRPassesCompiler(t *testing.T) {
 		t.Error("expected the execution contract to still be compiled and included for the fallback IR")
 	}
 }
+
+func TestRunner_BuildInitialMessages_TargetFilesOnly(t *testing.T) {
+	runner := Runner{
+		ReadAffectedFileContent: func(ctx context.Context, task *models.Task, path string) (string, bool) {
+			if path == "server/db.go" {
+				return "db", true
+			}
+			if path == "server/main.go" {
+				return "main", true
+			}
+			return "", false
+		},
+	}
+
+	task := &models.Task{
+		ID: "task-1",
+		Analysis: []byte(`{
+			"affected_files": [
+				{"file": "server/main.go"},
+				{"file": "server/db.go"}
+			],
+			"execution_units": [
+				{
+					"id": "unit-1",
+					"execution_profile": {"agent": "backend"},
+					"target_files": ["server/db.go"]
+				}
+			]
+		}`),
+	}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
+
+	// 1. code_backend_0 resolves to unit-1, should only include server/db.go, NOT server/main.go
+	msgs, err := runner.BuildInitialMessages(context.Background(), task, agent, "code_backend_0", "test instruction")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prompt := msgs[len(msgs)-1].Content
+	if !strings.Contains(prompt, "server/db.go") {
+		t.Errorf("expected prompt to contain target file server/db.go, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "server/main.go") {
+		t.Errorf("expected prompt NOT to contain main.go since it is not in target_files, got:\n%s", prompt)
+	}
+
+	// 2. fix step should fall back to task-wide AffectedFiles, including both
+	msgsFix, err := runner.BuildInitialMessages(context.Background(), task, agent, "fix", "test instruction")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	promptFix := msgsFix[len(msgsFix)-1].Content
+	if !strings.Contains(promptFix, "server/db.go") || !strings.Contains(promptFix, "server/main.go") {
+		t.Errorf("expected fix prompt to contain both files, got:\n%s", promptFix)
+	}
+}

@@ -50,6 +50,34 @@ func (r Runner) isAgentic() bool {
 	return len(r.Tools) > 0 && r.ToolExecutor != nil
 }
 
+func unitForStep(analysis *models.TaskAnalysis, stepID string) *models.ExecutionUnit {
+	if analysis == nil {
+		return nil
+	}
+	var beCount, feCount int
+	for i, unit := range analysis.ExecutionUnits {
+		agent := strings.ToLower(unit.ExecutionProfile.Agent)
+		var currentStepID string
+		if agent == "frontend" {
+			currentStepID = fmt.Sprintf("code_frontend_%d", feCount)
+			feCount++
+		} else {
+			currentStepID = fmt.Sprintf("code_backend_%d", beCount)
+			beCount++
+		}
+		if currentStepID == stepID {
+			return &analysis.ExecutionUnits[i]
+		}
+	}
+	// Fallback: check if stepID matches unit.ID directly
+	for i, unit := range analysis.ExecutionUnits {
+		if unit.ID == stepID {
+			return &analysis.ExecutionUnits[i]
+		}
+	}
+	return nil
+}
+
 // BuildInitialMessages constructs the initial prompt for a step exactly as Run() does before
 // its first LLM call, without ever calling the LLM. It is the single source of truth for that
 // construction so the ExecutionSnapshot resume path (llm_step.go) can independently reconstruct
@@ -69,12 +97,31 @@ func (r Runner) BuildInitialMessages(ctx context.Context, task *models.Task, age
 	if len(task.Analysis) > 0 {
 		_ = json.Unmarshal(task.Analysis, &analysis)
 	}
-	if len(analysis.AffectedFiles) > 0 && shouldIncludeAffectedFiles(stepID) && r.ReadAffectedFileContent != nil {
+
+	var filesToInclude []string
+	isFixStep := (stepID == workflow.StepFix)
+
+	if isFixStep {
+		for _, f := range analysis.AffectedFiles {
+			filesToInclude = append(filesToInclude, f.File)
+		}
+	} else {
+		unit := unitForStep(&analysis, stepID)
+		if unit != nil && len(unit.TargetFiles) > 0 {
+			filesToInclude = unit.TargetFiles
+		} else {
+			for _, f := range analysis.AffectedFiles {
+				filesToInclude = append(filesToInclude, f.File)
+			}
+		}
+	}
+
+	if len(filesToInclude) > 0 && shouldIncludeAffectedFiles(stepID) && r.ReadAffectedFileContent != nil {
 		var b strings.Builder
 		b.WriteString("\n\n### Workspace Affected Files ###\n")
-		for _, file := range analysis.AffectedFiles {
-			displayPath := paths.WorkspaceToRepoRelative(file.File)
-			if content, ok := r.ReadAffectedFileContent(ctx, task, file.File); ok {
+		for _, file := range filesToInclude {
+			displayPath := paths.WorkspaceToRepoRelative(file)
+			if content, ok := r.ReadAffectedFileContent(ctx, task, file); ok {
 				b.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", displayPath, content))
 			} else {
 				b.WriteString(fmt.Sprintf("\n--- %s [NEW FILE — does not exist yet] ---\nThis file needs to be created. Use the create_file tool.\n", displayPath))
@@ -94,6 +141,11 @@ func (r Runner) BuildInitialMessages(ctx context.Context, task *models.Task, age
 		}
 		if requiresPatch(stepID) {
 			fullInstruction += "\n\nCRITICAL REQUIREMENT: The patch/diff field MUST contain a valid Unified Git Diff (starting with 'diff --git') representing all source code changes. Do NOT output raw file contents. Do NOT include any text outside the JSON structure."
+		}
+	}
+	if prevErrors, ok := ctx.Value("previous_attempt_errors").(map[string]string); ok {
+		if prevErr, exists := prevErrors[stepID]; exists && prevErr != "" {
+			fullInstruction += fmt.Sprintf("\n\nPREVIOUS ATTEMPT FAILED:\n%s", prevErr)
 		}
 	}
 	messages = append(messages, llm.Message{Role: "user", Content: "Workflow step: " + stepID + "\n\n" + fullInstruction})

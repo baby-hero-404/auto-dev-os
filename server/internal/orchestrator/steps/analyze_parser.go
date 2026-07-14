@@ -104,6 +104,13 @@ func parseAnalysisFinal(parsedFinal map[string]any) models.TaskAnalysis {
 						}
 					}
 				}
+				if tfs, ok := uMap["target_files"].([]any); ok {
+					for _, tf := range tfs {
+						if tfStr, ok := tf.(string); ok {
+							unit.TargetFiles = append(unit.TargetFiles, tfStr)
+						}
+					}
+				}
 				analysis.ExecutionUnits = append(analysis.ExecutionUnits, unit)
 			}
 		}

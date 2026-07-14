@@ -44,7 +44,7 @@ test.describe("Git accounts credentials management", () => {
     await page.getByRole("link", { name: /Projects/i }).click();
     await page.getByRole("link", { name: /Website Refactor/i }).click();
 
-    await page.getByRole("button", { name: "Repositories" }).click();
+    await page.getByRole("link", { name: "Repositories" }).click();
 
     await expect(page.getByLabel("Git Account")).toContainText("Enterprise GitHub");
 

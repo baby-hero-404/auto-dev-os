@@ -162,6 +162,7 @@ type ExecutionUnit struct {
 	ExecutionProfile ExecutionProfile     `json:"execution_profile"`
 	Constraints      ExecutionConstraints `json:"constraints"`
 	Dependencies     []string             `json:"dependencies,omitempty"`
+	TargetFiles      []string             `json:"target_files,omitempty"`
 }
 
 type ExecutionBoundary struct {

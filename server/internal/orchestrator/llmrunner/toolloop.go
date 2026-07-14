@@ -110,6 +110,7 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 
 	failureCounts := make(map[string]int)
 	readMemo := make(map[string]int) // (path, line-range) discriminator -> turn first read at
+	sg := newStallGuard()
 	var editsApplied []string
 	var filesRead []string
 
@@ -153,6 +154,11 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					continue
 				}
 
+				if interceptResult, blocked := sg.Check(call.Name, call.Arguments); blocked {
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: interceptResult})
+					continue
+				}
+
 				result, toolErr := cfg.ExecuteTool(ctx, call.Name, call.Arguments)
 				if toolErr != nil {
 					return nil, messages, &ToolLoopResult{FilesRead: filesRead}, toolErr
@@ -162,6 +168,7 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					failureCounts[key]++
 				} else {
 					failureCounts[key] = 0
+					sg.RecordSuccess(call.Name, call.Arguments, i+1)
 					if editToolNames[call.Name] && discriminator != "" {
 						editsApplied = append(editsApplied, discriminator)
 					}

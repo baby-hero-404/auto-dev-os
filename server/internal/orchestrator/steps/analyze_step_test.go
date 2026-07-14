@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,7 +101,7 @@ func TestAnalyzeStep_RunsAnalysisAutoApprove(t *testing.T) {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Implement basic sum function",
-  "affected_files": ["math.go"],
+  "affected_files": [{"file": "math.go", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [
@@ -221,7 +222,7 @@ func TestAnalyzeStep_ContractValidationRetriesThenSucceeds(t *testing.T) {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Implement basic sum function",
-  "affected_files": ["math.go"],
+  "affected_files": [{"file": "math.go", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
@@ -306,5 +307,221 @@ func TestNormalizeTaskID(t *testing.T) {
 		if actual != tt.expected {
 			t.Errorf("normalizeTaskID(%q, %d, %d) = %q; expected %q", tt.input, tt.fallbackPhase, tt.fallbackTask, actual, tt.expected)
 		}
+	}
+}
+
+func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "analyze-step-boundary-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:         "task-boundary",
+		ProjectID:  "proj-boundary",
+		Complexity: "easy",
+		Status:     models.TaskStatusTodo,
+	}
+
+	// 1. Uncovered affected files or target_files
+	uncoveredResponse := `
+{
+  "complexity": "easy",
+  "primary_category": "backend",
+  "scope": "Test boundary coverage",
+  "affected_files": [{"file": "cmd/zentao-sync/main.go", "confidence": 1.0, "reason": "edit"}],
+  "risks": [],
+  "risk_domains": [],
+  "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
+  "clarification_questions": [],
+  "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [
+    {
+      "id": "u1",
+      "objective": "write entrypoint",
+      "tasks": ["Task 1.1: write code"],
+      "execution_profile": {"agent": "backend", "skills": []},
+      "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
+      "dependencies": [],
+      "target_files": ["cmd/zentao-sync/main.go"]
+    }
+  ],
+  "execution_irs": [{"node_id": "u1", "intent": {"capability": "x", "operation": "y"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
+  "proposal_md": "## Proposal",
+  "specs_md": "## ADDED Requirements",
+  "design_md": "## Design",
+  "tasks_md": "## Tasks",
+  "execution_boundaries": [{"module": "main", "root": "internal/"}],
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
+}`
+
+	chatterUncovered := &mockLLMChatter{
+		resp: &llm.Response{
+			Content: uncoveredResponse,
+			Model:   "test-model",
+		},
+	}
+
+	stepUncovered := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", AutonomyLevel: "high"}, JobID: "j1"},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: "high"}},
+		chatterUncovered,
+		&mockPromptAssembler{},
+		&mockSandboxRunner{},
+		&mockArtifactSaver{},
+		&mockStatusUpdater{},
+		&mockTraceRecorder{},
+		&mockLogger{},
+		nil,
+		nil,
+		8.0,
+		tools.DefaultRegistry(nil, nil),
+	)
+
+	_, err = stepUncovered.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error due to boundary coverage violation, got nil")
+	}
+	if !strings.Contains(err.Error(), "Boundary coverage validation failed") {
+		t.Errorf("expected boundary coverage failure message, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cmd/zentao-sync/main.go") {
+		t.Errorf("expected uncovered file name in error message, got: %v", err)
+	}
+
+	// 2. Empty target_files rejected
+	emptyTargetResponse := `
+{
+  "complexity": "easy",
+  "primary_category": "backend",
+  "scope": "Test boundary coverage",
+  "affected_files": [{"file": "internal/main.go", "confidence": 1.0, "reason": "edit"}],
+  "risks": [],
+  "risk_domains": [],
+  "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
+  "clarification_questions": [],
+  "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [
+    {
+      "id": "u1",
+      "objective": "write entrypoint",
+      "tasks": ["Task 1.1: write code"],
+      "execution_profile": {"agent": "backend", "skills": []},
+      "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
+      "dependencies": [],
+      "target_files": []
+    }
+  ],
+  "execution_irs": [{"node_id": "u1", "intent": {"capability": "x", "operation": "y"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
+  "proposal_md": "## Proposal",
+  "specs_md": "## ADDED Requirements",
+  "design_md": "## Design",
+  "tasks_md": "## Tasks",
+  "execution_boundaries": [{"module": "main", "root": "internal/"}],
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
+}`
+
+	chatterEmptyTarget := &mockLLMChatter{
+		resp: &llm.Response{
+			Content: emptyTargetResponse,
+			Model:   "test-model",
+		},
+	}
+
+	stepEmptyTarget := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", AutonomyLevel: "high"}, JobID: "j1"},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: "high"}},
+		chatterEmptyTarget,
+		&mockPromptAssembler{},
+		&mockSandboxRunner{},
+		&mockArtifactSaver{},
+		&mockStatusUpdater{},
+		&mockTraceRecorder{},
+		&mockLogger{},
+		nil,
+		nil,
+		8.0,
+		tools.DefaultRegistry(nil, nil),
+	)
+
+	_, err = stepEmptyTarget.Execute(context.Background(), workflow.StepContext{})
+	if err == nil {
+		t.Fatal("expected error due to empty target_files, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty or missing target_files") {
+		t.Errorf("expected error about missing target_files, got: %v", err)
+	}
+
+	// 3. Covered output passes
+	coveredResponse := `
+{
+  "complexity": "easy",
+  "primary_category": "backend",
+  "scope": "Test boundary coverage",
+  "affected_files": [{"file": "internal/main.go", "confidence": 1.0, "reason": "edit"}],
+  "risks": [],
+  "risk_domains": [],
+  "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
+  "clarification_questions": [],
+  "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [
+    {
+      "id": "u1",
+      "objective": "write entrypoint",
+      "tasks": ["Task 1.1: write code"],
+      "execution_profile": {"agent": "backend", "skills": []},
+      "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
+      "dependencies": [],
+      "target_files": ["internal/main.go"]
+    }
+  ],
+  "execution_irs": [{"node_id": "u1", "intent": {"capability": "x", "operation": "y"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
+  "proposal_md": "## Proposal",
+  "specs_md": "## ADDED Requirements",
+  "design_md": "## Design",
+  "tasks_md": "## Tasks",
+  "execution_boundaries": [{"module": "main", "root": "internal/"}],
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
+}`
+
+	chatterCovered := &mockLLMChatter{
+		resp: &llm.Response{
+			Content: coveredResponse,
+			Model:   "test-model",
+		},
+	}
+
+	stepCovered := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", AutonomyLevel: "high"}, JobID: "j1"},
+		tmpDir,
+		&mockTaskReader{task: task},
+		nil,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: "high"}},
+		chatterCovered,
+		&mockPromptAssembler{},
+		&mockSandboxRunner{},
+		&mockArtifactSaver{},
+		&mockStatusUpdater{},
+		&mockTraceRecorder{},
+		&mockLogger{},
+		nil,
+		nil,
+		8.0,
+		tools.DefaultRegistry(nil, nil),
+	)
+
+	_, err = stepCovered.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error for covered output: %v", err)
 	}
 }

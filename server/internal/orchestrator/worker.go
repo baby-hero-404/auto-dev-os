@@ -402,10 +402,25 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			engine.CompletedSteps = completed
 		}
 
+		inputs := map[string]any{
+			"task_id":  task.ID,
+			"agent_id": agent.ID,
+			"job_id":   job.ID,
+		}
+		if err != nil {
+			failedSteps := make(map[string]string)
+			for stepID, status := range result.Status {
+				if status == workflow.StepStatusFailed {
+					failedSteps[stepID] = err.Error()
+				}
+			}
+			attemptCtx = context.WithValue(attemptCtx, "previous_attempt_errors", failedSteps)
+		}
+
 		if resumedStepID != "" {
-			result, err = engine.Resume(attemptCtx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID}, resumedStepID)
+			result, err = engine.Resume(attemptCtx, def, inputs, resumedStepID)
 		} else {
-			result, err = engine.Run(attemptCtx, def, map[string]any{"task_id": task.ID, "agent_id": agent.ID, "job_id": job.ID})
+			result, err = engine.Run(attemptCtx, def, inputs)
 		}
 		if errors.Is(err, workflow.ErrReviewFixLoop) {
 			o.log(ctx, task.ID, &job.ID, "info", "Review findings detected. Looping back to review step.")
@@ -425,6 +440,10 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			return
 		}
 		if err == nil || errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
+			break
+		}
+		if errors.Is(err, workflow.ErrNoProgress) && attempt >= 2 {
+			o.log(ctx, task.ID, &job.ID, "warn", "structural failure (no workspace progress); skipping remaining retries")
 			break
 		}
 		if attempt < maxRetries {

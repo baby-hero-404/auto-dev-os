@@ -14,10 +14,16 @@ func TestIntentTokens(t *testing.T) {
 		"user_repository": {"user", "repository"},
 		"user-repository": {"user", "repository"},
 		"APIClient":       {"api", "client"},
+		"SyncEngineScheduler": {"sync", "engine", "scheduler"},
 		"":                {},
+		"Thiết lập cấu trúc dự án và SQLite": {}, // Natural language / Vietnamese should be skipped
+		"This is a sentence to skip":         {}, // Natural language / English sentence >= 3 words should be skipped
 	}
 	for input, want := range cases {
 		got := intentTokens(input)
+		if len(want) == 0 && len(got) == 0 {
+			continue
+		}
 		if strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Errorf("intentTokens(%q) = %v, want %v", input, got, want)
 		}
@@ -34,7 +40,7 @@ func TestResolveIntent_Resolvable(t *testing.T) {
 		{File: "internal/repository/order.go", Reason: "unrelated"},
 	}
 
-	targets, err := ResolveIntent(ir, candidates)
+	targets, err := ResolveIntent(ir, candidates, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +60,7 @@ func TestResolveIntent_Ambiguous(t *testing.T) {
 		{File: "internal/repository/order.go"},
 	}
 
-	targets, err := ResolveIntent(ir, candidates)
+	targets, err := ResolveIntent(ir, candidates, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +78,7 @@ func TestResolveIntent_Unresolvable(t *testing.T) {
 		{File: "internal/repository/user.go"},
 	}
 
-	_, err := ResolveIntent(ir, candidates)
+	_, err := ResolveIntent(ir, candidates, nil)
 	if err == nil {
 		t.Fatal("expected error for unresolvable intent, got nil")
 	}
@@ -83,13 +89,55 @@ func TestResolveIntent_Unresolvable(t *testing.T) {
 	if resErr.NodeID != "node_1" || resErr.Capability != "PaymentGateway" {
 		t.Errorf("unexpected error fields: %+v", resErr)
 	}
+	// Verify double failure names both strategies
+	if !strings.Contains(resErr.Reason, "attempted unit target_files") || !strings.Contains(resErr.Reason, "token matching fallback") {
+		t.Errorf("expected error reason to name both strategies, got: %s", resErr.Reason)
+	}
 }
 
 func TestResolveIntent_EmptyCapability(t *testing.T) {
 	ir := models.ExecutionIR{NodeID: "node_1", Intent: models.Intent{Capability: "", Operation: "create"}}
-	_, err := ResolveIntent(ir, []models.AffectedFile{{File: "internal/repository/user.go"}})
+	_, err := ResolveIntent(ir, []models.AffectedFile{{File: "internal/repository/user.go"}}, nil)
 	if err == nil {
 		t.Fatal("expected error for empty capability, got nil")
+	}
+}
+
+func TestResolveIntent_TargetFilesFirst(t *testing.T) {
+	ir := models.ExecutionIR{
+		NodeID: "node_1",
+		Intent: models.Intent{Capability: "PaymentGateway", Operation: "create"},
+	}
+	candidates := []models.AffectedFile{
+		{File: "internal/repository/user.go"},
+	}
+	targetFiles := []string{"internal/gateway/payment.go"}
+
+	targets, err := ResolveIntent(ir, candidates, targetFiles)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(targets) != 1 || targets[0] != "internal/gateway/payment.go" {
+		t.Errorf("expected to resolve from targetFiles first, got: %v", targets)
+	}
+}
+
+func TestResolveIntent_VietnameseNaturalLanguage(t *testing.T) {
+	ir := models.ExecutionIR{
+		NodeID: "node_1",
+		Intent: models.Intent{Capability: "Thiết lập cấu trúc dự án và SQLite", Operation: "create"},
+	}
+	candidates := []models.AffectedFile{
+		{File: "internal/repository/user.go"},
+	}
+	targetFiles := []string{"server/main.go", "server/db.go"}
+
+	targets, err := ResolveIntent(ir, candidates, targetFiles)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(targets) != 2 || targets[0] != "server/main.go" || targets[1] != "server/db.go" {
+		t.Errorf("expected to resolve natural language capability using targetFiles, got: %v", targets)
 	}
 }
 

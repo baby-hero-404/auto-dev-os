@@ -52,7 +52,7 @@ test.describe("Auto Code OS E2E flows", () => {
     await page.getByRole("link", { name: /Website Refactor/i }).click();
 
     await expect(page.getByRole("heading", { name: "Website Refactor" })).toBeVisible();
-    await page.getByRole("button", { name: "Repositories" }).click();
+    await page.getByRole("link", { name: "Repositories" }).click();
     await expect(page.getByText("github.com/test/repo.git")).toBeVisible();
   });
 

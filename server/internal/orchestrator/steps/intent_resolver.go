@@ -23,6 +23,21 @@ func (e *IntentResolutionError) Error() string {
 // intentTokens splits a capability identifier — "UserRepository",
 // "user_repository", "user-repository" — into lowercase match tokens.
 func intentTokens(capability string) []string {
+	if len(strings.Fields(capability)) >= 3 {
+		return nil
+	}
+
+	hasNonASCIILetterOrMark := false
+	for _, r := range capability {
+		if r > 127 && (unicode.IsLetter(r) || unicode.IsMark(r)) {
+			hasNonASCIILetterOrMark = true
+			break
+		}
+	}
+	if hasNonASCIILetterOrMark {
+		return nil
+	}
+
 	runes := []rune(capability)
 	var b strings.Builder
 	for i, r := range runes {
@@ -43,6 +58,7 @@ func intentTokens(capability string) []string {
 	}
 
 	fields := strings.Fields(b.String())
+
 	tokens := make([]string, 0, len(fields))
 	seen := make(map[string]bool, len(fields))
 	for _, f := range fields {
@@ -77,13 +93,17 @@ func pathMatchesTokens(path string, tokens []string) bool {
 // Multiple matches are a legitimate success (REQ-004 does not treat ambiguity
 // as failure): a capability may legitimately span several files. Zero matches
 // is the only failure mode.
-func ResolveIntent(ir models.ExecutionIR, candidates []models.AffectedFile) ([]string, error) {
+func ResolveIntent(ir models.ExecutionIR, candidates []models.AffectedFile, targetFiles []string) ([]string, error) {
+	if len(targetFiles) > 0 {
+		return targetFiles, nil
+	}
+
 	tokens := intentTokens(ir.Intent.Capability)
 	if len(tokens) == 0 {
 		return nil, &IntentResolutionError{
 			NodeID:     ir.NodeID,
 			Capability: ir.Intent.Capability,
-			Reason:     "empty capability, cannot derive match tokens",
+			Reason:     "attempted unit target_files (none found) and token matching fallback (skipped: capability contains natural language or is empty)",
 		}
 	}
 
@@ -98,7 +118,7 @@ func ResolveIntent(ir models.ExecutionIR, candidates []models.AffectedFile) ([]s
 		return nil, &IntentResolutionError{
 			NodeID:     ir.NodeID,
 			Capability: ir.Intent.Capability,
-			Reason:     fmt.Sprintf("no workspace file matched tokens [%s]", strings.Join(tokens, ", ")),
+			Reason:     fmt.Sprintf("attempted unit target_files (none found) and token matching fallback (no match for tokens: %s)", strings.Join(tokens, ", ")),
 		}
 	}
 	return matches, nil
@@ -120,7 +140,14 @@ func ResolveExecutionIRTargets(analysis models.TaskAnalysis) (map[string][]strin
 	resolved := make(map[string][]string, len(analysis.ExecutionIRs))
 	var errs []error
 	for _, ir := range analysis.ExecutionIRs {
-		targets, err := ResolveIntent(ir, analysis.AffectedFiles)
+		var targetFiles []string
+		for _, unit := range analysis.ExecutionUnits {
+			if unit.ID == ir.NodeID {
+				targetFiles = unit.TargetFiles
+				break
+			}
+		}
+		targets, err := ResolveIntent(ir, analysis.AffectedFiles, targetFiles)
 		if err != nil {
 			errs = append(errs, err)
 			continue

@@ -3,12 +3,14 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
+	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -73,6 +75,17 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 	var err error
 	var patchApplied bool
 	var retryErrorMsg string
+	var hasEditsApplied bool
+
+	wrapErr := func(e error) error {
+		if e == nil {
+			return nil
+		}
+		if !hasEditsApplied && !errors.Is(e, workflow.ErrPaused) && !errors.Is(e, workflow.ErrWaitingApproval) && !llm.IsTransientError(e) {
+			return fmt.Errorf("%w: %w", workflow.ErrNoProgress, e)
+		}
+		return e
+	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		currentInstruction := baseInstruction
@@ -86,7 +99,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 			cfg.logf(ctx, "info", "Resetting worktree before retry attempt %d", attempt)
 			if errReset := cfg.Worktree.ResetRoleWorktrees(ctx, cfg.Task, cfg.Agent, cfg.WorktreeSuffix); errReset != nil {
 				cfg.logf(ctx, "error", "failed to reset worktree: %v", errReset)
-				return nil, false, fmt.Errorf("worktree corrupted: failed to reset worktree: %w", errReset)
+				return nil, false, wrapErr(fmt.Errorf("worktree corrupted: failed to reset worktree: %w", errReset))
 			}
 		}
 		llmCtx := ctx
@@ -98,7 +111,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		}
 		out, err = cfg.LLM.RunLLMStep(llmCtx, cfg.Task, cfg.Agent, cfg.JobID, cfg.StepID, currentInstruction)
 		if err != nil {
-			return nil, false, err
+			return nil, false, wrapErr(err)
 		}
 
 		retryNeeded := false
@@ -111,6 +124,9 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 				// hung/corrupting test run can be reverted to the salvaged state instead of
 				// losing the edits or leaving the worktree undefined (Issue 6).
 				editsApplied, _ := out["edits_applied"].([]string)
+				if len(editsApplied) > 0 {
+					hasEditsApplied = true
+				}
 				cfg.logf(ctx, "warn", "tool loop exhausted its iteration budget but %d edit(s) were applied; attempting to salvage as a partial result (attempt %d/%d)", len(editsApplied), attempt, maxRetries)
 
 				var salvageHash string
@@ -163,7 +179,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 									retryNeeded = true
 								} else {
 									cfg.logf(ctx, "error", "Targeted tests failed on salvaged partial result after max retries")
-									return nil, false, fmt.Errorf("targeted tests failed on salvaged partial result: %w", errT)
+									return nil, false, wrapErr(fmt.Errorf("targeted tests failed on salvaged partial result: %w", errT))
 								}
 							}
 						}
@@ -186,6 +202,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 			parsed, _ := out["parsed"].(map[string]any)
 			summary, _ := parsed["summary"].(string)
 			if strings.TrimSpace(summary) != "" {
+				hasEditsApplied = true
 				if cfg.Tester != nil && cfg.Diff != nil {
 					if repoHostPath, err := cfg.Diff.GetTaskRepoHostPath(ctx, cfg.Task); err == nil {
 						if changedFiles, diffErr := cfg.Diff.GetChangedFiles(ctx, cfg.Task, cfg.Agent, repoHostPath, cfg.WorktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
@@ -198,7 +215,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 									retryNeeded = true
 								} else {
 									cfg.logf(ctx, "error", "Targeted tests failed after max retries")
-									return nil, false, fmt.Errorf("targeted tests failed: %w", errT)
+									return nil, false, wrapErr(fmt.Errorf("targeted tests failed: %w", errT))
 								}
 							} else {
 								patchApplied = true
@@ -247,11 +264,11 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 						if pErr, ok := applyErr.(*patch.PolicyViolationError); ok {
 							if pErr.Severity == patch.SeverityCritical {
 								cfg.logf(ctx, "error", "CRITICAL Security Boundary Violation: %s. Pausing task for human review.", pErr.ErrorMsg)
-								return nil, false, fmt.Errorf("%w: %s", workflow.ErrPaused, pErr.ErrorMsg)
+								return nil, false, wrapErr(fmt.Errorf("%w: %s", workflow.ErrPaused, pErr.ErrorMsg))
 							}
 							if attempt >= 2 {
 								cfg.logf(ctx, "error", "Repeated Execution Boundary Violation (attempt %d): %s. Pausing task.", attempt, pErr.ErrorMsg)
-								return nil, false, fmt.Errorf("%w: repeated boundary violations: %s", workflow.ErrPaused, pErr.ErrorMsg)
+								return nil, false, wrapErr(fmt.Errorf("%w: repeated boundary violations: %s", workflow.ErrPaused, pErr.ErrorMsg))
 							}
 
 							jsonErrBytes, _ := json.MarshalIndent(pErr, "", "  ")
@@ -268,10 +285,11 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 							retryNeeded = true
 						} else {
 							cfg.logf(ctx, "error", "Patch apply failed after max retries")
-							return nil, false, fmt.Errorf("failed to apply patch: %w", applyErr)
+							return nil, false, wrapErr(fmt.Errorf("failed to apply patch: %w", applyErr))
 						}
 					} else {
 						// Patch applied cleanly. Now let's run targeted tests to verify!
+						hasEditsApplied = true
 						if cfg.Tester != nil && cfg.Diff != nil {
 							if repoHostPath, err := cfg.Diff.GetTaskRepoHostPath(ctx, cfg.Task); err == nil {
 								if changedFiles, diffErr := cfg.Diff.GetChangedFiles(ctx, cfg.Task, cfg.Agent, repoHostPath, cfg.WorktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
@@ -283,7 +301,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 											retryNeeded = true
 										} else {
 											cfg.logf(ctx, "error", "Targeted tests failed after max retries")
-											return nil, false, fmt.Errorf("targeted tests failed: %w", errT)
+											return nil, false, wrapErr(fmt.Errorf("targeted tests failed: %w", errT))
 										}
 									} else {
 										patchApplied = true

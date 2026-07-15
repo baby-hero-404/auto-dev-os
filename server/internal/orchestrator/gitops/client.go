@@ -3,7 +3,6 @@ package gitops
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -96,21 +95,11 @@ func (c *DefaultSandboxGitClient) CommitChanges(ctx context.Context, task *model
 	return nil
 }
 
-func getDiffPrefixes(containerPath string) string {
-	rel, err := filepath.Rel("/workspace", containerPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
-		return ""
-	}
-	rel = filepath.ToSlash(rel)
-	return fmt.Sprintf(" --src-prefix=a/%s/ --dst-prefix=b/%s/", rel, rel)
-}
-
 func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
-	prefixes := getDiffPrefixes(containerPath)
 	trackCmd := fmt.Sprintf("git -C %s add -N .", paths.QuoteShellArg(containerPath))
 	_, _ = c.RunSandboxStep(ctx, task, agent, "git_track_untracked", trackCmd)
 
-	cmd := fmt.Sprintf("git -C %s diff%s", paths.QuoteShellArg(containerPath), prefixes)
+	cmd := fmt.Sprintf("git -C %s diff", paths.QuoteShellArg(containerPath))
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_diff", cmd)
 	if out != nil {
 		if stdout, ok := out["stdout"].(string); ok {
@@ -121,11 +110,9 @@ func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task
 }
 
 func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, baseBranch string) (string, error) {
-	prefixes := getDiffPrefixes(containerPath)
-	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[3]s %[2]s...HEAD 2>/dev/null || git diff %[3]s master...HEAD 2>/dev/null || git diff %[3]s HEAD~1 2>/dev/null || git diff %[3]s)",
+	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[2]s...HEAD 2>/dev/null || git diff master...HEAD 2>/dev/null || git diff HEAD~1 2>/dev/null || git diff)",
 		paths.QuoteShellArg(containerPath),
 		paths.QuoteShellArg(baseBranch),
-		prefixes,
 	)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_pr_diff", diffCmd)
 	if out != nil {
@@ -189,7 +176,7 @@ for repo in meta.get("repos", []):
     full_path = os.path.join(container_path, rel_path)
     if os.path.exists(os.path.join(full_path, ".git")):
         subprocess.run(["git", "-C", full_path, "add", "-N", "."], capture_output=True)
-        res = subprocess.run(["git", "-C", full_path, "diff", f"--src-prefix=a/{rel_path}/", f"--dst-prefix=b/{rel_path}/"], capture_output=True, text=True)
+        res = subprocess.run(["git", "-C", full_path, "diff"], capture_output=True, text=True)
         if res.returncode == 0 and res.stdout.strip():
             diff_out.append(f"--- Repository: {name}\n{res.stdout}")
 print("\n".join(diff_out))`
@@ -247,7 +234,7 @@ for repo in meta.get("repos", []):
         if res.returncode == 0:
             for line in res.stdout.splitlines():
                 if len(line) > 2:
-                    files_out.append(f"{rel_path}/{line[3:].strip()}")
+                    files_out.append(line[3:].strip())
 print("\n".join(files_out))`
 
 	cmd := fmt.Sprintf("python3 -c %[1]s %[2]s %[3]s",

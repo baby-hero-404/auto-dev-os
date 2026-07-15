@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -44,9 +46,20 @@ func (r *Registry) Execute(ctx context.Context, name string, call Call) (Result,
 		return Result{}, fmt.Errorf("unknown tool: %s", name)
 	}
 	if !AllowedForRole(call.AgentRole, t.Capabilities()) {
+		var allowedToolNames []string
+		r.mu.RLock()
+		for tName, regTool := range r.tools {
+			if AllowedForRole(call.AgentRole, regTool.Capabilities()) {
+				allowedToolNames = append(allowedToolNames, tName)
+			}
+		}
+		r.mu.RUnlock()
+		sort.Strings(allowedToolNames)
+		toolsList := strings.Join(allowedToolNames, ", ")
+
 		return Result{
 			Success: false,
-			Message: fmt.Sprintf("Error: role %q is not authorized to use tool %q", call.AgentRole, name),
+			Message: fmt.Sprintf("Error: role %q is not authorized to use tool %q. This will not change during this step — do not call it again. Tools available to you: %s", call.AgentRole, name, toolsList),
 		}, nil
 	}
 	return t.Execute(ctx, call)

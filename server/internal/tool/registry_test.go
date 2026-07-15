@@ -135,8 +135,16 @@ func TestRegistryExecute_RejectsUnauthorizedRole(t *testing.T) {
 	}
 	if res.Message == "" {
 		t.Error("expected a rejection message explaining the authorization failure")
-	} else if !strings.HasPrefix(res.Message, "Error: ") {
-		t.Errorf("expected rejection message to start with 'Error: ', got: %q", res.Message)
+	} else {
+		if !strings.HasPrefix(res.Message, "Error: ") {
+			t.Errorf("expected rejection message to start with 'Error: ', got: %q", res.Message)
+		}
+		if !strings.Contains(res.Message, "This will not change during this step — do not call it again") {
+			t.Errorf("expected rejection message to state that the rejection is permanent, got: %q", res.Message)
+		}
+		if !strings.Contains(res.Message, "Tools available to you:") {
+			t.Errorf("expected rejection message to list available tools, got: %q", res.Message)
+		}
 	}
 	if invoked {
 		t.Error("expected the underlying tool to NOT be invoked when the role is unauthorized")

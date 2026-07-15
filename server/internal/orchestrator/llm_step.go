@@ -13,6 +13,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -43,9 +44,15 @@ func agenticWorkspaceRole(stepID string) string {
 
 func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
 	o.initCheckpoints()
+	agentRole := ""
+	if agent != nil {
+		agentRole = agent.Role
+	}
+	resolvedRole := effectiveRoleForStep(stepID, agentRole, task)
+
 	var tools []llm.ToolDefinition
 	if o.capManager != nil && agent != nil {
-		tools = o.capManager.ToolsForRole(agent.Role)
+		tools = o.capManager.ToolsForRole(resolvedRole)
 	}
 	var assemble llmrunner.PromptAssembler
 	if o.prompts != nil {
@@ -80,13 +87,13 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		Compiler: prompts.NewDefaultPromptCompiler("default"),
 	}
 	if stepIsAgentic(stepID) && o.registry != nil && len(tools) > 0 {
-		agentID, agentRole := "", ""
+		agentID := ""
 		if agent != nil {
-			agentID, agentRole = agent.ID, agent.Role
+			agentID = agent.ID
 		}
 		workspace := o.resolveAgenticWorkspace(ctx, task, agenticWorkspaceRole(stepID))
 		runner.Tools = tools
-		runner.ToolExecutor = steps.NewBoundaryCheckedToolExecutor(o.registry, workspace, task, agentID, agentRole, o.tasks)
+		runner.ToolExecutor = steps.NewBoundaryCheckedToolExecutor(o.registry, workspace, task, agentID, resolvedRole, o.tasks)
 	}
 
 	if models.IsStateMachineEnabled(ctx) && o.checkpoints != nil && assemble != nil {
@@ -164,4 +171,42 @@ func (o *Orchestrator) resolveAgenticWorkspace(ctx context.Context, task *models
 		return wp.RepoMain(task.ID, repoName).String()
 	}
 	return wp.RepoWorktreeDir(task.ID, repoName, role).String()
+}
+
+// stepRequiresEditCaps reports whether stepID's instruction expects the model
+// to modify files (fix + all coding steps; review/analyze/plan stay read-only).
+func stepRequiresEditCaps(stepID string) bool {
+	return stepID == workflow.StepFix ||
+		strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
+		strings.HasPrefix(stepID, workflow.StepCodeFrontend)
+}
+
+// effectiveRoleForStep returns the capability role a step's LLM call should
+// advertise, execute, AND render its persona with. If the step expects edits
+// but the assigned agent's role lacks CapEdit/CapCreate, remap to the task's
+// coder role (task 8291a25e: fix under planner/reviewer had zero edit tools
+// while its instruction demanded edits).
+func effectiveRoleForStep(stepID, agentRole string, task *models.Task) string {
+	if !stepRequiresEditCaps(stepID) {
+		return agentRole
+	}
+	if tool.AllowedForRole(agentRole, []tool.Capability{tool.CapEdit}) &&
+		tool.AllowedForRole(agentRole, []tool.Capability{tool.CapCreate}) {
+		return agentRole // already a coder role — keep it
+	}
+	return coderRoleForTask(task)
+}
+
+func coderRoleForTask(task *models.Task) string {
+	if task == nil || len(task.Analysis) == 0 {
+		return "backend"
+	}
+	var analysis models.TaskAnalysis
+	if err := json.Unmarshal(task.Analysis, &analysis); err == nil {
+		switch strings.ToLower(analysis.PrimaryCategory) {
+		case "frontend", "ui", "ux":
+			return "frontend"
+		}
+	}
+	return "backend"
 }

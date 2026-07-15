@@ -21,11 +21,11 @@ func DefaultRoleProfiles() map[string]RoleProfile {
 		},
 		"backend": {
 			Role:         "backend",
-			Capabilities: []Capability{CapRead, CapEdit, CapBuild, CapGit, CapSearch, CapContext},
+			Capabilities: []Capability{CapRead, CapEdit, CapCreate, CapBuild, CapGit, CapSearch, CapContext},
 		},
 		"frontend": {
 			Role:         "frontend",
-			Capabilities: []Capability{CapRead, CapEdit, CapBuild, CapSearch, CapContext},
+			Capabilities: []Capability{CapRead, CapEdit, CapCreate, CapBuild, CapSearch, CapContext},
 		},
 		"reviewer": {
 			Role:         "reviewer",

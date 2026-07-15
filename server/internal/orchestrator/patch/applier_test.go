@@ -401,11 +401,11 @@ func TestRunner_NormalizePatchPath(t *testing.T) {
 	runner := &Runner{}
 
 	tests := []struct {
-		name             string
-		firstPath        string
-		role             string
-		expectedRepo     string
-		expectedRelPath  string
+		name            string
+		firstPath       string
+		role            string
+		expectedRepo    string
+		expectedRelPath string
 	}{
 		{
 			name:            "Full path with worktrees and role",
@@ -521,3 +521,54 @@ func TestLegacyGitApplier_Validate_RedundantRepoPrefixWarning(t *testing.T) {
 	}
 }
 
+// TestRunner_SplitPatchByRepoWithWorkspace_MultiRepo regression-tests task 8291a25e: after
+// REQ-002 removed repo-name path prefixes from GetWorkspaceDiff's output, a multi-repo patch's
+// only repo-attribution signal is the "--- Repository: <name>" marker line. Before this fix,
+// NormalizePatchPath's path-based fallback misread a subdirectory as the repo name (or produced
+// an empty repo key), merging every repo's diff blocks into one wrong bucket.
+func TestRunner_SplitPatchByRepoWithWorkspace_MultiRepo(t *testing.T) {
+	ws := &models.TaskWorkspace{
+		Repos: []models.RepoWorkspace{
+			{Name: "repoA"},
+			{Name: "repoB"},
+		},
+	}
+	runner := &Runner{}
+
+	patchText := "--- Repository: repoA\n" +
+		"diff --git a/main.go b/main.go\n" +
+		"--- a/main.go\n+++ b/main.go\n@@ -1,1 +1,2 @@\n+x\n" +
+		"--- Repository: repoB\n" +
+		"diff --git a/internal/utils.go b/internal/utils.go\n" +
+		"--- a/internal/utils.go\n+++ b/internal/utils.go\n@@ -1,1 +1,2 @@\n+y\n"
+
+	res := runner.SplitPatchByRepoWithWorkspace(patchText, ws, "backend")
+
+	if len(res) != 2 {
+		t.Fatalf("expected 2 repo patches, got %d: keys=%v", len(res), mapKeys(res))
+	}
+
+	repoAPatch, ok := res["repoA"]
+	if !ok {
+		t.Fatalf("expected repoA patch, got keys: %v", mapKeys(res))
+	}
+	if !strings.Contains(repoAPatch, "a/main.go") || strings.Contains(repoAPatch, "internal/utils.go") {
+		t.Errorf("expected repoA patch to contain only main.go, got:\n%s", repoAPatch)
+	}
+
+	repoBPatch, ok := res["repoB"]
+	if !ok {
+		t.Fatalf("expected repoB patch, got keys: %v", mapKeys(res))
+	}
+	if !strings.Contains(repoBPatch, "a/internal/utils.go") || strings.Contains(repoBPatch, "diff --git a/main.go") {
+		t.Errorf("expected repoB patch to contain only internal/utils.go, got:\n%s", repoBPatch)
+	}
+}
+
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

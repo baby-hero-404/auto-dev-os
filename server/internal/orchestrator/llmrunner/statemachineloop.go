@@ -138,11 +138,11 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 		// Prepare prompt instructions for the current state/phase
 		phasePrompt := fmt.Sprintf("\n\n[STATE MACHINE] Current Phase: %s. Remaining budget: %d iterations. Allowed tools: %s.", currentState, sm.Remaining(), getToolNames(allowedTools))
 		if currentState == StateDiscovery {
-			phasePrompt += "\nExplore the codebase to discover files needing change. Do NOT edit any files yet."
+			phasePrompt += "\nExplore the codebase to discover files needing change. Do NOT edit any files yet. When you are finished exploring and have identified all files needing change, you must stop calling tools and output a message (text or JSON schema response) summarizing your findings to transition out of Discovery."
 		} else if currentState == StateImplementation {
-			phasePrompt += fmt.Sprintf("\nApply your edits directly using write tools. You are strictly allowed to modify only these files: %s.", strings.Join(resolvedTargets, ", "))
+			phasePrompt += fmt.Sprintf("\nApply your edits directly using write tools. You are strictly allowed to modify only these files: %s. When you have completed all edits, stop calling tools and output a message/JSON summarizing the applied changes to transition to Validation.", strings.Join(resolvedTargets, ", "))
 		} else if currentState == StateValidation {
-			phasePrompt += "\nVerify your edits using the test/lint tools. Fix any issues found."
+			phasePrompt += "\nVerify your edits using the test/lint tools. Fix any issues found. Once tests and lint pass and everything is verified, stop calling tools and output your final JSON response matching the schema to complete the task."
 		}
 
 		// Append the phase instructions to the user prompt history

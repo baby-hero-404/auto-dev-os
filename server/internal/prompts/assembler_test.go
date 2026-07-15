@@ -338,6 +338,54 @@ func TestPromptAssembler_AssembleForAgent(t *testing.T) {
 	}
 }
 
+func TestPromptAssembler_FixStepPersona(t *testing.T) {
+	engine := &MockContextEngine{}
+	assembler := NewPromptAssembler(testBaseTools(), engine)
+
+	task := models.Task{
+		ID:        "task-fix-1",
+		ProjectID: "project-1",
+		Title:     "Fix bug",
+		Analysis:  json.RawMessage(`{"primary_category":"backend"}`),
+	}
+
+	// Fix step under planner agent: should load coder role prompt, not planner, and no "Do NOT write implementation code".
+	ctx := context.WithValue(context.Background(), StepIDCtxKey, "fix")
+	agent := &models.Agent{ID: "agent-1", Role: "planner"}
+
+	messages, _, err := assembler.AssembleForAgent(ctx, task, agent, nil, nil)
+	if err != nil {
+		t.Fatalf("AssembleForAgent failed: %v", err)
+	}
+
+	var systemPrompt string
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemPrompt = msg.Content
+			break
+		}
+	}
+
+	if systemPrompt == "" {
+		t.Fatal("expected system prompt to be generated")
+	}
+
+	// Verify it contains the Coder Role Prompt
+	if !strings.Contains(systemPrompt, "# Coder Role") {
+		t.Error("expected system prompt to contain '# Coder Role'")
+	}
+
+	// Verify it does NOT contain the Planner Role Prompt
+	if strings.Contains(systemPrompt, "# Planner Role") {
+		t.Error("expected system prompt to NOT contain '# Planner Role'")
+	}
+
+	// Verify it does NOT contain the "Do NOT write implementation code" constraint
+	if strings.Contains(systemPrompt, "Do NOT write implementation code") {
+		t.Error("expected system prompt to NOT contain 'Do NOT write implementation code'")
+	}
+}
+
 func TestTruncateHistoryKeepsRecentMessages(t *testing.T) {
 	history := []llm.Message{
 		{Role: "user", Content: strings.Repeat("old", 100)},

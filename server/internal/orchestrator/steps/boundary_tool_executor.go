@@ -47,7 +47,7 @@ func NewBoundaryCheckedToolExecutor(registry *tool.Registry, workspace string, t
 					oldFile = "/dev/null"
 				}
 
-				decision := patch.EvaluatePolicy(path, oldFile, &analysis)
+				decision := patch.EvaluatePolicy(path, oldFile, &analysis, tool.IsRepoCheckoutWorkspace(workspace))
 				switch decision.Severity {
 				case patch.SeverityCritical:
 					return "", fmt.Errorf("%w: security boundary violation on %q: %s", workflow.ErrPaused, path, decision.Reason)

@@ -44,3 +44,91 @@ func TestResolveSafePath(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalizeRepoRelative(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		repoName   string
+		branch     string
+		wantPath   string
+		wantOk     bool
+	}{
+		{
+			name:     "already relative",
+			path:     "cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "cmd/sync/main.go",
+			wantOk:   true,
+		},
+		{
+			name:     "single workspace prefix",
+			path:     "code/repos/tool_zentao/main/cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "cmd/sync/main.go",
+			wantOk:   true,
+		},
+		{
+			name:     "worktree suffix prefix",
+			path:     "code/repos/tool_zentao/worktrees/backend/cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "cmd/sync/main.go",
+			wantOk:   true,
+		},
+		{
+			name:     "doubled prefix (call-131)",
+			path:     "code/repos/tool_zentao/main/code/repos/tool_zentao/main/cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "cmd/sync/main.go",
+			wantOk:   true,
+		},
+		{
+			name:     "foreign repo prefix - rejected",
+			path:     "code/repos/other_repo/main/cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "traversal escape - rejected",
+			path:     "code/repos/tool_zentao/main/../../evil.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "traversal inside - rejected",
+			path:     "cmd/../evil.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "",
+			wantOk:   false,
+		},
+		{
+			name:     "git diff a/ prefix - resolved",
+			path:     "a/cmd/sync/main.go",
+			repoName: "tool_zentao",
+			branch:   "main",
+			wantPath: "cmd/sync/main.go",
+			wantOk:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := CanonicalizeRepoRelative(tc.path, tc.repoName, tc.branch)
+			if ok != tc.wantOk {
+				t.Fatalf("CanonicalizeRepoRelative() ok = %v, want %v", ok, tc.wantOk)
+			}
+			if ok && got != tc.wantPath {
+				t.Errorf("CanonicalizeRepoRelative() got = %q, want %q", got, tc.wantPath)
+			}
+		})
+	}
+}

@@ -48,7 +48,7 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 	if agent != nil {
 		agentRole = agent.Role
 	}
-	resolvedRole := effectiveRoleForStep(stepID, agentRole, task)
+	resolvedRole := tool.EffectiveRoleForStep(stepID, agentRole, task)
 
 	var tools []llm.ToolDefinition
 	if o.capManager != nil && agent != nil {
@@ -173,40 +173,6 @@ func (o *Orchestrator) resolveAgenticWorkspace(ctx context.Context, task *models
 	return wp.RepoWorktreeDir(task.ID, repoName, role).String()
 }
 
-// stepRequiresEditCaps reports whether stepID's instruction expects the model
-// to modify files (fix + all coding steps; review/analyze/plan stay read-only).
-func stepRequiresEditCaps(stepID string) bool {
-	return stepID == workflow.StepFix ||
-		strings.HasPrefix(stepID, workflow.StepCodeBackend) ||
-		strings.HasPrefix(stepID, workflow.StepCodeFrontend)
-}
-
-// effectiveRoleForStep returns the capability role a step's LLM call should
-// advertise, execute, AND render its persona with. If the step expects edits
-// but the assigned agent's role lacks CapEdit/CapCreate, remap to the task's
-// coder role (task 8291a25e: fix under planner/reviewer had zero edit tools
-// while its instruction demanded edits).
-func effectiveRoleForStep(stepID, agentRole string, task *models.Task) string {
-	if !stepRequiresEditCaps(stepID) {
-		return agentRole
-	}
-	if tool.AllowedForRole(agentRole, []tool.Capability{tool.CapEdit}) &&
-		tool.AllowedForRole(agentRole, []tool.Capability{tool.CapCreate}) {
-		return agentRole // already a coder role — keep it
-	}
-	return coderRoleForTask(task)
-}
-
-func coderRoleForTask(task *models.Task) string {
-	if task == nil || len(task.Analysis) == 0 {
-		return "backend"
-	}
-	var analysis models.TaskAnalysis
-	if err := json.Unmarshal(task.Analysis, &analysis); err == nil {
-		switch strings.ToLower(analysis.PrimaryCategory) {
-		case "frontend", "ui", "ux":
-			return "frontend"
-		}
-	}
-	return "backend"
-}
+// stepRequiresEditCaps and effectiveRoleForStep moved to internal/tool (tool.StepRequiresEditCaps,
+// tool.EffectiveRoleForStep) so orchestrator and prompts share one implementation instead of two
+// copies that could silently diverge — see internal/tool/rolepolicy.go.

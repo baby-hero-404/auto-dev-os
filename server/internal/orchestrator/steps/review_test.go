@@ -9,6 +9,33 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
+func TestParseReviewFindings_FieldMapping(t *testing.T) {
+	parsed := map[string]any{
+		"findings": []any{
+			map[string]any{
+				"repo":           "tool_zentao",
+				"file":           "cmd/sync/main.go",
+				"line":           float64(12),
+				"severity":       "high",
+				"recommendation": "fix it",
+				"requires_fix":   true,
+			},
+		},
+	}
+	findings, err := ParseReviewFindings(parsed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.Repo != "tool_zentao" || f.File != "cmd/sync/main.go" || f.Line != 12 ||
+		f.Severity != "high" || f.Recommendation != "fix it" || !f.RequiresFix {
+		t.Errorf("unexpected finding: %+v", f)
+	}
+}
+
 func TestReviewStep_SkipsEasyTask(t *testing.T) {
 	task := &models.Task{ID: "t1", Complexity: models.TaskComplexityEasy}
 	step := NewReviewStep(
@@ -94,6 +121,35 @@ func TestReviewStep_WithFindings(t *testing.T) {
 	}
 	if result["parsed"] == nil {
 		t.Error("expected parsed result to be returned")
+	}
+}
+
+// TestReviewStep_RequiresFixTrue regression-tests the legacy requires_fix:true boolean signal
+// (independent of severity), lost when ParseReviewFindings/hasActionableFindings were rewritten
+// to the typed models.ReviewFinding contract (Part 2 review finding).
+func TestReviewStep_RequiresFixTrue(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	findings := map[string]any{"findings": []any{map[string]any{"file": "main.go", "requires_fix": true}}}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		&mockLLMRunner{result: StepResult{"parsed": findings}},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		nil,
+		statusMock,
+		&mockLogger{},
+	)
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusMock.lastStatus != models.TaskStatusFixing {
+		t.Errorf("expected requires_fix:true (no severity) to route to fixing, got: %s", statusMock.lastStatus)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -532,7 +533,7 @@ func resolveTaskAnalysisForCollect(ctx context.Context, task models.Task, stepID
 
 // loadBaseRolePrompts loads the immutable Base Prompt, Role Prompt, and (mutable) Step Prompt
 // sections — the fixed identity/instructions layer every prompt starts with.
-func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string) []PromptSection {
+func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string, task models.Task) []PromptSection {
 	var sections []PromptSection
 
 	if a.promptPaths != nil && a.fs != nil {
@@ -543,7 +544,12 @@ func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string
 	}
 
 	if agent != nil && a.promptPaths != nil && a.fs != nil {
-		rolePromptFile := a.promptPaths.RolePrompt(agent.Role)
+		role := tool.EffectiveRoleForStep(stepID, agent.Role, &task)
+		roleFile := role
+		if role == "backend" || role == "frontend" {
+			roleFile = "coder"
+		}
+		rolePromptFile := a.promptPaths.RolePrompt(roleFile)
 		if content, err := a.fs.ReadFile(rolePromptFile); err == nil {
 			sections = append(sections, NewPromptSection("Role Prompt", string(content), PriorityRolePrompt, RenderOrderRolePrompt, true, "system"))
 		}
@@ -557,6 +563,11 @@ func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string
 
 	return sections
 }
+
+// coderRoleForTask, stepRequiresEditCaps, effectiveRoleForStep moved to internal/tool
+// (tool.CoderRoleForTask, tool.StepRequiresEditCaps, tool.EffectiveRoleForStep) so this package
+// and orchestrator share one implementation instead of two copies that could silently diverge —
+// see internal/tool/rolepolicy.go.
 
 // collectJITSkills resolves and renders the JIT Skills section (REQ-003), or a zero-value
 // PromptSection (empty Body) if resolution failed or no skills matched.
@@ -1048,7 +1059,7 @@ func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *
 	analysis := resolveTaskAnalysisForCollect(ctx, task, stepID)
 
 	var sections []PromptSection
-	sections = append(sections, a.loadBaseRolePrompts(agent, stepID)...)
+	sections = append(sections, a.loadBaseRolePrompts(agent, stepID, task)...)
 	if jit := a.collectJITSkills(ctx, task, agent, stepID); jit.Body != "" {
 		sections = append(sections, jit)
 	}

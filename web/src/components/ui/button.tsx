@@ -41,8 +41,20 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       md: "h-10 px-4 py-2 text-sm rounded-md",
     };
 
+    if (asChild) {
+      return (
+        <Slot
+          className={cn(baseStyles, variants[variant], sizes[size], className)}
+          ref={ref}
+          {...props}
+        >
+          {children}
+        </Slot>
+      );
+    }
+
     return (
-      <Comp
+      <button
         className={cn(baseStyles, variants[variant], sizes[size], className)}
         ref={ref}
         disabled={disabled || isLoading}
@@ -52,7 +64,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
         ) : null}
         {children}
-      </Comp>
+      </button>
     );
   }
 );

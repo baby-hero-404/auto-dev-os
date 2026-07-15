@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -164,5 +165,101 @@ func TestFixStep_PRDiffFallbackUsesFrontendWorktreeSuffix(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected frontend worktree suffix fallback, got suffix calls %#v", diffMock.workspaceSuffixes)
+	}
+}
+
+func TestFixStep_PathCanonicalization(t *testing.T) {
+	task := &models.Task{
+		ID:         "t1",
+		Complexity: models.TaskComplexityMedium,
+		Analysis: []byte(`{
+			"execution_boundaries": [
+				{
+					"repo_name": "tool_zentao"
+				}
+			]
+		}`),
+	}
+
+	llmMock := &mockLLMRunner{
+		result: StepResult{
+			"parsed": map[string]any{
+				"fixes_applied": true,
+				"summary":       "done",
+			},
+		},
+	}
+
+	loggerMock := &mockLogger{}
+
+	step := NewFixStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockCheckpointLister{},
+		llmMock,
+		&mockDiffCapturer{},
+		nil,
+		&mockPatchApplier{},
+		&mockTestRunner{},
+		&mockStatusUpdater{},
+		loggerMock,
+		&mockWorktreeManager{},
+		&mockAffectedFileReader{},
+	)
+
+	// Context with findings:
+	// 1. One workspace-prefixed path under the target repo (tool_zentao)
+	// 2. One foreign repo path (other_repo) - should be dropped
+	sc := workflow.StepContext{
+		Inputs: map[string]StepResult{
+			workflow.StepReview: {
+				"parsed": map[string]any{
+					"findings": []any{
+						map[string]any{
+							"file":     "code/repos/tool_zentao/main/cmd/sync/main.go",
+							"severity": "high",
+						},
+						map[string]any{
+							"file":     "code/repos/other_repo/main/cmd/sync/main.go",
+							"severity": "high",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := step.Execute(context.Background(), sc)
+	if err != nil && !errors.Is(err, workflow.ErrReviewFixLoop) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	capturedInstruction := llmMock.lastInstruction
+
+	// Verify that the instruction contains the canonical path cmd/sync/main.go
+	if !strings.Contains(capturedInstruction, "cmd/sync/main.go") {
+		t.Errorf("expected instruction to contain canonicalized path 'cmd/sync/main.go', got: %s", capturedInstruction)
+	}
+
+	// Verify that the instruction does NOT contain the uncanonicalized workspace prefix for tool_zentao
+	if strings.Contains(capturedInstruction, "code/repos/tool_zentao/main") {
+		t.Errorf("expected instruction to NOT contain workspace path prefix, got: %s", capturedInstruction)
+	}
+
+	// Verify that the foreign repo path other_repo was dropped
+	if strings.Contains(capturedInstruction, "other_repo") {
+		t.Errorf("expected instruction to NOT contain foreign repo path 'other_repo', got: %s", capturedInstruction)
+	}
+
+	// Verify that a warning was logged for dropping the foreign repo path
+	foundWarning := false
+	for _, msg := range loggerMock.messages {
+		if strings.Contains(msg, "dropping unresolvable review finding path") && strings.Contains(msg, "other_repo") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Errorf("expected warning to be logged for the dropped foreign repo path, logs: %v", loggerMock.messages)
 	}
 }

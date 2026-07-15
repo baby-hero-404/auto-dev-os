@@ -11,48 +11,82 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-func hasActionableFindings(findings any) bool {
-	slice, ok := findings.([]any)
-	if !ok {
-		return false
-	}
-	for _, f := range slice {
-		fMap, ok := f.(map[string]any)
-		if !ok {
-			continue
-		}
-		if reqFix, ok := fMap["requires_fix"].(bool); ok && reqFix {
+func hasActionableFindings(findings []models.ReviewFinding) bool {
+	for _, f := range findings {
+		if f.RequiresFix {
 			return true
 		}
-		sev, ok := fMap["severity"].(string)
-		if ok {
-			s := strings.ToLower(strings.TrimSpace(sev))
-			if s == "warning" || s == "error" || s == "high" || s == "blocking" || s == "critical" || s == "medium" {
-				return true
-			}
+		s := strings.ToLower(strings.TrimSpace(f.Severity))
+		if s == "warning" || s == "error" || s == "high" || s == "blocking" || s == "critical" || s == "medium" {
+			return true
 		}
 	}
 	return false
 }
 
-func getReviewFindings(parsed map[string]any) any {
+func ParseReviewFindings(parsed map[string]any) ([]models.ReviewFinding, error) {
 	if parsed == nil {
-		return nil
+		return nil, nil
 	}
+
+	var rawFindings []any
+
 	if findings, exists := parsed["findings"]; exists {
-		return findings
+		if slice, ok := findings.([]any); ok {
+			rawFindings = slice
+		} else if item, ok := findings.(map[string]any); ok {
+			rawFindings = []any{item}
+		}
+	} else if arr, exists := parsed["array"]; exists {
+		if slice, ok := arr.([]any); ok {
+			rawFindings = slice
+		} else if item, ok := arr.(map[string]any); ok {
+			rawFindings = []any{item}
+		}
+	} else if _, hasFile := parsed["file"]; hasFile {
+		rawFindings = []any{parsed}
+	} else if _, hasRec := parsed["recommendation"]; hasRec {
+		rawFindings = []any{parsed}
 	}
-	if arr, exists := parsed["array"]; exists {
-		return arr
+
+	var result []models.ReviewFinding
+	for _, raw := range rawFindings {
+		fMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		var f models.ReviewFinding
+		if repo, ok := fMap["repo"].(string); ok {
+			f.Repo = repo
+		}
+		if file, ok := fMap["file"].(string); ok {
+			f.File = file
+		}
+		if lineVal, ok := fMap["line"]; ok {
+			switch val := lineVal.(type) {
+			case float64:
+				f.Line = int(val)
+			case int:
+				f.Line = val
+			}
+		}
+		if severity, ok := fMap["severity"].(string); ok {
+			f.Severity = severity
+		}
+		if reqFix, ok := fMap["requires_fix"].(bool); ok {
+			f.RequiresFix = reqFix
+		}
+		if recommendation, ok := fMap["recommendation"].(string); ok {
+			f.Recommendation = recommendation
+		} else if rec, ok := fMap["recommendation_text"].(string); ok {
+			f.Recommendation = rec
+		} else if rec, ok := fMap["message"].(string); ok {
+			f.Recommendation = rec
+		}
+		result = append(result, f)
 	}
-	// Fallback if the parsed map itself represents a single finding object
-	if _, hasFile := parsed["file"]; hasFile {
-		return []any{parsed}
-	}
-	if _, hasRec := parsed["recommendation"]; hasRec {
-		return []any{parsed}
-	}
-	return nil
+
+	return result, nil
 }
 
 func getCoderModel(ctx context.Context, lister CheckpointLister, taskID string) string {
@@ -129,8 +163,8 @@ func (s *ReviewStep) StatusOnResume(output StepResult) string {
 	}
 	nextStatus := models.TaskStatusTesting
 	if parsed, ok := output["parsed"].(map[string]any); ok {
-		findings := getReviewFindings(parsed)
-		if findings != nil && hasActionableFindings(findings) {
+		findings, _ := ParseReviewFindings(parsed)
+		if len(findings) > 0 && hasActionableFindings(findings) {
 			nextStatus = models.TaskStatusFixing
 		}
 	}
@@ -269,8 +303,8 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 			if s.artifacts != nil {
 				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepReview, "review_findings", parsed)
 			}
-			findings := getReviewFindings(parsed)
-			if findings != nil {
+			findings, _ := ParseReviewFindings(parsed)
+			if len(findings) > 0 {
 				if hasActionableFindings(findings) {
 					hasFindings = true
 				}

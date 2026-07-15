@@ -148,7 +148,9 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 								repoRelPath = file
 							}
 
-							dec := EvaluatePolicy(repoRelPath, currentOldFile, &analysis)
+							// repoRelPath is always "<repoName>/<file>" here, never "code/repos/...",
+							// so the self-nested-path guard never applies to this diff-based flow.
+							dec := EvaluatePolicy(repoRelPath, currentOldFile, &analysis, false)
 							switch dec.Severity {
 							case SeverityCritical:
 								return &PolicyViolationError{

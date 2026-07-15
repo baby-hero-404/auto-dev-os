@@ -180,6 +180,22 @@ type ExpandedBoundary struct {
 	Risk       string `json:"risk"` // LOW, MEDIUM, HIGH, CRITICAL
 }
 
+// ReviewFinding is the typed contract crossing the review→fix seam.
+// File is repository-relative by definition; Repo carries repository
+// identity separately (never as a path prefix). This is the first
+// applied slice of the execution-semantics-2026 typed-contract model.
+type ReviewFinding struct {
+	Repo           string `json:"repo,omitempty"`
+	File           string `json:"file"` // repository-relative
+	Line           int    `json:"line,omitempty"`
+	Severity       string `json:"severity"` // CRITICAL|HIGH|MEDIUM|LOW
+	Recommendation string `json:"recommendation"`
+	// RequiresFix preserves the legacy boolean actionability signal some reviewer
+	// outputs use instead of (or alongside) Severity — independent OR condition,
+	// not derived from Severity.
+	RequiresFix bool `json:"requires_fix,omitempty"`
+}
+
 type TaskAnalysis struct {
 	Complexity             string              `json:"complexity"`
 	PrimaryCategory        string              `json:"primary_category,omitempty"`

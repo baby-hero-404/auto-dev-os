@@ -132,7 +132,10 @@ export function TaskActions() {
             {task.status === "failed" ? "Retry Execute" : "Execute"}
           </button>
         )}
-        {task && isPaused && (
+        {task && isPaused && 
+         task.spec_status !== "pending_review" && 
+         task.spec_status !== "changes_requested" && 
+         task.spec_status !== "clarification_required" && (
           <button
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-brand-primary px-3 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 shadow-sm cursor-pointer"
             onClick={execute}

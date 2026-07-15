@@ -4,9 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+// IsRepoCheckoutWorkspace reports whether workspace is a single repository checkout root
+// (e.g. .../code/repos/<repo>/main or a directory containing .git), as opposed to the flat
+// multi-repo CodeRoot (.../code) used when a task spans more than one repository. Multi-repo
+// tasks legitimately use "code/repos/<repo>/..." as a relative path — the self-nesting guards
+// in this file and patch.EvaluatePolicy must only fire when workspace is itself a repo root,
+// or they misclassify correct multi-repo paths as the nested-path bug (task 8291a25e report,
+// Part 2 review finding on EvaluatePolicy).
+func IsRepoCheckoutWorkspace(workspace string) bool {
+	if strings.Contains(filepath.ToSlash(workspace), "/code/repos/") {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(workspace, ".git"))
+	return err == nil
+}
 
 // SafeWorkspacePath resolves relPath within the workspace and prevents directory traversal.
 func SafeWorkspacePath(workspace string, relPath string) (string, error) {
@@ -39,6 +55,24 @@ func SafeWorkspacePath(workspace string, relPath string) (string, error) {
 
 	if !strings.HasPrefix(absResolved+sep, prefix) {
 		return "", fmt.Errorf("security violation: path %q escapes workspace boundary", relPath)
+	}
+
+	// Tool-Layer Guard: reject code/repos/... prefixed relPaths when the workspace is a repository root
+	if IsRepoCheckoutWorkspace(absWorkspace) {
+		normalizedRel := strings.ReplaceAll(relPath, "\\", "/")
+		normalizedRel = strings.TrimPrefix(normalizedRel, "/")
+		if strings.HasPrefix(normalizedRel, "code/repos/") {
+			parts := strings.Split(normalizedRel, "/")
+			correctPath := normalizedRel
+			if len(parts) >= 5 && parts[0] == "code" && parts[1] == "repos" {
+				if parts[3] == "worktrees" && len(parts) >= 6 {
+					correctPath = strings.Join(parts[5:], "/")
+				} else {
+					correctPath = strings.Join(parts[4:], "/")
+				}
+			}
+			return "", fmt.Errorf("path %q appears workspace-prefixed; this workspace is the repository root — use %q", relPath, correctPath)
+		}
 	}
 
 	return absResolved, nil

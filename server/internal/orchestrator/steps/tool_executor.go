@@ -43,13 +43,24 @@ func NewRegistryToolExecutor(registry *tool.Registry, workspace, taskID, agentID
 			return "Error: " + err.Error(), nil
 		}
 		if !res.Success {
+			errMsg := "Error: tool execution failed"
 			if res.Message != "" {
-				return "Error: " + res.Message, nil
+				// Tool/registry-level messages (e.g. Registry.Execute's authorization
+				// rejection) already carry their own "Error: " prefix — don't double it.
+				if strings.HasPrefix(res.Message, "Error: ") {
+					errMsg = res.Message
+				} else {
+					errMsg = "Error: " + res.Message
+				}
 			}
 			if len(res.Diagnostics) > 0 {
-				return "Error: " + res.Diagnostics[0].Message, nil
+				var diagMsgs []string
+				for _, d := range res.Diagnostics {
+					diagMsgs = append(diagMsgs, fmt.Sprintf("- [%s] %s:%d: %s", d.Severity, d.File, d.Line, d.Message))
+				}
+				errMsg = errMsg + "\nDiagnostics:\n" + strings.Join(diagMsgs, "\n")
 			}
-			return "Error: tool execution failed", nil
+			return errMsg, nil
 		}
 		return res.Output, nil
 	}

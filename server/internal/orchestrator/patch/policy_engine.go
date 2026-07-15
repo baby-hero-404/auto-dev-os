@@ -49,10 +49,24 @@ var criticalPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)secret`),
 }
 
-func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAnalysis) PolicyDecision {
+// EvaluatePolicy scores a proposed file change against the task's execution boundaries.
+// isRepoRootWorkspace must be true only when the caller's tool workspace is itself a single
+// repository checkout root (see tool.IsRepoCheckoutWorkspace) — for multi-repo tasks the tool
+// workspace is the flat CodeRoot, where "code/repos/<repo>/..." is the CORRECT relative path
+// form, not the self-nesting bug pattern the check below guards against.
+func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAnalysis, isRepoRootWorkspace bool) PolicyDecision {
 	file = filepath.ToSlash(filepath.Clean(strings.TrimSpace(file)))
-	baseName := filepath.Base(file)
 	isNew := currentOldFile == "/dev/null" || currentOldFile == ""
+	baseName := filepath.Base(file)
+
+	// Self-nested path check — only meaningful when the workspace root IS a repo checkout.
+	if isRepoRootWorkspace && strings.HasPrefix(strings.TrimPrefix(file, "/"), "code/repos/") {
+		return PolicyDecision{
+			Severity: SeverityError,
+			Reason:   fmt.Sprintf("path %q appears workspace-prefixed; this workspace is the repository root — use a repository-relative path instead", file),
+			Risk:     "HIGH",
+		}
+	}
 
 	// 1. Critical infrastructure / security check
 	for _, pat := range criticalPatterns {
@@ -141,7 +155,6 @@ func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAna
 			break
 		}
 	}
-
 
 	// Determine required capability
 	requiredCap := "modify_existing"

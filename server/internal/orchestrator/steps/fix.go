@@ -7,7 +7,29 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
+
+func getRepoName(t *models.Task, frozen *models.FrozenContext) string {
+	if frozen != nil && len(frozen.ExecutionBoundaries) > 0 {
+		for _, b := range frozen.ExecutionBoundaries {
+			if b.RepoName != "" {
+				return b.RepoName
+			}
+		}
+	}
+	if len(t.Analysis) > 0 {
+		var analysis models.TaskAnalysis
+		if err := json.Unmarshal(t.Analysis, &analysis); err == nil {
+			for _, b := range analysis.ExecutionBoundaries {
+				if b.RepoName != "" {
+					return b.RepoName
+				}
+			}
+		}
+	}
+	return ""
+}
 
 // FixStep implements Step for fixing findings/feedback from PR review.
 type FixStep struct {
@@ -67,6 +89,13 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		return StepResult{"status": "skipped", "info": "skipped fix step for easy task"}, nil
 	}
 
+	var analysis models.TaskAnalysis
+	if len(s.rt.Task.Analysis) > 0 {
+		_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
+	}
+	frozen := LoadFrozenContext(stepCtx, &analysis)
+	repoName := getRepoName(s.rt.Task, frozen)
+
 	var prFeedback string
 	if s.checkpoints != nil {
 		if checkpoints, cpErr := s.checkpoints.ListCheckpoints(ctx, s.rt.Task.ID); cpErr == nil {
@@ -92,14 +121,30 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		}
 		if prFeedback == "" {
 			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
-				findings := getReviewFindings(parsed)
-				if findings != nil {
-					if !hasActionableFindings(findings) {
+				findings, _ := ParseReviewFindings(parsed)
+				if len(findings) > 0 {
+					var canonicalized []models.ReviewFinding
+					for _, f := range findings {
+						// "main" is correct here (not the repo's git default branch): the fix
+						// step always runs in the physical main checkout directory, which
+						// paths.OSWorkspacePaths.RepoMain names "main" literally regardless of
+						// the repo's actual default branch — see resolveAgenticWorkspace.
+						if canonicalPath, ok := paths.CanonicalizeRepoRelative(f.File, repoName, "main"); ok {
+							f.File = canonicalPath
+							canonicalized = append(canonicalized, f)
+						}
+					}
+					if !hasActionableFindings(canonicalized) {
 						return StepResult{
 							"status": "skipped",
 							"info":   "no review findings, skipped fix step",
 						}, nil
 					}
+				} else {
+					return StepResult{
+						"status": "skipped",
+						"info":   "no review findings, skipped fix step",
+					}, nil
 				}
 			}
 		}
@@ -127,11 +172,7 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 
 		instruction := "Fix review findings. Here is the current workspace diff:\n\n" + diffText + "\n\n"
 
-		var analysis models.TaskAnalysis
-		if len(s.rt.Task.Analysis) > 0 {
-			_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
-		}
-		if frozen := LoadFrozenContext(stepCtx, &analysis); frozen != nil {
+		if frozen != nil {
 			if len(frozen.AcceptanceCriteria) > 0 {
 				acJSON, _ := json.MarshalIndent(frozen.AcceptanceCriteria, "", "  ")
 				instruction += "\n\nACCEPTANCE CRITERIA - Your fix MUST still satisfy these criteria:\n```json\n" + string(acJSON) + "\n```\n"
@@ -145,10 +186,24 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		var findingsJSON string
 		if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
 			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
-				findings := getReviewFindings(parsed)
-				if findings != nil {
-					if findingsBytes, err := json.MarshalIndent(findings, "", "  "); err == nil {
-						findingsJSON = string(findingsBytes)
+				rawFindings, err := ParseReviewFindings(parsed)
+				if err == nil && len(rawFindings) > 0 {
+					var canonicalized []models.ReviewFinding
+					for _, f := range rawFindings {
+						canonicalPath, ok := paths.CanonicalizeRepoRelative(f.File, repoName, "main")
+						if !ok {
+							if s.log != nil {
+								s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("dropping unresolvable review finding path: %q (repo: %s)", f.File, repoName))
+							}
+							continue
+						}
+						f.File = canonicalPath
+						canonicalized = append(canonicalized, f)
+					}
+					if len(canonicalized) > 0 {
+						if findingsBytes, err := json.MarshalIndent(canonicalized, "", "  "); err == nil {
+							findingsJSON = string(findingsBytes)
+						}
 					}
 				}
 			}
@@ -159,7 +214,13 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 		} else if findingsJSON != "" {
 			instruction += fmt.Sprintf("Address the following review findings:\n\n%s\n\n", findingsJSON)
 		}
-		instruction += "IMPORTANT: The diff above shows the current proposed changes. Use the available tools (e.g. search_replace, create_file) to fix ONLY the findings directly in the workspace. DO NOT recreate files that the diff already creates. All file paths are relative to your workspace root.\n"
+		var pathInstruction string
+		if repoName != "" {
+			pathInstruction = fmt.Sprintf("repository-relative to repository %s", repoName)
+		} else {
+			pathInstruction = "repository-relative"
+		}
+		instruction += fmt.Sprintf("IMPORTANT: The diff above shows the current proposed changes. Use the available tools (e.g. search_replace, create_file) to fix ONLY the findings directly in the workspace. DO NOT recreate files that the diff already creates. All file paths are %s.\n", pathInstruction)
 		instruction += "Use run_tests/run_build/run_lint to verify your fix before finishing. When done, respond with JSON containing fixes_applied and summary."
 
 		_, patchApplied, err := runPatchRetryLoop(ctx, patchRetryConfig{

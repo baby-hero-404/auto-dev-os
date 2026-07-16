@@ -2,10 +2,10 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Edit2, Check, X } from "lucide-react";
+import { ArrowLeft, Edit2, Check, X, Play, Pause, Ban } from "lucide-react";
 import { Badge, taskStatusBadge } from "@/components/ui/badge";
 import { Markdown } from "@/components/ui/markdown";
-import { useTaskDetail } from "./TaskDetailContext";
+import { useTaskDetail, formatStepName } from "./TaskDetailContext";
 
 export function TaskHeader() {
   const {
@@ -14,7 +14,24 @@ export function TaskHeader() {
     workflow,
     descriptionParts,
     updateTask,
+    workflowCompletion,
+    analysisData,
+    execute,
+    pause,
+    cancel,
+    isPaused,
   } = useTaskDetail();
+
+  const jobStatus = workflow?.job?.status?.toLowerCase();
+  const canPause = jobStatus === "running";
+  const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
+  const canResume = !!(
+    task &&
+    isPaused &&
+    task.spec_status !== "pending_review" &&
+    task.spec_status !== "changes_requested" &&
+    task.spec_status !== "clarification_required"
+  );
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -72,8 +89,9 @@ export function TaskHeader() {
   }, []);
 
   return (
-    <header className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
-      <div className="flex flex-col justify-between gap-5 xl:flex-row xl:items-start">
+    <header className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-5 shadow-lg transition-all hover:shadow-xl hover:border-stroke/80 group">
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+      <div className="relative flex flex-col justify-between gap-5 xl:flex-row xl:items-start z-10">
         <div className="min-w-0 flex-1">
           <Link
             href={`/projects/${projectID}`}
@@ -228,6 +246,61 @@ export function TaskHeader() {
           )}
         </div>
       </div>
+
+      {task && (
+        <div className="mt-5 pt-4 border-t border-stroke/30 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6 text-xs text-content-muted">
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-foreground">Current Step:</span>
+              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
+                {workflow?.job?.step ? formatStepName(workflow.job.step, analysisData) : "None"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-foreground">Progress:</span>
+              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
+                {workflowCompletion}%
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-foreground">Assigned Agent:</span>
+              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
+                {task.agent_id || "Unassigned"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {canResume && (
+              <button
+                onClick={execute}
+                className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-1.5 text-xs font-semibold text-slate-950 transition-all duration-300 hover:opacity-90 hover:shadow-[0_0_15px_rgba(var(--brand-primary),0.4)] hover:scale-[1.02] active:scale-95 cursor-pointer shadow-sm"
+              >
+                <Play size={13} fill="currentColor" />
+                Resume
+              </button>
+            )}
+            {canPause && (
+              <button
+                onClick={pause}
+                className="inline-flex items-center gap-1.5 rounded-md border border-stroke/50 bg-card/80 backdrop-blur px-4 py-1.5 text-xs font-semibold text-foreground transition-all duration-300 hover:bg-surface hover:border-stroke hover:shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer shadow-sm"
+              >
+                <Pause size={13} />
+                Pause
+              </button>
+            )}
+            {canCancel && (
+              <button
+                onClick={cancel}
+                className="inline-flex items-center gap-1.5 rounded-md border border-danger/40 bg-danger/10 px-4 py-1.5 text-xs font-semibold text-danger transition-all duration-300 hover:bg-danger/20 hover:shadow-[0_0_12px_rgba(var(--danger),0.3)] hover:border-danger/60 hover:scale-[1.02] active:scale-95 cursor-pointer shadow-sm"
+              >
+                <Ban size={13} />
+                Close Task
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

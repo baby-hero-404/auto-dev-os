@@ -128,6 +128,15 @@ func (m *Manager) RemoveWorkspace(taskID string) error {
 		_ = m.Artifacts.DeleteByTaskID(context.Background(), taskID)
 	}
 
+	// Clean up the task's log file (<LogFileRoot>/<taskID>.jsonl)
+	if m.LogFileRoot != "" {
+		logPath := filepath.Join(m.LogFileRoot, taskID+".jsonl")
+		if err := os.Remove(logPath); err != nil && !os.IsNotExist(err) {
+			// Non-fatal: log file may have already been pruned by retention
+			_ = err
+		}
+	}
+
 	root := m.WorkspaceRoot
 	if root == "" {
 		root = "/tmp/auto-code-os/workspaces"

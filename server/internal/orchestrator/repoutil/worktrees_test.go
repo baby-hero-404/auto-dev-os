@@ -168,3 +168,46 @@ func TestCreateGitCheckpoint_EmptyCheckpointIsLogged(t *testing.T) {
 		t.Fatal("expected a warning to be logged for an empty checkpoint, got none")
 	}
 }
+
+// TestRestoreGitCheckpoint_DoesNotDiscardProgressAheadOfCheckpoint reproduces the data-loss bug
+// traced from task cdf739c8-bd39-4d11-8633-f9b2ca804637: a review-fix loop-back re-enters
+// worker.go's job resume path, which restores the worktree to the last checkpoint with
+// status=="success" (e.g. the last code_backend_N step). A "fix" step's salvaged partial edits
+// land in a further commit on top of that checkpoint but never earn their own "success" status
+// checkpoint, so on the very next loop-back the restore call would reset straight back past
+// them — silently discarding every fix attempt's work, every single cycle. RestoreGitCheckpoint
+// must be a no-op when the worktree already contains (is a descendant of) the checkpoint commit.
+func TestRestoreGitCheckpoint_DoesNotDiscardProgressAheadOfCheckpoint(t *testing.T) {
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	m, task, _, agent := newTestManager(t, repoDir)
+
+	// Checkpoint A: simulates the last successful code_backend_N step.
+	checkpointHash, err := m.CreateGitCheckpoint(context.Background(), task, agent, "code_backend_3", "")
+	if err != nil {
+		t.Fatalf("CreateGitCheckpoint (checkpoint) failed: %v", err)
+	}
+
+	// Simulate a "fix" step's salvaged edit landing in a further commit on top of the checkpoint.
+	salvagedFile := filepath.Join(repoDir, "cmd", "sync-service", "main.go")
+	if err := os.MkdirAll(filepath.Dir(salvagedFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(salvagedFile, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.CreateGitCheckpoint(context.Background(), task, agent, "fix_salvage", ""); err != nil {
+		t.Fatalf("CreateGitCheckpoint (salvage) failed: %v", err)
+	}
+
+	// A review-fix loop-back resumes the job, which restores to the last *successful* checkpoint
+	// (checkpointHash) — this must NOT wipe out the salvaged main.go committed after it.
+	if err := m.RestoreGitCheckpoint(context.Background(), task, agent, checkpointHash, ""); err != nil {
+		t.Fatalf("RestoreGitCheckpoint failed: %v", err)
+	}
+
+	if _, err := os.Stat(salvagedFile); err != nil {
+		t.Fatalf("salvaged file was discarded by restoring to an earlier checkpoint it's already ahead of: %v", err)
+	}
+}

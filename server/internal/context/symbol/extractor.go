@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/parser"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/source"
+	sitter "github.com/smacker/go-tree-sitter"
 )
 
 // ExtractTags parses a file and extracts all definitions and references.
 func ExtractTags(filepathStr string) ([]source.Tag, error) {
 	ext := filepath.Ext(filepathStr)
-	
+
 	lang := parser.GetLanguage(ext)
 	if lang == nil {
 		// Fallback for unsupported languages
@@ -53,34 +53,56 @@ func ExtractTags(filepathStr string) ([]source.Tag, error) {
 		if !ok {
 			break
 		}
-		
+
+		// A definition match carries two captures: "name.definition.*" (the identifier,
+		// used for the tag's Name) and "definition.*" (the enclosing declaration node, used
+		// for the tag's Line/EndLine span so it reflects the whole function/method/type body
+		// instead of collapsing to the single-line identifier token). A reference match only
+		// ever has the single "name.reference.*" capture.
+		var nameNode *sitter.Node
+		var nameTagName string
+		var spanNode *sitter.Node
+
 		for _, c := range m.Captures {
 			tagName := q.CaptureNameForId(c.Index)
-			nodeName := c.Node.Content(content)
-			
-			// Resolve kind based on tree-sitter tag name
-			kind := "ref"
-			if strings.Contains(tagName, "definition") {
-				kind = "def"
+			if strings.HasPrefix(tagName, "name.") {
+				nameNode = c.Node
+				nameTagName = tagName
+			} else if strings.HasPrefix(tagName, "definition.") {
+				spanNode = c.Node
 			}
-			
-			name := nodeName
-			if kind == "def" {
-				dir := filepath.Base(filepath.Dir(filepathStr))
-				file := filepath.Base(filepathStr)
-				name = filepath.Join(dir, file) + ": " + nodeName
-			}
-			
-			tags = append(tags, source.Tag{
-				Name:     name,
-				Kind:     kind,
-				Line:     int(c.Node.StartPoint().Row),
-				EndLine:  int(c.Node.EndPoint().Row),
-				Filepath: filepathStr,
-			})
 		}
+		if nameNode == nil {
+			continue
+		}
+
+		kind := "ref"
+		if strings.Contains(nameTagName, "definition") {
+			kind = "def"
+		}
+
+		rangeNode := nameNode
+		if spanNode != nil {
+			rangeNode = spanNode
+		}
+
+		nodeName := nameNode.Content(content)
+		name := nodeName
+		if kind == "def" {
+			dir := filepath.Base(filepath.Dir(filepathStr))
+			file := filepath.Base(filepathStr)
+			name = filepath.Join(dir, file) + ": " + nodeName
+		}
+
+		tags = append(tags, source.Tag{
+			Name:     name,
+			Kind:     kind,
+			Line:     int(rangeNode.StartPoint().Row),
+			EndLine:  int(rangeNode.EndPoint().Row),
+			Filepath: filepathStr,
+		})
 	}
-	
+
 	// If the parser returned an empty result, use fallback to catch unseen refs
 	if len(tags) == 0 {
 		return parser.ExtractFallbackTags(filepathStr)

@@ -20,6 +20,7 @@ type Manager struct {
 	GitOps        GitOpsClient
 	Artifacts     ArtifactRepository
 	WorkspaceRoot string
+	LogFileRoot   string // Root directory for task log files (<taskID>.jsonl)
 	Retention     WorkspaceRetention
 	LockCancels   sync.Map
 	LockConns     sync.Map

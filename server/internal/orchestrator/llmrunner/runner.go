@@ -196,6 +196,10 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 			return nil, fmt.Errorf("llm call failed: %w", chatErr)
 		}
 		r.log(ctx, task.ID, nil, "info", fmt.Sprintf("%s (attempt %d): llm response from %s", stepID, attempt, resp.Model))
+		
+		if resp.Content != "" {
+			r.log(ctx, task.ID, nil, "info", resp.Content)
+		}
 
 		parsedJSON, parseErr := ParseJSONMarkdown(resp.Content)
 		if parseErr == nil {
@@ -334,6 +338,9 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 			}
 			if shadowSM != nil && resp != nil {
 				r.updateShadowSM(ctx, shadowSM, resp, resolvedTargets, task.ID)
+			}
+			if resp != nil && resp.Content != "" {
+				r.log(ctx, task.ID, nil, "info", resp.Content)
 			}
 		},
 	})

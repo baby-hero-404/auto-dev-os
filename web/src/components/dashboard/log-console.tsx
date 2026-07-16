@@ -93,12 +93,78 @@ function LogMessage({ message }: { message: string }) {
   );
 }
 
-interface LogConsoleProps {
-  logs: RealtimeLog[];
+export interface MilestoneItem {
+  id: string;
+  timestamp: string;
+  message: string;
+  type: "success" | "running" | "failed" | "info" | "paused";
 }
 
-export function LogConsole({ logs }: LogConsoleProps) {
+export function parseMilestones(logs: RealtimeLog[]): MilestoneItem[] {
+  const milestones: MilestoneItem[] = [];
+  
+  for (const log of logs) {
+    const msg = log.message;
+    
+    const stepMatch = msg.match(/step ([\w-]+) (success|failed|running)/i);
+    const checkpointMatch = msg.match(/checkpoint/i);
+    const pauseResumeMatch = msg.match(/paused|resumed/i);
+    const workflowMatch = msg.match(/workflow (failed|completed)/i);
+    const errorLevel = log.level === "error";
+
+    let type: "success" | "running" | "failed" | "info" | "paused" = "info";
+    let isMilestone = false;
+    let message = msg;
+
+    if (workflowMatch) {
+      isMilestone = true;
+      const status = workflowMatch[1].toLowerCase();
+      type = status === "completed" ? "success" : "failed";
+      message = `Workflow ${status === "completed" ? "Completed Successfully" : "Failed"}`;
+    } else if (stepMatch) {
+      isMilestone = true;
+      const stepName = stepMatch[1].replace(/_/g, " ");
+      const action = stepMatch[2].toLowerCase();
+      type = action === "success" ? "success" : action === "failed" ? "failed" : "running";
+      message = `Step "${stepName}" ${action}`;
+    } else if (checkpointMatch) {
+      isMilestone = true;
+      type = "success";
+      message = msg.replace(/\[#\d+\]\s*/, "");
+    } else if (pauseResumeMatch) {
+      isMilestone = true;
+      type = msg.toLowerCase().includes("paused") ? "paused" : "running";
+      message = msg.replace(/\[#\d+\]\s*/, "");
+    } else if (errorLevel) {
+      isMilestone = true;
+      type = "failed";
+    }
+
+    if (isMilestone) {
+      milestones.push({
+        id: `${log.createdAtEpoch}-${milestones.length}`,
+        timestamp: new Date(log.createdAtEpoch).toLocaleTimeString(),
+        message,
+        type
+      });
+    }
+  }
+  
+  return milestones;
+}
+
+interface LogConsoleProps {
+  logs: RealtimeLog[];
+  isWorkflowRunning?: boolean;
+}
+
+export function LogConsole({ logs, isWorkflowRunning }: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<"milestones" | "all">(
+    isWorkflowRunning ? "milestones" : "all"
+  );
+
+  const milestones = useMemo(() => parseMilestones(logs), [logs]);
 
   const toggleGroup = (key: string, defaultExpanded: boolean) => {
     setExpanded((prev) => ({
@@ -143,14 +209,86 @@ export function LogConsole({ logs }: LogConsoleProps) {
   };
 
   return (
-    <div className="rounded-lg border border-stroke bg-panel p-5 h-full flex flex-col min-h-[400px]">
-      <div className="mb-4 flex items-center gap-2">
-        <TerminalSquare size={18} className="text-brand-primary" />
-        <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">Execution Logs</h2>
+    <div id="log-console" className="rounded-lg border border-stroke bg-panel p-5 h-full flex flex-col min-h-[400px]">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <TerminalSquare size={18} className="text-brand-primary" />
+          <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">Execution Logs</h2>
+        </div>
+        
+        {logs.length > 0 && (
+          <div className="flex rounded-lg border border-stroke bg-surface/80 p-0.5 text-[10.5px] font-semibold">
+            <button
+              onClick={() => setViewMode("milestones")}
+              className={`rounded px-3 py-1 cursor-pointer transition-all ${
+                viewMode === "milestones"
+                  ? "bg-card text-brand-primary shadow-sm border border-stroke/10"
+                  : "text-content-muted hover:text-foreground border border-transparent"
+              }`}
+            >
+              Milestones
+            </button>
+            <button
+              onClick={() => setViewMode("all")}
+              className={`rounded px-3 py-1 cursor-pointer transition-all ${
+                viewMode === "all"
+                  ? "bg-card text-brand-primary shadow-sm border border-stroke/10"
+                  : "text-content-muted hover:text-foreground border border-transparent"
+              }`}
+            >
+              All Logs
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex-1 overflow-hidden rounded-md bg-slate-50 dark:bg-slate-950 border border-stroke min-h-[520px]">
         {logs.length === 0 ? (
           <p className="text-content-muted p-4 font-mono text-xs">No logs yet. Execute the workflow to start.</p>
+        ) : viewMode === "milestones" ? (
+          <div className="h-full w-full overflow-y-auto p-4 custom-scrollbar flex flex-col gap-4">
+            {milestones.length === 0 ? (
+              <p className="text-content-muted font-mono text-xs text-center py-8">No milestones recorded yet.</p>
+            ) : (
+              <div className="relative border-l border-stroke/70 pl-6 space-y-5 ml-2 pt-2 text-left">
+                {milestones.map((m) => {
+                  let dotBg = "bg-slate-400";
+                  let borderStyle = "border-stroke";
+                  let textColor = "text-foreground";
+                  
+                  if (m.type === "success") {
+                    dotBg = "bg-emerald-500";
+                    borderStyle = "border-emerald-500/30";
+                    textColor = "text-emerald-700 dark:text-emerald-300 font-semibold";
+                  } else if (m.type === "running") {
+                    dotBg = "bg-sky-500 animate-pulse";
+                    borderStyle = "border-sky-500/30";
+                    textColor = "text-sky-700 dark:text-sky-300 font-semibold";
+                  } else if (m.type === "failed") {
+                    dotBg = "bg-rose-500";
+                    borderStyle = "border-rose-500/30";
+                    textColor = "text-rose-700 dark:text-rose-300 font-bold";
+                  } else if (m.type === "paused") {
+                    dotBg = "bg-amber-500";
+                    borderStyle = "border-amber-500/30";
+                    textColor = "text-amber-700 dark:text-amber-300 font-semibold";
+                  }
+
+                  return (
+                    <div key={m.id} className="relative flex flex-col gap-1">
+                      {/* Dot */}
+                      <span className={`absolute -left-[30px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-panel border-2 ${borderStyle}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${dotBg}`} />
+                      </span>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className={`text-xs ${textColor}`}>{m.message}</span>
+                        <span className="text-[10px] font-mono text-content-muted/80 whitespace-nowrap">{m.timestamp}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         ) : (
           <Virtuoso
             data={flattenedItems}
@@ -166,6 +304,7 @@ export function LogConsole({ logs }: LogConsoleProps) {
 
                 return (
                   <div
+                    id={`log-group-${item.stepName}`}
                     className="flex items-center gap-2 px-4 py-2 border-b border-stroke/50 bg-slate-100 dark:bg-slate-900 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
                     onClick={() => toggleGroup(item.key, item.defaultExpanded)}
                   >

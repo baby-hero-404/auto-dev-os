@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -56,7 +57,9 @@ func TestAnalyze_BoundaryViolation_ExhaustsBudget_FailsBeforeCoding(t *testing.T
 	artifactRepo := &mockArtifactRepo{}
 	reposRepo := &mockRepositoriesRepo{repo: repo}
 
-	// 6 iterations budget. Every response returned contains the uncovered boundary violation.
+	// steps.AnalyzeMaxIterations iterations budget. Every response returned contains the
+	// uncovered boundary violation, so the loop must exhaust the *entire* current budget before
+	// the caller sees the boundary-violation error as the final failure reason.
 	uncoveredResponse := `
 {
   "complexity": "easy",
@@ -90,7 +93,7 @@ func TestAnalyze_BoundaryViolation_ExhaustsBudget_FailsBeforeCoding(t *testing.T
 }`
 
 	var queue []*llm.Response
-	for i := 0; i < 6; i++ {
+	for i := 0; i < steps.AnalyzeMaxIterations; i++ {
 		queue = append(queue, &llm.Response{
 			Model:   "mock-model",
 			Content: uncoveredResponse,

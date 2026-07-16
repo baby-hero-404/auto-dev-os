@@ -50,6 +50,7 @@ func (o *Orchestrator) StartWorkspacePruner(ctx context.Context) {
 
 func (o *Orchestrator) StartLogPruner(ctx context.Context, retentionDays int, fileRoot string) {
 	o.initWkspace()
+	o.wkspace.LogFileRoot = fileRoot
 	o.wkspace.StartLogPruner(ctx, retentionDays, fileRoot)
 }
 

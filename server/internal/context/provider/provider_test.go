@@ -214,8 +214,11 @@ func TestGetRepoMapTokenPruningAndBuffing(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
 
-	// Test 1: Restrict budget to very small tokens, should return minimal string
-	maxTokensSmall := 20
+	// Test 1: Restrict budget to very small tokens, should return minimal string.
+	// Must be large enough to fit at least one rendered "def ... (N lines)" entry (FormatSkeleton
+	// now appends a line-count suffix — see repomap.FormatSkeleton) or the budget starves out
+	// before buffing (Test 2 below) ever gets a chance to matter.
+	maxTokensSmall := 60
 	repoMapSmall, err := provider.GetRepoMap(ctx, []string{}, maxTokensSmall)
 	if err != nil {
 		t.Fatal(err)

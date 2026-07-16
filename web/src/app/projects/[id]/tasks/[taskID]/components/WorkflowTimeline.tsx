@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Compass,
   Loader2,
@@ -16,27 +16,32 @@ import {
   Terminal,
   GitPullRequest,
   Play,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Circle,
 } from "lucide-react";
 import {
   useTaskDetail,
   formatStepName,
   getStepDescription,
   WORKFLOW_STEPS,
-  getStepTasks
+  getStepTasks,
+  getSemanticStatusColor
 } from "./TaskDetailContext";
 
-function getStepIcon(step: string) {
-  if (step === WORKFLOW_STEPS.CONTEXT_LOAD) return <FileText size={13} />;
-  if (step === WORKFLOW_STEPS.ANALYZE) return <Search size={13} />;
-  if (step === WORKFLOW_STEPS.PLAN) return <ClipboardList size={13} />;
-  if (step.startsWith("code_backend")) return <Code size={13} className="text-emerald-500" />;
-  if (step.startsWith("code_frontend")) return <Code size={13} className="text-sky-500" />;
-  if (step === WORKFLOW_STEPS.MERGE) return <GitMerge size={13} />;
-  if (step === WORKFLOW_STEPS.REVIEW) return <Eye size={13} />;
-  if (step === WORKFLOW_STEPS.FIX) return <Sparkles size={13} />;
-  if (step === WORKFLOW_STEPS.TEST) return <Terminal size={13} />;
-  if (step === WORKFLOW_STEPS.PR) return <GitPullRequest size={13} />;
-  return <Play size={13} />;
+function getStepIcon(step: string, size = 16) {
+  if (step === WORKFLOW_STEPS.CONTEXT_LOAD) return <FileText size={size} />;
+  if (step === WORKFLOW_STEPS.ANALYZE) return <Search size={size} />;
+  if (step === WORKFLOW_STEPS.PLAN) return <ClipboardList size={size} />;
+  if (step.startsWith("code_backend")) return <Code size={size} className="text-emerald-500" />;
+  if (step.startsWith("code_frontend")) return <Code size={size} className="text-sky-500" />;
+  if (step === WORKFLOW_STEPS.MERGE) return <GitMerge size={size} />;
+  if (step === WORKFLOW_STEPS.REVIEW) return <Eye size={size} />;
+  if (step === WORKFLOW_STEPS.FIX) return <Sparkles size={size} />;
+  if (step === WORKFLOW_STEPS.TEST) return <Terminal size={size} />;
+  if (step === WORKFLOW_STEPS.PR) return <GitPullRequest size={size} />;
+  return <Play size={size} />;
 }
 
 interface WorkflowTimelineNode {
@@ -58,7 +63,11 @@ export function WorkflowTimeline() {
     stepDurations,
     analysisData,
     latest,
+    implementationItems,
   } = useTaskDetail();
+
+  const [collapsedSubTimelines, setCollapsedSubTimelines] = useState<Record<string, boolean>>({});
+  const isWorkflowCompleted = workflow?.job?.status === "success" || workflow?.job?.status === "failed";
 
   const activeStepName = useMemo(() => {
     if (!workflow?.job?.step) return null;
@@ -114,7 +123,7 @@ export function WorkflowTimeline() {
                  id: `phase_${index}`,
                  title: `Phase ${index + 1}`,
                  description: phaseDesc,
-                 icon: <Code size={14} />,
+                 icon: <Code size={16} />,
                  steps: phaseSteps,
                  isGroup: true,
                  isExecutionPhase: true, // Special flag for phase rendering
@@ -126,7 +135,7 @@ export function WorkflowTimeline() {
                id: "implementation",
                title: "Implementation",
                description: "Executing granular execution units (code writing, models, UI).",
-               icon: <Code size={14} />,
+               icon: <Code size={16} />,
                steps: codeSteps,
                isGroup: true,
              });
@@ -138,7 +147,7 @@ export function WorkflowTimeline() {
           id: step,
           title: formatStepName(step, analysisData),
           description: getStepDescription(step, analysisData),
-          icon: getStepIcon(step),
+          icon: getStepIcon(step, 16),
           steps: [step],
           isGroup: false,
         });
@@ -148,7 +157,7 @@ export function WorkflowTimeline() {
   }, [workflowSteps, analysisData]);
 
   return (
-    <section className="rounded-xl border border-stroke bg-card p-6 shadow-sm hover:shadow-md transition-shadow">
+    <section className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-6 shadow-lg hover:shadow-xl transition-all group">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded-lg bg-brand-primary/10 border border-brand-primary/20 text-brand-primary">
@@ -183,7 +192,11 @@ export function WorkflowTimeline() {
 
       <div className="relative flex w-full items-start gap-4 overflow-x-auto pb-6 pt-4 hide-scrollbar md:gap-5">
         {/* Connector Line Background */}
-        <div className="absolute left-[52px] right-[52px] top-[39px] -z-10 h-[3px] bg-stroke/30 rounded-full" />
+        <div className="absolute left-[52px] right-[52px] top-[42px] -z-10 h-[3px] bg-stroke/30 rounded-full overflow-hidden">
+          {workflow?.job?.status === "running" && (
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-sky-500/50 to-transparent w-full -translate-x-full animate-[shimmer_3s_infinite]" />
+          )}
+        </div>
 
         {timelineNodes.map((node, index) => {
           let nodeStatus = "pending";
@@ -293,37 +306,64 @@ export function WorkflowTimeline() {
 
               {/* Connecting Line Progress Overlay */}
               {index > 0 && (
-                <div className={`absolute right-[50%] top-[38px] -z-10 h-[3px] w-full transition-all duration-500 ${isCompleted ? "bg-brand-primary" :
-                    isRunning ? "bg-gradient-to-r from-brand-primary to-sky-500/30 animate-pulse" :
+                <div className={`absolute right-[50%] top-[42px] -z-10 h-[3px] w-full transition-all duration-500 ${isCompleted ? "bg-emerald-500" :
+                    isRunning ? "bg-gradient-to-r from-emerald-500 to-sky-500/30 animate-pulse" :
                       "bg-transparent"
                   }`} />
               )}
 
               {/* Node Circle */}
-              <div className={`relative z-10 flex size-11 items-center justify-center rounded-full border-2 transition-all duration-300 shadow-sm cursor-pointer ${isCompleted ? "border-brand-primary bg-brand-primary/5 text-brand-primary hover:bg-brand-primary/10" :
-                  isFailed ? "border-rose-500 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20" :
-                    isRunning ? "border-sky-500 bg-sky-500/10 text-sky-500 shadow-[0_0_12px_rgba(14,165,233,0.3)] animate-pulse" :
-                      "border-stroke bg-card text-content-muted/80 hover:border-content-muted hover:text-foreground"
-                }`}>
-                {node.icon}
+              {(() => {
+                const semanticStyle = getSemanticStatusColor(nodeStatus);
+                const handleNodeClick = () => {
+                  const targetStep = node.steps[0];
+                  if (targetStep) {
+                    const el = document.getElementById(`log-group-${targetStep}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }
+                };
 
-                {/* Tiny Status Badges on the Circle */}
-                {isCompleted && (
-                  <div className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand-primary text-card border border-card shadow-sm">
-                    <Check size={9} strokeWidth={4} />
+                return (
+                  <div
+                    onClick={handleNodeClick}
+                    className={`relative z-10 flex size-[52px] items-center justify-center rounded-full transition-all duration-300 shadow-sm cursor-pointer ${
+                      isRunning
+                        ? `${semanticStyle.border} ${semanticStyle.bg} ${semanticStyle.text} border-[3px] shadow-[0_0_12px_rgba(14,165,233,0.3)] animate-pulse`
+                        : isCompleted
+                        ? "border-emerald-500 bg-emerald-500/5 text-emerald-500 hover:bg-emerald-500/10 border-2"
+                        : isFailed
+                        ? "border-rose-500 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 border-2"
+                        : "border-stroke bg-card text-content-muted/80 hover:border-content-muted hover:text-foreground border-2"
+                    }`}
+                  >
+                    {node.icon}
+     
+                    {/* Tiny Status Badges on the Circle */}
+                    {isCompleted && (
+                      <div className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-emerald-500 text-card border border-card shadow-sm">
+                        <Check size={9} strokeWidth={4} />
+                      </div>
+                    )}
+                    {isFailed && (
+                      <div className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-rose-500 text-card border border-card shadow-sm">
+                        <AlertCircle size={9} strokeWidth={4} />
+                      </div>
+                    )}
                   </div>
-                )}
-                {isFailed && (
-                  <div className="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-rose-500 text-card border border-card shadow-sm">
-                    <AlertCircle size={9} strokeWidth={4} />
-                  </div>
-                )}
-              </div>
-
+                );
+              })()}
+ 
               {/* Label Details */}
               <div className="w-full px-1 flex flex-col items-center text-center">
-                <div className={`text-[10px] font-bold uppercase tracking-wider transition-colors line-clamp-1 leading-tight ${isCompleted || isRunning ? "text-foreground font-semibold" : "text-content-muted/80"
-                  }`}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider transition-colors line-clamp-1 leading-tight ${
+                  isRunning
+                    ? "text-sky-500 font-extrabold font-bold"
+                    : isCompleted
+                    ? "text-foreground font-semibold"
+                    : "text-content-muted/80"
+                }`}>
                   {node.title}
                 </div>
                 {isRunning ? (
@@ -339,6 +379,85 @@ export function WorkflowTimeline() {
                     {lastDuration && ` (${lastDuration})`}
                   </div>
                 )}
+
+                {/* Sub-Timeline for Group nodes (Implementation/Execution units) */}
+                {(() => {
+                  const nodeItems = implementationItems.filter(item => {
+                    return node.steps.some(step => {
+                      return item.stepId === step || item.stepId.startsWith(step) || (step === "code_backend" && item.stepId.startsWith("code_"));
+                    });
+                  });
+                  if (!node.isGroup || nodeItems.length === 0) return null;
+                  
+                  const isCollapsed = collapsedSubTimelines[node.id] !== undefined
+                    ? collapsedSubTimelines[node.id]
+                    : isWorkflowCompleted;
+
+                  return (
+                    <div className="mt-3 w-full border-t border-stroke/50 pt-2 flex flex-col items-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCollapsedSubTimelines(prev => ({
+                            ...prev,
+                            [node.id]: !isCollapsed
+                          }));
+                        }}
+                        className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-content-muted hover:text-foreground transition-colors cursor-pointer animate-fade-in"
+                      >
+                        <span>Sub-Tasks ({nodeItems.length})</span>
+                        {isCollapsed ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+                      </button>
+                      
+                      <div
+                        className="overflow-hidden transition-all duration-300 ease-in-out w-full"
+                        style={{ maxHeight: isCollapsed ? "0px" : "300px" }}
+                      >
+                        <div className="mt-2 flex flex-col gap-1.5 text-left w-full pl-2 border-l border-stroke/60">
+                          {nodeItems.map((item) => {
+                            const isItemDone = item.status === "done";
+                            const isItemRunning = item.status === "running";
+                            
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const el = document.getElementById(`log-group-${item.stepId}`);
+                                  if (el) {
+                                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  }
+                                }}
+                                className="flex items-start gap-1.5 text-[9.5px] cursor-pointer group/item select-none"
+                              >
+                                <div className="mt-0.5 shrink-0">
+                                  {isItemDone ? (
+                                    <CheckCircle2 size={10} className="text-emerald-500" />
+                                  ) : isItemRunning ? (
+                                    <span className="relative flex h-2 w-2 mt-0.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+                                    </span>
+                                  ) : (
+                                    <Circle size={10} className="text-content-muted/60" />
+                                  )}
+                                </div>
+                                <span
+                                  className={`leading-tight font-medium group-hover/item:text-brand-primary transition-colors line-clamp-2 ${
+                                    isItemDone ? "text-content-muted line-through" : "text-foreground"
+                                  }`}
+                                  title={item.name}
+                                >
+                                  {item.name}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           );

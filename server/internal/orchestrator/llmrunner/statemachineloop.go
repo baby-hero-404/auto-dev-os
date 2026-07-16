@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -72,8 +73,16 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 	}
 
 	ir := resolveExecutionIRForStep(&analysis, stepID)
-	sm := NewStateMachine(ir.Budget)
-	r.log(ctx, task.ID, nil, "info", fmt.Sprintf("StateMachine initialized for node %s with budget: Discovery=%d, Implementation=%d, Validation=%d", ir.NodeID, ir.Budget.Discovery, ir.Budget.Implementation, ir.Budget.Validation))
+	// The fix step receives the full diff and review findings upfront — it has
+	// complete context and does not need a DISCOVERY phase. Starting in
+	// IMPLEMENTATION avoids the LLM being blocked by the read-only DISCOVERY
+	// allowlist when it correctly attempts write/test tool calls immediately.
+	initialState := StateDiscovery
+	if stepID == workflow.StepFix {
+		initialState = StateImplementation
+	}
+	sm := NewStateMachineFrom(initialState, ir.Budget)
+	r.log(ctx, task.ID, nil, "info", fmt.Sprintf("StateMachine initialized for node %s (starting state: %s) with budget: Discovery=%d, Implementation=%d, Validation=%d", ir.NodeID, initialState, ir.Budget.Discovery, ir.Budget.Implementation, ir.Budget.Validation))
 
 	resolvedTargets := analysis.ExecutionIRTargets[ir.NodeID]
 

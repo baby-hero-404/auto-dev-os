@@ -67,6 +67,16 @@ func (s *ContextLoadStep) StatusOnResume(_ StepResult) string {
 }
 
 func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	// Set once, up front, so every ctxEngine call below (IndexWorkspace, RetrieveContext,
+	// GetRepoMap) sees the task's workspace root. Provider.GetRepoMap treats a missing
+	// WorkspaceRootKey as "scanning the global root" and short-circuits to an empty result
+	// (its safety check against scanning outside a task's workspace) — RetrieveContext and
+	// GetRepoMap used to be called with the original, unaugmented ctx (only a locally-scoped
+	// indexCtx carried the key, and only for the IndexWorkspace call), so the repo map / semantic
+	// snippets silently came back empty even though the underlying AST indexing pipeline worked
+	// correctly, forcing the analyze step to fall back to reading files one at a time via tools.
+	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID))
+
 	if s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == models.TaskStatusFailed || s.rt.Task.Status == "" {
 		if s.status != nil {
 			if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusContextLoading); err != nil {
@@ -80,8 +90,6 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	// Pre-warm the SQLite AST cache.
 	if s.ctxEngine != nil {
-		localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
-
 		// 1. Two-Tier Cache Initialization
 		var repoCommits []provider.RepoCommitInfo
 		if s.wkspace != nil {
@@ -134,8 +142,7 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		}
 
 		// 2. Perform incremental workspace indexing
-		indexCtx := context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
-		if err := s.ctxEngine.IndexWorkspace(indexCtx); err != nil {
+		if err := s.ctxEngine.IndexWorkspace(ctx); err != nil {
 			if s.log != nil {
 				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to index workspace: %v", err))
 			}
@@ -307,7 +314,6 @@ func (s *ContextLoadStep) gatherRepoContexts(ctx context.Context, repoPaths []co
 		loadRepoDocs(rp, pathPrefix, conventions, architectures, contributings)
 	}
 
-
 	result["git_logs"] = gitLogs
 	result["current_branches"] = currentBranches
 	result["test_commands"] = testCommands
@@ -348,7 +354,6 @@ func (s *ContextLoadStep) getSandboxGitOutput(ctx context.Context, rel, containe
 	}
 	return ""
 }
-
 
 func detectTestCommands(rp, rel string) []string {
 	var cmds []string

@@ -207,17 +207,28 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		// history rather than permanently lost, even though the active worktree still resets cleanly.
 		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		rescueBranch := fmt.Sprintf("rescue/%s-%d", task.ID, time.Now().UnixNano())
+		// If the worktree's current HEAD already contains commitHash (e.g. a partial/salvaged
+		// commit made further progress since the checkpoint being restored to), restoring would
+		// silently discard that progress even though it's strictly ahead. Restore-to-checkpoint
+		// runs unconditionally on every job resume, including internal review-fix loop-backs
+		// where the worktree is already exactly where the previous attempt left it — so this
+		// idempotency check (skip when HEAD is already at-or-past commitHash) is load-bearing,
+		// not just an optimization.
 		script := fmt.Sprintf(`set -e
 %[4]s
-if [ -n "$(git -C %[1]s status --porcelain)" ]; then
-  git -C %[1]s add -A
-  git -C %[1]s commit -m "AutoCodeOS: rescue snapshot before checkpoint restore" -q --allow-empty
-  git -C %[1]s branch %[3]s
-  git -C %[1]s reset --hard HEAD~1
-fi
-git -C %[1]s checkout %[2]s
-git -C %[1]s reset --hard HEAD
-git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript)
+if git -C %[1]s merge-base --is-ancestor %[2]s HEAD 2>/dev/null; then
+  echo "SKIP_RESTORE: worktree already at or ahead of checkpoint %[2]s"
+else
+  if [ -n "$(git -C %[1]s status --porcelain)" ]; then
+    git -C %[1]s add -A
+    git -C %[1]s commit -m "AutoCodeOS: rescue snapshot before checkpoint restore" -q --allow-empty
+    git -C %[1]s branch %[3]s
+    git -C %[1]s reset --hard HEAD~1
+  fi
+  git -C %[1]s checkout %[2]s
+  git -C %[1]s reset --hard HEAD
+  git -C %[1]s clean -fd
+fi`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript)
 
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)

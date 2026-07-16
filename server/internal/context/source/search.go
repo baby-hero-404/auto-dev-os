@@ -19,13 +19,17 @@ type searchQuery struct {
 	paths map[string]bool
 }
 
-type scoredTag struct {
+// ScoredTag pairs a Tag with its relevance score for the query it was matched against,
+// normalized to [0, 1] (the top-ranked result scores 1.0). Exported so callers (e.g.
+// provider.RetrieveContext) can surface a meaningful relevance value instead of discarding the
+// ranking SearchTags already computed internally to sort its results.
+type ScoredTag struct {
 	Tag
-	score float64
+	Score float64
 }
 
 // SearchTags reads all cached files and tags from SQLite, scoring them against the query.
-func (c *Cache) SearchTags(inputQuery string, limit int) ([]Tag, error) {
+func (c *Cache) SearchTags(inputQuery string, limit int) ([]ScoredTag, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -41,7 +45,7 @@ func (c *Cache) SearchTags(inputQuery string, limit int) ([]Tag, error) {
 	}
 	defer rows.Close()
 
-	var candidates []scoredTag
+	var candidates []ScoredTag
 
 	for rows.Next() {
 		var relPath string
@@ -64,32 +68,39 @@ func (c *Cache) SearchTags(inputQuery string, limit int) ([]Tag, error) {
 			if tag.Kind != "def" {
 				continue // Only fetch snippet bodies of definitions
 			}
-			
+
 			tagScore := fileScore + scoreText(tag.Name, query, 3.0)
-			
+
 			if tagScore > 0 {
-				candidates = append(candidates, scoredTag{
+				candidates = append(candidates, ScoredTag{
 					Tag:   tag,
-					score: tagScore,
+					Score: tagScore,
 				})
 			}
 		}
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
+		return candidates[i].Score > candidates[j].Score
 	})
 
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 
-	results := make([]Tag, 0, len(candidates))
-	for _, c := range candidates {
-		results = append(results, c.Tag)
+	// Normalize to [0, 1] relative to the top match — raw scores are unbounded weighted sums
+	// with no inherent scale, so callers displaying this as "relevance" need something
+	// comparable across queries rather than an arbitrary number like 11.5.
+	if len(candidates) > 0 {
+		maxScore := candidates[0].Score
+		if maxScore > 0 {
+			for i := range candidates {
+				candidates[i].Score = candidates[i].Score / maxScore
+			}
+		}
 	}
 
-	return results, nil
+	return candidates, nil
 }
 
 func buildQuery(input string) searchQuery {

@@ -28,22 +28,22 @@ import (
 
 // AnalyzeStep implements Step for the analysis phase.
 type AnalyzeStep struct {
-	rt            StepRuntime
-	workspaceRoot string
-	tasks         TaskReader
-	taskUpdate    TaskUpdater
-	projects      ProjectReader
-	llm           LLMChatter
-	prompts       PromptAssembler
-	sandbox       SandboxRunner
-	artifacts     ArtifactSaver
-	status        StatusUpdater
-	traces        TraceRecorder
-	log           Logger
-	wkspace       WorkspaceLoader
-	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
-	maxCost       float64
-	registry      *tool.Registry
+	rt                      StepRuntime
+	workspaceRoot           string
+	tasks                   TaskReader
+	taskUpdate              TaskUpdater
+	projects                ProjectReader
+	llm                     LLMChatter
+	prompts                 PromptAssembler
+	sandbox                 SandboxRunner
+	artifacts               ArtifactSaver
+	status                  StatusUpdater
+	traces                  TraceRecorder
+	log                     Logger
+	wkspace                 WorkspaceLoader
+	containerPath           func(task *models.Task, hostPath string, worktreeSuffix string) string
+	maxCost                 float64
+	registry                *tool.Registry
 	lastValidationError     error
 	lastValidationIteration int
 	lastAttemptIteration    int
@@ -154,9 +154,15 @@ func (s *AnalyzeStep) runAnalyzeProcess(ctx context.Context, stepCtx workflow.St
 	return parseAnalysisFinal(parsedFinal), false, nil
 }
 
-// analyzeMaxIterations bounds the analyze step's tool loop (Task 4.2 / REQ-M08), matching the
-// iteration budget the step used before migrating onto the shared llmrunner.RunToolLoop.
-const analyzeMaxIterations = 6
+// AnalyzeMaxIterations bounds the analyze step's tool loop (Task 4.2 / REQ-M08). Each exploration
+// tool call (list_files, read_file, ...) consumes one iteration before the model can even attempt
+// its final JSON spec, so this must leave headroom beyond "one call per file worth reading" — a
+// repo with prior commits (e.g. re-running against a repo an earlier task already merged code
+// into) can easily need 5+ read_file calls just to see existing files. At 6, that left zero
+// iterations to ever output the spec itself: task b5f92863 spent all 6 turns reading
+// go.mod/model.go/client.go/client_test.go/README.md and hard-failed with
+// "exceeded max iterations (6)" without ever reaching a JSON response.
+const AnalyzeMaxIterations = 12
 
 // buildAnalyzeRouteOptions resolves the model routing options for the analyze step's LLM calls.
 // Unlike the pre-migration hand-rolled loop, this is computed once per runAnalyzeToolLoop call
@@ -196,7 +202,7 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 	parsedFinal, _, _, err := llmrunner.RunToolLoop(ctx, llmrunner.ToolLoopConfig{
 		Messages:      messages,
 		Tools:         s.analyzeToolDefinitions(),
-		MaxIterations: analyzeMaxIterations,
+		MaxIterations: AnalyzeMaxIterations,
 		Chat: func(callCtx context.Context, msgs []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
 			return s.llm.ChatWithOptions(llm.WithRouteOptions(callCtx, routeOpts), msgs, opts)
 		},
@@ -302,7 +308,6 @@ func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[st
 
 	analysisDraft := parseAnalysisFinal(parsedJSON)
 
-
 	// Validate boundary coverage for affected files and target files
 	if err := validateBoundaryCoverage(analysisDraft); err != nil {
 		s.lastValidationError = err
@@ -358,7 +363,7 @@ func analyzeContractMissingFields(parsedJSON map[string]any) []string {
 	if _, ok := parsedJSON["execution_units"].([]any); !ok {
 		missingFields = append(missingFields, "execution_units")
 	}
-	
+
 	if irsAny, ok := parsedJSON["execution_irs"].([]any); !ok {
 		missingFields = append(missingFields, "execution_irs")
 	} else {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
 import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
@@ -20,7 +20,50 @@ export function SpecPanel() {
     togglePlanStep,
   } = useTaskDetail();
 
+  const [isDescCollapsed, setIsDescCollapsed] = useState(true);
+  const [isRisksCollapsed, setIsRisksCollapsed] = useState(true);
+  const [isBoundariesCollapsed, setIsBoundariesCollapsed] = useState(true);
   const [isExpandedOpen, setIsExpandedOpen] = useState(false);
+
+  useEffect(() => {
+    if (!taskID || taskID === "undefined") return;
+    if (typeof window !== "undefined") {
+      const descVal = localStorage.getItem(`task-desc-collapsed-${taskID}`);
+      const boundariesVal = localStorage.getItem(`task-boundaries-collapsed-${taskID}`);
+      const storedRisks = localStorage.getItem(`task-risks-collapsed-${taskID}`);
+
+      setIsDescCollapsed(descVal !== null ? descVal === "true" : true);
+      setIsBoundariesCollapsed(boundariesVal !== null ? boundariesVal === "true" : true);
+
+      if (storedRisks !== null) {
+        setIsRisksCollapsed(storedRisks === "true");
+      } else {
+        const hasRisks = !!(analysisData.risk_domains && analysisData.risk_domains.length > 0);
+        setIsRisksCollapsed(!hasRisks);
+      }
+    }
+  }, [taskID, analysisData.risk_domains]);
+
+  const toggleDescCollapse = () => {
+    if (!taskID || taskID === "undefined") return;
+    const nextState = !isDescCollapsed;
+    setIsDescCollapsed(nextState);
+    localStorage.setItem(`task-desc-collapsed-${taskID}`, String(nextState));
+  };
+
+  const toggleRisksCollapse = () => {
+    if (!taskID || taskID === "undefined") return;
+    const nextState = !isRisksCollapsed;
+    setIsRisksCollapsed(nextState);
+    localStorage.setItem(`task-risks-collapsed-${taskID}`, String(nextState));
+  };
+
+  const toggleBoundariesCollapse = () => {
+    if (!taskID || taskID === "undefined") return;
+    const nextState = !isBoundariesCollapsed;
+    setIsBoundariesCollapsed(nextState);
+    localStorage.setItem(`task-boundaries-collapsed-${taskID}`, String(nextState));
+  };
 
   const handleSelectSummary = useCallback(() => setActiveSpecTab("summary"), [setActiveSpecTab]);
   const handleSelectProposal = useCallback(() => setActiveSpecTab("proposal"), [setActiveSpecTab]);
@@ -43,8 +86,9 @@ export function SpecPanel() {
   }
 
   return (
-    <div className="rounded-xl border border-stroke bg-card p-5 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-stroke pb-3">
+    <div className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-5 shadow-lg hover:shadow-xl transition-all group">
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+      <div className="relative mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-stroke/40 pb-3 z-10">
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-brand-primary" />
           <h2 className="font-heading text-base font-bold text-foreground">
@@ -103,11 +147,25 @@ export function SpecPanel() {
       {activeSpecTab === "summary" ? (
         <div className="space-y-4">
           {analysisData.scope && (
-            <div>
+            <div className="relative">
               <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-1">
                 Scope
               </h3>
-              <p className="text-sm leading-relaxed text-foreground">{analysisData.scope}</p>
+              <div
+                className="relative overflow-hidden transition-all duration-300 ease-in-out"
+                style={{ maxHeight: isDescCollapsed ? "3em" : "1000px" }}
+              >
+                <p className="text-sm leading-relaxed text-foreground">{analysisData.scope}</p>
+                {isDescCollapsed && (
+                  <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-card to-transparent pointer-events-none" />
+                )}
+              </div>
+              <button
+                onClick={toggleDescCollapse}
+                className="text-[10px] font-bold text-brand-primary hover:text-brand-primary/80 transition-colors mt-1 cursor-pointer block"
+              >
+                {isDescCollapsed ? "Show Description" : "Hide Description"}
+              </button>
             </div>
           )}
 
@@ -210,40 +268,46 @@ export function SpecPanel() {
             )}
 
             <div className="space-y-4">
-              {analysisData.risks_details && analysisData.risks_details.length > 0 ? (
+              {((analysisData.risks_details && analysisData.risks_details.length > 0) || (analysisData.risks && analysisData.risks.length > 0)) && (
                 <div>
-                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                    Risks Assessment
-                  </h3>
-                  <ul className="space-y-2 max-h-[180px] overflow-y-auto pr-1.5 custom-scrollbar">
-                    {analysisData.risks_details.map((risk, idx) => (
-                      <li key={idx} className="flex flex-col gap-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-amber-600 dark:text-amber-400">{risk.risk}</span>
-                          <div className="flex gap-1.5">
-                            <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.probability} prob</span>
-                            <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.severity} sev</span>
-                          </div>
-                        </div>
-                        <div className="text-content-muted/80 mt-1"><span className="font-medium text-content-muted">Mitigation:</span> {risk.mitigation}</div>
-                        <div className="text-[10px] font-mono text-brand-primary/70 mt-0.5">Owner: {risk.owner}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : analysisData.risks && analysisData.risks.length > 0 && (
-                <div>
-                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                    Risks
-                  </h3>
-                  <ul className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1.5 custom-scrollbar">
-                    {analysisData.risks.map((risk, idx) => (
-                      <li key={idx} className="flex items-start gap-2 text-xs text-content-muted">
-                        <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
-                        <span className="leading-5">{risk}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <button
+                    onClick={toggleRisksCollapse}
+                    className="flex w-full items-center justify-between font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2 cursor-pointer hover:text-foreground transition-colors"
+                  >
+                    <span>Risks Assessment ({analysisData.risks_details?.length || analysisData.risks?.length || 0})</span>
+                    {!isRisksCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <div
+                    className="overflow-hidden transition-all duration-300 ease-in-out"
+                    style={{ maxHeight: !isRisksCollapsed ? "400px" : "0px" }}
+                  >
+                    {analysisData.risks_details && analysisData.risks_details.length > 0 ? (
+                      <ul className="space-y-2 max-h-[180px] overflow-y-auto pr-1.5 custom-scrollbar">
+                        {analysisData.risks_details.map((risk, idx) => (
+                          <li key={idx} className="flex flex-col gap-1 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-amber-600 dark:text-amber-400">{risk.risk}</span>
+                              <div className="flex gap-1.5">
+                                <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.probability} prob</span>
+                                <span className="rounded bg-background px-1.5 py-0.5 text-[9px] uppercase">{risk.severity} sev</span>
+                              </div>
+                            </div>
+                            <div className="text-content-muted/80 mt-1"><span className="font-medium text-content-muted">Mitigation:</span> {risk.mitigation}</div>
+                            <div className="text-[10px] font-mono text-brand-primary/70 mt-0.5">Owner: {risk.owner}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <ul className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1.5 custom-scrollbar">
+                        {analysisData.risks?.map((risk, idx) => (
+                          <li key={idx} className="flex items-start gap-2 text-xs text-content-muted">
+                            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
+                            <span className="leading-5">{risk}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -272,30 +336,39 @@ export function SpecPanel() {
 
               {analysisData.execution_boundaries && analysisData.execution_boundaries.length > 0 && (
                 <div className="mt-4">
-                  <h3 className="font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2">
-                    Execution Boundaries
-                  </h3>
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1.5 custom-scrollbar">
-                    {analysisData.execution_boundaries.map((boundary, idx) => (
-                      <div key={idx} className="rounded-lg border border-stroke bg-surface p-3 text-[11px]">
-                        <div className="flex items-center justify-between font-mono font-bold text-content mb-1">
-                          <span>
-                            {boundary.repo_name && <span className="text-brand-primary/70">{boundary.repo_name}/</span>}
-                            {boundary.root || "./"}
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary uppercase">
-                            {boundary.module}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {boundary.capabilities.map((cap, cIdx) => (
-                            <span key={cIdx} className="rounded bg-content/5 text-content-muted px-1.5 py-0.5 font-mono text-[9px]">
-                              {cap}
+                  <button
+                    onClick={toggleBoundariesCollapse}
+                    className="flex w-full items-center justify-between font-mono text-[10px] font-bold uppercase tracking-wider text-content-muted mb-2 cursor-pointer hover:text-foreground transition-colors"
+                  >
+                    <span>Execution Boundaries ({analysisData.execution_boundaries.length})</span>
+                    {!isBoundariesCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <div
+                    className="overflow-hidden transition-all duration-300 ease-in-out"
+                    style={{ maxHeight: !isBoundariesCollapsed ? "400px" : "0px" }}
+                  >
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1.5 custom-scrollbar">
+                      {analysisData.execution_boundaries.map((boundary, idx) => (
+                        <div key={idx} className="rounded-lg border border-stroke bg-surface p-3 text-[11px]">
+                          <div className="flex items-center justify-between font-mono font-bold text-content mb-1">
+                            <span>
+                              {boundary.repo_name && <span className="text-brand-primary/70">{boundary.repo_name}/</span>}
+                              {boundary.root || "./"}
                             </span>
-                          ))}
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary uppercase">
+                              {boundary.module}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {boundary.capabilities.map((cap, cIdx) => (
+                              <span key={cIdx} className="rounded bg-content/5 text-content-muted px-1.5 py-0.5 font-mono text-[9px]">
+                                {cap}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}

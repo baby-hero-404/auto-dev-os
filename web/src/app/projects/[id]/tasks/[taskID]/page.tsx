@@ -5,6 +5,10 @@ import Link from "next/link";
 import { AlertCircle, Loader2, Check, Send } from "lucide-react";
 import { TaskDetailProvider, useTaskDetail } from "./components/TaskDetailContext";
 import { TaskHeader } from "./components/TaskHeader";
+import { DashboardSummary } from "./components/DashboardSummary";
+import { ImplementationChecklist } from "./components/ImplementationChecklist";
+import { ActiveWorkflowBanner } from "./components/ActiveWorkflowBanner";
+import { TaskActions } from "./components/TaskActions";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { SpecPanel } from "./components/SpecPanel";
 import { PRPanel } from "./components/PRPanel";
@@ -55,8 +59,18 @@ function TaskDetailContent() {
 
   return (
     <main className="min-h-screen bg-background px-4 py-5 font-sans text-content md:px-8 md:py-7">
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-7xl space-y-8">
         <TaskHeader />
+
+        <DashboardSummary />
+
+        <ActiveWorkflowBanner />
+
+        <PRPanel />
+
+        <WorkflowTimeline />
+
+        <ImplementationChecklist />
 
         {error && (
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300 flex items-center gap-2" role="alert">
@@ -99,16 +113,13 @@ function TaskDetailContent() {
             </div>
           )}
 
-        <PRPanel />
-        <WorkflowTimeline />
-        <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-          <section className="space-y-6">
-            <SpecPanel />
-            <LogConsole logs={logs} />
-          </section>
+        <LogConsole logs={logs} isWorkflowRunning={workflow?.job?.status === "running"} />
 
-          <WorkflowSidebar />
-        </div>
+        <SpecPanel />
+
+        <WorkflowSidebar />
+
+        <TaskActions />
 
         <RequestChangesModal />
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useMemo, useCallback } from "react";
-import type { Task, WorkflowStatus, WorkflowArtifact, TaskAnalysis, AffectedFile, ExecutionUnit } from "@/lib/types";
+import type { Task, WorkflowStatus, WorkflowArtifact, TaskAnalysis, AffectedFile, ExecutionUnit, WorkflowCheckpoint } from "@/lib/types";
 import { getRiskAssessment, splitTaskDescription } from "@/lib/utils/task-utils";
 import { parseUnifiedDiff, type ParsedFileDiff } from "@/components/projects/task-diff-viewer";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
@@ -9,6 +9,80 @@ import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { RealtimeLog } from "@/lib/store/use-realtime-log-store";
+
+export interface ImplementationItem {
+  id: string;              // execution_unit.id
+  name: string;            // execution_unit title/objective
+  description: string;     // human-readable summary
+  status: 'done' | 'running' | 'pending';
+  affectedFiles: string[];
+  stepId: string;          // e.g. "code_backend_2"
+  checkpointExists: boolean;
+}
+
+export function deriveImplementationItems(
+  analysis: Partial<TaskAnalysis> | undefined,
+  checkpoints: WorkflowCheckpoint[] | undefined,
+  currentStep: string | undefined
+): ImplementationItem[] {
+  if (!analysis?.execution_units || analysis.execution_units.length === 0) {
+    return [];
+  }
+
+  const completedSteps = new Set<string>();
+  const runningSteps = new Set<string>();
+  
+  if (checkpoints) {
+    for (const cp of checkpoints) {
+      if (!cp.step.startsWith("code_")) continue;
+      const status = cp.state?.status;
+      if (status === "success" || status === "recorded" || status === "skipped") {
+        completedSteps.add(cp.step);
+      } else if (status === "running") {
+        runningSteps.add(cp.step);
+      }
+    }
+  }
+
+  if (currentStep && currentStep.startsWith("code_")) {
+    runningSteps.add(currentStep);
+  }
+
+  let backendIdx = 0;
+  let frontendIdx = 0;
+
+  return analysis.execution_units.map((unit) => {
+    const rawAgent = unit.execution_profile?.agent?.toLowerCase() || "backend";
+    const role = (rawAgent === "frontend" || rawAgent === "fe") ? "frontend" : "backend";
+    
+    let idx = 0;
+    if (role === "frontend") {
+      idx = frontendIdx;
+      frontendIdx++;
+    } else {
+      idx = backendIdx;
+      backendIdx++;
+    }
+
+    const stepId = `code_${role}_${idx}`;
+    const isDone = completedSteps.has(stepId);
+    const isRunning = !isDone && runningSteps.has(stepId);
+    
+    const name = (unit as any).title || (unit as any).intent?.capability || unit.objective || `Unit ${idx}`;
+    const description = (unit as any).description || unit.objective || '';
+    const affectedFiles = (unit as any).affected_files || [];
+
+    return {
+      id: unit.id,
+      name,
+      description,
+      status: isDone ? 'done' : isRunning ? 'running' : 'pending',
+      affectedFiles,
+      stepId,
+      checkpointExists: isDone,
+    };
+  });
+}
 
 // Enums & Constants for Workflow Steps to avoid typos
 export const WORKFLOW_STEPS = {
@@ -225,6 +299,62 @@ export function getStepTasks(step: string, analysisData?: Partial<TaskAnalysis>)
   return [];
 }
 
+export function getSemanticStatusColor(status: string): { bg: string; text: string; border: string; ring: string; dot: string } {
+  const norm = status?.toLowerCase() ?? "";
+  if (norm === "success" || norm === "recorded" || norm === "skipped" || norm === "completed" || norm === "merged") {
+    return {
+      bg: "bg-emerald-500/10",
+      text: "text-emerald-500",
+      border: "border-emerald-500",
+      ring: "ring-emerald-500/30",
+      dot: "bg-emerald-500"
+    };
+  }
+  if (norm === "running" || norm === "active") {
+    return {
+      bg: "bg-sky-500/10",
+      text: "text-sky-500",
+      border: "border-sky-500",
+      ring: "ring-sky-500/30",
+      dot: "bg-sky-500"
+    };
+  }
+  if (norm === "failed" || norm === "blocked" || norm === "danger") {
+    return {
+      bg: "bg-rose-500/10",
+      text: "text-rose-500",
+      border: "border-rose-500",
+      ring: "ring-rose-500/30",
+      dot: "bg-rose-500"
+    };
+  }
+  return {
+    bg: "bg-slate-500/10",
+    text: "text-content-muted",
+    border: "border-stroke",
+    ring: "ring-transparent",
+    dot: "bg-slate-400"
+  };
+}
+
+// getTaskSemanticStatus buckets a Task.status value (todo/context_loading/analyzing/
+// spec_review/planning/coding/reviewing/fixing/testing/pr_ready/human_review/merged/failed —
+// see badge.tsx's taskStatusBadge) into the 4-state vocabulary getSemanticStatusColor expects
+// (success/running/failed/pending). Task statuses use a different, richer vocabulary than the
+// workflow-step statuses (success/running/failed/pending) getSemanticStatusColor was written
+// for, so passing task.status to it directly only ever matches "merged" or "failed" — every
+// other (in-progress) status silently fell through to the gray "pending" default.
+export function getTaskSemanticStatus(status: string): "success" | "running" | "failed" | "pending" {
+  const norm = status?.toLowerCase() ?? "";
+  if (norm === "merged") return "success";
+  if (norm === "failed") return "failed";
+  // todo hasn't started yet; spec_review/human_review are paused waiting on a human, not
+  // actively worked on by the agent — both read as "waiting", not "running".
+  if (norm === "todo" || norm === "spec_review" || norm === "human_review") return "pending";
+  // context_loading, analyzing, planning, coding, reviewing, fixing, testing, pr_ready
+  return "running";
+}
+
 interface TaskDetailContextType {
   projectID: string;
   taskID: string;
@@ -284,6 +414,8 @@ interface TaskDetailContextType {
   diffText: string;
   parsedDiffs: ParsedFileDiff[];
   parsedDiffFiles: string[];
+  implementationItems: ImplementationItem[];
+  currentImplementationItem: ImplementationItem | null;
 }
 
 const TaskDetailContext = createContext<TaskDetailContextType | undefined>(undefined);
@@ -623,6 +755,15 @@ export function TaskDetailProvider({
   );
   const isPaused = workflow?.job?.status === "paused";
 
+  const implementationItems = useMemo(() => {
+    const currentStep = workflow?.job?.status === "running" ? workflow?.job?.step : undefined;
+    return deriveImplementationItems(analysisData, workflow?.checkpoints, currentStep);
+  }, [analysisData, workflow?.checkpoints, workflow?.job?.status, workflow?.job?.step]);
+
+  const currentImplementationItem = useMemo(() => {
+    return implementationItems.find(item => item.status === "running") || null;
+  }, [implementationItems]);
+
   return (
     <TaskDetailContext.Provider
       value={{
@@ -684,6 +825,8 @@ export function TaskDetailProvider({
         diffText,
         parsedDiffs,
         parsedDiffFiles,
+        implementationItems,
+        currentImplementationItem,
       }}
     >
       {children}

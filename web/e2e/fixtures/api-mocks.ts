@@ -400,6 +400,198 @@ export async function installApiMocks(page: Page, state = createMockState()) {
 
     await json(route, { error: "Unhandled git account route" }, 404);
   });
+
+  await page.route("**/api/v1/tasks/**", async (route) => {
+    const request = route.request();
+    const url = request.url();
+    const method = request.method();
+    
+    const segments = new URL(url).pathname.split("/");
+    const taskIndex = segments.indexOf("tasks");
+    const taskId = segments[taskIndex + 1];
+    const subAction = segments[taskIndex + 2];
+
+    if (method === "GET") {
+      if (subAction === "workflow") {
+        await json(route, {
+          task: {
+            id: taskId,
+            project_id: projectID,
+            title: "Add API Authentication",
+            description: "Implement JWT login and verification endpoints",
+            status: "todo",
+            complexity: "easy",
+            priority: 1,
+            labels: ["auth", "backend"],
+            spec_status: "review",
+            created_at: now,
+            updated_at: now,
+            analysis: {
+              scope: "Implement JWT auth endpoints",
+              complexity_details: {
+                architecture: "rest",
+                data_migration: false,
+                breaking_change: false,
+              },
+              risk_domains: ["security"],
+              risks_details: [
+                {
+                  risk: "Token leak",
+                  probability: "low",
+                  severity: "high",
+                  mitigation: "Use HTTPOnly cookies",
+                  owner: "Hermes Bot"
+                }
+              ],
+              execution_plan: ["Create login route", "Create verify route"],
+              execution_boundaries: [
+                {
+                  module: "auth",
+                  root: "src/auth",
+                  repo_name: "auto-dev-os",
+                  capabilities: ["modify_existing"]
+                }
+              ],
+              expanded_boundaries: [],
+              execution_units: [
+                {
+                  id: "code_backend_0",
+                  objective: "Write database models",
+                  tasks: ["Create user schema", "Set up indexes"],
+                  execution_profile: { type: "backend" },
+                  constraints: { parallelizable: false, max_files: 2, estimated_tokens: 100, max_risk: "low" }
+                },
+                {
+                  id: "code_frontend_0",
+                  objective: "Build login page",
+                  tasks: ["Implement input forms", "Add form validation"],
+                  execution_profile: { type: "frontend" },
+                  constraints: { parallelizable: false, max_files: 2, estimated_tokens: 100, max_risk: "low" }
+                }
+              ]
+            }
+          },
+          job: {
+            id: "job-1",
+            status: "running",
+            step: "code_backend_0",
+            progress: 50,
+            step_index: 3,
+            steps_total: 6,
+            error_count: 0,
+            created_at: now,
+            updated_at: now,
+          },
+          checkpoints: [
+            {
+              id: "cp-1",
+              task_id: taskId,
+              step: "context_load",
+              status: "success",
+              message: "Context loaded successfully",
+              created_at: now,
+            },
+            {
+              id: "cp-2",
+              task_id: taskId,
+              step: "code_backend_0",
+              status: "running",
+              message: "Writing models...",
+              created_at: now,
+            }
+          ]
+        });
+        return;
+      }
+
+      if (subAction === "logs") {
+        if (segments[taskIndex + 3] === "stream") {
+          await route.fulfill({
+            status: 200,
+            contentType: "text/event-stream",
+            body: "event: log\ndata: {\"id\":\"log-sse-1\",\"task_id\":\"task-1\",\"level\":\"info\",\"message\":\"SSE log stream active\",\"timestamp\":\"2026-06-01T00:00:00.000Z\"}\n\nevent: log\ndata: {\"id\":\"log-sse-2\",\"task_id\":\"task-1\",\"level\":\"info\",\"message\":\"checkpoint: load success\",\"timestamp\":\"2026-06-01T00:00:00.050Z\"}\n\n",
+          });
+          return;
+        }
+
+        await json(route, [
+          {
+            id: "log-1",
+            task_id: taskId,
+            level: "info",
+            message: "Analyzing workspace constraints...",
+            timestamp: now,
+          },
+          {
+            id: "log-2",
+            task_id: taskId,
+            level: "info",
+            message: "checkpoint: load success",
+            timestamp: now,
+          }
+        ]);
+        return;
+      }
+
+      // Default task get
+      await json(route, {
+        id: taskId,
+        project_id: projectID,
+        title: "Add API Authentication",
+        description: "Implement JWT login and verification endpoints",
+        status: "todo",
+        complexity: "easy",
+        priority: 1,
+        labels: ["auth", "backend"],
+        spec_status: "review",
+        created_at: now,
+        updated_at: now,
+        analysis: {
+          scope: "Implement JWT auth endpoints",
+          complexity_details: {
+            architecture: "rest",
+            data_migration: false,
+            breaking_change: false,
+          },
+          risk_domains: ["security"],
+          risks_details: [
+            {
+              risk: "Token leak",
+              probability: "low",
+              severity: "high",
+              mitigation: "Use HTTPOnly cookies",
+              owner: "Hermes Bot"
+            }
+          ],
+          execution_plan: ["Create login route", "Create verify route"],
+          execution_boundaries: [
+            {
+              module: "auth",
+              root: "src/auth",
+              repo_name: "auto-dev-os",
+              capabilities: ["modify_existing"]
+            }
+          ],
+          expanded_boundaries: []
+        }
+      });
+      return;
+    }
+
+    if (method === "POST" || method === "PATCH") {
+      await json(route, {
+        status: "success",
+        id: taskId,
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page.route("**/api/v1/workflows/*/artifacts", async (route) => {
+    await json(route, []);
+  });
 }
 
 async function json(route: Route, body: unknown, status = 200) {

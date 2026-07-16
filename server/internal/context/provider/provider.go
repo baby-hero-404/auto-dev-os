@@ -201,7 +201,7 @@ func (p *Provider) initLocalCacheFromGlobal(wsRoot string, localDbPath string) e
 		}
 
 		globalCachePath := filepath.Join(globalCacheDir, fmt.Sprintf("global_cache_%s_%s.db", r.Name, commitHash))
-		
+
 		if _, errStat := os.Stat(globalCachePath); os.IsNotExist(errStat) {
 			_ = p.buildGlobalCache(repoAbsPath, r.Name, commitHash, globalCachePath)
 		}
@@ -423,7 +423,7 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 		}
 
 		content := strings.Join(lines[startLine-1:endLine], "\n")
-		
+
 		var relPath string
 		var relErr error
 		if pathCtx != nil {
@@ -445,6 +445,7 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 			StartLine: startLine,
 			EndLine:   endLine,
 			Content:   content,
+			Relevance: t.Score,
 			Retriever: "ast_context_engine",
 		})
 	}

@@ -329,9 +329,13 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 			if latestCommitHash != "" {
 				worktreeSuffix := ""
-				if latestStep == workflow.StepCodeBackend {
+				// latestStep is a per-unit step id (e.g. "code_backend_3"), not the bare
+				// "code_backend"/"code_frontend" constants, so this must be a prefix match, not
+				// an exact one — an exact match here never fires for any real backend/frontend
+				// step, silently restoring the main worktree instead of the role worktree.
+				if strings.HasPrefix(latestStep, workflow.StepCodeBackend) {
 					worktreeSuffix = "-be-worktree"
-				} else if latestStep == workflow.StepCodeFrontend {
+				} else if strings.HasPrefix(latestStep, workflow.StepCodeFrontend) {
 					worktreeSuffix = "-fe-worktree"
 				}
 				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Restoring worktree %s to commit checkpoint %s from step %s", worktreeSuffix, latestCommitHash, latestStep))

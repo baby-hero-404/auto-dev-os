@@ -29,13 +29,22 @@ type mockContextEngine struct {
 	globalCacheDir  string
 	builtCaches     []string
 	initLocalCalled bool
+
+	// getRepoMapCtx/retrieveContextCtx capture the ctx each call actually received, so tests can
+	// assert provider.WorkspaceRootKey was set on it (REQ: RetrieveContext/GetRepoMap must see the
+	// task's workspace root, not the original un-augmented ctx — see
+	// TestStepContextLoad_Execute_PropagatesWorkspaceRootToRepoMapAndRetrieveContext).
+	getRepoMapCtx      context.Context
+	retrieveContextCtx context.Context
 }
 
 func (m *mockContextEngine) GetRepoMap(ctx context.Context, activeFiles []string, maxTokens int) (string, error) {
+	m.getRepoMapCtx = ctx
 	return "", nil
 }
 
 func (m *mockContextEngine) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
+	m.retrieveContextCtx = ctx
 	return nil, nil
 }
 
@@ -152,6 +161,74 @@ func TestStepContextLoad_Execute(t *testing.T) {
 	testCommands, ok := res["test_commands"].([]string)
 	if !ok || len(testCommands) == 0 {
 		t.Errorf("expected detected test commands, got: %v", res["test_commands"])
+	}
+}
+
+// TestStepContextLoad_Execute_PropagatesWorkspaceRootToRepoMapAndRetrieveContext reproduces the
+// bug traced from task b5f92863-39df-46ae-849a-f4781c0b9987: RetrieveContext and GetRepoMap were
+// called with the original ctx (no provider.WorkspaceRootKey set), instead of the workspace-scoped
+// ctx already built for IndexWorkspace. Provider.GetRepoMap treats a missing WorkspaceRootKey as
+// "scanning the global root" and short-circuits to an empty result, so the repo map/semantic
+// snippets silently came back empty — even though the underlying AST indexing pipeline worked
+// fine — forcing the analyze step to fall back to reading files one at a time via tools instead of
+// getting a repo map upfront.
+func TestStepContextLoad_Execute_PropagatesWorkspaceRootToRepoMapAndRetrieveContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-load-workspaceroot-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{ID: "task-789", ProjectID: "proj-789"}
+	agent := &models.Agent{ID: "agent-789"}
+
+	workspaceRoot := filepath.Join(tmpDir, "workspaces")
+	taskWorkspace := filepath.Join(workspaceRoot, task.ID)
+	if err := os.MkdirAll(taskWorkspace, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mockEngine := &mockContextEngine{}
+
+	step := NewContextLoadStep(
+		StepRuntime{Task: task, Agent: agent, JobID: "job-789"},
+		workspaceRoot,
+		&mockTaskReader{task: task},
+		statusUpdaterAdapter{update: func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
+			return task, nil
+		}},
+		&mockStepWorkspaceLoader{},
+		sandboxRunnerAdapter{run: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (map[string]any, error) {
+			return map[string]any{"stdout": "mock output"}, nil
+		}},
+		mockEngine,
+		artifactSaverAdapter{save: func(ctx context.Context, jobID string, taskID string, step string, artType string, payload any) error {
+			return nil
+		}},
+		&mockRepositoryLister{},
+		&mockLogger{},
+		func(task *models.Task, hostPath string, worktreeSuffix string) string {
+			return hostPath
+		},
+	)
+
+	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	expectedRoot := taskWorkspace
+	if mockEngine.retrieveContextCtx == nil {
+		t.Fatal("RetrieveContext was never called")
+	}
+	if got, _ := mockEngine.retrieveContextCtx.Value(provider.WorkspaceRootKey).(string); got != expectedRoot {
+		t.Errorf("RetrieveContext's ctx WorkspaceRootKey = %q, want %q", got, expectedRoot)
+	}
+
+	if mockEngine.getRepoMapCtx == nil {
+		t.Fatal("GetRepoMap was never called")
+	}
+	if got, _ := mockEngine.getRepoMapCtx.Value(provider.WorkspaceRootKey).(string); got != expectedRoot {
+		t.Errorf("GetRepoMap's ctx WorkspaceRootKey = %q, want %q", got, expectedRoot)
 	}
 }
 

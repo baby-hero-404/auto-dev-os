@@ -88,8 +88,15 @@ type StateMachine struct {
 // NewStateMachine starts a machine in DISCOVERY with the given phase
 // budgets (typically ExecutionIR.Budget).
 func NewStateMachine(budget models.PhaseBudgets) *StateMachine {
+	return NewStateMachineFrom(StateDiscovery, budget)
+}
+
+// NewStateMachineFrom starts a machine in the given initial state with the
+// provided phase budgets. Use this when the calling step already has full
+// context (e.g. fix step after review) and the DISCOVERY phase can be skipped.
+func NewStateMachineFrom(initial NodeState, budget models.PhaseBudgets) *StateMachine {
 	return &StateMachine{
-		current:    StateDiscovery,
+		current:    initial,
 		budget:     budget,
 		used:       make(map[NodeState]int),
 		allowlists: defaultToolAllowlists,

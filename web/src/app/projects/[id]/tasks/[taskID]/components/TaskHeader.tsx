@@ -2,12 +2,15 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Edit2, Check, X, Play, Pause, Ban } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Edit2, Check, X, Play, Pause, Ban, Trash2, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { Badge, taskStatusBadge } from "@/components/ui/badge";
 import { Markdown } from "@/components/ui/markdown";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useTaskDetail, formatStepName } from "./TaskDetailContext";
 
 export function TaskHeader() {
+  const router = useRouter();
   const {
     projectID,
     task,
@@ -17,9 +20,13 @@ export function TaskHeader() {
     workflowCompletion,
     analysisData,
     execute,
+    analyze,
+    retry,
     pause,
     cancel,
+    deleteTask,
     isPaused,
+    isExecutionReady,
   } = useTaskDetail();
 
   const jobStatus = workflow?.job?.status?.toLowerCase();
@@ -32,6 +39,41 @@ export function TaskHeader() {
     task.spec_status !== "changes_requested" &&
     task.spec_status !== "clarification_required"
   );
+
+  // Absorbed from TaskActions: contextual run controls. Review CTAs (Approve/
+  // Request Changes/Start Review) live in ReviewActionBar, not here.
+  const showAnalyze = !!(task && (task.status === "todo" || task.status === "failed") && !isExecutionReady);
+  const showExecute = !!(task && isExecutionReady);
+
+  const [isDescOpen, setIsDescOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+
+  const handleAnalyze = useCallback(async () => {
+    if (!task) return;
+    if (task.status === "failed") await retry();
+    else await analyze();
+  }, [task, retry, analyze]);
+
+  const handleExecute = useCallback(async () => {
+    if (!task) return;
+    if (task.status === "failed") await retry();
+    else await execute();
+  }, [task, retry, execute]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    setIsDeleting(true);
+    const success = await deleteTask();
+    if (success) {
+      router.push(`/projects/${projectID}`);
+    } else {
+      setIsDeleting(false);
+      setIsDeleteConfirmOpen(false);
+    }
+  }, [deleteTask, router, projectID]);
+
+  const attemptsCount = workflow?.job?.attempts ?? 0;
+  const lastError = workflow?.job?.last_error;
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
@@ -160,6 +202,17 @@ export function TaskHeader() {
             )}
           </div>
 
+          {!isEditingDesc && (
+            <button
+              onClick={() => setIsDescOpen((v) => !v)}
+              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-content-muted transition hover:text-foreground cursor-pointer"
+              aria-expanded={isDescOpen}
+            >
+              {isDescOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {isDescOpen ? "Hide project description" : "Show project description"}
+            </button>
+          )}
+
           {isEditingDesc ? (
             <div className="flex flex-col gap-2 mt-3 max-w-4xl">
               <textarea
@@ -187,7 +240,7 @@ export function TaskHeader() {
                 </button>
               </div>
             </div>
-          ) : (
+          ) : isDescOpen ? (
             <div className="group mt-1.5 max-w-4xl space-y-3">
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1 rounded-lg border border-stroke bg-surface/20 p-3">
@@ -243,7 +296,7 @@ export function TaskHeader() {
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -268,9 +321,41 @@ export function TaskHeader() {
                 {task.agent_id || "Unassigned"}
               </span>
             </div>
+            {attemptsCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-foreground">Attempts:</span>
+                <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
+                  {attemptsCount}
+                </span>
+              </div>
+            )}
+            {lastError && (
+              <div className="flex items-center gap-1.5 text-rose-500" title={lastError}>
+                <AlertTriangle size={13} className="shrink-0" />
+                <span className="max-w-[240px] truncate font-mono text-[11px] font-semibold">{lastError}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
+            {showAnalyze && (
+              <button
+                onClick={handleAnalyze}
+                className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-1.5 text-xs font-semibold text-slate-950 transition-all duration-300 hover:opacity-90 hover:shadow-[0_0_15px_rgba(var(--brand-primary),0.4)] hover:scale-[1.02] active:scale-95 cursor-pointer shadow-sm"
+              >
+                <Play size={13} />
+                {task.status === "failed" ? "Retry Analyze" : "Analyze"}
+              </button>
+            )}
+            {showExecute && (
+              <button
+                onClick={handleExecute}
+                className="inline-flex items-center gap-1.5 rounded-md bg-brand-primary px-4 py-1.5 text-xs font-semibold text-slate-950 transition-all duration-300 hover:opacity-90 hover:shadow-[0_0_15px_rgba(var(--brand-primary),0.4)] hover:scale-[1.02] active:scale-95 cursor-pointer shadow-sm"
+              >
+                <Play size={13} fill="currentColor" />
+                {task.status === "failed" ? "Retry Execute" : "Execute"}
+              </button>
+            )}
             {canResume && (
               <button
                 onClick={execute}
@@ -298,9 +383,27 @@ export function TaskHeader() {
                 Close Task
               </button>
             )}
+            <button
+              onClick={() => setIsDeleteConfirmOpen(true)}
+              disabled={isDeleting}
+              title="Delete Task"
+              className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-transparent px-2.5 py-1.5 text-xs font-semibold text-danger transition hover:bg-danger/5 disabled:opacity-50 cursor-pointer"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        title="Delete Task"
+        description="Are you sure you want to delete this task? This action cannot be undone."
+        confirmText="Delete"
+        variant="danger"
+        onConfirm={handleDeleteConfirm}
+        onClose={() => setIsDeleteConfirmOpen(false)}
+      />
     </header>
   );
 }

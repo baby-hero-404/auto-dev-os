@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -136,7 +137,7 @@ type PromptAssembler interface {
 
 // TraceRecorder writes LLM call traces. Used by: analyze.
 type TraceRecorder interface {
-	WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, retryAttempt int, latency time.Duration)
+	WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, counters llmrunner.TraceCounters, latency time.Duration)
 }
 
 // ReviewerAssigner optionally assigns a specialized reviewer agent. Used by: review.

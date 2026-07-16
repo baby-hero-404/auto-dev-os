@@ -3,7 +3,16 @@
 import { useTaskDetail } from "./TaskDetailContext";
 import { CheckCircle2, Circle, FileCode, ListTodo } from "lucide-react";
 
-export function ImplementationChecklist() {
+interface ImplementationChecklistProps {
+  /**
+   * Expands the (default-collapsed) LogConsole and scrolls to the matching
+   * log group (REQ-006). When omitted, falls back to a direct scroll — which
+   * only resolves if the log is already open.
+   */
+  expandAndScrollToLog?: (stepId: string) => void;
+}
+
+export function ImplementationChecklist({ expandAndScrollToLog }: ImplementationChecklistProps = {}) {
   const { implementationItems } = useTaskDetail();
 
   if (!implementationItems || implementationItems.length === 0) {
@@ -15,6 +24,10 @@ export function ImplementationChecklist() {
   const completedItems = implementationItems.filter((item) => item.status === "done");
 
   const scrollToLog = (stepId: string) => {
+    if (expandAndScrollToLog) {
+      expandAndScrollToLog(stepId);
+      return;
+    }
     const el = document.getElementById(`log-group-${stepId}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });

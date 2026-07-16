@@ -174,7 +174,7 @@ func (r Runner) runStateMachine(ctx context.Context, task *models.Task, agent *m
 			} else {
 				tracedParsed = map[string]any{"raw_content": resp.Content}
 			}
-			r.WriteTrace(ctx, task, agent, stepID, msgs, resp, tracedParsed, sm.used[currentState]+1, latency)
+			r.WriteTrace(ctx, task, agent, stepID, msgs, resp, tracedParsed, TraceCounters{Iteration: sm.used[currentState] + 1, Kind: TraceKindPhaseIteration}, latency)
 		}
 
 		if len(resp.ToolCalls) > 0 {

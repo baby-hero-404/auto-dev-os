@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
 import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
 import { useTaskDetail, isAffectedFile } from "./TaskDetailContext";
 
-export function SpecPanel() {
+interface SpecPanelProps {
+  /** Controlled collapse state (REQ-005). When omitted, the panel self-manages. */
+  isExpanded?: boolean;
+  onToggle?: () => void;
+}
+
+export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
   const {
     taskID,
     token,
@@ -19,6 +25,18 @@ export function SpecPanel() {
     completedPlanSteps,
     togglePlanStep,
   } = useTaskDetail();
+
+  // Outer collapse: default-collapsed. Uncontrolled fallback when no props given.
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = isExpanded ?? internalOpen;
+  const toggleOpen = onToggle ?? (() => setInternalOpen((v) => !v));
+
+  const presenceChips = [
+    { label: "Scope", present: !!analysisData.scope },
+    { label: "Recommendation", present: !!analysisData.proposal_md },
+    { label: "Architecture", present: !!analysisData.design_md },
+    { label: "Risks", present: !!(analysisData.risk_domains && analysisData.risk_domains.length > 0) },
+  ].filter((c) => c.present);
 
   const [isDescCollapsed, setIsDescCollapsed] = useState(true);
   const [isRisksCollapsed, setIsRisksCollapsed] = useState(true);
@@ -88,14 +106,31 @@ export function SpecPanel() {
   return (
     <div className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-5 shadow-lg hover:shadow-xl transition-all group">
       <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-      <div className="relative mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-stroke/40 pb-3 z-10">
-        <div className="flex items-center gap-2">
+      <div className={`relative flex flex-wrap items-center justify-between gap-4 z-10 ${isOpen ? "mb-4 border-b border-stroke/40 pb-3" : ""}`}>
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="flex items-center gap-2 cursor-pointer text-left"
+          aria-expanded={isOpen}
+        >
+          {isOpen ? <ChevronUp size={18} className="text-content-muted" /> : <ChevronDown size={18} className="text-content-muted" />}
           <Sparkles size={18} className="text-brand-primary" />
           <h2 className="font-heading text-base font-bold text-foreground">
             Proposed Task Specification
           </h2>
-        </div>
-        {hasMarkdownData && (
+        </button>
+        {!isOpen && (
+          <div className="flex flex-wrap items-center gap-2">
+            {presenceChips.map((c) => (
+              <span key={c.label} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                <Check size={10} />
+                {c.label}
+              </span>
+            ))}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary">View details</span>
+          </div>
+        )}
+        {isOpen && hasMarkdownData && (
           <div className="flex gap-1.5 bg-surface/60 p-1.5 rounded-lg border border-stroke shadow-inner overflow-x-auto hide-scrollbar">
             <button
               onClick={handleSelectSummary}
@@ -144,7 +179,7 @@ export function SpecPanel() {
         )}
       </div>
 
-      {activeSpecTab === "summary" ? (
+      {isOpen && (activeSpecTab === "summary" ? (
         <div className="space-y-4">
           {analysisData.scope && (
             <div className="relative">
@@ -426,7 +461,7 @@ export function SpecPanel() {
           {activeSpecTab === "design" && <Markdown content={analysisData.design_md || ""} />}
           {activeSpecTab === "tasks" && <Markdown content={analysisData.tasks_md || ""} />}
         </div>
-      )}
+      ))}
     </div>
   );
 }

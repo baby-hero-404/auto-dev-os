@@ -157,15 +157,15 @@ export function WorkflowTimeline() {
   }, [workflowSteps, analysisData]);
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-6 shadow-lg hover:shadow-xl transition-all group">
+    <section className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/40 p-6 shadow-sm hover:shadow-md transition-all group">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded-lg bg-brand-primary/10 border border-brand-primary/20 text-brand-primary">
             <Compass size={18} />
           </div>
           <div>
-            <h2 className="font-heading text-base font-bold text-foreground">Task Flow</h2>
-            <p className="mt-0.5 text-xs text-content-muted">Execution pipeline, sandboxed runs, and checkpoint state.</p>
+            <h2 className="font-heading text-base font-bold text-foreground">Workflow Phases</h2>
+            <p className="mt-0.5 text-xs text-content-muted">High-level pipeline stages. See the checklist above for per-unit implementation progress.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

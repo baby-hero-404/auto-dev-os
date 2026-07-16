@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -217,7 +218,7 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 			s.lastAttemptIteration = iter
 			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: response from %s", iter, resp.Model))
 			if s.traces != nil {
-				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, msgs, resp, parsed, iter, latency)
+				s.traces.WriteLLMCallTrace(ctx, s.rt.Task, s.rt.Agent, workflow.StepAnalyze, msgs, resp, parsed, llmrunner.TraceCounters{Iteration: iter, Kind: llmrunner.TraceKindToolIteration}, latency)
 			}
 		},
 	})
@@ -227,58 +228,108 @@ func (s *AnalyzeStep) runAnalyzeToolLoop(ctx context.Context, messages []llm.Mes
 	return parsedFinal, nil
 }
 
-func validateBoundaryCoverage(analysis models.TaskAnalysis) error {
-	isCovered := func(file string) bool {
-		cleanFile := path.Clean(file)
-		for _, b := range analysis.ExecutionBoundaries {
-			root := b.Root
-			if root == "" || root == "." || root == "./" {
-				return true
-			}
-			normRoot := path.Clean(root)
-			if !strings.HasSuffix(normRoot, "/") {
-				normRoot = normRoot + "/"
-			}
-			if strings.HasPrefix(cleanFile, normRoot) || cleanFile == path.Clean(root) {
-				return true
-			}
+// boundaryFileIsCovered reports whether file falls under any of the declared boundaries.
+func boundaryFileIsCovered(file string, boundaries []models.ExecutionBoundary) bool {
+	cleanFile := path.Clean(file)
+	for _, b := range boundaries {
+		root := b.Root
+		if root == "" || root == "." || root == "./" {
+			return true
 		}
-		return false
+		normRoot := path.Clean(root)
+		if !strings.HasSuffix(normRoot, "/") {
+			normRoot = normRoot + "/"
+		}
+		if strings.HasPrefix(cleanFile, normRoot) || cleanFile == path.Clean(root) {
+			return true
+		}
 	}
+	return false
+}
 
+// collectUncoveredBoundaryFiles returns the affected/target files not covered by any
+// execution boundary. An empty result means the spec is fully covered. (REQ-002:
+// returns the structured list rather than embedding filenames in an error string.)
+func collectUncoveredBoundaryFiles(analysis models.TaskAnalysis) []string {
 	var uncovered []string
+	seen := map[string]bool{}
+	add := func(f string) {
+		if !seen[f] {
+			seen[f] = true
+			uncovered = append(uncovered, f)
+		}
+	}
 	for _, aff := range analysis.AffectedFiles {
-		if !isCovered(aff.File) {
-			uncovered = append(uncovered, aff.File)
+		if !boundaryFileIsCovered(aff.File, analysis.ExecutionBoundaries) {
+			add(aff.File)
 		}
 	}
 	for _, unit := range analysis.ExecutionUnits {
 		for _, tf := range unit.TargetFiles {
-			if !isCovered(tf) {
-				found := false
-				for _, u := range uncovered {
-					if u == tf {
-						found = true
-						break
-					}
-				}
-				if !found {
-					uncovered = append(uncovered, tf)
-				}
+			if !boundaryFileIsCovered(tf, analysis.ExecutionBoundaries) {
+				add(tf)
 			}
 		}
 	}
+	return uncovered
+}
 
-	if len(uncovered) > 0 {
-		var roots []string
-		for _, b := range analysis.ExecutionBoundaries {
-			roots = append(roots, b.Root)
-		}
-		rootsStr := strings.Join(roots, ", ")
-		return fmt.Errorf("Boundary coverage validation failed:\nexecution_boundaries do not cover: %s (declared roots: %s). Widen an existing boundary or add one so every affected/target file is covered.", strings.Join(uncovered, ", "), rootsStr)
+// sensitiveBoundaryPrefixes are directory prefixes that must NEVER be auto-covered by
+// autoWidenBoundaries — modifications there (CI, deploy, infra) are too consequential to
+// grant without an explicit human/LLM decision. Kept as a single reviewable var.
+var sensitiveBoundaryPrefixes = []string{".github/", "deploy/", "infra/", ".ci/"}
+
+// isSensitiveBoundaryPath reports whether an uncovered file must escalate rather than
+// auto-widen: CI/deploy/infra directories, secret files, tfvars, or the repo-root Go
+// module files.
+func isSensitiveBoundaryPath(file string) bool {
+	clean := path.Clean(file)
+	if clean == "go.mod" || clean == "go.sum" {
+		return true
 	}
+	for _, p := range sensitiveBoundaryPrefixes {
+		if strings.HasPrefix(clean, p) {
+			return true
+		}
+	}
+	base := path.Base(clean)
+	if strings.HasPrefix(base, "secrets") || strings.HasSuffix(base, ".tfvars") {
+		return true
+	}
+	return false
+}
 
-	return nil
+// autoWidenBoundaries deterministically synthesizes execution boundaries for uncovered
+// files whose parent directory is safe to auto-grant, and returns the residual files that
+// must still escalate to a human/LLM round-trip (REQ-002). It NEVER synthesizes a root
+// "." boundary — that would grant repo-wide write access — so any file at the repo root
+// stays in residual. Output ordering is stable (sorted by root) for determinism.
+func autoWidenBoundaries(uncovered []string, existing []models.ExecutionBoundary) (added []models.ExecutionBoundary, residual []string) {
+	addedRoots := map[string]bool{}
+	for _, f := range uncovered {
+		if isSensitiveBoundaryPath(f) {
+			residual = append(residual, f)
+			continue
+		}
+		root := path.Dir(path.Clean(f))
+		// A parent dir of "." (or empty/root) means a repo-root file — never synthesize
+		// a root boundary. Escalate instead.
+		if root == "." || root == "" || root == "/" {
+			residual = append(residual, f)
+			continue
+		}
+		if addedRoots[root] || boundaryFileIsCovered(f, existing) {
+			continue
+		}
+		addedRoots[root] = true
+		added = append(added, models.ExecutionBoundary{
+			Module:       path.Base(root),
+			Root:         root,
+			Capabilities: []string{"modify_existing", "create_test", "create_helper"},
+		})
+	}
+	sort.Slice(added, func(i, j int) bool { return added[i].Root < added[j].Root })
+	return added, residual
 }
 
 // validateAnalyzeSpec is the llmrunner.ToolLoopValidator for the analyze step's spec JSON. It
@@ -308,10 +359,38 @@ func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[st
 
 	analysisDraft := parseAnalysisFinal(parsedJSON)
 
-	// Validate boundary coverage for affected files and target files
-	if err := validateBoundaryCoverage(analysisDraft); err != nil {
-		s.lastValidationError = err
-		return err
+	// Boundary coverage (REQ-002): compute the uncovered files, then deterministically
+	// auto-widen boundaries for the safe (non-sensitive, non-root) ones instead of
+	// round-tripping to the LLM to regenerate the entire spec. Only the residual
+	// (sensitive/root) files escalate via the corrective feedback loop.
+	if uncovered := collectUncoveredBoundaryFiles(analysisDraft); len(uncovered) > 0 {
+		added, residual := autoWidenBoundaries(uncovered, analysisDraft.ExecutionBoundaries)
+		if len(added) > 0 {
+			analysisDraft.ExecutionBoundaries = append(analysisDraft.ExecutionBoundaries, added...)
+			// Reflect the widening into the accepted spec JSON so the persisted contract
+			// matches. Only execution_boundaries changes; every other field is the model's
+			// last output verbatim.
+			if bJSON, mErr := json.Marshal(analysisDraft.ExecutionBoundaries); mErr == nil {
+				var bAny []any
+				if json.Unmarshal(bJSON, &bAny) == nil {
+					parsedJSON["execution_boundaries"] = bAny
+				}
+			}
+			addedRoots := make([]string, 0, len(added))
+			for _, b := range added {
+				addedRoots = append(addedRoots, b.Root)
+			}
+			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("StepAnalyze Iteration %d: auto-widened execution_boundaries to cover %s", iteration, strings.Join(addedRoots, ", ")))
+		}
+		if len(residual) > 0 {
+			var roots []string
+			for _, b := range analysisDraft.ExecutionBoundaries {
+				roots = append(roots, b.Root)
+			}
+			err := fmt.Errorf("Boundary coverage validation failed:\nexecution_boundaries do not cover: %s (declared roots: %s). Widen an existing boundary or add one so every affected/target file is covered.", strings.Join(residual, ", "), strings.Join(roots, ", "))
+			s.lastValidationError = err
+			return err
+		}
 	}
 
 	if len(analysisDraft.ExecutionUnits) > 0 {

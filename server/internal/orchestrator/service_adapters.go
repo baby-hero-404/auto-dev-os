@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -66,9 +67,9 @@ func (a promptAssemblerAdapter) AssembleForAgent(ctx context.Context, task model
 }
 
 type traceRecorderAdapter struct {
-	write func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, retryAttempt int, latency time.Duration)
+	write func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, counters llmrunner.TraceCounters, latency time.Duration)
 }
 
-func (a traceRecorderAdapter) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed steps.StepResult, retryAttempt int, latency time.Duration) {
-	a.write(ctx, task, agent, stepID, messages, resp, map[string]any(parsed), retryAttempt, latency)
+func (a traceRecorderAdapter) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed steps.StepResult, counters llmrunner.TraceCounters, latency time.Duration) {
+	a.write(ctx, task, agent, stepID, messages, resp, map[string]any(parsed), counters, latency)
 }

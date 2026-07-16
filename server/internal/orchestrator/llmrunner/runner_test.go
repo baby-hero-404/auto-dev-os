@@ -74,6 +74,74 @@ func TestRunner_Run_AgenticModeUsesToolLoop(t *testing.T) {
 	}
 }
 
+// TestUnitForStep_MapsCodeStepsAndOmitsNonCode guards the mapping that drives REQ-003's
+// timeline enrichment: a per-unit code step resolves to its execution unit (so node_id +
+// objective can be attached), while a non-code step resolves to nil (fields omitted).
+func TestUnitForStep_MapsCodeStepsAndOmitsNonCode(t *testing.T) {
+	analysis := &models.TaskAnalysis{
+		ExecutionUnits: []models.ExecutionUnit{
+			{ID: "sqlite_repo", Objective: "Set up the SQLite repository", ExecutionProfile: models.ExecutionProfile{Agent: "backend"}},
+			{ID: "login_page", Objective: "Build the login page", ExecutionProfile: models.ExecutionProfile{Agent: "frontend"}},
+		},
+	}
+
+	if u := UnitForStep(analysis, "code_backend_0"); u == nil || u.ID != "sqlite_repo" || u.Objective != "Set up the SQLite repository" {
+		t.Errorf("code_backend_0 should map to sqlite_repo unit, got %+v", u)
+	}
+	if u := UnitForStep(analysis, "code_frontend_0"); u == nil || u.ID != "login_page" {
+		t.Errorf("code_frontend_0 should map to login_page unit, got %+v", u)
+	}
+	if u := UnitForStep(analysis, "context_load"); u != nil {
+		t.Errorf("non-code step context_load must not map to a unit (timeline fields omitted), got %+v", u)
+	}
+	if u := UnitForStep(analysis, "analyze"); u != nil {
+		t.Errorf("non-code step analyze must not map to a unit, got %+v", u)
+	}
+}
+
+// TestRunner_Run_AgenticMode_TraceCountersAreIterations guards REQ-001: a tool loop
+// with no failure must record each call as an ascending Iteration with RetryAttempt=0
+// and Kind=tool_iteration — never as a "retry" (the mislabel that produced report
+// Finding 31's phantom "9 retries").
+func TestRunner_Run_AgenticMode_TraceCountersAreIterations(t *testing.T) {
+	provider := &mockAgenticProvider{}
+	var captured []TraceCounters
+
+	runner := Runner{
+		Provider: provider,
+		Tools:    []llm.ToolDefinition{{Name: "search_replace"}},
+		ToolExecutor: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			return "ok: applied", nil
+		},
+		WriteTrace: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, msgs []llm.Message, resp *llm.Response, parsed map[string]any, counters TraceCounters, latency time.Duration) {
+			captured = append(captured, counters)
+		},
+	}
+
+	task := &models.Task{ID: "task-1"}
+	agent := &models.Agent{ID: "agent-1", Role: models.AgentRoleBackend}
+
+	if _, err := runner.Run(context.Background(), task, agent, "job-1", "code_backend_0", "implement the change"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(captured) != 2 {
+		t.Fatalf("expected 2 traced iterations (tool-call round + final), got %d", len(captured))
+	}
+	for i, c := range captured {
+		wantIter := i + 1
+		if c.Iteration != wantIter {
+			t.Errorf("call %d: expected Iteration=%d, got %d", i, wantIter, c.Iteration)
+		}
+		if c.RetryAttempt != 0 {
+			t.Errorf("call %d: expected RetryAttempt=0 (no failure occurred), got %d", i, c.RetryAttempt)
+		}
+		if c.Kind != TraceKindToolIteration {
+			t.Errorf("call %d: expected Kind=%q, got %q", i, TraceKindToolIteration, c.Kind)
+		}
+	}
+}
+
 func TestRunner_ValidateSchema_AgenticRequiresSummaryNotPatch(t *testing.T) {
 	r := Runner{}
 
@@ -206,7 +274,7 @@ func TestRunner_Run_StateMachineMode_WritesTrace(t *testing.T) {
 		ToolExecutor: func(ctx context.Context, name, args string) (string, error) {
 			return "", nil
 		},
-		WriteTrace: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, msgs []llm.Message, resp *llm.Response, parsed map[string]any, iteration int, latency time.Duration) {
+		WriteTrace: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, msgs []llm.Message, resp *llm.Response, parsed map[string]any, counters TraceCounters, latency time.Duration) {
 			traceCalls++
 		},
 		Log: func(ctx context.Context, taskID string, jobID *string, level, message string) {},

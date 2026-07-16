@@ -57,15 +57,16 @@ func TestAnalyze_BoundaryViolation_ExhaustsBudget_FailsBeforeCoding(t *testing.T
 	artifactRepo := &mockArtifactRepo{}
 	reposRepo := &mockRepositoriesRepo{repo: repo}
 
-	// steps.AnalyzeMaxIterations iterations budget. Every response returned contains the
-	// uncovered boundary violation, so the loop must exhaust the *entire* current budget before
-	// the caller sees the boundary-violation error as the final failure reason.
+	// steps.AnalyzeMaxIterations iterations budget. Every response leaves a SENSITIVE file
+	// (deploy/, on the auto-widen denylist per REQ-002) uncovered, so the loop cannot
+	// auto-widen it and must exhaust the *entire* current budget before the caller sees the
+	// boundary-violation error as the final failure reason.
 	uncoveredResponse := `
 {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Test boundary coverage",
-  "affected_files": [{"file": "cmd/zentao-sync/main.go", "confidence": 1.0, "reason": "edit"}],
+  "affected_files": [{"file": "deploy/zentao-sync.yaml", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
@@ -80,7 +81,7 @@ func TestAnalyze_BoundaryViolation_ExhaustsBudget_FailsBeforeCoding(t *testing.T
       "execution_profile": {"agent": "backend", "skills": []},
       "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
       "dependencies": [],
-      "target_files": ["cmd/zentao-sync/main.go"]
+      "target_files": ["deploy/zentao-sync.yaml"]
     }
   ],
   "execution_irs": [{"node_id": "code_backend_0", "intent": {"capability": "modify", "operation": "write entrypoint"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
@@ -127,9 +128,9 @@ func TestAnalyze_BoundaryViolation_ExhaustsBudget_FailsBeforeCoding(t *testing.T
 		t.Errorf("expected job status to be failed, got %s", job.Status)
 	}
 
-	// Assert: the failure error names cmd/zentao-sync/main.go
-	if !strings.Contains(job.LastError, "cmd/zentao-sync/main.go") {
-		t.Errorf("expected LastError to name 'cmd/zentao-sync/main.go', got %q", job.LastError)
+	// Assert: the failure error names the uncovered sensitive file
+	if !strings.Contains(job.LastError, "deploy/zentao-sync.yaml") {
+		t.Errorf("expected LastError to name 'deploy/zentao-sync.yaml', got %q", job.LastError)
 	}
 
 	// Assert: mockLLMProvider.calls contains zero code_backend or fix entries
@@ -185,12 +186,17 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
 	artifactRepo := &mockArtifactRepo{}
 	reposRepo := &mockRepositoriesRepo{repo: repo}
 
+	// The first turn leaves a repo-ROOT file (main.go, parent dir ".") uncovered. autoWidenBoundaries
+	// never synthesizes a root "." boundary (repo-wide over-grant), so it stays residual and feeds
+	// back a boundary error. The second turn self-repairs by explicitly declaring the root boundary
+	// (an explicit LLM decision is allowed; only *auto*-widening is restricted). main.go is not a
+	// high-risk path, so the repaired spec auto-approves and proceeds to coding. REQ-002.
 	uncoveredResponse := `
 {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Test boundary coverage",
-  "affected_files": [{"file": "cmd/zentao-sync/main.go", "confidence": 1.0, "reason": "edit"}],
+  "affected_files": [{"file": "main.go", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
@@ -205,7 +211,7 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
       "execution_profile": {"agent": "backend", "skills": []},
       "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
       "dependencies": [],
-      "target_files": ["cmd/zentao-sync/main.go"]
+      "target_files": ["main.go"]
     }
   ],
   "execution_irs": [{"node_id": "code_backend_0", "intent": {"capability": "modify", "operation": "write entrypoint"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
@@ -222,7 +228,7 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Test boundary coverage",
-  "affected_files": [{"file": "cmd/zentao-sync/main.go", "confidence": 1.0, "reason": "edit"}],
+  "affected_files": [{"file": "main.go", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
@@ -237,7 +243,7 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
       "execution_profile": {"agent": "backend", "skills": []},
       "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
       "dependencies": [],
-      "target_files": ["cmd/zentao-sync/main.go"]
+      "target_files": ["main.go"]
     }
   ],
   "execution_irs": [{"node_id": "code_backend_0", "intent": {"capability": "modify", "operation": "write entrypoint"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
@@ -245,7 +251,7 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
   "specs_md": "## ADDED Requirements",
   "design_md": "## Design",
   "tasks_md": "## Tasks",
-  "execution_boundaries": [{"module": "main", "root": "cmd/"}],
+  "execution_boundaries": [{"module": "root", "root": "."}],
   "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
 }`
 
@@ -304,8 +310,8 @@ func TestAnalyze_BoundaryViolation_SelfRepairsOnFeedback(t *testing.T) {
 	if err := json.Unmarshal(task.Analysis, &savedAnalysis); err != nil {
 		t.Fatalf("failed to unmarshal persisted analysis: %v", err)
 	}
-	if len(savedAnalysis.ExecutionBoundaries) == 0 || savedAnalysis.ExecutionBoundaries[0].Root != "cmd/" {
-		t.Errorf("expected corrected boundary root 'cmd/', got %+v", savedAnalysis.ExecutionBoundaries)
+	if len(savedAnalysis.ExecutionBoundaries) == 0 || savedAnalysis.ExecutionBoundaries[0].Root != "." {
+		t.Errorf("expected corrected boundary root '.', got %+v", savedAnalysis.ExecutionBoundaries)
 	}
 
 	// Assert: the second analyze prompt contains the corrective coverage-error text

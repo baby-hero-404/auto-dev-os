@@ -156,15 +156,38 @@ export function parseMilestones(logs: RealtimeLog[]): MilestoneItem[] {
 interface LogConsoleProps {
   logs: RealtimeLog[];
   isWorkflowRunning?: boolean;
+  /** Controlled collapse state (REQ-006). When omitted, the console self-manages. */
+  isExpanded?: boolean;
+  onToggle?: () => void;
 }
 
-export function LogConsole({ logs, isWorkflowRunning }: LogConsoleProps) {
+export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<"milestones" | "all">(
     isWorkflowRunning ? "milestones" : "all"
   );
 
+  // Collapse control: default-collapsed. Uncontrolled fallback when no props given.
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = isExpanded ?? internalOpen;
+  const toggleOpen = onToggle ?? (() => setInternalOpen((v) => !v));
+
   const milestones = useMemo(() => parseMilestones(logs), [logs]);
+
+  // Latest event for the collapsed summary — recomputed every render so it stays
+  // live while the workflow runs even when the console is closed (REQ-006).
+  const latestMilestone = milestones.length > 0 ? milestones[milestones.length - 1] : null;
+  const latestEventText = latestMilestone
+    ? latestMilestone.message
+    : logs.length > 0
+      ? logs[logs.length - 1].message
+      : "No logs yet";
+  const latestEventType = latestMilestone?.type ?? "info";
+  const latestDotColor =
+    latestEventType === "success" ? "bg-emerald-500" :
+      latestEventType === "running" ? "bg-sky-500 animate-pulse" :
+        latestEventType === "failed" ? "bg-rose-500" :
+          latestEventType === "paused" ? "bg-amber-500" : "bg-slate-400";
 
   const toggleGroup = (key: string, defaultExpanded: boolean) => {
     setExpanded((prev) => ({
@@ -209,14 +232,20 @@ export function LogConsole({ logs, isWorkflowRunning }: LogConsoleProps) {
   };
 
   return (
-    <div id="log-console" className="rounded-lg border border-stroke bg-panel p-5 h-full flex flex-col min-h-[400px]">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+    <div id="log-console" className={`rounded-lg border border-stroke bg-panel p-5 flex flex-col ${isOpen ? "h-full min-h-[400px]" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-4 ${isOpen ? "mb-4" : ""}`}>
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="flex items-center gap-2 cursor-pointer text-left"
+          aria-expanded={isOpen}
+        >
+          {isOpen ? <ChevronDown size={18} className="text-content-muted" /> : <ChevronRight size={18} className="text-content-muted" />}
           <TerminalSquare size={18} className="text-brand-primary" />
           <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">Execution Logs</h2>
-        </div>
-        
-        {logs.length > 0 && (
+        </button>
+
+        {isOpen && logs.length > 0 && (
           <div className="flex rounded-lg border border-stroke bg-surface/80 p-0.5 text-[10.5px] font-semibold">
             <button
               onClick={() => setViewMode("milestones")}
@@ -241,7 +270,20 @@ export function LogConsole({ logs, isWorkflowRunning }: LogConsoleProps) {
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-hidden rounded-md bg-slate-50 dark:bg-slate-950 border border-stroke min-h-[520px]">
+
+      {!isOpen && (
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="mt-3 flex w-full items-center gap-2.5 rounded-md border border-stroke/50 bg-surface/30 px-3 py-2.5 text-left transition hover:bg-surface/60 cursor-pointer"
+        >
+          <span className={`h-2 w-2 shrink-0 rounded-full ${latestDotColor}`} />
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-content-muted">{latestEventText}</span>
+          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-brand-primary">View full log</span>
+        </button>
+      )}
+
+      <div className={`flex-1 overflow-hidden rounded-md bg-slate-50 dark:bg-slate-950 border border-stroke min-h-[520px] ${isOpen ? "" : "hidden"}`}>
         {logs.length === 0 ? (
           <p className="text-content-muted p-4 font-mono text-xs">No logs yet. Execute the workflow to start.</p>
         ) : viewMode === "milestones" ? (

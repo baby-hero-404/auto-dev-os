@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTaskDetail, formatStepName, getSemanticStatusColor, getTaskSemanticStatus } from "./TaskDetailContext";
 import { Badge, taskStatusBadge } from "@/components/ui/badge";
-import { Clock, CheckSquare, AlertTriangle, ListTodo, Layers } from "lucide-react";
+import { Clock, CheckSquare, AlertTriangle, ListTodo } from "lucide-react";
 import { CurrentImplementationCard } from "./CurrentImplementationCard";
 
 export function DashboardSummary() {
@@ -16,6 +16,7 @@ export function DashboardSummary() {
     analysisData,
     implementationItems,
     currentImplementationItem,
+    displayFiles,
   } = useTaskDetail();
 
   const [elapsedTime, setElapsedTime] = useState("0s");
@@ -149,6 +150,31 @@ export function DashboardSummary() {
             <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
               <Clock size={14} className="text-brand-primary" />
               <span className="font-mono">{elapsedTime}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Workflow progress (absorbed from the removed WorkflowSidebar) */}
+        <div className="relative z-10 mt-4 border-t border-stroke/30 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-content-muted">Workflow progress</span>
+            <span className="font-mono text-xs font-semibold text-foreground">{workflowCompletion}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface/60 border border-stroke/30">
+            <div className="h-full rounded-full bg-brand-primary transition-all duration-700 ease-out" style={{ width: `${workflowCompletion}%` }} />
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-content-muted">
+            <div className="rounded border border-stroke/50 bg-surface/30 px-2 py-1">
+              <div className="font-mono font-bold text-foreground">{workflow.checkpoints?.length ?? 0}</div>
+              checkpoints
+            </div>
+            <div className="rounded border border-stroke/50 bg-surface/30 px-2 py-1">
+              <div className="font-mono font-bold text-foreground">{workflow.job?.attempts ?? 0}</div>
+              attempts
+            </div>
+            <div className="rounded border border-stroke/50 bg-surface/30 px-2 py-1">
+              <div className="font-mono font-bold text-foreground">{displayFiles.length}</div>
+              files
             </div>
           </div>
         </div>

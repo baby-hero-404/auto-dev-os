@@ -12,6 +12,7 @@ import (
 
 	"context"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -33,7 +34,7 @@ func redactSecrets(s string) string {
 	return s
 }
 
-func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, retryAttempt int, latency time.Duration) {
+func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, counters llmrunner.TraceCounters, latency time.Duration) {
 	if !o.llmTraceEnabled {
 		return
 	}
@@ -77,7 +78,9 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 		PromptHash      string    `json:"prompt_hash"`
 		TemplateVersion string    `json:"template_version,omitempty"`
 		ContextVersion  string    `json:"context_version,omitempty"`
+		Iteration       int       `json:"iteration"`
 		RetryAttempt    int       `json:"retry_attempt"`
+		CallKind        string    `json:"call_kind,omitempty"`
 		LatencyMS       int64     `json:"latency_ms"`
 		CostUSD         float64   `json:"cost_usd"`
 	}
@@ -110,7 +113,9 @@ func (o *Orchestrator) writeLLMCallTrace(ctx context.Context, task *models.Task,
 		Timestamp:      time.Now(),
 		PromptHash:     promptHash,
 		ContextVersion: analysis.SpecHash,
-		RetryAttempt:   retryAttempt,
+		Iteration:      counters.Iteration,
+		RetryAttempt:   counters.RetryAttempt,
+		CallKind:       counters.Kind,
 		LatencyMS:      latency.Milliseconds(),
 		CostUSD:        costUSD,
 	}

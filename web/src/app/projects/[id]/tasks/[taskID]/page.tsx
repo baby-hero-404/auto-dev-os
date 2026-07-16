@@ -1,18 +1,16 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useCallback } from "react";
 import Link from "next/link";
 import { AlertCircle, Loader2, Check, Send } from "lucide-react";
 import { TaskDetailProvider, useTaskDetail } from "./components/TaskDetailContext";
 import { TaskHeader } from "./components/TaskHeader";
+import { ReviewActionBar } from "./components/ReviewActionBar";
 import { DashboardSummary } from "./components/DashboardSummary";
 import { ImplementationChecklist } from "./components/ImplementationChecklist";
-import { ActiveWorkflowBanner } from "./components/ActiveWorkflowBanner";
-import { TaskActions } from "./components/TaskActions";
 import { WorkflowTimeline } from "./components/WorkflowTimeline";
 import { SpecPanel } from "./components/SpecPanel";
 import { PRPanel } from "./components/PRPanel";
-import { WorkflowSidebar } from "./components/WorkflowSidebar";
 import { RequestChangesModal } from "./components/RequestChangesModal";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { useSession } from "@/lib/session";
@@ -30,6 +28,22 @@ function TaskDetailContent() {
     isTaskLoading,
     workflowError,
   } = useTaskDetail();
+
+  // Collapse state for the tertiary reference surfaces is lifted here so the
+  // ImplementationChecklist can programmatically expand the log and scroll to it
+  // (REQ-005/REQ-006).
+  const [isLogExpanded, setLogExpanded] = useState(false);
+  const [isSpecExpanded, setSpecExpanded] = useState(false);
+
+  const expandAndScrollToLog = useCallback((stepId: string) => {
+    setLogExpanded(true);
+    requestAnimationFrame(() => {
+      document.getElementById(`log-group-${stepId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, []);
 
   if (isTaskLoading) {
     return (
@@ -62,15 +76,15 @@ function TaskDetailContent() {
       <div className="mx-auto max-w-7xl space-y-8">
         <TaskHeader />
 
+        <ReviewActionBar />
+
         <DashboardSummary />
 
-        <ActiveWorkflowBanner />
-
-        <PRPanel />
+        <ImplementationChecklist expandAndScrollToLog={expandAndScrollToLog} />
 
         <WorkflowTimeline />
 
-        <ImplementationChecklist />
+        <PRPanel />
 
         {error && (
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300 flex items-center gap-2" role="alert">
@@ -113,13 +127,14 @@ function TaskDetailContent() {
             </div>
           )}
 
-        <LogConsole logs={logs} isWorkflowRunning={workflow?.job?.status === "running"} />
+        <SpecPanel isExpanded={isSpecExpanded} onToggle={() => setSpecExpanded((v) => !v)} />
 
-        <SpecPanel />
-
-        <WorkflowSidebar />
-
-        <TaskActions />
+        <LogConsole
+          logs={logs}
+          isWorkflowRunning={workflow?.job?.status === "running"}
+          isExpanded={isLogExpanded}
+          onToggle={() => setLogExpanded((v) => !v)}
+        />
 
         <RequestChangesModal />
       </div>

@@ -22,6 +22,26 @@ type ProjectResolver interface {
 	GetByID(ctx context.Context, id string) (*models.Project, error)
 }
 
+// TraceCounters carries the per-call loop counters recorded in an LLM call trace.
+// It disambiguates a tool/phase loop *iteration* from a genuine failure *retry* — a
+// distinction the old single `retry_attempt` field conflated (see the
+// analyze-runtime-determinism spec, REQ-001).
+type TraceCounters struct {
+	// Iteration is the tool-loop / phase-loop index for this call (always accurate).
+	Iteration int
+	// RetryAttempt is the genuine failure-retry count; 0 when the call is not a retry.
+	RetryAttempt int
+	// Kind labels which loop produced the call.
+	Kind string
+}
+
+// TraceCounters.Kind values.
+const (
+	TraceKindToolIteration  = "tool_iteration"
+	TraceKindPhaseIteration = "phase_iteration"
+	TraceKindRetry          = "retry"
+)
+
 type Runner struct {
 	WorkspaceRoot           string
 	Provider                llm.Provider
@@ -29,7 +49,7 @@ type Runner struct {
 	Projects                ProjectResolver
 	ReadAffectedFileContent func(context.Context, *models.Task, string) (string, bool)
 	SaveArtifact            func(context.Context, string, string, string, string, any) error
-	WriteTrace              func(context.Context, *models.Task, *models.Agent, string, []llm.Message, *llm.Response, map[string]any, int, time.Duration)
+	WriteTrace              func(context.Context, *models.Task, *models.Agent, string, []llm.Message, *llm.Response, map[string]any, TraceCounters, time.Duration)
 	Log                     func(context.Context, string, *string, string, string)
 
 	// Tools and ToolExecutor enable the agentic tool-call loop (Issue 1+2). When both are set,
@@ -48,6 +68,12 @@ type Runner struct {
 
 func (r Runner) isAgentic() bool {
 	return len(r.Tools) > 0 && r.ToolExecutor != nil
+}
+
+// UnitForStep exposes unitForStep to other packages (e.g. the worker's timeline writer,
+// REQ-003) so the per-unit code-step → execution-unit mapping has a single implementation.
+func UnitForStep(analysis *models.TaskAnalysis, stepID string) *models.ExecutionUnit {
+	return unitForStep(analysis, stepID)
 }
 
 func unitForStep(analysis *models.TaskAnalysis, stepID string) *models.ExecutionUnit {
@@ -262,7 +288,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 
 	r.save(ctx, jobID, task.ID, stepID, "llm_response", parsed)
 	if r.WriteTrace != nil {
-		r.WriteTrace(ctx, task, agent, stepID, messages, resp, parsed, finalAttempt, callLatency)
+		r.WriteTrace(ctx, task, agent, stepID, messages, resp, parsed, TraceCounters{Iteration: finalAttempt, RetryAttempt: finalAttempt, Kind: TraceKindRetry}, callLatency)
 	}
 
 	return map[string]any{
@@ -334,7 +360,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		},
 		OnCall: func(iteration int, msgs []llm.Message, resp *llm.Response, parsed map[string]any, latency time.Duration) {
 			if r.WriteTrace != nil {
-				r.WriteTrace(ctx, task, agent, stepID, msgs, resp, parsed, iteration, latency)
+				r.WriteTrace(ctx, task, agent, stepID, msgs, resp, parsed, TraceCounters{Iteration: iteration, Kind: TraceKindToolIteration}, latency)
 			}
 			if shadowSM != nil && resp != nil {
 				r.updateShadowSM(ctx, shadowSM, resp, resolvedTargets, task.ID)

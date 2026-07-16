@@ -14,6 +14,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -207,6 +208,18 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				}
 				if event.Error != "" {
 					timelineEvent["error"] = event.Error
+				}
+				// REQ-003: link code-step timeline records to the execution contract so the
+				// timeline is auditable/replayable against it. Additive fields, omitted for
+				// non-code steps (no matching execution unit).
+				if isCodeStep && len(task.Analysis) > 0 {
+					var tlAnalysis models.TaskAnalysis
+					if json.Unmarshal(task.Analysis, &tlAnalysis) == nil {
+						if unit := llmrunner.UnitForStep(&tlAnalysis, event.StepID); unit != nil {
+							timelineEvent["node_id"] = unit.ID
+							timelineEvent["objective"] = unit.Objective
+						}
+					}
 				}
 				if b, err := json.Marshal(timelineEvent); err == nil {
 					f, err := os.OpenFile(timelineFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)

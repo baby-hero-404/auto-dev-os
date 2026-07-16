@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -32,7 +35,7 @@ type mockTraceRecorder struct {
 	called bool
 }
 
-func (m *mockTraceRecorder) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, retryAttempt int, latency time.Duration) {
+func (m *mockTraceRecorder) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, counters llmrunner.TraceCounters, latency time.Duration) {
 	m.called = true
 }
 
@@ -324,13 +327,14 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
 		Status:     models.TaskStatusTodo,
 	}
 
-	// 1. Uncovered affected files or target_files
+	// 1. Uncovered SENSITIVE affected file must still escalate (REQ-002): deploy/ is on
+	// the sensitive denylist, so it is NOT auto-widened and the boundary error surfaces.
 	uncoveredResponse := `
 {
   "complexity": "easy",
   "primary_category": "backend",
   "scope": "Test boundary coverage",
-  "affected_files": [{"file": "cmd/zentao-sync/main.go", "confidence": 1.0, "reason": "edit"}],
+  "affected_files": [{"file": "deploy/zentao-sync.yaml", "confidence": 1.0, "reason": "edit"}],
   "risks": [],
   "risk_domains": [],
   "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
@@ -345,7 +349,7 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
       "execution_profile": {"agent": "backend", "skills": []},
       "constraints": {"parallelizable": false, "max_files": 1, "estimated_tokens": 1000, "max_risk": "low"},
       "dependencies": [],
-      "target_files": ["cmd/zentao-sync/main.go"]
+      "target_files": ["deploy/zentao-sync.yaml"]
     }
   ],
   "execution_irs": [{"node_id": "u1", "intent": {"capability": "x", "operation": "y"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
@@ -390,7 +394,7 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
 	if !strings.Contains(err.Error(), "Boundary coverage validation failed") {
 		t.Errorf("expected boundary coverage failure message, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cmd/zentao-sync/main.go") {
+	if !strings.Contains(err.Error(), "deploy/zentao-sync.yaml") {
 		t.Errorf("expected uncovered file name in error message, got: %v", err)
 	}
 
@@ -521,4 +525,71 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for covered output: %v", err)
 	}
+}
+
+// TestAutoWidenBoundaries covers REQ-002's deterministic-widening rules directly on the
+// pure function: safe dirs auto-widen, sensitive/root files stay in residual, root "." is
+// never synthesized, and output ordering is stable.
+func TestAutoWidenBoundaries(t *testing.T) {
+	t.Run("non-sensitive files auto-widen; sensitive + root escalate", func(t *testing.T) {
+		uncovered := []string{
+			"cmd/sync/main.go",       // safe -> widen to cmd/sync
+			"internal/repo/db.go",    // safe -> widen to internal/repo
+			"deploy/prod.yaml",       // sensitive -> residual
+			"go.mod",                 // repo-root Go module -> residual
+			"config.yaml",            // repo-root file (dir ".") -> residual
+			".github/workflows/x.yml", // CI -> residual
+		}
+		added, residual := autoWidenBoundaries(uncovered, nil)
+
+		gotRoots := make([]string, 0, len(added))
+		for _, b := range added {
+			if b.Root == "." || b.Root == "" || b.Root == "./" {
+				t.Fatalf("autoWidenBoundaries synthesized a root boundary %q — repo-wide over-grant", b.Root)
+			}
+			gotRoots = append(gotRoots, b.Root)
+		}
+		wantRoots := []string{"cmd/sync", "internal/repo"} // sorted
+		if !reflect.DeepEqual(gotRoots, wantRoots) {
+			t.Errorf("added roots = %v, want %v", gotRoots, wantRoots)
+		}
+		// module derived from the leaf dir
+		for _, b := range added {
+			if b.Module != path.Base(b.Root) {
+				t.Errorf("boundary %q module = %q, want %q", b.Root, b.Module, path.Base(b.Root))
+			}
+		}
+
+		wantResidual := map[string]bool{"deploy/prod.yaml": true, "go.mod": true, "config.yaml": true, ".github/workflows/x.yml": true}
+		if len(residual) != len(wantResidual) {
+			t.Fatalf("residual = %v, want the 4 sensitive/root files", residual)
+		}
+		for _, f := range residual {
+			if !wantResidual[f] {
+				t.Errorf("unexpected residual file %q", f)
+			}
+		}
+	})
+
+	t.Run("deterministic: same input yields identical output", func(t *testing.T) {
+		in := []string{"pkg/b/x.go", "pkg/a/y.go", "cmd/z/main.go"}
+		a1, _ := autoWidenBoundaries(in, nil)
+		a2, _ := autoWidenBoundaries(in, nil)
+		if !reflect.DeepEqual(a1, a2) {
+			t.Errorf("non-deterministic output: %v vs %v", a1, a2)
+		}
+		if len(a1) != 3 || a1[0].Root != "cmd/z" || a1[1].Root != "pkg/a" || a1[2].Root != "pkg/b" {
+			t.Errorf("expected stable sorted roots [cmd/z pkg/a pkg/b], got %v", a1)
+		}
+	})
+
+	t.Run("two files in same dir yield one boundary", func(t *testing.T) {
+		added, residual := autoWidenBoundaries([]string{"internal/svc/a.go", "internal/svc/b.go"}, nil)
+		if len(residual) != 0 {
+			t.Errorf("expected no residual, got %v", residual)
+		}
+		if len(added) != 1 || added[0].Root != "internal/svc" {
+			t.Errorf("expected a single internal/svc boundary, got %v", added)
+		}
+	})
 }

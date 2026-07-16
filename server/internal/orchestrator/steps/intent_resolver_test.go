@@ -10,12 +10,12 @@ import (
 
 func TestIntentTokens(t *testing.T) {
 	cases := map[string][]string{
-		"UserRepository":  {"user", "repository"},
-		"user_repository": {"user", "repository"},
-		"user-repository": {"user", "repository"},
-		"APIClient":       {"api", "client"},
-		"SyncEngineScheduler": {"sync", "engine", "scheduler"},
-		"":                {},
+		"UserRepository":                      {"user", "repository"},
+		"user_repository":                     {"user", "repository"},
+		"user-repository":                     {"user", "repository"},
+		"APIClient":                           {"api", "client"},
+		"SyncEngineScheduler":                 {"sync", "engine", "scheduler"},
+		"":                                    {},
 		"Thiết lập cấu trúc dự án và SQLite": {}, // Natural language / Vietnamese should be skipped
 		"This is a sentence to skip":         {}, // Natural language / English sentence >= 3 words should be skipped
 	}
@@ -40,9 +40,12 @@ func TestResolveIntent_Resolvable(t *testing.T) {
 		{File: "internal/repository/order.go", Reason: "unrelated"},
 	}
 
-	targets, err := ResolveIntent(ir, candidates, nil)
+	targets, dropped, err := ResolveIntent(ir, candidates, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dropped) != 0 {
+		t.Errorf("expected 0 dropped files, got: %v", dropped)
 	}
 	if len(targets) != 1 || targets[0] != "internal/repository/user.go" {
 		t.Errorf("unexpected targets: %v", targets)
@@ -60,7 +63,7 @@ func TestResolveIntent_Ambiguous(t *testing.T) {
 		{File: "internal/repository/order.go"},
 	}
 
-	targets, err := ResolveIntent(ir, candidates, nil)
+	targets, _, err := ResolveIntent(ir, candidates, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +81,7 @@ func TestResolveIntent_Unresolvable(t *testing.T) {
 		{File: "internal/repository/user.go"},
 	}
 
-	_, err := ResolveIntent(ir, candidates, nil)
+	_, _, err := ResolveIntent(ir, candidates, nil)
 	if err == nil {
 		t.Fatal("expected error for unresolvable intent, got nil")
 	}
@@ -97,28 +100,32 @@ func TestResolveIntent_Unresolvable(t *testing.T) {
 
 func TestResolveIntent_EmptyCapability(t *testing.T) {
 	ir := models.ExecutionIR{NodeID: "node_1", Intent: models.Intent{Capability: "", Operation: "create"}}
-	_, err := ResolveIntent(ir, []models.AffectedFile{{File: "internal/repository/user.go"}}, nil)
+	_, _, err := ResolveIntent(ir, []models.AffectedFile{{File: "internal/repository/user.go"}}, nil)
 	if err == nil {
 		t.Fatal("expected error for empty capability, got nil")
 	}
 }
 
-func TestResolveIntent_TargetFilesFirst(t *testing.T) {
+func TestResolveIntent_Corroboration(t *testing.T) {
 	ir := models.ExecutionIR{
 		NodeID: "node_1",
 		Intent: models.Intent{Capability: "PaymentGateway", Operation: "create"},
 	}
 	candidates := []models.AffectedFile{
+		{File: "internal/gateway/payment.go"},
 		{File: "internal/repository/user.go"},
 	}
-	targetFiles := []string{"internal/gateway/payment.go"}
+	targetFiles := []string{"internal/gateway/payment.go", "internal/gateway/uncorroborated.go"}
 
-	targets, err := ResolveIntent(ir, candidates, targetFiles)
+	targets, dropped, err := ResolveIntent(ir, candidates, targetFiles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(targets) != 1 || targets[0] != "internal/gateway/payment.go" {
-		t.Errorf("expected to resolve from targetFiles first, got: %v", targets)
+		t.Errorf("expected to resolve only corroborated target file, got: %v", targets)
+	}
+	if len(dropped) != 1 || dropped[0] != "internal/gateway/uncorroborated.go" {
+		t.Errorf("expected uncorroborated to be dropped, got: %v", dropped)
 	}
 }
 
@@ -128,16 +135,20 @@ func TestResolveIntent_VietnameseNaturalLanguage(t *testing.T) {
 		Intent: models.Intent{Capability: "Thiết lập cấu trúc dự án và SQLite", Operation: "create"},
 	}
 	candidates := []models.AffectedFile{
-		{File: "internal/repository/user.go"},
+		{File: "server/main.go"},
+		{File: "server/db.go"},
 	}
 	targetFiles := []string{"server/main.go", "server/db.go"}
 
-	targets, err := ResolveIntent(ir, candidates, targetFiles)
+	targets, dropped, err := ResolveIntent(ir, candidates, targetFiles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(dropped) != 0 {
+		t.Errorf("expected 0 dropped, got %v", dropped)
+	}
 	if len(targets) != 2 || targets[0] != "server/main.go" || targets[1] != "server/db.go" {
-		t.Errorf("expected to resolve natural language capability using targetFiles, got: %v", targets)
+		t.Errorf("expected to resolve natural language capability using corroborated targetFiles, got: %v", targets)
 	}
 }
 
@@ -152,7 +163,7 @@ func TestResolveExecutionIRTargets_PartialResolution(t *testing.T) {
 		},
 	}
 
-	resolved, err := ResolveExecutionIRTargets(analysis)
+	resolved, dropped, err := ResolveExecutionIRTargets(analysis)
 	if err == nil {
 		t.Fatal("expected aggregated error for the unresolvable node, got nil")
 	}
@@ -165,6 +176,7 @@ func TestResolveExecutionIRTargets_PartialResolution(t *testing.T) {
 	if _, ok := resolved["node_bad"]; ok {
 		t.Errorf("node_bad should not appear in resolved map, got: %v", resolved)
 	}
+	_ = dropped
 }
 
 func TestResolveExecutionIRTargets_AllResolved(t *testing.T) {
@@ -174,11 +186,42 @@ func TestResolveExecutionIRTargets_AllResolved(t *testing.T) {
 			{NodeID: "node_ok", Intent: models.Intent{Capability: "UserRepository", Operation: "create"}},
 		},
 	}
-	resolved, err := ResolveExecutionIRTargets(analysis)
+	resolved, dropped, err := ResolveExecutionIRTargets(analysis)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(resolved) != 1 {
 		t.Errorf("expected 1 resolved entry, got %v", resolved)
+	}
+	if len(dropped) != 0 {
+		t.Errorf("expected 0 dropped entry, got %v", dropped)
+	}
+}
+
+func TestResolveExecutionIRTargets_MaxFiles(t *testing.T) {
+	analysis := models.TaskAnalysis{
+		AffectedFiles: []models.AffectedFile{
+			{File: "internal/repository/user.go"},
+			{File: "internal/repository/user_test.go"},
+		},
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID: "node_ok",
+				Constraints: models.ExecutionConstraints{
+					MaxFiles: 1,
+				},
+			},
+		},
+		ExecutionIRs: []models.ExecutionIR{
+			{NodeID: "node_ok", Intent: models.Intent{Capability: "UserRepository", Operation: "create"}},
+		},
+	}
+
+	_, _, err := ResolveExecutionIRTargets(analysis)
+	if err == nil {
+		t.Fatal("expected error due to MaxFiles limit exceeded, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds MaxFiles") {
+		t.Errorf("expected error to mention MaxFiles limit, got: %v", err)
 	}
 }

@@ -252,6 +252,19 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		createdPRSummaries = append(createdPRSummaries, *summary)
 	}
 
+	if s.diff != nil {
+		prDiffText, err := s.diff.CapturePRDiff(ctx, s.rt.Task, s.rt.Agent, "main")
+		if err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to capture PR diff: %v", err))
+		} else if prDiffText != "" && s.artifacts != nil {
+			if err := saveArtifactWithCycleDedup(ctx, s.artifacts, s.rt.JobID, s.rt.Task.ID, stepCtx.StepID, "diff", prDiffText); err != nil {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save PR diff artifact: %v", err))
+			} else {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "info", "successfully saved PR diff artifact")
+			}
+		}
+	}
+
 	if len(createdPRSummaries) > 0 {
 		var pqCreatedPRs *pq.StringArray
 		if len(createdPRs) > 0 {
@@ -337,4 +350,38 @@ func reviewSelfReviewFallback(checkpoints []models.WorkflowCheckpoint) bool {
 		}
 	}
 	return false
+}
+
+// saveArtifactWithCycleDedup saves payload as a WorkflowArtifact under step, suffixing
+// "_cycle_N" when an artifact of the same step+type already exists — mirrors
+// checkpoint.Store.SaveArtifact's dedup rule so repeated PR-step runs (e.g. across review/fix
+// cycles) don't collide on the same artifact key. Only PRStep needs this: it holds an
+// ArtifactRepository (Create + List) rather than the narrower ArtifactSaver other steps use,
+// since it also reads back artifacts by job ID elsewhere in this file.
+func saveArtifactWithCycleDedup(ctx context.Context, artifacts ArtifactRepository, jobID, taskID, step, artType string, payload any) error {
+	dedupedStep := step
+	existing, err := artifacts.ListByTaskID(ctx, taskID)
+	if err == nil {
+		count := 0
+		for _, a := range existing {
+			if (a.Step == step || strings.HasPrefix(a.Step, step+"_cycle_")) && a.Type == artType {
+				count++
+			}
+		}
+		if count > 0 {
+			dedupedStep = fmt.Sprintf("%s_cycle_%d", step, count+1)
+		}
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal artifact payload: %w", err)
+	}
+	return artifacts.Create(ctx, &models.WorkflowArtifact{
+		JobID:   jobID,
+		TaskID:  taskID,
+		Step:    dedupedStep,
+		Type:    artType,
+		Payload: raw,
+	})
 }

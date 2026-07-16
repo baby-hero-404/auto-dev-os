@@ -52,6 +52,12 @@ export default function AIProvidersPage() {
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [addModelLevel, setAddModelLevel] = useState<"fast" | "balanced" | "powerful">("fast");
 
+  const handleSetForm: React.Dispatch<React.SetStateAction<FormState>> = (update) => {
+    setForm(update);
+    setDraftTestState("idle");
+    setFormError("");
+  };
+
   const { data: credentials = [], error, mutate, isLoading } = useSWR(
     orgID && token ? ["provider-credentials", orgID] : null,
     () => api.listProviderCredentials(orgID, token),
@@ -372,7 +378,7 @@ export default function AIProvidersPage() {
             }
           }}
           onSubmit={handleAddCredential}
-          onSetForm={setForm}
+          onSetForm={handleSetForm}
           onTestKey={testDraftCredential}
           onToggleApiKey={() => setShowApiKey((value) => !value)}
         />

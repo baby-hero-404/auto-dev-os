@@ -38,9 +38,9 @@ export function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
 
 const RISK_BADGES: Record<string, string> = {
   low: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-warning/10 text-warning border-warning/20",
-  high: "bg-danger/10 text-danger border-danger/20",
-  critical: "bg-danger/20 text-danger border-danger/30 animate-pulse",
+  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  high: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+  critical: "bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30 animate-pulse",
 };
 
 interface TaskDiffViewerProps {
@@ -155,7 +155,7 @@ export function TaskDiffViewer({
         <div className="flex-1 min-h-[350px] overflow-auto rounded-lg border border-stroke bg-slate-950 dark:bg-black p-4 font-mono text-xs leading-relaxed shadow-inner">
           {activeSelectedFile ? (
             activeFileDiff ? (
-              <div className="space-y-0.5 font-mono text-[11px] text-foreground select-text">
+              <div className="space-y-0.5 font-mono text-[11px] text-slate-300 select-text">
                 {activeFileDiff.diffLines.map((line, idx) => {
                   let lineClass = "text-slate-400";
                   if (line.startsWith("+") && !line.startsWith("+++")) {

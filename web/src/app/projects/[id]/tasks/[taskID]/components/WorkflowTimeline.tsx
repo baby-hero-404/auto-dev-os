@@ -203,7 +203,7 @@ export function WorkflowTimeline() {
              if (status === "running") anyRunning = true;
              if (status === "failed") anyFailed = true;
              if (status) anyStarted = true;
-             if (status !== "success" && status !== "recorded") allDone = false;
+             if (status !== "success" && status !== "recorded" && status !== "skipped") allDone = false;
              
              const dur = stepDurations.get(step);
              if (dur) lastDuration = dur; // grab the latest available duration
@@ -243,7 +243,7 @@ export function WorkflowTimeline() {
                   <div className="flex flex-col gap-2 w-full mt-3 border-t border-stroke/50 pt-2.5 max-h-[160px] overflow-y-auto custom-scrollbar">
                     {activeNodeSteps.map((step: string) => {
                       const st = latest.get(step);
-                      const isDone = st === "success" || st === "recorded";
+                      const isDone = st === "success" || st === "recorded" || st === "skipped";
                       const isRun = st === "running";
                       const isFail = st === "failed";
                       const tasks = getStepTasks(step, analysisData);

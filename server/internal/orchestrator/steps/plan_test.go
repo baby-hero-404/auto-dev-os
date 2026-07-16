@@ -563,3 +563,73 @@ func TestPlanStep_SkipWhenExecutionUnitsAlreadyProvided(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanStep_LogsResolverDisagreement covers REQ-M01's logging responsibility: when
+// ResolveExecutionIRTargets returns a non-empty dropped map (an LLM-suggested target_files
+// entry the Intent Resolver's own AffectedFiles matching didn't corroborate), PlanStep —
+// not the I/O-free intent_resolver.go — is the one that logs it.
+func TestPlanStep_LogsResolverDisagreement(t *testing.T) {
+	analysis := models.TaskAnalysis{
+		Complexity:      "medium",
+		PrimaryCategory: "backend",
+		AffectedFiles: []models.AffectedFile{
+			{File: "internal/repository/user.go"},
+		},
+		ExecutionUnits: []models.ExecutionUnit{
+			{
+				ID:          "unit1",
+				Objective:   "Create user repository",
+				Tasks:       []string{"Task 1"},
+				TargetFiles: []string{"internal/repository/user.go", "internal/repository/ghost.go"},
+				ExecutionProfile: models.ExecutionProfile{
+					Agent: "backend",
+				},
+			},
+		},
+		ExecutionIRs: []models.ExecutionIR{
+			{NodeID: "unit1", Intent: models.Intent{Capability: "UserRepository", Operation: "create"}},
+		},
+	}
+	analysisJSON, _ := json.Marshal(analysis)
+	task := &models.Task{
+		ID:         "task-disagreement",
+		Complexity: models.TaskComplexityMedium,
+		Analysis:   analysisJSON,
+	}
+
+	log := &mockLogger{}
+	step := NewPlanStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		nil, nil, nil,
+		&mockStatusUpdater{},
+		log,
+		&mockCheckpointLister{},
+		8.0,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, msg := range log.messages {
+		if strings.Contains(msg, "not corroborated by AffectedFiles") &&
+			strings.Contains(msg, "unit1") &&
+			strings.Contains(msg, "internal/repository/ghost.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a warn log naming the uncorroborated path, got messages: %v", log.messages)
+	}
+
+	// The corroborated path must NOT be reported as dropped.
+	for _, msg := range log.messages {
+		if strings.Contains(msg, "not corroborated") && strings.Contains(msg, "internal/repository/user.go") {
+			t.Errorf("corroborated path should not appear in a disagreement log, got: %q", msg)
+		}
+	}
+}

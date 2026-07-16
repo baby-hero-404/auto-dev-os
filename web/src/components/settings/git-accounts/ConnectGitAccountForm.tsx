@@ -88,6 +88,28 @@ export function ConnectGitAccountForm({
         </label>
       </div>
 
+      <div className="mt-4 rounded-md border border-stroke/50 bg-surface/20 p-3 text-xs text-content-muted leading-relaxed">
+        <p className="font-semibold text-foreground mb-1">💡 Quick Guide: Generating a GitHub Personal Access Token (classic)</p>
+        <ol className="list-decimal pl-4 space-y-1">
+          <li>
+            Visit the{" "}
+            <a
+              href="https://github.com/settings/tokens"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-primary font-medium hover:underline"
+            >
+              GitHub Token Settings
+            </a>.
+          </li>
+          <li>Click <strong>Generate new token</strong> &gt; <strong>Generate new token (classic)</strong>.</li>
+          <li>
+            Select the <strong>repo</strong> scope (full control of private and public repositories).
+          </li>
+          <li>Click <strong>Generate token</strong> at the bottom and copy the generated key (starts with <code>ghp_</code>).</li>
+        </ol>
+      </div>
+
       {formError && (
         <div className="mt-4 rounded-md border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-500">
           {formError}

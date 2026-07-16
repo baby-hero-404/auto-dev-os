@@ -228,8 +228,13 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 	// Derive Execution IRs (REQ-001) when the Planner hasn't emitted them directly.
 	BuildExecutionIRs(&analysis)
 
-	targets, resolveErr := ResolveExecutionIRTargets(analysis)
+	targets, dropped, resolveErr := ResolveExecutionIRTargets(analysis)
 	analysis.ExecutionIRTargets = targets
+	for nodeID, dropList := range dropped {
+		if len(dropList) > 0 {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("Plan: node %s — LLM-suggested paths not corroborated by AffectedFiles: %v", nodeID, dropList))
+		}
+	}
 	if resolveErr != nil {
 		if models.IsStateMachineEnabled(ctx) {
 			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "error", fmt.Sprintf("Plan intent resolution failed: %v", resolveErr))

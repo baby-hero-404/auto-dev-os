@@ -9,6 +9,10 @@ export type GroupedLogItem =
   | { type: "log"; log: RealtimeLog }
   | { type: "group"; key: string; stepName: string; status: LogGroupStatus; logs: RealtimeLog[] };
 
+export type FlattenedLogItem =
+  | { type: "log"; log: RealtimeLog; isGroupChild?: boolean }
+  | { type: "group"; key: string; stepName: string; status: LogGroupStatus; logs: RealtimeLog[]; isExpanded: boolean; defaultExpanded: boolean; originalIndex: number };
+
 function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
   const result: GroupedLogItem[] = [];
   let currentGroup: { key: string; stepName: string; status: LogGroupStatus; logs: RealtimeLog[] } | null = null;
@@ -33,7 +37,7 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
     if (currentGroup) {
       const endMatch = log.message.match(/\[#\d+\] step ([\w-]+) (success|failed|paused)/);
       currentGroup.logs.push(log);
-      
+
       if (endMatch && endMatch[1] === currentGroup.stepName) {
         currentGroup.status = endMatch[2] as LogGroupStatus;
         result.push({ type: "group", ...currentGroup });
@@ -64,19 +68,18 @@ function LogMessage({ message }: { message: string }) {
   const displayedText = isExpanded ? message : previewLines;
 
   // Check if it looks like code, JSON, diff, or raw trace
-  const isCodeOrJson = 
-    message.includes("```") || 
-    message.trim().startsWith("{") || 
-    message.trim().startsWith("[") || 
+  const isCodeOrJson =
+    message.includes("```") ||
+    message.trim().startsWith("{") ||
+    message.trim().startsWith("[") ||
     lines.some(l => l.startsWith("    ") || l.startsWith("\t") || l.startsWith("+ ") || l.startsWith("- "));
 
   return (
     <div className="flex flex-col gap-1 w-full">
-      <div className={`whitespace-pre-wrap text-slate-800 dark:text-slate-100 break-words font-mono ${
-        isCodeOrJson || isExpanded 
-          ? "bg-slate-100/50 dark:bg-slate-900/50 border border-stroke/40 rounded p-2 max-h-[300px] overflow-y-auto custom-scrollbar text-[11px] leading-relaxed" 
+      <div className={`whitespace-pre-wrap text-slate-800 dark:text-slate-100 break-words font-mono ${isCodeOrJson || isExpanded
+          ? "bg-slate-100/50 dark:bg-slate-900/50 border border-stroke/40 rounded p-2 max-h-[300px] overflow-y-auto custom-scrollbar text-[11px] leading-relaxed"
           : ""
-      }`}>
+        }`}>
         {displayedText}
         {!isExpanded && <span className="text-content-muted">...</span>}
       </div>
@@ -105,19 +108,19 @@ export function LogConsole({ logs }: LogConsoleProps) {
   };
 
   const flattenedItems = useMemo(() => {
-    const items: any[] = [];
+    const items: FlattenedLogItem[] = [];
     const grouped = groupLogs(logs);
-    
+
     grouped.forEach((item, index) => {
       if (item.type === "log") {
         items.push(item);
       } else {
         const defaultExpanded = item.status === "running" || item.status === "failed";
         const isExpanded = expanded[item.key] ?? defaultExpanded;
-        
+
         items.push({ ...item, isExpanded, defaultExpanded, originalIndex: index });
         if (isExpanded) {
-          items.push(...item.logs.map((log) => ({ type: "log", log, isGroupChild: true })));
+          items.push(...item.logs.map((log) => ({ type: "log" as const, log, isGroupChild: true })));
         }
       }
     });
@@ -156,13 +159,13 @@ export function LogConsole({ logs }: LogConsoleProps) {
             itemContent={(_, item) => {
               if (item.type === "group") {
                 const Icon = item.isExpanded ? ChevronDown : ChevronRight;
-                const statusColor = 
+                const statusColor =
                   item.status === "running" ? "text-blue-500" :
-                  item.status === "success" ? "text-emerald-500" :
-                  item.status === "failed" ? "text-red-500" : "text-amber-500";
-                  
+                    item.status === "success" ? "text-emerald-500" :
+                      item.status === "failed" ? "text-red-500" : "text-amber-500";
+
                 return (
-                  <div 
+                  <div
                     className="flex items-center gap-2 px-4 py-2 border-b border-stroke/50 bg-slate-100 dark:bg-slate-900 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
                     onClick={() => toggleGroup(item.key, item.defaultExpanded)}
                   >
@@ -175,14 +178,14 @@ export function LogConsole({ logs }: LogConsoleProps) {
                   </div>
                 );
               }
-              
+
               const log = item.log as RealtimeLog;
-              const levelStyle = 
-                log.level === "error" ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" : 
-                log.level === "warn" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" : 
-                log.level === "debug" ? "bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20" :
-                "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
-                
+              const levelStyle =
+                log.level === "error" ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" :
+                  log.level === "warn" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" :
+                    log.level === "debug" ? "bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20" :
+                      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
+
               return (
                 <div className={`grid gap-2 border-b border-stroke/20 py-2 px-4 md:grid-cols-[120px_80px_1fr] ${item.isGroupChild ? 'bg-slate-50/50 dark:bg-slate-950/50 border-l-2 border-slate-200 dark:border-slate-800 pl-10' : ''}`}>
                   <span className="text-content-muted select-none whitespace-nowrap">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>

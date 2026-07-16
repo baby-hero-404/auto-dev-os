@@ -480,3 +480,98 @@ func (r *WorkflowRepo) ReleaseAdvisoryLock(ctx context.Context, lockConn any, ta
 
 	return nil
 }
+
+func (r *WorkflowRepo) FindLogsByPattern(ctx context.Context, taskIDs []string, level string, messagePrefix string) ([]models.TaskLog, error) {
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+
+	if r.fileRoot == "" {
+		var logs []models.TaskLog
+		if err := r.db.WithContext(ctx).
+			Where("task_id IN ? AND level = ? AND message LIKE ?", taskIDs, level, messagePrefix+"%").
+			Order("created_at ASC").
+			Find(&logs).Error; err != nil {
+			return nil, fmt.Errorf("find logs from DB: %w", err)
+		}
+		return logs, nil
+	}
+
+	logMu.RLock()
+	defer logMu.RUnlock()
+
+	var logs []models.TaskLog
+
+	for _, taskID := range taskIDs {
+		logPath := filepath.Join(r.fileRoot, taskID+".jsonl")
+		f, err := os.Open(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("open log file %s: %w", logPath, err)
+		}
+
+		dec := json.NewDecoder(f)
+		for dec.More() {
+			var log models.TaskLog
+			if err := dec.Decode(&log); err != nil {
+				f.Close()
+				return nil, fmt.Errorf("decode log line in %s: %w", logPath, err)
+			}
+			if log.Level == level && strings.HasPrefix(log.Message, messagePrefix) {
+				logs = append(logs, log)
+			}
+		}
+		f.Close()
+	}
+
+	return logs, nil
+}
+
+func (r *WorkflowRepo) CountTotalCalls(ctx context.Context, taskIDs []string) (int, error) {
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+
+	if r.fileRoot == "" {
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&models.TaskLog{}).
+			Where("task_id IN ? AND message LIKE 'assembled prompt with%'", taskIDs).
+			Count(&count).Error; err != nil {
+			return 0, fmt.Errorf("count calls from DB: %w", err)
+		}
+		return int(count), nil
+	}
+
+	logMu.RLock()
+	defer logMu.RUnlock()
+
+	var count int
+
+	for _, taskID := range taskIDs {
+		logPath := filepath.Join(r.fileRoot, taskID+".jsonl")
+		f, err := os.Open(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, fmt.Errorf("open log file %s: %w", logPath, err)
+		}
+
+		dec := json.NewDecoder(f)
+		for dec.More() {
+			var log models.TaskLog
+			if err := dec.Decode(&log); err != nil {
+				f.Close()
+				return 0, fmt.Errorf("decode log line in %s: %w", logPath, err)
+			}
+			if strings.HasPrefix(log.Message, "assembled prompt with") {
+				count++
+			}
+		}
+		f.Close()
+	}
+
+	return count, nil
+}

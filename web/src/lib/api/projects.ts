@@ -214,13 +214,14 @@ export const tasks = {
               if (currentEvent === "log") {
                 try {
                   onLog(JSON.parse(dataStr));
-                } catch (e) {}
+                } catch {}
               }
             }
           }
         }
-      } catch (err: any) {
-        if (err.name === "AbortError" || signal.aborted) {
+      } catch (err) {
+        const error = err as Error;
+        if (error.name === "AbortError" || signal.aborted) {
           return;
         }
         if (err instanceof StreamFatalError) {

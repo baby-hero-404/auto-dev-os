@@ -155,19 +155,19 @@ func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, ag
 		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		commitMsg := fmt.Sprintf("chore(auto-code-os): checkpoint %s", stepID)
 
+		// `git add -A` (not a hand-rolled extension whitelist) so newly created files are
+		// captured even when they live inside a brand-new directory: `git status --porcelain`
+		// reports such a directory as a single collapsed "?? dir/" line, which never matches a
+		// per-extension case pattern, so a whitelist-based add loop silently drops the whole
+		// directory. A later RestoreGitCheckpoint then runs `git clean -fd`, which permanently
+		// deletes that never-committed, still-untracked work. `-A` mirrors the same-file rescue
+		// snapshot in RestoreGitCheckpoint below, which already stages this way successfully.
 		script := fmt.Sprintf(`set -e
 %[3]s
-git -C %[1]s add -u
-git -C %[1]s status --porcelain | grep '^??' | cut -c 4- | while read -r file; do
-  if [ -n "$file" ]; then
-    case "$file" in
-      *.go|*.ts|*.tsx|*.js|*.jsx|*.css|*.json|*.sql|*.yaml|*.yml|*.toml|*.md|*go.mod|*go.sum)
-        git -C %[1]s add "$file"
-        ;;
-    esac
-  fi
-done
+git -C %[1]s add -A
+staged_count=$(git -C %[1]s diff --cached --name-only | wc -l | tr -d ' ')
 git -C %[1]s commit -q -m %[2]s --allow-empty
+echo "STAGED_COUNT=$staged_count"
 git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitMsg), identityScript)
 
 		res, err := m.RunSandboxStepInWorktree(ctx, task, agent, "checkpoint_"+stepID, script, worktreeSuffix)
@@ -178,6 +178,11 @@ git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.
 			lines := strings.Split(strings.TrimSpace(stdout), "\n")
 			if len(lines) > 0 {
 				lastCommitHash = strings.TrimSpace(lines[len(lines)-1])
+			}
+			for _, line := range lines {
+				if count, cut := strings.CutPrefix(strings.TrimSpace(line), "STAGED_COUNT="); cut && count == "0" && m.Log != nil {
+					m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("checkpoint %s for repo %s staged 0 files — commit is empty, nothing from this step was captured", stepID, repo.URL))
+				}
 			}
 		}
 	}

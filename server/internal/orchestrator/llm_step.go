@@ -105,9 +105,47 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 				rawMsgs, _ := json.Marshal(messages)
 				h := sha256.Sum256(rawMsgs)
 				currentPromptHash := hex.EncodeToString(h[:])
+				var analysis models.TaskAnalysis
+				if len(task.Analysis) > 0 {
+					_ = json.Unmarshal(task.Analysis, &analysis)
+				}
+				var ir models.ExecutionIR
+				role := agenticWorkspaceRole(stepID)
+				for _, node := range analysis.ExecutionIRs {
+					for _, unit := range analysis.ExecutionUnits {
+						if unit.ID == node.NodeID {
+							if strings.ToLower(unit.ExecutionProfile.Agent) == role {
+								ir = node
+								break
+							}
+						}
+					}
+				}
+				if ir.NodeID == "" && len(analysis.ExecutionIRs) == 1 {
+					ir = analysis.ExecutionIRs[0]
+				}
+				if ir.NodeID == "" {
+					ir = models.ExecutionIR{
+						SchemaVersion: models.CurrentExecutionIRSchemaVersion,
+						NodeID:        "default",
+						Intent:        models.Intent{Capability: stepID, Operation: "modify"},
+						Constraints:   []string{},
+						Acceptance:    []string{},
+					}
+				}
+				resolvedTargets := analysis.ExecutionIRTargets[ir.NodeID]
+				currentSemanticHash := models.ComputeSemanticHash(ir, resolvedTargets)
+
+				matched := false
 				if currentPromptHash == snap.PromptHash {
 					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: PromptHash verified. Resuming with byte-identical execution state.", stepID))
+					matched = true
+				} else if snap.SemanticHash != "" && snap.SemanticHash == currentSemanticHash {
+					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("step %s: SemanticHash verified (%s). Prompt wording changed, skipping re-reasoning.", stepID, snap.SemanticHash))
+					matched = true
+				}
 
+				if matched {
 					// Apply snapshot diff to restore workspace
 					o.initRepoutil()
 					worktreeSuffix := ""

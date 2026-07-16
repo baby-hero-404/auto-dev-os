@@ -250,6 +250,9 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 				}
 				diffText, _ = s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepReview, suffix)
 			}
+			if s.artifacts != nil && diffText != "" {
+				_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, stepCtx.StepID, "diff", diffText)
+			}
 		}
 		if diffText == "" && s.log != nil {
 			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "no diff was provided to review step")
@@ -263,6 +266,17 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		frozen := LoadFrozenContext(stepCtx, &analysis)
 
 		if frozen != nil {
+			if len(frozen.ExecutionUnits) > 0 {
+				var objectives []string
+				for _, unit := range frozen.ExecutionUnits {
+					if unit.Objective != "" {
+						objectives = append(objectives, fmt.Sprintf("- Node %s: %s", unit.ID, unit.Objective))
+					}
+				}
+				if len(objectives) > 0 {
+					instruction += "\n\nEXECUTION OBJECTIVES - You MUST verify the implementation matches these node objectives:\n" + strings.Join(objectives, "\n")
+				}
+			}
 			if frozen.TasksMD != "" {
 				instruction += "\n\nCRITICAL RUBRIC - You MUST verify that the following tasks have been completed correctly and accurately based on the diff. If any task is incomplete or not addressed, report a finding with 'requires_fix': true:\n\n" + frozen.TasksMD
 			}

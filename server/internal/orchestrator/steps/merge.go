@@ -211,6 +211,9 @@ func (s *MergeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (
 		if errDiff != nil {
 			return nil, fmt.Errorf("merge check failed: %w", errDiff)
 		}
+		if s.artifacts != nil && diffText != "" {
+			_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, stepCtx.StepID, "diff", diffText)
+		}
 	}
 	if s.status != nil {
 		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusReviewing); err != nil {

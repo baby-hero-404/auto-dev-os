@@ -132,11 +132,15 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 		for absHostPath, targetContainerPath := range cacheDirs {
 			if stat, err := os.Stat(absHostPath); err == nil && stat.IsDir() {
+				readOnly := true
+				if targetContainerPath == "/go/pkg/mod" {
+					readOnly = false
+				}
 				mounts = append(mounts, mount.Mount{
 					Type:     mount.TypeBind,
 					Source:   absHostPath,
 					Target:   targetContainerPath,
-					ReadOnly: true,
+					ReadOnly: readOnly,
 				})
 				// If we mounted Go cache, set GOPATH env var
 				if targetContainerPath == "/go/pkg/mod" {

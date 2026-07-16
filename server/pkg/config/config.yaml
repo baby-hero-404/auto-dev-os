@@ -71,5 +71,6 @@ logging:
 execution:
   state_machine_enabled: false
   max_tool_result_chars: 8000
+  rollout_violation_threshold_pct: 1.0
 
 

@@ -403,21 +403,40 @@ export function TaskDetailProvider({
         frontendCount = subtasks.frontend.length;
       }
 
-      if (backendCount > 0) {
-        for (let i = 0; i < backendCount; i++) {
-          steps.push(`code_backend_${i}`);
+      const hasExecutionUnits = !!(analysisData.execution_units && analysisData.execution_units.length > 0);
+
+      if (hasExecutionUnits) {
+        if (backendCount > 0) {
+          for (let i = 0; i < backendCount; i++) {
+            steps.push(`code_backend_${i}`);
+          }
+        }
+        if (frontendCount > 0) {
+          for (let i = 0; i < frontendCount; i++) {
+            steps.push(`code_frontend_${i}`);
+          }
+        }
+        if (backendCount === 0 && frontendCount === 0) {
+          steps.push(WORKFLOW_STEPS.CODE_BACKEND, WORKFLOW_STEPS.CODE_FRONTEND);
         }
       } else {
-        steps.push(WORKFLOW_STEPS.CODE_BACKEND);
+        if (backendCount > 0) {
+          for (let i = 0; i < backendCount; i++) {
+            steps.push(`code_backend_${i}`);
+          }
+        } else {
+          steps.push(WORKFLOW_STEPS.CODE_BACKEND);
+        }
+
+        if (frontendCount > 0) {
+          for (let i = 0; i < frontendCount; i++) {
+            steps.push(`code_frontend_${i}`);
+          }
+        } else {
+          steps.push(WORKFLOW_STEPS.CODE_FRONTEND);
+        }
       }
 
-      if (frontendCount > 0) {
-        for (let i = 0; i < frontendCount; i++) {
-          steps.push(`code_frontend_${i}`);
-        }
-      } else {
-        steps.push(WORKFLOW_STEPS.CODE_FRONTEND);
-      }
 
       steps.push(
         WORKFLOW_STEPS.MERGE,
@@ -499,7 +518,7 @@ export function TaskDetailProvider({
   const workflowCompletion = useMemo(() => {
     const finished = workflowSteps.filter((step) => {
       const status = latest.get(step);
-      return status === "success" || status === "recorded";
+      return status === "success" || status === "recorded" || status === "skipped";
     }).length;
     return Math.round((finished / workflowSteps.length) * 100);
   }, [latest, workflowSteps]);
@@ -508,7 +527,7 @@ export function TaskDetailProvider({
     const counts = { done: 0, running: 0, failed: 0, pending: 0 };
     for (const step of workflowSteps) {
       const status = latest.get(step) ?? "pending";
-      if (status === "success" || status === "recorded") {
+      if (status === "success" || status === "recorded" || status === "skipped") {
         counts.done += 1;
       } else if (status === "running") {
         counts.running += 1;

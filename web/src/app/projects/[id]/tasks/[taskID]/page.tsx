@@ -10,7 +10,6 @@ import { SpecPanel } from "./components/SpecPanel";
 import { PRPanel } from "./components/PRPanel";
 import { WorkflowSidebar } from "./components/WorkflowSidebar";
 import { RequestChangesModal } from "./components/RequestChangesModal";
-import { SpecReviewSection } from "@/components/projects/spec-review-section";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { useSession } from "@/lib/session";
 import type { Task, TaskAnalysis } from "@/lib/types";
@@ -24,9 +23,6 @@ function TaskDetailContent() {
     setError,
     updateTask,
     execute,
-    clarificationQuestions,
-    requestSpecChanges,
-    approveSpec,
     isTaskLoading,
     workflowError,
   } = useTaskDetail();
@@ -75,45 +71,36 @@ function TaskDetailContent() {
               <AlertCircle size={16} className="shrink-0 text-rose-500" />
               Task Execution Failed
             </div>
-            <p className="text-xs font-mono bg-black/40 border border-stroke/50 rounded-lg p-3 break-all whitespace-pre-wrap">
+            <p className="text-xs font-mono bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/10 dark:border-rose-900/30 rounded-lg p-3 break-all whitespace-pre-wrap text-rose-800 dark:text-rose-200">
               {workflow.job.last_error}
             </p>
           </div>
         )}
 
-        {workflow?.job?.status === "paused" && 
-         workflow?.job?.last_error && 
-         !workflow.job.last_error.includes("workflow paused for human spec review") &&
-         !workflow.job.last_error.includes("workflow paused for human task clarification") && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 flex flex-col gap-2" role="alert">
-            <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
-              <AlertCircle size={16} className="shrink-0 text-amber-500" />
-              Task Execution Paused (Human Action Required)
+        {workflow?.job?.status === "paused" &&
+          workflow?.job?.last_error &&
+          !workflow.job.last_error.includes("workflow paused for human spec review") &&
+          !workflow.job.last_error.includes("workflow paused for human task clarification") && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 flex flex-col gap-2" role="alert">
+              <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
+                <AlertCircle size={16} className="shrink-0 text-amber-500" />
+                Task Execution Paused (Human Action Required)
+              </div>
+              <p className="text-xs font-mono bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/10 dark:border-amber-900/30 rounded-lg p-3 break-all whitespace-pre-wrap text-amber-800 dark:text-amber-200">
+                {workflow.job.last_error}
+              </p>
+              <BoundaryResolutionControls
+                errorMsg={workflow.job.last_error}
+                task={task}
+                updateTask={updateTask}
+                execute={execute}
+                setError={setError}
+              />
             </div>
-            <p className="text-xs font-mono bg-black/40 border border-stroke/50 rounded-lg p-3 break-all whitespace-pre-wrap text-amber-600 dark:text-amber-200">
-              {workflow.job.last_error}
-            </p>
-            <BoundaryResolutionControls
-              errorMsg={workflow.job.last_error}
-              task={task}
-              updateTask={updateTask}
-              execute={execute}
-              setError={setError}
-            />
-          </div>
-        )}
-
-        <SpecReviewSection
-          specStatus={task?.spec_status}
-          hasUnansweredQuestions={clarificationQuestions.length > 0}
-          onRequestChanges={requestSpecChanges}
-          onApproveSpec={approveSpec}
-        />
+          )}
 
         <PRPanel />
-
         <WorkflowTimeline />
-
         <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
           <section className="space-y-6">
             <SpecPanel />
@@ -221,7 +208,7 @@ function BoundaryResolutionControls({
 
       const currentAnalysis = task?.analysis || ({} as Partial<TaskAnalysis>);
       const currentBoundaries = currentAnalysis.execution_boundaries || [];
-      
+
       // Deduplicate boundaries by root and repo_name
       const mergedBoundaries = [...currentBoundaries];
       for (const nb of newBoundaries) {
@@ -255,7 +242,7 @@ function BoundaryResolutionControls({
     try {
       const currentAnalysis = task?.analysis || ({} as Partial<TaskAnalysis>);
       const currentRules = currentAnalysis.task_rules || [];
-      const feedbackLine = violatedFiles.length > 0 
+      const feedbackLine = violatedFiles.length > 0
         ? `Do not modify these files: ${violatedFiles.join(", ")}. Guidance: ${feedback.trim()}`
         : `Guidance: ${feedback.trim()}`;
       const updatedRules = [...currentRules, feedbackLine];
@@ -326,7 +313,7 @@ function BoundaryResolutionControls({
               {violatedFiles.length > 0 ? "Option B: Block & Provide Guidance" : "Provide Guidance & Retry"}
             </h4>
             <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-              {violatedFiles.length > 0 
+              {violatedFiles.length > 0
                 ? "Prevent changes to these files. Instruct the agent on what to do instead (e.g., use mock data or existing functions)."
                 : "Instruct the agent on how to adjust its strategy (e.g., focus on a specific module or avoid a file path)."}
             </p>
@@ -335,7 +322,7 @@ function BoundaryResolutionControls({
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder={violatedFiles.length > 0 
+              placeholder={violatedFiles.length > 0
                 ? "e.g., Do not create sqlite/repository.go, use existing database functions instead."
                 : "e.g., Focus on creating the test file first, do not touch the main config files."}
               rows={2}

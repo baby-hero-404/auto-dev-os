@@ -91,6 +91,10 @@ type LoggingConfig struct {
 type ExecutionConfig struct {
 	StateMachineEnabled bool `mapstructure:"state_machine_enabled"`
 	MaxToolResultChars  int  `mapstructure:"max_tool_result_chars"`
+	// RolloutViolationThresholdPct is the default max [TELEMETRY-VIOLATION] rate (percent of
+	// LLM calls) the state-machine rollout gate (cmd/rollout-gate) tolerates before it
+	// reports "pass" — see docs/openspecs/runtime-centric-completion-2026 REQ-001.
+	RolloutViolationThresholdPct float64 `mapstructure:"rollout_violation_threshold_pct"`
 }
 
 type AutoCodeOSConfig struct {
@@ -218,6 +222,10 @@ func normalize(cfg *Config) error {
 
 	if cfg.Execution.MaxToolResultChars <= 0 {
 		cfg.Execution.MaxToolResultChars = 8000
+	}
+
+	if cfg.Execution.RolloutViolationThresholdPct <= 0 {
+		cfg.Execution.RolloutViolationThresholdPct = 1.0
 	}
 
 	if cfg.Git.DefaultAgentName == "" {

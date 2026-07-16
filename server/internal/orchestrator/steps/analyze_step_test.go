@@ -454,11 +454,8 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
 	)
 
 	_, err = stepEmptyTarget.Execute(context.Background(), workflow.StepContext{})
-	if err == nil {
-		t.Fatal("expected error due to empty target_files, got nil")
-	}
-	if !strings.Contains(err.Error(), "empty or missing target_files") {
-		t.Errorf("expected error about missing target_files, got: %v", err)
+	if err != nil {
+		t.Fatalf("unexpected error for empty target_files: %v", err)
 	}
 
 	// 3. Covered output passes

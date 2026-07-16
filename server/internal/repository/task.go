@@ -133,3 +133,15 @@ func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (r *TaskRepo) ListRecentByStatus(ctx context.Context, statuses []string, limit int) ([]models.Task, error) {
+	var tasks []models.Task
+	if err := r.db.WithContext(ctx).
+		Where("status IN ?", statuses).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&tasks).Error; err != nil {
+		return nil, fmt.Errorf("list recent tasks by status: %w", err)
+	}
+	return tasks, nil
+}

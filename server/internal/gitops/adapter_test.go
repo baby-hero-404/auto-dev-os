@@ -354,3 +354,41 @@ func initGitRepoWithoutAheadCommits(repoPath string) error {
 	}
 	return nil
 }
+
+type mockDecryptor struct {
+	decryptCount int
+}
+
+func (m *mockDecryptor) Decrypt(encoded string) (string, error) {
+	m.decryptCount++
+	if encoded == "encrypted-token" {
+		return "decrypted-token", nil
+	}
+	return "", errors.New("illegal base64 data")
+}
+
+func TestGitOpsAdapter_ProviderAndTokenForRepo_OrgFallbackDecryptedOnce(t *testing.T) {
+	dec := &mockDecryptor{}
+	adapter := NewGitOpsAdapter(&mockGitProvider{}, &mockRepoLookup{}, "", dec)
+	adapter.SetGitAccountLookup(&mockGitAccountLookup{
+		account: &models.GitAccount{
+			ID:    "org-account-1",
+			Token: "encrypted-token",
+		},
+	})
+
+	_, token, err := adapter.providerAndTokenForRepo(context.Background(), &models.Repository{
+		ProjectID: "project-123",
+		Provider:  "github",
+	})
+	if err != nil {
+		t.Fatalf("providerAndTokenForRepo failed: %v", err)
+	}
+	if token != "decrypted-token" {
+		t.Errorf("expected decrypted-token, got %q", token)
+	}
+	if dec.decryptCount != 1 {
+		t.Errorf("expected decrypt to be called exactly once, called %d times", dec.decryptCount)
+	}
+}
+

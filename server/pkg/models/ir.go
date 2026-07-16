@@ -3,9 +3,12 @@ package models
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -132,6 +135,7 @@ type ExecutionSnapshot struct {
 	WorkspaceDiff string           `json:"workspace_diff"` // unified diff vs. node entry workspace
 	ToolHistory   []ToolCallRecord `json:"tool_history"`
 	PromptHash    string           `json:"prompt_hash"` // hash of compiled prompt for replay integrity
+	SemanticHash  string           `json:"semantic_hash"`
 	Timestamp     time.Time        `json:"timestamp"`
 }
 
@@ -142,5 +146,29 @@ type ToolCallRecord struct {
 	Args      json.RawMessage `json:"args"`
 	Result    string          `json:"result"` // truncated per config
 	Error     string          `json:"error,omitempty"`
+}
+
+func ComputeSemanticHash(ir ExecutionIR, resolvedTargets []string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "node=%s\nop=%s\ncap=%s\n", ir.NodeID, ir.Intent.Operation, ir.Intent.Capability)
+
+	sortedTargets := append([]string(nil), resolvedTargets...)
+	sort.Strings(sortedTargets)
+	for _, t := range sortedTargets {
+		fmt.Fprintf(h, "target=%s\n", t)
+	}
+
+	sortedAcceptance := append([]string(nil), ir.Acceptance...)
+	sort.Strings(sortedAcceptance)
+	for _, a := range sortedAcceptance {
+		fmt.Fprintf(h, "acceptance=%s\n", a)
+	}
+
+	sortedConstraints := append([]string(nil), ir.Constraints...)
+	sort.Strings(sortedConstraints)
+	for _, c := range sortedConstraints {
+		fmt.Fprintf(h, "constraint=%s\n", c)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 

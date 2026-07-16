@@ -287,7 +287,7 @@ export function AddCredentialModal({
               {draftTestState === "testing" && <Loader2 size={14} className="animate-spin" />}
               {draftTestState === "success" && <CheckCircle2 size={14} />}
               {draftTestState === "error" && <XCircle size={14} />}
-              {draftTestState === "testing" ? "Testing" : draftTestState === "success" ? "Connected" : draftTestState === "error" ? "Failed" : "Test connection"}
+              {draftTestState === "testing" ? "Testing" : draftTestState === "success" ? "Connected" : draftTestState === "error" ? "Retry test" : "Test connection"}
             </button>
             <button
               disabled={isSubmitting || draftTestState !== "success" || !token || !orgID}

@@ -94,22 +94,6 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
 	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 
-	if s.prompts != nil {
-		var plannerTools []llm.ToolDefinition
-		if s.registry != nil {
-			profile := tool.DefaultRoleProfiles()["planner"]
-			plannerTools = s.registry.ToolsForCapabilities(profile.Capabilities)
-		}
-
-		plannerAgent := *s.rt.Agent
-		plannerAgent.Role = models.AgentRolePlanner
-
-		messages, tools, err := s.prompts.AssembleForAgent(ctx, *s.rt.Task, &plannerAgent, nil, plannerTools)
-		if err != nil {
-			return nil, fmt.Errorf("assemble prompt: %w", err)
-		}
-		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("assembled prompt with %d messages and %d tools", len(messages), len(tools)))
-	}
 	if patch.TaskReadyForExecution(s.rt.Task) {
 		if s.status != nil {
 			currentStatus := s.rt.Task.Status
@@ -318,18 +302,6 @@ func (s *AnalyzeStep) validateAnalyzeSpec(ctx context.Context, parsedJSON map[st
 
 	analysisDraft := parseAnalysisFinal(parsedJSON)
 
-	// Validate target_files presence first
-	var missingTargetUnits []string
-	for _, unit := range analysisDraft.ExecutionUnits {
-		if len(unit.TargetFiles) == 0 {
-			missingTargetUnits = append(missingTargetUnits, unit.ID)
-		}
-	}
-	if len(missingTargetUnits) > 0 {
-		err := fmt.Errorf("The following execution units have empty or missing target_files: %v", missingTargetUnits)
-		s.lastValidationError = err
-		return err
-	}
 
 	// Validate boundary coverage for affected files and target files
 	if err := validateBoundaryCoverage(analysisDraft); err != nil {
@@ -454,10 +426,12 @@ func (s *AnalyzeStep) buildAnalyzeMessages(ctx context.Context, instruction stri
 		plannerAgent := *s.rt.Agent
 		plannerAgent.Role = models.AgentRolePlanner
 
-		messages, _, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, &plannerAgent, nil, plannerTools)
+		var tools []llm.ToolDefinition
+		messages, tools, err = s.prompts.AssembleForAgent(stepCtx, *s.rt.Task, &plannerAgent, nil, plannerTools)
 		if err != nil {
 			return nil, err
 		}
+		s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("assembled prompt with %d messages and %d tools", len(messages), len(tools)))
 	} else {
 		messages = []llm.Message{{Role: "user", Content: s.rt.Task.Title + "\n\n" + s.rt.Task.Description}}
 	}

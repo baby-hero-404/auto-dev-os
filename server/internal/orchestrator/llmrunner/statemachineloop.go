@@ -457,6 +457,14 @@ func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, ag
 	h := sha256.Sum256(rawMsgs)
 	promptHash := hex.EncodeToString(h[:])
 
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	ir := resolveExecutionIRForStep(&analysis, stepID)
+	resolvedTargets := analysis.ExecutionIRTargets[ir.NodeID]
+	semanticHash := models.ComputeSemanticHash(ir, resolvedTargets)
+
 	snapshot := models.ExecutionSnapshot{
 		ExecutionID:   stepID,
 		CurrentState:  string(finalState),
@@ -464,6 +472,7 @@ func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, ag
 		WorkspaceDiff: diffText,
 		ToolHistory:   toolHistory,
 		PromptHash:    promptHash,
+		SemanticHash:  semanticHash,
 		Timestamp:     time.Now(),
 	}
 
@@ -471,6 +480,6 @@ func (r Runner) saveExecutionSnapshot(ctx context.Context, task *models.Task, ag
 	if saveErr != nil {
 		r.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to save execution snapshot: %v", saveErr))
 	} else {
-		r.log(ctx, task.ID, nil, "info", fmt.Sprintf("ExecutionSnapshot successfully saved with prompt hash: %s", promptHash))
+		r.log(ctx, task.ID, nil, "info", fmt.Sprintf("ExecutionSnapshot successfully saved with prompt hash: %s, semantic hash: %s", promptHash, semanticHash))
 	}
 }

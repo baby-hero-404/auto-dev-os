@@ -24,8 +24,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const Comp = asChild ? Slot : "button";
-
     const baseStyles =
       "inline-flex items-center justify-center font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stroke-focus disabled:pointer-events-none disabled:opacity-50 gap-2";
 

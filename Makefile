@@ -11,7 +11,7 @@ WEB_PORT ?= 3000
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
 LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
 
-.PHONY: help init build run clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-references
+.PHONY: help init build run clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-references rollout-gate
 
 # Default target displays the help menu
 .DEFAULT_GOAL := help
@@ -54,6 +54,10 @@ migrate: db-up ## Run database migrations
 	@echo "==> Running database migrations..."
 	@sleep 2
 	cd server && go run ./cmd/migrate
+
+rollout-gate: ## Evaluate state machine rollout gate (e.g. make rollout-gate SAMPLE=100 THRESHOLD=2.0). THRESHOLD defaults to execution.rollout_violation_threshold_pct from config when omitted.
+	@echo "==> Running rollout gate check..."
+	cd server && go run ./cmd/rollout-gate -sample $(or $(SAMPLE),100) $(if $(THRESHOLD),-threshold $(THRESHOLD),)
 
 # ── Build & Sandbox ──────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -283,5 +284,129 @@ func TestReviewStep_PRDiffFallbackUsesBackendWorktreeSuffix(t *testing.T) {
 	}
 	if diffMock.lastWorkspaceSuffix != "-be-worktree" {
 		t.Fatalf("expected backend worktree suffix fallback, got %q", diffMock.lastWorkspaceSuffix)
+	}
+}
+
+func TestReviewStep_ObjectiveInjection(t *testing.T) {
+	task := &models.Task{
+		ID:         "t1",
+		ProjectID:  "p1",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusReviewing,
+		Analysis: []byte(`{
+			"execution_units": [
+				{"id": "u1", "objective": "Create database migration"},
+				{"id": "u2", "objective": "Implement Repository layer"}
+			]
+		}`),
+	}
+
+	llmMock := &mockLLMRunner{result: StepResult{"parsed": map[string]any{"findings": []any{}}}}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleBackend}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		llmMock,
+		&mockDiffCapturer{},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		nil,
+		&mockStatusUpdater{},
+		&mockLogger{},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	instr := llmMock.lastInstruction
+	if !strings.Contains(instr, "EXECUTION OBJECTIVES") {
+		t.Errorf("expected instruction to contain EXECUTION OBJECTIVES, got:\n%s", instr)
+	}
+	if !strings.Contains(instr, "- Node u1: Create database migration") {
+		t.Errorf("expected instruction to contain u1 objective, got:\n%s", instr)
+	}
+	if !strings.Contains(instr, "- Node u2: Implement Repository layer") {
+		t.Errorf("expected instruction to contain u2 objective, got:\n%s", instr)
+	}
+}
+
+// TestReviewStep_ObjectiveInjection_LegacyNoExecutionUnits verifies REQ-003's stated
+// fallback: a task with no execution_units at all (pre-FrozenContext / legacy task) must
+// not gain an "EXECUTION OBJECTIVES" block — the addition is purely additive.
+func TestReviewStep_ObjectiveInjection_LegacyNoExecutionUnits(t *testing.T) {
+	task := &models.Task{
+		ID:         "t-legacy",
+		ProjectID:  "p1",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusReviewing,
+		Analysis:   []byte(`{}`),
+	}
+
+	llmMock := &mockLLMRunner{result: StepResult{"parsed": map[string]any{"findings": []any{}}}}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleBackend}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		llmMock,
+		&mockDiffCapturer{},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		nil,
+		&mockStatusUpdater{},
+		&mockLogger{},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(llmMock.lastInstruction, "EXECUTION OBJECTIVES") {
+		t.Errorf("expected no EXECUTION OBJECTIVES block for a task with no execution_units, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+// TestReviewStep_ObjectiveInjection_UnitsWithoutObjectives covers the case where
+// execution_units exist (FrozenContext present) but none carry a non-empty Objective —
+// the block must still be omitted entirely, not rendered as an empty/near-empty section.
+func TestReviewStep_ObjectiveInjection_UnitsWithoutObjectives(t *testing.T) {
+	task := &models.Task{
+		ID:         "t-empty-obj",
+		ProjectID:  "p1",
+		Complexity: models.TaskComplexityMedium,
+		Status:     models.TaskStatusReviewing,
+		Analysis: []byte(`{
+			"execution_units": [
+				{"id": "u1", "objective": ""}
+			]
+		}`),
+	}
+
+	llmMock := &mockLLMRunner{result: StepResult{"parsed": map[string]any{"findings": []any{}}}}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleBackend}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		llmMock,
+		&mockDiffCapturer{},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		nil,
+		&mockStatusUpdater{},
+		&mockLogger{},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(llmMock.lastInstruction, "EXECUTION OBJECTIVES") {
+		t.Errorf("expected no EXECUTION OBJECTIVES block when no unit has a non-empty objective, got:\n%s", llmMock.lastInstruction)
 	}
 }

@@ -161,6 +161,7 @@ func (a *GitOpsAdapter) providerAndTokenForRepo(ctx context.Context, repo *model
 			if acc.BaseURL != "" {
 				return NewGitHubProvider(acc.BaseURL), token, nil
 			}
+			return a.provider, token, nil
 		}
 	}
 

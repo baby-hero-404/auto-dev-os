@@ -24,36 +24,37 @@ import (
 // Orchestrator coordinates the end-to-end workflow for task execution:
 // agent assignment, workspace provisioning, step execution, and cleanup.
 type Orchestrator struct {
-	tasks           TaskRepository
-	workflows       WorkflowRepository
-	agents          AgentAssigner
-	runtime         sandbox.Runtime
-	prompts         PromptBuilder
-	llm             llm.Provider
-	ctxEngine       provider.ContextEngine
-	memHooks        MemoryRecorder
-	learnEngine     LearningRecorder
-	gitOps          GitOpsClient
-	artifacts       ArtifactRepository
-	repositories    RepositoryRepository
-	projects        ProjectRepository
-	sandboxGit      gitops.SandboxGitClient
-	workspaceRoot   string
-	dataRoot        string
-	retention       WorkspaceRetention
-	wg              sync.WaitGroup
-	lockCancels     sync.Map
-	lockConns       sync.Map
-	jobCancels      sync.Map
-	wkspace         *wkspace.Manager
-	checkpoints     *checkpoint.Store
-	repoutil        *repoutil.Manager
+	tasks               TaskRepository
+	workflows           WorkflowRepository
+	agents              AgentAssigner
+	runtime             sandbox.Runtime
+	prompts             PromptBuilder
+	llm                 llm.Provider
+	ctxEngine           provider.ContextEngine
+	memHooks            MemoryRecorder
+	learnEngine         LearningRecorder
+	gitOps              GitOpsClient
+	artifacts           ArtifactRepository
+	repositories        RepositoryRepository
+	projects            ProjectRepository
+	sandboxGit          gitops.SandboxGitClient
+	workspaceRoot       string
+	dataRoot            string
+	retention           WorkspaceRetention
+	wg                  sync.WaitGroup
+	lockCancels         sync.Map
+	lockConns           sync.Map
+	jobCancels          sync.Map
+	wkspace             *wkspace.Manager
+	checkpoints         *checkpoint.Store
+	repoutil            *repoutil.Manager
 	disableNetworking   bool
 	llmTraceEnabled     bool
 	llmLogLevel         string
 	maxPhaseCost        float64
 	stateMachineEnabled bool
 	maxToolResultChars  int
+	maxToolIterations   int
 	wakeChan            chan struct{}
 	registry            *tool.Registry
 	capManager          *tool.CapabilityManager
@@ -164,6 +165,12 @@ func WithStateMachineEnabled(enabled bool) Option {
 func WithMaxToolResultChars(chars int) Option {
 	return func(o *Orchestrator) {
 		o.maxToolResultChars = chars
+	}
+}
+
+func WithMaxToolIterations(iters int) Option {
+	return func(o *Orchestrator) {
+		o.maxToolIterations = iters
 	}
 }
 

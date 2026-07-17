@@ -21,7 +21,6 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-
 func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.run")
 	defer span.End()
@@ -157,7 +156,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if event.Error != "" {
 				state["error"] = event.Error
 			}
-			
+
 			// Attach current SpecHash to the checkpoint state to ensure immutable contract resuming
 			if len(task.Analysis) > 0 {
 				var analysis models.TaskAnalysis
@@ -179,9 +178,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if event.Status == workflow.StepStatusSuccess && isCodeStep && !stepWasSkipped {
 				worktreeSuffix := ""
 				if strings.HasPrefix(event.StepID, workflow.StepCodeBackend) {
-					worktreeSuffix = "-be-worktree"
+					worktreeSuffix = models.WorktreeSuffixBackend
 				} else if strings.HasPrefix(event.StepID, workflow.StepCodeFrontend) {
-					worktreeSuffix = "-fe-worktree"
+					worktreeSuffix = models.WorktreeSuffixFrontend
 				}
 				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Creating git checkpoint commit for step %s", event.StepID))
 				commitHash, err := o.repoutil.CreateGitCheckpoint(ctx, task, agent, event.StepID, worktreeSuffix)
@@ -234,7 +233,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if o.memHooks != nil {
 				o.memHooks.PostStepRecord(ctx, agent.ID, task, sessionID, event.StepID, string(event.Status), event.Output)
 			}
-			
+
 			if event.StepID == workflow.StepPlan && event.Status == workflow.StepStatusSuccess {
 				hasSubtasks := false
 				if subtasks, ok := event.Output["subtasks"].(map[string][]string); ok {
@@ -253,7 +252,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 					return workflow.ErrGraphChanged
 				}
 			}
-			
+
 			return nil
 		},
 	}
@@ -325,52 +324,87 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			engine.CompletedSteps = completed
 			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("resuming workflow with %d completed steps from checkpoint", len(completed)))
 
-			// Find the latest successful checkpoint among code_backend, code_frontend, and fix
-			var latestCommitHash string
-			var latestStep string
+			// Find the chronologically latest successful step to restore task status
+			var latestCompletedStep string
+			for _, cp := range checkpoints {
+				var state map[string]any
+				if json.Unmarshal(cp.State, &state) == nil {
+					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
+						latestCompletedStep = cp.Step
+					}
+				}
+			}
+
+			if latestCompletedStep != "" {
+				var resumeStatus string
+				if strings.HasPrefix(latestCompletedStep, workflow.StepContextLoad) || strings.HasPrefix(latestCompletedStep, workflow.StepAnalyze) {
+					resumeStatus = models.TaskStatusAnalyzing
+					if task.Complexity == models.TaskComplexityEasy {
+						resumeStatus = models.TaskStatusCoding
+					}
+				} else if strings.HasPrefix(latestCompletedStep, workflow.StepPlan) ||
+					strings.HasPrefix(latestCompletedStep, workflow.StepCodeBackend) ||
+					strings.HasPrefix(latestCompletedStep, workflow.StepCodeFrontend) ||
+					strings.HasPrefix(latestCompletedStep, workflow.StepFix) {
+					resumeStatus = models.TaskStatusCoding
+				} else if strings.HasPrefix(latestCompletedStep, workflow.StepMerge) {
+					resumeStatus = models.TaskStatusReviewing
+				} else if strings.HasPrefix(latestCompletedStep, workflow.StepTest) {
+					resumeStatus = models.TaskStatusTesting
+				} else if strings.HasPrefix(latestCompletedStep, workflow.StepPR) {
+					resumeStatus = models.TaskStatusHumanReview
+				}
+
+				if resumeStatus != "" && task.Status != resumeStatus {
+					o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Restoring task status to %s based on latest completed step %s", resumeStatus, latestCompletedStep))
+					if updatedTask, err := o.updateTaskStatus(ctx, task.ID, resumeStatus); err == nil {
+						task = updatedTask
+					}
+				}
+			}
+
+			// Find the latest successful checkpoint for each worktree suffix
+			latestCheckpoints := make(map[string]struct{ Hash, Step string })
 			for _, cp := range checkpoints {
 				var state map[string]any
 				if json.Unmarshal(cp.State, &state) == nil {
 					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 						if cpHash, ok := state["commit_hash"].(string); ok && cpHash != "" {
-							latestCommitHash = cpHash
-							latestStep = cp.Step
+							worktreeSuffix := ""
+							if strings.HasPrefix(cp.Step, workflow.StepCodeBackend) {
+								worktreeSuffix = models.WorktreeSuffixBackend
+							} else if strings.HasPrefix(cp.Step, workflow.StepCodeFrontend) {
+								worktreeSuffix = models.WorktreeSuffixFrontend
+							}
+							latestCheckpoints[worktreeSuffix] = struct{ Hash, Step string }{cpHash, cp.Step}
 						}
 					}
 				}
 			}
 
-			if latestCommitHash != "" {
-				worktreeSuffix := ""
-				// latestStep is a per-unit step id (e.g. "code_backend_3"), not the bare
-				// "code_backend"/"code_frontend" constants, so this must be a prefix match, not
-				// an exact one — an exact match here never fires for any real backend/frontend
-				// step, silently restoring the main worktree instead of the role worktree.
-				if strings.HasPrefix(latestStep, workflow.StepCodeBackend) {
-					worktreeSuffix = "-be-worktree"
-				} else if strings.HasPrefix(latestStep, workflow.StepCodeFrontend) {
-					worktreeSuffix = "-fe-worktree"
+			if len(latestCheckpoints) > 0 {
+				for worktreeSuffix, info := range latestCheckpoints {
+					o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Restoring worktree '%s' to commit checkpoint %s from step %s", worktreeSuffix, info.Hash, info.Step))
+					if err := o.repoutil.RestoreGitCheckpoint(ctx, task, agent, info.Hash, worktreeSuffix); err != nil {
+						o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to restore git checkpoint: %v", err))
+					}
 				}
-				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Restoring worktree %s to commit checkpoint %s from step %s", worktreeSuffix, latestCommitHash, latestStep))
-				if err := o.repoutil.RestoreGitCheckpoint(ctx, task, agent, latestCommitHash, worktreeSuffix); err != nil {
-					o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to restore git checkpoint: %v", err))
-				} else {
-					// Delete workspace_cache.db
-					if ws := o.wkspace.GetTaskWorkspace(task); ws != nil {
-						cachePath := filepath.Join(ws.Root, "context", "workspace_cache.db")
-						if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
-							o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to delete workspace_cache.db: %v", err))
-						} else {
-							o.log(ctx, task.ID, &job.ID, "info", "Deleted workspace_cache.db for re-indexing")
-						}
-					}
-					// Re-index workspace
-					prewarmCtx := context.WithValue(ctx, provider.WorkspaceRootKey, o.wkspace.GetTaskWorkspace(task).Root)
-					if errIndex := o.ctxEngine.IndexWorkspace(prewarmCtx); errIndex != nil {
-						o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to re-index workspace after restore: %v", errIndex))
+
+				// Delete workspace_cache.db
+				if ws := o.wkspace.GetTaskWorkspace(task); ws != nil {
+					cachePath := filepath.Join(ws.Root, "context", "workspace_cache.db")
+					if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+						o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to delete workspace_cache.db: %v", err))
 					} else {
-						o.log(ctx, task.ID, &job.ID, "info", "Workspace re-indexed successfully")
+						o.log(ctx, task.ID, &job.ID, "info", "Deleted workspace_cache.db for re-indexing")
 					}
+				}
+				// Re-index workspace
+				prewarmCtx := context.WithValue(ctx, provider.WorkspaceRootKey, o.wkspace.GetTaskWorkspace(task).Root)
+				if errIndex := o.ctxEngine.IndexWorkspace(prewarmCtx); errIndex != nil {
+					o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Failed to re-index workspace after restore: %v", errIndex))
+				} else {
+					o.log(ctx, task.ID, &job.ID, "info", "Workspace re-indexed successfully")
 				}
 			}
 		}
@@ -555,5 +589,3 @@ func (o *Orchestrator) calculateBackoff(attempt int) time.Duration {
 	}
 	return time.Duration(seconds) * time.Second
 }
-
-

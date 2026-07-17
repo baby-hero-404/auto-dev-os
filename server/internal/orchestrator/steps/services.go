@@ -107,6 +107,7 @@ type SandboxGitClient interface {
 	CheckoutBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) error
 	CheckoutNewBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) error
 	HasBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) bool
+	ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, target string) error
 	MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) (string, error)
 	CommitChanges(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, message string) error
 	GetChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) ([]string, error)

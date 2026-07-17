@@ -63,6 +63,9 @@ func (m *mockSandboxGit) HasBranch(ctx context.Context, task *models.Task, agent
 	}
 	return false
 }
+func (m *mockSandboxGit) ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, target string) error {
+	return nil
+}
 func (m *mockSandboxGit) MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) (string, error) {
 	if branch == "feature/task-123-be" {
 		return m.mergeBeStat, m.mergeBeErr

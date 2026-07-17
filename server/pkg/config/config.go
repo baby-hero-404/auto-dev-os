@@ -91,6 +91,7 @@ type LoggingConfig struct {
 type ExecutionConfig struct {
 	StateMachineEnabled bool `mapstructure:"state_machine_enabled"`
 	MaxToolResultChars  int  `mapstructure:"max_tool_result_chars"`
+	MaxToolIterations   int  `mapstructure:"max_tool_iterations"`
 	// RolloutViolationThresholdPct is the default max [TELEMETRY-VIOLATION] rate (percent of
 	// LLM calls) the state-machine rollout gate (cmd/rollout-gate) tolerates before it
 	// reports "pass" — see docs/openspecs/runtime-centric-completion-2026 REQ-001.
@@ -172,6 +173,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("logging.llm_log_level", "LOG_LLM_LOG_LEVEL")
 	v.BindEnv("sandbox.disable_networking", "SANDBOX_DISABLE_NETWORKING")
 	v.BindEnv("execution.state_machine_enabled", "EXECUTION_STATE_MACHINE_ENABLED")
+	v.BindEnv("execution.max_tool_iterations", "MAX_TOOL_ITERATIONS")
 
 	v.SetConfigType("yaml")
 	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {
@@ -222,6 +224,10 @@ func normalize(cfg *Config) error {
 
 	if cfg.Execution.MaxToolResultChars <= 0 {
 		cfg.Execution.MaxToolResultChars = 8000
+	}
+
+	if cfg.Execution.MaxToolIterations <= 0 {
+		cfg.Execution.MaxToolIterations = 15
 	}
 
 	if cfg.Execution.RolloutViolationThresholdPct <= 0 {

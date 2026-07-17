@@ -40,8 +40,11 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
 
       if (endMatch && endMatch[1] === currentGroup.stepName) {
         currentGroup.status = endMatch[2] as LogGroupStatus;
-        result.push({ type: "group", ...currentGroup });
-        currentGroup = null;
+        // Do not close the group if it is paused. Keep it open to receive resume logs.
+        if (endMatch[2] !== "paused") {
+          result.push({ type: "group", ...currentGroup });
+          currentGroup = null;
+        }
       }
     } else {
       result.push({ type: "log", log });
@@ -58,36 +61,26 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
 function LogMessage({ message }: { message: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const lines = message.split("\n");
-  const isLong = lines.length > 6 || message.length > 500;
+  const isLong = lines.length > 8 || message.length > 1000;
 
   if (!isLong) {
-    return <span className="whitespace-pre-wrap text-slate-800 dark:text-slate-100 break-words">{message}</span>;
+    return <span className="whitespace-pre-wrap text-[#c9d1d9] break-words font-mono">{message}</span>;
   }
 
-  const previewLines = lines.slice(0, 5).join("\n");
+  const previewLines = lines.slice(0, 6).join("\n");
   const displayedText = isExpanded ? message : previewLines;
 
-  // Check if it looks like code, JSON, diff, or raw trace
-  const isCodeOrJson =
-    message.includes("```") ||
-    message.trim().startsWith("{") ||
-    message.trim().startsWith("[") ||
-    lines.some(l => l.startsWith("    ") || l.startsWith("\t") || l.startsWith("+ ") || l.startsWith("- "));
-
   return (
-    <div className="flex flex-col gap-1 w-full">
-      <div className={`whitespace-pre-wrap text-slate-800 dark:text-slate-100 break-words font-mono ${isCodeOrJson || isExpanded
-          ? "bg-slate-100/50 dark:bg-slate-900/50 border border-stroke/40 rounded p-2 max-h-[300px] overflow-y-auto custom-scrollbar text-[11px] leading-relaxed"
-          : ""
-        }`}>
+    <div className="flex flex-col gap-1 w-full mt-0.5">
+      <div className="whitespace-pre-wrap text-[#c9d1d9] break-words font-mono leading-relaxed">
         {displayedText}
-        {!isExpanded && <span className="text-content-muted">...</span>}
+        {!isExpanded && <span className="text-[#8b949e]">...</span>}
       </div>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="text-[10px] font-bold text-brand-primary hover:text-brand-primary/80 transition-colors self-start mt-0.5 cursor-pointer"
+        className="text-[10px] font-bold text-[#58a6ff] hover:text-[#58a6ff]/80 transition-colors self-start mt-1 cursor-pointer flex items-center gap-1"
       >
-        {isExpanded ? "Show less" : `Show more (${lines.length - 5} lines)`}
+        {isExpanded ? "Show less" : `Show more (${lines.length - 6} lines)`}
       </button>
     </div>
   );
@@ -159,13 +152,13 @@ interface LogConsoleProps {
   /** Controlled collapse state (REQ-006). When omitted, the console self-manages. */
   isExpanded?: boolean;
   onToggle?: () => void;
+  hideHeader?: boolean;
 }
 
-export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: LogConsoleProps) {
+export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle, hideHeader = false }: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [viewMode, setViewMode] = useState<"milestones" | "all">(
-    isWorkflowRunning ? "milestones" : "all"
-  );
+  const [viewMode, setViewMode] = useState<"milestones" | "all">("all");
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Collapse control: default-collapsed. Uncontrolled fallback when no props given.
   const [internalOpen, setInternalOpen] = useState(false);
@@ -184,10 +177,10 @@ export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: Lo
       : "No logs yet";
   const latestEventType = latestMilestone?.type ?? "info";
   const latestDotColor =
-    latestEventType === "success" ? "bg-emerald-500" :
-      latestEventType === "running" ? "bg-sky-500 animate-pulse" :
-        latestEventType === "failed" ? "bg-rose-500" :
-          latestEventType === "paused" ? "bg-amber-500" : "bg-slate-400";
+    latestEventType === "success" ? "bg-[#3fb950]" :
+      latestEventType === "running" ? "bg-[#58a6ff] animate-pulse" :
+        latestEventType === "failed" ? "bg-[#f85149]" :
+          latestEventType === "paused" ? "bg-[#d29922]" : "bg-[#8b949e]";
 
   const toggleGroup = (key: string, defaultExpanded: boolean) => {
     setExpanded((prev) => ({
@@ -205,10 +198,10 @@ export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: Lo
         items.push(item);
       } else {
         const defaultExpanded = item.status === "running" || item.status === "failed";
-        const isExpanded = expanded[item.key] ?? defaultExpanded;
+        const isGroupExpanded = expanded[item.key] ?? defaultExpanded;
 
-        items.push({ ...item, isExpanded, defaultExpanded, originalIndex: index });
-        if (isExpanded) {
+        items.push({ ...item, isExpanded: isGroupExpanded, defaultExpanded, originalIndex: index });
+        if (isGroupExpanded) {
           items.push(...item.logs.map((log) => ({ type: "log" as const, log, isGroupChild: true })));
         }
       }
@@ -231,99 +224,127 @@ export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: Lo
     }
   };
 
+  const fullscreenClasses = isFullscreen 
+    ? "fixed inset-4 z-50 shadow-2xl rounded-xl border border-[#30363d] bg-[#0d1117] flex flex-col"
+    : `${hideHeader ? "" : "rounded-lg border border-[#30363d]"} bg-[#0d1117] flex flex-col ${isOpen ? "h-full min-h-[400px]" : ""}`;
+
   return (
-    <div id="log-console" className={`rounded-lg border border-stroke bg-panel p-5 flex flex-col ${isOpen ? "h-full min-h-[400px]" : ""}`}>
-      <div className={`flex flex-wrap items-center justify-between gap-4 ${isOpen ? "mb-4" : ""}`}>
-        <button
-          type="button"
-          onClick={toggleOpen}
-          className="flex items-center gap-2 cursor-pointer text-left"
-          aria-expanded={isOpen}
-        >
-          {isOpen ? <ChevronDown size={18} className="text-content-muted" /> : <ChevronRight size={18} className="text-content-muted" />}
-          <TerminalSquare size={18} className="text-brand-primary" />
-          <h2 className="font-mono text-lg font-semibold text-foreground dark:text-white">Execution Logs</h2>
-        </button>
+    <>
+      {isFullscreen && <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" onClick={() => setIsFullscreen(false)} />}
+      <div id="log-console" className={fullscreenClasses}>
+        {(!hideHeader || isFullscreen) && (
+          <>
+            <div className={`flex flex-wrap items-center justify-between gap-4 p-4 border-b border-[#30363d] bg-[#010409] rounded-t-lg ${isOpen ? "mb-0" : ""}`}>
+            <div className="flex items-center gap-2 text-left">
+              {!isFullscreen && (
+                <button type="button" onClick={toggleOpen} className="cursor-pointer" aria-expanded={isOpen}>
+                  {isOpen ? <ChevronDown size={16} className="text-[#8b949e]" /> : <ChevronRight size={16} className="text-[#8b949e]" />}
+                </button>
+              )}
+              <TerminalSquare size={16} className="text-[#58a6ff]" />
+              <h2 className="font-mono text-[13px] font-semibold text-[#e6edf3]">Execution Logs</h2>
+            </div>
 
-        {isOpen && logs.length > 0 && (
-          <div className="flex rounded-lg border border-stroke bg-surface/80 p-0.5 text-[10.5px] font-semibold">
-            <button
-              onClick={() => setViewMode("milestones")}
-              className={`rounded px-3 py-1 cursor-pointer transition-all ${
-                viewMode === "milestones"
-                  ? "bg-card text-brand-primary shadow-sm border border-stroke/10"
-                  : "text-content-muted hover:text-foreground border border-transparent"
-              }`}
-            >
-              Milestones
-            </button>
-            <button
-              onClick={() => setViewMode("all")}
-              className={`rounded px-3 py-1 cursor-pointer transition-all ${
-                viewMode === "all"
-                  ? "bg-card text-brand-primary shadow-sm border border-stroke/10"
-                  : "text-content-muted hover:text-foreground border border-transparent"
-              }`}
-            >
-              All Logs
-            </button>
+            {isOpen && logs.length > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="flex rounded-md border border-[#30363d] bg-[#161b22] p-0.5 text-[10px] font-semibold font-mono">
+                  <button
+                    onClick={() => setViewMode("all")}
+                    className={`rounded px-2.5 py-1 cursor-pointer transition-all ${
+                      viewMode === "all"
+                        ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                        : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
+                    }`}
+                  >
+                    Terminal
+                  </button>
+                  <button
+                    onClick={() => setViewMode("milestones")}
+                    className={`rounded px-2.5 py-1 cursor-pointer transition-all ${
+                      viewMode === "milestones"
+                        ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                        : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
+                    }`}
+                  >
+                    Milestones
+                  </button>
+                </div>
+                
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="text-[10px] font-mono font-semibold px-2 py-1.5 rounded-md border border-[#30363d] bg-[#21262d] text-[#c9d1d9] hover:bg-[#30363d] hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isFullscreen ? (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.22 9.78a.75.75 0 0 1 0 1.06l-2.5 2.5h2.03a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75v-3.5a.75.75 0 0 1 1.5 0v2.03l2.5-2.5a.75.75 0 0 1 1.06 0Zm5.56 0a.75.75 0 0 1 1.06 0l2.5 2.5v-2.03a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1 0-1.5h2.03l-2.5-2.5a.75.75 0 0 1 0-1.06ZM5.22 6.22a.75.75 0 0 1-1.06 0l-2.5-2.5v2.03a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5H2.38l2.5 2.5a.75.75 0 0 1 0 1.06Zm5.56 0a.75.75 0 0 1 0-1.06l2.5-2.5h-2.03a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.38l-2.5 2.5a.75.75 0 0 1-1.06 0Z"/></svg>
+                      Minimize
+                    </>
+                  ) : (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 0 1 1.06 1.06L2.56 7h2.19a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22Zm8.56 0a.75.75 0 0 1 0 1.06l-2.22 2.22h2.19a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22ZM3.72 12.28a.75.75 0 0 1 0-1.06l2.22-2.22H3.75a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-2.19l-2.22 2.22a.75.75 0 0 1-1.06 0Zm8.56 0a.75.75 0 0 1-1.06 0l-2.22-2.22v2.19a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-2.19l2.22 2.22a.75.75 0 0 1 0 1.06Z"/></svg>
+                      Expand
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {!isOpen && (
-        <button
-          type="button"
-          onClick={toggleOpen}
-          className="mt-3 flex w-full items-center gap-2.5 rounded-md border border-stroke/50 bg-surface/30 px-3 py-2.5 text-left transition hover:bg-surface/60 cursor-pointer"
-        >
-          <span className={`h-2 w-2 shrink-0 rounded-full ${latestDotColor}`} />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-content-muted">{latestEventText}</span>
-          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-brand-primary">View full log</span>
-        </button>
+          {!isOpen && (
+            <button
+              type="button"
+              onClick={toggleOpen}
+              className="m-3 flex items-center gap-2.5 rounded-md border border-[#30363d] bg-[#161b22] px-3 py-2 text-left transition hover:bg-[#21262d] cursor-pointer"
+            >
+              <span className={`h-2 w-2 shrink-0 rounded-full ${latestDotColor}`} />
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#8b949e]">{latestEventText}</span>
+              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#58a6ff]">View full log</span>
+            </button>
+          )}
+        </>
       )}
 
-      <div className={`flex-1 overflow-hidden rounded-md bg-slate-50 dark:bg-slate-950 border border-stroke min-h-[520px] ${isOpen ? "" : "hidden"}`}>
+      <div className={`relative flex-1 overflow-hidden rounded-b-lg bg-[#0d1117] min-h-[520px] ${isOpen ? "" : "hidden"}`}>
         {logs.length === 0 ? (
-          <p className="text-content-muted p-4 font-mono text-xs">No logs yet. Execute the workflow to start.</p>
+          <p className="text-[#8b949e] p-4 font-mono text-[11px]">No logs yet. Execute the workflow to start.</p>
         ) : viewMode === "milestones" ? (
-          <div className="h-full w-full overflow-y-auto p-4 custom-scrollbar flex flex-col gap-4">
+          <div className="absolute inset-0 overflow-y-auto p-5 custom-scrollbar flex flex-col gap-4 font-mono">
             {milestones.length === 0 ? (
-              <p className="text-content-muted font-mono text-xs text-center py-8">No milestones recorded yet.</p>
+              <p className="text-[#8b949e] text-[11px] text-center py-8">No milestones recorded yet.</p>
             ) : (
-              <div className="relative border-l border-stroke/70 pl-6 space-y-5 ml-2 pt-2 text-left">
+              <div className="relative border-l border-[#30363d] pl-6 space-y-5 ml-2 pt-2 text-left">
                 {milestones.map((m) => {
-                  let dotBg = "bg-slate-400";
-                  let borderStyle = "border-stroke";
-                  let textColor = "text-foreground";
+                  let dotBg = "bg-[#8b949e]";
+                  let borderStyle = "border-[#30363d]";
+                  let textColor = "text-[#c9d1d9]";
                   
                   if (m.type === "success") {
-                    dotBg = "bg-emerald-500";
-                    borderStyle = "border-emerald-500/30";
-                    textColor = "text-emerald-700 dark:text-emerald-300 font-semibold";
+                    dotBg = "bg-[#238636]";
+                    borderStyle = "border-[#238636]/30";
+                    textColor = "text-[#3fb950] font-semibold";
                   } else if (m.type === "running") {
-                    dotBg = "bg-sky-500 animate-pulse";
-                    borderStyle = "border-sky-500/30";
-                    textColor = "text-sky-700 dark:text-sky-300 font-semibold";
+                    dotBg = "bg-[#58a6ff] animate-pulse";
+                    borderStyle = "border-[#58a6ff]/30";
+                    textColor = "text-[#58a6ff] font-semibold";
                   } else if (m.type === "failed") {
-                    dotBg = "bg-rose-500";
-                    borderStyle = "border-rose-500/30";
-                    textColor = "text-rose-700 dark:text-rose-300 font-bold";
+                    dotBg = "bg-[#f85149]";
+                    borderStyle = "border-[#f85149]/30";
+                    textColor = "text-[#f85149] font-bold";
                   } else if (m.type === "paused") {
-                    dotBg = "bg-amber-500";
-                    borderStyle = "border-amber-500/30";
-                    textColor = "text-amber-700 dark:text-amber-300 font-semibold";
+                    dotBg = "bg-[#d29922]";
+                    borderStyle = "border-[#d29922]/30";
+                    textColor = "text-[#d29922] font-semibold";
                   }
 
                   return (
-                    <div key={m.id} className="relative flex flex-col gap-1">
+                    <div key={m.id} className="relative flex flex-col gap-1.5">
                       {/* Dot */}
-                      <span className={`absolute -left-[30px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-panel border-2 ${borderStyle}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${dotBg}`} />
+                      <span className={`absolute -left-[31px] top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#0d1117] border-[1.5px] ${borderStyle}`}>
+                        <span className={`h-2 w-2 rounded-full ${dotBg}`} />
                       </span>
-                      <div className="flex items-center justify-between gap-4">
-                        <span className={`text-xs ${textColor}`}>{m.message}</span>
-                        <span className="text-[10px] font-mono text-content-muted/80 whitespace-nowrap">{m.timestamp}</span>
+                      <div className="flex items-start justify-between gap-4">
+                        <span className={`text-[12px] leading-relaxed ${textColor}`}>{m.message}</span>
+                        <span className="text-[10px] text-[#8b949e] whitespace-nowrap mt-0.5">{m.timestamp}</span>
                       </div>
                     </div>
                   );
@@ -332,54 +353,71 @@ export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle }: Lo
             )}
           </div>
         ) : (
-          <Virtuoso
-            data={flattenedItems}
-            className="h-full w-full font-mono text-xs"
-            followOutput="smooth"
-            itemContent={(_, item) => {
-              if (item.type === "group") {
-                const Icon = item.isExpanded ? ChevronDown : ChevronRight;
-                const statusColor =
-                  item.status === "running" ? "text-blue-500" :
-                    item.status === "success" ? "text-emerald-500" :
-                      item.status === "failed" ? "text-red-500" : "text-amber-500";
+          <div className="absolute inset-0">
+            <Virtuoso
+              data={flattenedItems}
+              className="h-full w-full font-mono text-[11px]"
+              followOutput="smooth"
+              itemContent={(_, item) => {
+                if (item.type === "group") {
+                  const Icon = item.isExpanded ? ChevronDown : ChevronRight;
+                  const statusColor =
+                    item.status === "running" ? "text-[#58a6ff]" :
+                      item.status === "success" ? "text-[#3fb950]" :
+                        item.status === "failed" ? "text-[#f85149]" : "text-[#d29922]";
+
+                  return (
+                    <div
+                      id={`log-group-${item.stepName}`}
+                      className="flex items-center gap-2 px-4 py-2 border-y border-[#30363d] bg-[#161b22] cursor-pointer hover:bg-[#21262d] transition-colors -mt-px first:mt-0"
+                      onClick={() => toggleGroup(item.key, item.defaultExpanded)}
+                    >
+                      <Icon size={14} className="text-[#8b949e]" />
+                      <span className="font-semibold text-[#e6edf3] uppercase tracking-wider text-[10px]">
+                        {(() => {
+                          if (item.stepName.startsWith("code_backend_")) {
+                            const parsedIdx = Number(item.stepName.substring("code_backend_".length));
+                            return `Backend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
+                          }
+                          if (item.stepName.startsWith("code_frontend_")) {
+                            const parsedIdx = Number(item.stepName.substring("code_frontend_".length));
+                            return `Frontend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
+                          }
+                          return item.stepName;
+                        })()}
+                      </span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        {getStatusIcon(item.status)}
+                        <span className={`font-bold uppercase text-[9px] ${statusColor}`}>{item.status}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const log = item.log as RealtimeLog;
+                const levelStyle =
+                  log.level === "error" ? "text-[#f85149]" :
+                    log.level === "warn" ? "text-[#d29922]" :
+                      log.level === "debug" ? "text-[#8b949e]" :
+                        "text-[#3fb950]";
 
                 return (
-                  <div
-                    id={`log-group-${item.stepName}`}
-                    className="flex items-center gap-2 px-4 py-2 border-b border-stroke/50 bg-slate-100 dark:bg-slate-900 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-                    onClick={() => toggleGroup(item.key, item.defaultExpanded)}
-                  >
-                    <Icon size={14} className="text-slate-500" />
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">Step: {item.stepName}</span>
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {getStatusIcon(item.status)}
-                      <span className={`font-bold uppercase text-[10px] ${statusColor}`}>{item.status}</span>
+                  <div className={`flex gap-3 border-b border-[#30363d]/50 py-1.5 px-4 hover:bg-[#161b22] transition-colors ${item.isGroupChild ? 'bg-[#0d1117] border-l-2 border-[#30363d] pl-8' : ''}`}>
+                    <span className="text-[#8b949e] select-none whitespace-nowrap shrink-0 mt-0.5">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>
+                    <div className="flex shrink-0 mt-0.5">
+                      <span className={`${levelStyle} select-none text-[10px] font-bold uppercase min-w-[40px]`}>{log.level}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <LogMessage message={log.message} />
                     </div>
                   </div>
                 );
-              }
-
-              const log = item.log as RealtimeLog;
-              const levelStyle =
-                log.level === "error" ? "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20" :
-                  log.level === "warn" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" :
-                    log.level === "debug" ? "bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20" :
-                      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
-
-              return (
-                <div className={`grid gap-2 border-b border-stroke/20 py-2 px-4 md:grid-cols-[120px_80px_1fr] ${item.isGroupChild ? 'bg-slate-50/50 dark:bg-slate-950/50 border-l-2 border-slate-200 dark:border-slate-800 pl-10' : ''}`}>
-                  <span className="text-content-muted select-none whitespace-nowrap">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>
-                  <div className="flex">
-                    <span className={`${levelStyle} select-none text-[9px] font-bold uppercase px-1.5 py-0.5 rounded leading-none flex items-center justify-center min-w-[50px]`}>{log.level}</span>
-                  </div>
-                  <LogMessage message={log.message} />
-                </div>
-              );
-            }}
-          />
+              }}
+            />
+          </div>
         )}
       </div>
     </div>
+    </>
   );
 }

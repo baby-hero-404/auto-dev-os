@@ -27,10 +27,26 @@ func (m *Manager) AcquireWorkspaceLock(ctx context.Context, task *models.Task, j
 
 	// 1. Acquire DB advisory lock first (Postgres level authority)
 	if m.Workflows != nil {
-		lockConn, locked, err := m.Workflows.AcquireAdvisoryLock(ctx, task.ID)
-		if err != nil {
-			return fmt.Errorf("failed to acquire DB advisory lock: %w", err)
+		var lockConn any
+		var locked bool
+		var err error
+
+		// Retry up to 15 times (15 seconds) to allow cancelled jobs time to release the lock
+		for i := 0; i < 15; i++ {
+			lockConn, locked, err = m.Workflows.AcquireAdvisoryLock(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("failed to acquire DB advisory lock: %w", err)
+			}
+			if locked {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(1 * time.Second):
+			}
 		}
+
 		if !locked {
 			return fmt.Errorf("workspace is locked in DB by another active process (advisory lock check failed)")
 		}

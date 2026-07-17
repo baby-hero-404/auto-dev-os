@@ -97,7 +97,7 @@ func TestPlanStep_NoLLMCall(t *testing.T) {
 	analysis := models.TaskAnalysis{
 		Complexity:      "medium",
 		PrimaryCategory: "backend",
-		ExecutionPhases:   []models.ExecutionPhase{{Phase: "Backend", Tasks: []string{"Task 1"}}},
+		ExecutionPhases: []models.ExecutionPhase{{Phase: "Backend", Tasks: []string{"Task 1"}}},
 	}
 	analysisJSON, _ := json.Marshal(analysis)
 

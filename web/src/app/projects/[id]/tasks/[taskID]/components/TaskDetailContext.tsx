@@ -18,6 +18,7 @@ export interface ImplementationItem {
   affectedFiles: string[];
   stepId: string;          // e.g. "code_backend_2"
   checkpointExists: boolean;
+  tasks?: string[];        // Fine-grained tasks mapped to this execution unit
 }
 
 export function deriveImplementationItems(
@@ -80,6 +81,7 @@ export function deriveImplementationItems(
       affectedFiles,
       stepId,
       checkpointExists: isDone,
+      tasks: (unit as any).tasks || [],
     };
   });
 }

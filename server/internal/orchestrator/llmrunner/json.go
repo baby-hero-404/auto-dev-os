@@ -417,4 +417,3 @@ func RepairJSONBrackets(input string) string {
 	}
 	return result.String()
 }
-

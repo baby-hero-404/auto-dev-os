@@ -126,8 +126,8 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	worktreeSuffix := ""
 	if !isEasy {
-		worktreeSuffix = "-be-worktree"
-		if err := setupSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, "be", "backend", worktreeSuffix); err != nil {
+		worktreeSuffix = models.WorktreeSuffixBackend
+		if err := setupSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, models.RoleBackend, "backend", worktreeSuffix); err != nil {
 			return nil, err
 		}
 	}
@@ -224,7 +224,7 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 	}
 
 	if worktreeSuffix != "" {
-		if err := commitSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, "be", "backend", worktreeSuffix); err != nil {
+		if err := commitSandbox(ctx, s.rt.Task, backendAgent, s.worktree, s.workspace, models.RoleBackend, "backend", worktreeSuffix); err != nil {
 			return nil, err
 		}
 	}

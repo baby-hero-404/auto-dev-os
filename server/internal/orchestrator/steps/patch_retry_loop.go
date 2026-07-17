@@ -186,7 +186,14 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 					}
 				}
 				if testsOK {
-					patchApplied = true
+					if attempt < maxRetries {
+						retryErrorMsg = "\n\nYour previous attempt ran out of iterations partway through. Please continue your work and finish the remaining tasks."
+						retryErrorMsg += filesReadNote(filesReadPrevAttempt)
+						retryNeeded = true
+					} else {
+						cfg.logf(ctx, "warn", "Tool loop exhausted iterations and max retries reached. Salvaging as partial success.")
+						patchApplied = true
+					}
 				}
 				if !retryNeeded {
 					break
@@ -228,6 +235,15 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 					}
 				} else {
 					patchApplied = true
+				}
+			} else {
+				if attempt < maxRetries {
+					cfg.logf(ctx, "warn", "LLM response missing summary (attempt %d/%d). Retrying...", attempt, maxRetries)
+					retryErrorMsg = "\n\nYou failed to provide the required 'summary' in your final response. You must output a JSON object containing a 'summary' string confirming you have completed the work."
+					retryNeeded = true
+				} else {
+					cfg.logf(ctx, "error", "LLM response missing summary after max retries")
+					return nil, false, wrapErr(fmt.Errorf("LLM failed to provide a valid summary of changes"))
 				}
 			}
 			if !retryNeeded {
@@ -316,6 +332,15 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 							patchApplied = true
 						}
 					}
+				}
+			} else {
+				if attempt < maxRetries {
+					cfg.logf(ctx, "warn", "No patch found in response (attempt %d/%d). Retrying...", attempt, maxRetries)
+					retryErrorMsg = "\n\nYou failed to provide a diff patch. Please output a valid diff block or SEARCH/REPLACE block as instructed."
+					retryNeeded = true
+				} else {
+					cfg.logf(ctx, "error", "No patch found after max retries")
+					return nil, false, wrapErr(fmt.Errorf("LLM failed to provide a valid diff patch"))
 				}
 			}
 		}

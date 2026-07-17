@@ -29,7 +29,7 @@ func (m *Manager) getEngine(ctx context.Context) orchestratorpatch.PatchEngine {
 	if m.ListRepositories != nil {
 		runner.ListRepositories = m.ListRepositories
 	}
-	
+
 	strategy := "unified_diff"
 	if prompts.UseSearchReplace(ctx) {
 		strategy = "search_replace"

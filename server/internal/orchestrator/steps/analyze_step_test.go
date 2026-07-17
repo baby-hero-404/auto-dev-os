@@ -533,11 +533,11 @@ func TestAnalyzeStep_BoundaryCoverageValidation(t *testing.T) {
 func TestAutoWidenBoundaries(t *testing.T) {
 	t.Run("non-sensitive files auto-widen; sensitive + root escalate", func(t *testing.T) {
 		uncovered := []string{
-			"cmd/sync/main.go",       // safe -> widen to cmd/sync
-			"internal/repo/db.go",    // safe -> widen to internal/repo
-			"deploy/prod.yaml",       // sensitive -> residual
-			"go.mod",                 // repo-root Go module -> residual
-			"config.yaml",            // repo-root file (dir ".") -> residual
+			"cmd/sync/main.go",        // safe -> widen to cmd/sync
+			"internal/repo/db.go",     // safe -> widen to internal/repo
+			"deploy/prod.yaml",        // sensitive -> residual
+			"go.mod",                  // repo-root Go module -> residual
+			"config.yaml",             // repo-root file (dir ".") -> residual
 			".github/workflows/x.yml", // CI -> residual
 		}
 		added, residual := autoWidenBoundaries(uncovered, nil)

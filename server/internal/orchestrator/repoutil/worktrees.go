@@ -200,6 +200,15 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		localPath := m.RepoHostPath(task, ws, repo)
 		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
 		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+		containerLocalPath := m.ContainerPathForHostPath(task, localPath, "")
+
+		var roleName string
+		switch worktreeSuffix {
+		case models.WorktreeSuffixBackend:
+			roleName = models.RoleBackend
+		case models.WorktreeSuffixFrontend:
+			roleName = models.RoleFrontend
+		}
 
 		// If a prior step's patch was applied but never committed (e.g. commitSandbox failed -
 		// REQ-M04), the dirty worktree state below is about to be discarded by checkout/reset/clean.
@@ -216,6 +225,14 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		// not just an optimization.
 		script := fmt.Sprintf(`set -e
 %[4]s
+if [ ! -d %[1]s ]; then
+  echo "Recreating missing worktree directory..."
+  roleBranch="feature/%[5]s-%[6]s"
+  git -C %[7]s show-ref --verify --quiet refs/heads/$roleBranch || git -C %[7]s branch $roleBranch %[2]s
+  git -C %[7]s worktree prune
+  git -C %[7]s worktree add %[1]s $roleBranch
+fi
+
 if git -C %[1]s merge-base --is-ancestor %[2]s HEAD 2>/dev/null; then
   echo "SKIP_RESTORE: worktree already at or ahead of checkpoint %[2]s"
 else
@@ -225,10 +242,11 @@ else
     git -C %[1]s branch %[3]s
     git -C %[1]s reset --hard HEAD~1
   fi
-  git -C %[1]s checkout %[2]s
-  git -C %[1]s reset --hard HEAD
+  roleBranch="feature/%[5]s-%[6]s"
+  git -C %[1]s checkout $roleBranch
+  git -C %[1]s reset --hard %[2]s
   git -C %[1]s clean -fd
-fi`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript)
+fi`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript, task.ID, roleName, paths.QuoteShellArg(containerLocalPath))
 
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)

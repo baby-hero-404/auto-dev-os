@@ -148,7 +148,7 @@ func (o *Orchestrator) runGarbageCollection(ctx context.Context) {
 
 	// 1. Build a set of referenced repo-commits from active task workspaces
 	referenced := make(map[string]bool) // key: "repoName_commitHash"
-	
+
 	// Scan task workspaces under o.workspaceRoot
 	if workspaceEntries, err := os.ReadDir(o.workspaceRoot); err == nil {
 		for _, wEntry := range workspaceEntries {

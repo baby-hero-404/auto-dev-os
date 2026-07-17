@@ -38,7 +38,7 @@ func ScanDirectory(root string, maxDepth int, maxEntries int) (string, error) {
 			}
 
 			indent := strings.Repeat("  ", depth-1)
-			
+
 			if count >= maxEntries {
 				totalTruncated++
 				continue

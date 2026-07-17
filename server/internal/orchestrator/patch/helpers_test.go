@@ -1,8 +1,8 @@
 package patch
 
 import (
-	"testing"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"testing"
 )
 
 func TestIsUnderAffectedDir_AllowsSiblingFileInSameDirectory(t *testing.T) {

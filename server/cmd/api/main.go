@@ -199,6 +199,7 @@ func run() error {
 	opts = append(opts, orchestrator.WithMaxPhaseCost(cfg.Worker.MaxPhaseCost))
 	opts = append(opts, orchestrator.WithStateMachineEnabled(cfg.Execution.StateMachineEnabled))
 	opts = append(opts, orchestrator.WithMaxToolResultChars(cfg.Execution.MaxToolResultChars))
+	opts = append(opts, orchestrator.WithMaxToolIterations(cfg.Execution.MaxToolIterations))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 

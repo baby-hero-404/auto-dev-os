@@ -10,12 +10,12 @@ import (
 
 func TestIntentTokens(t *testing.T) {
 	cases := map[string][]string{
-		"UserRepository":                      {"user", "repository"},
-		"user_repository":                     {"user", "repository"},
-		"user-repository":                     {"user", "repository"},
-		"APIClient":                           {"api", "client"},
-		"SyncEngineScheduler":                 {"sync", "engine", "scheduler"},
-		"":                                    {},
+		"UserRepository":      {"user", "repository"},
+		"user_repository":     {"user", "repository"},
+		"user-repository":     {"user", "repository"},
+		"APIClient":           {"api", "client"},
+		"SyncEngineScheduler": {"sync", "engine", "scheduler"},
+		"":                    {},
 		"Thiết lập cấu trúc dự án và SQLite": {}, // Natural language / Vietnamese should be skipped
 		"This is a sentence to skip":         {}, // Natural language / English sentence >= 3 words should be skipped
 	}

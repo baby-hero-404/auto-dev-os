@@ -13,7 +13,7 @@ var diffFileHeaderRegex = regexp.MustCompile(`^\+\+\+ (?:b/)?(.*)$`)
 
 func ValidateUnifiedDiff(patch string, basePath string) []ValidationError {
 	var errors []ValidationError
-	
+
 	// Check hunk count mismatches
 	errors = append(errors, ValidateHunkCounts(patch)...)
 

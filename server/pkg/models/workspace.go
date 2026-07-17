@@ -12,6 +12,12 @@ const (
 	TestStatusPassed  = "passed"
 	TestStatusFailed  = "failed"
 	TestStatusSkipped = "skipped"
+
+	RoleBackend = "be"
+	RoleFrontend = "fe"
+
+	WorktreeSuffixBackend = "-be-worktree"
+	WorktreeSuffixFrontend = "-fe-worktree"
 )
 
 // TaskWorkspace represents the layout of a task's workspace directories.

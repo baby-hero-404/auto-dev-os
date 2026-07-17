@@ -6,7 +6,6 @@ import { useTaskDetail } from "./TaskDetailContext";
 import { SpecPanel } from "./SpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { DescriptionBody } from "./DescriptionBody";
-import { CheckpointsPanel } from "./CheckpointsPanel";
 
 interface AccordionItemProps {
   title: string;
@@ -68,6 +67,7 @@ interface SupportingAccordionProps {
 
 export function SupportingAccordion({ openSections, onToggleSection }: SupportingAccordionProps) {
   const {
+    task,
     workflow,
     logs,
     analysisData,
@@ -125,68 +125,53 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
   const checkpointCount = workflow?.checkpoints?.length || 0;
 
   return (
-    <section className="space-y-4">
-      <h2 className="font-heading text-sm font-extrabold uppercase tracking-wider text-content-muted mb-2 text-left">
+    <section className="flex flex-col gap-2 mt-8">
+      <h2 className="text-xs font-semibold tracking-wider uppercase text-content-muted mb-2 px-1">
         Supporting Information
       </h2>
 
       {/* Accordion 1: Specification */}
-      <AccordionItem
-        title="Specification"
-        isOpen={!!openSections.specification}
-        onToggle={() => onToggleSection("specification")}
-        summary={
-          <div className="flex flex-wrap gap-1">
-            {presenceChips.map((c) => (
-              <span
-                key={c.label}
-                className="inline-flex items-center gap-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
-              >
-                <Check size={8} />
-                {c.label}
-              </span>
-            ))}
-          </div>
-        }
-      >
-        <SpecPanel isExpanded={true} onToggle={() => {}} />
-      </AccordionItem>
+      {task?.status !== 'spec_review' && (
+        <AccordionItem
+          title="Specification"
+          isOpen={!!openSections.specification}
+          onToggle={() => onToggleSection("specification")}
+          summary={
+            <div className="flex flex-wrap gap-1">
+              {presenceChips.map((c) => (
+                <span
+                  key={c.label}
+                  className="inline-flex items-center gap-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
+                >
+                  <Check size={8} />
+                  {c.label}
+                </span>
+              ))}
+            </div>
+          }
+        >
+          <SpecPanel isExpanded={true} onToggle={() => {}} />
+        </AccordionItem>
+      )}
 
       {/* Accordion 2: Execution Logs */}
-      <AccordionItem
-        title="Execution Logs"
-        isOpen={!!openSections.logs}
-        onToggle={() => onToggleSection("logs")}
-        summary={logSummary}
-        keepMounted={true}
-      >
-        <LogConsole
-          logs={logs}
-          isWorkflowRunning={workflow?.job?.status === "running"}
-          isExpanded={true}
-          onToggle={() => {}}
-        />
-      </AccordionItem>
+      {!['coding', 'testing', 'fixing', 'failed', 'merged', 'pr_ready', 'human_review'].includes(task?.status || '') && (
+        <AccordionItem
+          title="Execution Logs"
+          isOpen={!!openSections.logs}
+          onToggle={() => onToggleSection("logs")}
+          summary={logSummary}
+          keepMounted={true}
+        >
+          <LogConsole
+            logs={logs}
+            isWorkflowRunning={workflow?.job?.status === "running"}
+            isExpanded={true}
+            onToggle={() => {}}
+          />
+        </AccordionItem>
+      )}
 
-      {/* Accordion 3: Description */}
-      <AccordionItem
-        title="Description"
-        isOpen={!!openSections.description}
-        onToggle={() => onToggleSection("description")}
-        summary={<span className="truncate">{descriptionSummary}</span>}
-      >
-        <DescriptionBody />
-      </AccordionItem>
-
-      {/* Accordion 4: Agent & Checkpoints */}
-      <AccordionItem
-        title="Agent & Checkpoints"
-        isOpen={!!openSections.checkpoints}
-        onToggle={() => onToggleSection("checkpoints")}
-        summary={<span>{checkpointCount} checkpoints</span>}
-      >
-        <CheckpointsPanel />
-      </AccordionItem>
     </section>
   );
 }

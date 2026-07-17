@@ -182,18 +182,6 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 			continue // no changes in this repo for easy tasks
 		}
 
-		branchName := fmt.Sprintf("feature/%s", s.rt.Task.ID)
-		if err := s.git.CheckoutNewBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, branchName); err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
-			return nil, fmt.Errorf("checkout branch failed for %s: %w", repo.URL, err)
-		}
-
-		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)
-		if err := s.gitops.CommitAndPush(ctx, localPath, repo.URL, branchName, commitMsg, nil, s.rt.Agent.Role); err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
-			return nil, fmt.Errorf("commit and push failed for %s: %w", repo.URL, err)
-		}
-
 		baseBranch := repo.Branch
 		if workspace != nil {
 			for _, rWS := range workspace.Repos {
@@ -205,6 +193,24 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		}
 		if baseBranch == "" {
 			baseBranch = "main"
+		}
+
+		branchName := fmt.Sprintf("feature/%s", s.rt.Task.ID)
+		if err := s.git.CheckoutNewBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, branchName); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
+			return nil, fmt.Errorf("checkout branch failed for %s: %w", repo.URL, err)
+		}
+
+		// Squash all checkpoint commits into a single commit by doing a soft reset to the base branch.
+		// This keeps all the changes staged.
+		if err := s.git.ResetSoft(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, baseBranch); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("reset soft failed for %s (squash may fail): %v", repo.URL, err))
+		}
+
+		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)
+		if err := s.gitops.CommitAndPush(ctx, localPath, repo.URL, branchName, commitMsg, nil, s.rt.Agent.Role); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("commit and push failed for %s: %v", repo.URL, err))
+			return nil, fmt.Errorf("commit and push failed for %s: %w", repo.URL, err)
 		}
 
 		// Capture this specific repo's diff using baseBranch, fallback to master/HEAD~1/plain diff to avoid errors

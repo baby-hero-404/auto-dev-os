@@ -7,18 +7,18 @@ import (
 )
 
 var stallGuardReadOnlyTools = map[string]bool{
-	"list_files":           true,
-	"read_file":            true,
-	"run_lint":             true,
-	"run_tests":            true,
-	"run_build":            true,
-	"grep_search":          true,
-	"find_symbol":          true,
-	"git_status":           true,
-	"git_diff":             true,
-	"file_exists":          true,
-	"read_spec":            true,
-	"read_affected_files":  true,
+	"list_files":          true,
+	"read_file":           true,
+	"run_lint":            true,
+	"run_tests":           true,
+	"run_build":           true,
+	"grep_search":         true,
+	"find_symbol":         true,
+	"git_status":          true,
+	"git_diff":            true,
+	"file_exists":         true,
+	"read_spec":           true,
+	"read_affected_files": true,
 }
 
 type successfulCall struct {

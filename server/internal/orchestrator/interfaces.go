@@ -16,6 +16,15 @@ type AgentAssigner interface {
 	GetByID(ctx context.Context, id string) (*models.Agent, error)
 }
 
+// SandboxGitClient manages git operations within the sandbox.
+type SandboxGitClient interface {
+	CheckoutBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) error
+	CheckoutNewBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) error
+	HasBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) bool
+	ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, target string) error
+	MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) (string, error)
+}
+
 // PromptBuilder assembles LLM messages and tool definitions for agents.
 type PromptBuilder interface {
 	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error)

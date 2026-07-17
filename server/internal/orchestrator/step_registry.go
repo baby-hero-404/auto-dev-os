@@ -56,8 +56,8 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.wkspace,                           // WorkspaceLoader
 			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
 			loggerAdapter{log: o.log},                        // Logger
-			o.workflows,                         // WorkflowCheckpointRepo
-			o.maxPhaseCost,                      // maxCost
+			o.workflows,                                      // WorkflowCheckpointRepo
+			o.maxPhaseCost,                                   // maxCost
 		),
 		steps.NewCodeBackendStep(
 			rt,
@@ -121,10 +121,10 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.repoutil,                          // DiffCapturer
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			o.repoutil, // PatchApplier
-			testerRunnerAdapter{run: o.runTargetedTests},     // TestRunner
-			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
-			loggerAdapter{log: o.log},                        // Logger
-			o.repoutil,                          // WorktreeManager
+			testerRunnerAdapter{run: o.runTargetedTests},               // TestRunner
+			statusUpdaterAdapter{update: o.updateTaskStatus},           // StatusUpdater
+			loggerAdapter{log: o.log},                                  // Logger
+			o.repoutil,                                                 // WorktreeManager
 			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
 		),
 		steps.NewTestStep(

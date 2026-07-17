@@ -75,6 +75,7 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 		WriteTrace:              o.writeLLMCallTrace,
 		Log:                     o.log,
 		MaxToolResultChars:      o.maxToolResultChars,
+		MaxToolIterations:       o.maxToolIterations,
 		CaptureDiff: func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error) {
 			o.initRepoutil()
 			return o.repoutil.CaptureWorkspaceDiff(ctx, task, agent, stepID, worktreeSuffix)
@@ -151,9 +152,9 @@ func (o *Orchestrator) runLLMStep(ctx context.Context, task *models.Task, agent 
 					worktreeSuffix := ""
 					if task.Complexity != models.TaskComplexityEasy {
 						if strings.HasPrefix(stepID, workflow.StepCodeBackend) {
-							worktreeSuffix = "-be-worktree"
+							worktreeSuffix = models.WorktreeSuffixBackend
 						} else if strings.HasPrefix(stepID, workflow.StepCodeFrontend) {
-							worktreeSuffix = "-fe-worktree"
+							worktreeSuffix = models.WorktreeSuffixFrontend
 						}
 					}
 

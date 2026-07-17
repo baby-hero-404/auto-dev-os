@@ -13,6 +13,7 @@ type SandboxGitClient interface {
 	CheckoutBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) error
 	CheckoutNewBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) error
 	HasBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) bool
+	ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, target string) error
 	MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) (string, error)
 	CommitChanges(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, message string) error
 	GetDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error)
@@ -50,6 +51,12 @@ func (c *DefaultSandboxGitClient) HasBranch(ctx context.Context, task *models.Ta
 	cmd := fmt.Sprintf("git -C %s show-ref --verify --quiet refs/heads/%s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(branch))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_check_branch_"+branch, cmd)
 	return err == nil
+}
+
+func (c *DefaultSandboxGitClient) ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, target string) error {
+	cmd := fmt.Sprintf("git -C %s reset --soft %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(target))
+	_, err := c.RunSandboxStep(ctx, task, agent, "git_reset_soft", cmd)
+	return err
 }
 
 func (c *DefaultSandboxGitClient) MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, branch string) (string, error) {

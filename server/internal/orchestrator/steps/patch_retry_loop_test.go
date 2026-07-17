@@ -285,4 +285,3 @@ func TestRunPatchRetryLoop_TransientErrorNoWrap(t *testing.T) {
 		t.Errorf("expected transient error to NOT be wrapped in ErrNoProgress, got %v", err)
 	}
 }
-

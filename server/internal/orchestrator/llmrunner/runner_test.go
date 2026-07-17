@@ -307,7 +307,7 @@ func TestRunner_Run_StateMachineMode(t *testing.T) {
 			executedTools[name] = true
 			return "ok", nil
 		},
-		Log: func(ctx context.Context, taskID string, jobID *string, level, message string) {},
+		Log:          func(ctx context.Context, taskID string, jobID *string, level, message string) {},
 		SaveArtifact: func(ctx context.Context, jobID, taskID, step, artType string, payload any) error { return nil },
 	}
 

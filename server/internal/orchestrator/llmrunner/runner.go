@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +60,7 @@ type Runner struct {
 	ToolExecutor       ToolExecutor
 	CaptureDiff        func(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) (string, error)
 	MaxToolResultChars int
+	MaxToolIterations  int
 
 	// Compiler renders a node's ExecutionIR into the "Execution Contract" message (constraints,
 	// acceptance criteria, physical write-scope, budgets) that runStateMachine prepends once per
@@ -222,7 +225,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 			return nil, fmt.Errorf("llm call failed: %w", chatErr)
 		}
 		r.log(ctx, task.ID, nil, "info", fmt.Sprintf("%s (attempt %d): llm response from %s", stepID, attempt, resp.Model))
-		
+
 		if resp.Content != "" {
 			r.log(ctx, task.ID, nil, "info", resp.Content)
 		}
@@ -320,10 +323,21 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 	shadowSM = NewStateMachine(ir.Budget)
 	resolvedTargets = analysis.ExecutionIRTargets[ir.NodeID]
 
+	maxIters := 15
+	budgetSum := ir.Budget.Discovery + ir.Budget.Implementation + ir.Budget.Validation
+	if budgetSum > 0 {
+		maxIters = budgetSum + 3 // padding for retries
+	}
+	if env := os.Getenv("MAX_TOOL_ITERATIONS"); env != "" {
+		if val, err := strconv.Atoi(env); err == nil && val > 0 {
+			maxIters = val
+		}
+	}
+
 	parsed, _, partial, err := RunToolLoop(ctx, ToolLoopConfig{
 		Messages:      messages,
 		Tools:         r.Tools,
-		MaxIterations: 8,
+		MaxIterations: maxIters,
 		Chat: func(ctx context.Context, msgs []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
 			resp, chatErr := r.Provider.ChatWithOptions(ctx, msgs, opts)
 			if chatErr == nil {
@@ -550,4 +564,3 @@ func requiresPatch(stepID string) bool {
 		strings.HasPrefix(stepID, workflow.StepCodeFrontend) ||
 		stepID == workflow.StepFix
 }
-

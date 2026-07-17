@@ -15,6 +15,7 @@ export function DescriptionBody() {
   const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editedDesc, setEditedDesc] = useState(task?.description ?? "");
   const [isSaving, setIsSaving] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (task?.description) {
@@ -73,8 +74,19 @@ export function DescriptionBody() {
         <div className="group relative flex items-start gap-2 text-left">
           <div className="min-w-0 flex-1 rounded-lg border border-stroke/50 bg-surface/20 p-4">
             {descriptionParts.body ? (
-              <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
-                <Markdown content={descriptionParts.body} />
+              <div className="flex flex-col items-start">
+                <div className={`prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed relative overflow-hidden transition-all duration-300 ${!isExpanded ? 'max-h-24' : ''}`}>
+                  <Markdown content={descriptionParts.body} />
+                  {!isExpanded && (
+                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-surface/20 to-transparent pointer-events-none" />
+                  )}
+                </div>
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="text-brand-primary text-xs font-medium hover:underline mt-2 cursor-pointer transition-colors"
+                >
+                  {isExpanded ? "Show less" : "Show more"}
+                </button>
               </div>
             ) : (
               <p className="text-sm text-content-muted/70 italic">No description provided. Click the edit icon to add one.</p>

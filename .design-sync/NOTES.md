@@ -106,3 +106,86 @@ download. Also installed `typescript` and `@types/react` there.
 All 4 components were authored + graded `good` (user chose "author all 4"
 given the tiny component count — cheap here, wouldn't be the default choice
 at normal DS scale).
+
+## Page references (`guidelines/pages/`)
+
+User asked to widen the sync beyond the 4 atomic components to include
+**whole real pages**, explicitly as non-interactive reference material (not
+mountable DS components) — "what pages actually look like" when the kit's
+pieces are composed in context. Since none of the app's routes are
+themselves reusable/composable pieces (they're thin `DashboardLayout`
+wrappers around data-bound feature components, per `web/src/app/agents/
+page.tsx` etc.), these ship as flat PNG screenshots + an index, not as
+`components/` cards.
+
+**Capture method**: Playwright, full-page screenshots at default viewport,
+against the real app driven by the repo's own e2e mock fixtures
+(`web/e2e/fixtures/api-mocks.ts`: `installApiMocks` + `seedSession` +
+`createMockState`), plus a catch-all `**/api/v1/**` route registered
+*before* `installApiMocks`'s specific routes (Playwright: last-registered
+route wins on overlap) so any endpoint the fixtures don't cover returns an
+empty 200 instead of hanging/erroring. 15 routes captured; excluded the
+legacy `/tasks/[id]` redirect stub (no rendered UI of its own — pure
+`useEffect` → `router.push`).
+
+The maintenance script lives at `.design-sync/capture-pages.spec.ts` (not
+part of the real e2e suite — outside `web/e2e/` so Playwright's `testDir`
+never picks it up). To regenerate:
+
+```
+cp .design-sync/capture-pages.spec.ts web/e2e/_page-capture.spec.ts
+cd web && SKIP_WEBSERVER=1 PLAYWRIGHT_PORT=<port-of-a-running-dev-server> \
+  npx playwright test e2e/_page-capture.spec.ts --reporter=list
+rm e2e/_page-capture.spec.ts
+```
+
+Output lands in `.design-sync/pages/*.png` (the script's `OUT_DIR` is
+`../.design-sync/pages`, relative to `web/`).
+
+**Each page also has a `.html` card wrapper** (`.design-sync/pages/<Name>.html`,
+generated once by a one-off script — regenerate similarly if pages are
+added/removed): a minimal `<!-- @dsCard group="Pages" viewport="WxH" -->`
+page that just `<img src="<Name>.png">`s the screenshot at half-scale. This
+is what makes them show up as browsable cards in the claude.ai/design app's
+picker — files under `guidelines/` with no `@dsCard` marker are uploaded and
+readable via `read_file`/the design agent, but **invisible in the app's own
+UI**, which only lists `@dsCard`-marked `.html` files (learned this the hard
+way — first pass shipped only the `.png`+`.md`, user reported not seeing
+them in the app at all).
+
+**Re-sync risk — none of this survives `package-build.mjs`**: every build
+runs `rmSync(OUT, { recursive: true, force: true })` on the whole
+`ds-bundle/` output dir, and the only thing that auto-repopulates
+`guidelines/` is `cfg.guidelinesGlob` matching `.md`/`.mdx` files (images
+and other `.html` are explicitly skipped — see `.ds-sync/lib/docs.mjs`'s "is
+not .md/.mdx — skipped" check). So after any future full resync, re-copy
+manually before re-uploading:
+
+```
+mkdir -p ds-bundle/guidelines/pages
+cp .design-sync/pages/*.png .design-sync/pages/*.html ds-bundle/guidelines/pages/
+cp .design-sync/pages/pages.md ds-bundle/guidelines/pages.md
+```
+
+The pointer to `guidelines/pages.md` lives in `.design-sync/conventions.md`
+(the `readmeHeader`), so it regenerates into `README.md` automatically on
+rebuild — only the `guidelines/pages/` images and `guidelines/pages.md`
+itself need the manual re-copy. `_ds_sync.json`'s `auxSha` covers
+`guidelines/` + `README.md`, so after re-copying, recompute it before
+upload: `node --input-type=module -e "import { auxShaFor } from
+'./.ds-sync/lib/sync-hashes.mjs'; console.log(auxShaFor('./ds-bundle'))"`
+and patch the `auxSha` field in `ds-bundle/_ds_sync.json` to match — a full
+`resync.mjs` run recomputes this for you automatically; only a
+build-mjs-only run needs the manual patch.
+
+Uploaded via a scoped `finalize_plan`/`write_files` (writes:
+`guidelines/pages/**`, `guidelines/pages.md`, `README.md`,
+`_ds_sync.json`, `_ds_needs_recompile`) rather than the full atomic-path
+plan, since this was an incremental addition on top of an already-verified
+sync. **Always include `_ds_needs_recompile`** (write it first as a fence,
+then again last after the real files) — it's what makes the app rebuild
+`_ds_manifest.json` and pick up new `@dsCard` cards; without re-writing it,
+new cards silently don't appear even though the files are uploaded fine.
+The manifest itself only recompiles when the project is opened/refreshed in
+the browser, not immediately on upload — don't be alarmed if `read_file`
+on `_ds_manifest.json` right after upload still shows the old card list.

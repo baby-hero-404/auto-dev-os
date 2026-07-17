@@ -32,42 +32,45 @@ test.describe("Task Detail — workflow-oriented redesign", () => {
     // Header
     await expect(page.getByRole("heading", { name: "Add API Authentication" })).toBeVisible();
 
-    // REQ-007: project description collapsed by default
-    await expect(page.getByRole("button", { name: /Show project description/i })).toBeVisible();
-    await expect(page.getByText("Implement JWT login and verification endpoints")).toHaveCount(0);
-    await page.getByRole("button", { name: /Show project description/i }).click();
+    // REQ-007: project description collapsed by default inside accordion
+    const descButton = page.getByRole("button", { name: "Description" });
+    await expect(descButton).toBeVisible();
+    // Edit Description button is inside DescriptionBody which is only mounted when expanded
+    await expect(page.getByTitle("Edit Description")).toHaveCount(0);
+    await descButton.click();
+    await expect(page.getByTitle("Edit Description")).toBeVisible();
     await expect(page.getByText("Implement JWT login and verification endpoints")).toBeVisible();
 
     // REQ-003: implementation checklist is the primary progress surface, shows the running unit
-    const checklistHeading = page.getByRole("heading", { name: "Implementation Checklist" });
-    await expect(checklistHeading).toBeVisible();
-    await expect(page.getByText("Write database models").first()).toBeVisible();
+    const taskItem = page.getByText("Write database models").first();
+    await expect(taskItem).toBeVisible();
 
     // REQ-002/REQ-004: checklist renders ABOVE the (demoted) Workflow Phases timeline
     const phasesHeading = page.getByRole("heading", { name: "Workflow Phases" });
     await expect(phasesHeading).toBeVisible();
-    const checklistBox = await checklistHeading.boundingBox();
+    
+    const taskItemBox = await taskItem.boundingBox();
     const phasesBox = await phasesHeading.boundingBox();
-    expect(checklistBox!.y).toBeLessThan(phasesBox!.y);
+    expect(taskItemBox!.y).toBeLessThan(phasesBox!.y);
 
-    // REQ-005: SpecPanel collapsed by default — title + "View details", body hidden
-    await expect(page.getByRole("button", { name: /Proposed Task Specification/i })).toBeVisible();
-    await expect(page.getByText("View details")).toBeVisible();
+    // REQ-005: SpecPanel collapsed by default inside accordion — title + chips, body hidden
+    const specButton = page.getByRole("button", { name: "Specification" });
+    await expect(specButton).toBeVisible();
     await expect(page.getByRole("button", { name: /Execution Boundaries/i })).toHaveCount(0);
-    await page.getByRole("button", { name: /Proposed Task Specification/i }).click();
+    await specButton.click();
     await expect(page.getByRole("button", { name: /Execution Boundaries/i })).toBeVisible();
 
-    // REQ-006: LogConsole collapsed by default — "View full log", body hidden
-    await expect(page.getByText("View full log")).toBeVisible();
+    // REQ-006: LogConsole collapsed by default inside accordion — summary line, body hidden
+    const logsButton = page.getByRole("button", { name: "Execution Logs" });
+    await expect(logsButton).toBeVisible();
     await expect(page.getByRole("button", { name: "All Logs" })).toHaveCount(0);
-    await page.getByText("View full log").click();
-    // Expanding reveals the full log body (Milestones/All Logs toggle + parsed milestone).
+    await logsButton.click();
+    // Expanding reveals the full log body (Milestones/All Logs toggle)
     await expect(page.getByRole("button", { name: "All Logs" })).toBeVisible();
     await expect(page.getByText("checkpoint: load success").first()).toBeVisible();
 
     // REQ-008/009/010: removed surfaces must not appear
     await expect(page.getByRole("heading", { name: /AI is currently working on/i })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Checkpoints/i })).toHaveCount(0);
     await expect(page.getByText("Task Controls")).toHaveCount(0);
   });
 

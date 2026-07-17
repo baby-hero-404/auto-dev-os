@@ -3,11 +3,10 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Edit2, Check, X, Play, Pause, Ban, Trash2, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Edit2, Check, X, Play, Pause, Ban, Trash2 } from "lucide-react";
 import { Badge, taskStatusBadge } from "@/components/ui/badge";
-import { Markdown } from "@/components/ui/markdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useTaskDetail, formatStepName } from "./TaskDetailContext";
+import { useTaskDetail } from "./TaskDetailContext";
 
 export function TaskHeader() {
   const router = useRouter();
@@ -15,10 +14,7 @@ export function TaskHeader() {
     projectID,
     task,
     workflow,
-    descriptionParts,
     updateTask,
-    workflowCompletion,
-    analysisData,
     execute,
     analyze,
     retry,
@@ -40,12 +36,9 @@ export function TaskHeader() {
     task.spec_status !== "clarification_required"
   );
 
-  // Absorbed from TaskActions: contextual run controls. Review CTAs (Approve/
-  // Request Changes/Start Review) live in ReviewActionBar, not here.
   const showAnalyze = !!(task && (task.status === "todo" || task.status === "failed") && !isExecutionReady);
   const showExecute = !!(task && isExecutionReady);
 
-  const [isDescOpen, setIsDescOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
@@ -72,13 +65,8 @@ export function TaskHeader() {
     }
   }, [deleteTask, router, projectID]);
 
-  const attemptsCount = workflow?.job?.attempts ?? 0;
-  const lastError = workflow?.job?.last_error;
-
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [isEditingDesc, setIsEditingDesc] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
-  const [editedDesc, setEditedDesc] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   const [prevTaskTitle, setPrevTaskTitle] = useState(task?.title ?? "");
@@ -89,23 +77,10 @@ export function TaskHeader() {
     }
   }
 
-  const [prevTaskDesc, setPrevTaskDesc] = useState(task?.description ?? "");
-  if (task?.description !== prevTaskDesc) {
-    setPrevTaskDesc(task?.description ?? "");
-    if (!isEditingDesc && task?.description) {
-      setEditedDesc(task.description);
-    }
-  }
-
   const handleStartEditTitle = useCallback(() => {
     setEditedTitle(task?.title ?? "");
     setIsEditingTitle(true);
   }, [task?.title]);
-
-  const handleStartEditDesc = useCallback(() => {
-    setEditedDesc(task?.description ?? "");
-    setIsEditingDesc(true);
-  }, [task?.description]);
 
   const handleSaveTitle = useCallback(async () => {
     if (!editedTitle.trim()) return;
@@ -115,19 +90,8 @@ export function TaskHeader() {
     setIsSaving(false);
   }, [editedTitle, updateTask]);
 
-  const handleSaveDesc = useCallback(async () => {
-    setIsSaving(true);
-    await updateTask({ description: editedDesc.trim() });
-    setIsEditingDesc(false);
-    setIsSaving(false);
-  }, [editedDesc, updateTask]);
-
   const handleCancelTitle = useCallback(() => {
     setIsEditingTitle(false);
-  }, []);
-
-  const handleCancelDesc = useCallback(() => {
-    setIsEditingDesc(false);
   }, []);
 
   return (
@@ -201,143 +165,10 @@ export function TaskHeader() {
               </span>
             )}
           </div>
-
-          {!isEditingDesc && (
-            <button
-              onClick={() => setIsDescOpen((v) => !v)}
-              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-content-muted transition hover:text-foreground cursor-pointer"
-              aria-expanded={isDescOpen}
-            >
-              {isDescOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {isDescOpen ? "Hide project description" : "Show project description"}
-            </button>
-          )}
-
-          {isEditingDesc ? (
-            <div className="flex flex-col gap-2 mt-3 max-w-4xl">
-              <textarea
-                value={editedDesc}
-                onChange={(e) => setEditedDesc(e.target.value)}
-                className="text-sm text-foreground bg-surface border border-stroke rounded px-3 py-2 focus:outline-none focus:border-brand-primary min-h-[100px] resize-y"
-                disabled={isSaving}
-                autoFocus
-                placeholder="Detail the target objective, files to modify, or technical requirements."
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={handleCancelDesc}
-                  disabled={isSaving}
-                  className="px-3 py-1.5 text-xs font-semibold border border-stroke hover:bg-surface rounded transition cursor-pointer disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveDesc}
-                  disabled={isSaving}
-                  className="px-3 py-1.5 text-xs font-semibold bg-brand-primary text-slate-950 hover:opacity-90 rounded transition cursor-pointer disabled:opacity-50"
-                >
-                  {isSaving ? "Saving..." : "Save Description"}
-                </button>
-              </div>
-            </div>
-          ) : isDescOpen ? (
-            <div className="group mt-1.5 max-w-4xl space-y-3">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1 rounded-lg border border-stroke bg-surface/20 p-3">
-                  {descriptionParts.body ? (
-                    <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
-                      <Markdown content={descriptionParts.body} />
-                    </div>
-                  ) : (
-                    <p className="text-sm text-content-muted/70 italic">No description provided. Click the edit icon to add one.</p>
-                  )}
-                </div>
-                {task && (
-                  <button
-                    onClick={handleStartEditDesc}
-                    className="opacity-40 hover:opacity-100 focus:opacity-100 group-hover:opacity-100 focus-within:opacity-100 p-1 text-content-muted hover:text-foreground hover:bg-surface rounded transition shrink-0 cursor-pointer"
-                    title="Edit Description"
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                )}
-              </div>
-              {descriptionParts.context && (
-                <div className="rounded-lg border border-warning/20 bg-warning/5 p-3 text-xs text-content-muted">
-                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-warning">
-                    Request history (Legacy)
-                  </div>
-                  <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed">
-                    <Markdown content={descriptionParts.context} />
-                  </div>
-                </div>
-              )}
-
-              {task?.clarifications && task.clarifications.length > 0 && (
-                <div className="rounded-lg border border-stroke bg-surface/20 p-3 text-xs text-content-muted">
-                  <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-wider text-warning">
-                    Clarification History
-                  </div>
-                  <div className="space-y-3">
-                    {task.clarifications.map((round) => (
-                      <div key={round.round} className="border-t border-stroke/50 pt-2 first:border-0 first:pt-0">
-                        <div className="text-[10px] font-semibold text-content-muted mb-1.5 flex justify-between items-center">
-                          <span>Round {round.round}</span>
-                          <span className="opacity-70">{new Date(round.timestamp).toLocaleString()}</span>
-                        </div>
-                        <div className="pl-3 border-l-2 border-warning/30 space-y-1.5 text-xs text-foreground/90 bg-warning/[0.02] p-2 rounded-r">
-                          <div className="prose prose-sm max-w-none text-content-muted dark:prose-invert">
-                            <Markdown content={round.response} />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
         </div>
-      </div>
 
-      {task && (
-        <div className="mt-5 pt-4 border-t border-stroke/30 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-6 text-xs text-content-muted">
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-foreground">Current Step:</span>
-              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
-                {workflow?.job?.step ? formatStepName(workflow.job.step, analysisData) : "None"}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-foreground">Progress:</span>
-              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
-                {workflowCompletion}%
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-foreground">Assigned Agent:</span>
-              <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
-                {task.agent_id || "Unassigned"}
-              </span>
-            </div>
-            {attemptsCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-foreground">Attempts:</span>
-                <span className="font-mono bg-surface/80 px-2 py-0.5 rounded border border-stroke/40 font-bold text-foreground">
-                  {attemptsCount}
-                </span>
-              </div>
-            )}
-            {lastError && (
-              <div className="flex items-center gap-1.5 text-rose-500" title={lastError}>
-                <AlertTriangle size={13} className="shrink-0" />
-                <span className="max-w-[240px] truncate font-mono text-[11px] font-semibold">{lastError}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
+        {task && (
+          <div className="flex items-center gap-2 xl:mt-6">
             {showAnalyze && (
               <button
                 onClick={handleAnalyze}
@@ -392,8 +223,8 @@ export function TaskHeader() {
               <Trash2 size={13} />
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <ConfirmDialog
         isOpen={isDeleteConfirmOpen}

@@ -6,13 +6,11 @@ import { AlertCircle, Loader2, Check, Send } from "lucide-react";
 import { TaskDetailProvider, useTaskDetail } from "./components/TaskDetailContext";
 import { TaskHeader } from "./components/TaskHeader";
 import { ReviewActionBar } from "./components/ReviewActionBar";
-import { DashboardSummary } from "./components/DashboardSummary";
-import { ImplementationChecklist } from "./components/ImplementationChecklist";
-import { WorkflowTimeline } from "./components/WorkflowTimeline";
-import { SpecPanel } from "./components/SpecPanel";
+import { ExecutionPanel } from "./components/ExecutionPanel";
+import { CompactTimeline } from "./components/CompactTimeline";
 import { PRPanel } from "./components/PRPanel";
+import { SupportingAccordion } from "./components/SupportingAccordion";
 import { RequestChangesModal } from "./components/RequestChangesModal";
-import { LogConsole } from "@/components/dashboard/log-console";
 import { useSession } from "@/lib/session";
 import type { Task, TaskAnalysis } from "@/lib/types";
 
@@ -20,7 +18,6 @@ function TaskDetailContent() {
   const {
     task,
     workflow,
-    logs,
     error,
     setError,
     updateTask,
@@ -29,14 +26,20 @@ function TaskDetailContent() {
     workflowError,
   } = useTaskDetail();
 
-  // Collapse state for the tertiary reference surfaces is lifted here so the
-  // ImplementationChecklist can programmatically expand the log and scroll to it
-  // (REQ-005/REQ-006).
-  const [isLogExpanded, setLogExpanded] = useState(false);
-  const [isSpecExpanded, setSpecExpanded] = useState(false);
+  // Accordion open/close state (REQ-005/REQ-006)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    specification: false,
+    logs: false,
+    description: false,
+    checkpoints: false,
+  });
+
+  const toggleSection = useCallback((key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   const expandAndScrollToLog = useCallback((stepId: string) => {
-    setLogExpanded(true);
+    setOpenSections((prev) => ({ ...prev, logs: true }));
     requestAnimationFrame(() => {
       document.getElementById(`log-group-${stepId}`)?.scrollIntoView({
         behavior: "smooth",
@@ -74,16 +77,19 @@ function TaskDetailContent() {
   return (
     <main className="min-h-screen bg-background px-4 py-5 font-sans text-content md:px-8 md:py-7">
       <div className="mx-auto max-w-7xl space-y-8">
+        {/* Row 1: slimmed Task Header with controls */}
         <TaskHeader />
 
+        {/* Row 2: spec approval actions */}
         <ReviewActionBar />
 
-        <DashboardSummary />
+        {/* Row 3: primary execution console card */}
+        <ExecutionPanel onOpenLog={expandAndScrollToLog} />
 
-        <ImplementationChecklist expandAndScrollToLog={expandAndScrollToLog} />
+        {/* Row 4: high-level horizontal timeline */}
+        <CompactTimeline />
 
-        <WorkflowTimeline />
-
+        {/* Row 5: PR submission panel */}
         <PRPanel />
 
         {error && (
@@ -127,14 +133,8 @@ function TaskDetailContent() {
             </div>
           )}
 
-        <SpecPanel isExpanded={isSpecExpanded} onToggle={() => setSpecExpanded((v) => !v)} />
-
-        <LogConsole
-          logs={logs}
-          isWorkflowRunning={workflow?.job?.status === "running"}
-          isExpanded={isLogExpanded}
-          onToggle={() => setLogExpanded((v) => !v)}
-        />
+        {/* Row 6: Accordion with Specs, Logs, Description, Agent info */}
+        <SupportingAccordion openSections={openSections} onToggleSection={toggleSection} />
 
         <RequestChangesModal />
       </div>

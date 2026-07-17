@@ -57,3 +57,4 @@ ds-bundle/
 web/.ds-sync-cache/
 .ai-memory/last_recall_session
 .ai-memory/memory.db
+.tokensave

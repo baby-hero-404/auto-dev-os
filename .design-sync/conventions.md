@@ -44,6 +44,13 @@ fade), `animate-modal-in` (scale+slide-up, use for dialogs/popovers),
 `animate-pulse-dot` (status-dot pulse), `animate-completion-pop` (spring pop
 for success/completion states).
 
+### Page references
+
+`guidelines/pages.md` has full-screen captures of every real route in the
+app (mock data, real layout/composition) — reference-only, not mountable
+components. Use them to see how these pieces actually get composed in
+context before designing a new screen.
+
 ### Where the truth lives
 
 Read `styles.css` (and its `@import`ed `_ds_bundle.css`) for the full token

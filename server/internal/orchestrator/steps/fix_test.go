@@ -135,7 +135,7 @@ func TestFixStep_PRDiffFallbackUsesFrontendWorktreeSuffix(t *testing.T) {
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleFrontend}, JobID: "j1"},
 		&mockTaskReader{task: task},
 		&mockCheckpointLister{},
-		&mockLLMRunner{result: StepResult{"parsed": map[string]any{}}},
+		&mockLLMRunner{result: StepResult{"parsed": map[string]any{"summary": "done"}}},
 		diffMock,
 		nil, nil, nil, nil,
 		&mockLogger{},
@@ -153,7 +153,7 @@ func TestFixStep_PRDiffFallbackUsesFrontendWorktreeSuffix(t *testing.T) {
 	}
 
 	_, err := step.Execute(context.Background(), sc)
-	if err != nil {
+	if err != nil && !errors.Is(err, workflow.ErrReviewFixLoop) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	found := false

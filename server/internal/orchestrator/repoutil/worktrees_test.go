@@ -101,13 +101,14 @@ func TestCreateGitCheckpoint_CapturesNewFileInNewDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hash, err := m.CreateGitCheckpoint(context.Background(), task, agent, "code_backend_0", "")
+	ckResult, err := m.CreateGitCheckpoint(context.Background(), task, agent, "code_backend_0", "")
 	if err != nil {
 		t.Fatalf("CreateGitCheckpoint failed: %v", err)
 	}
-	if hash == "" {
+	if ckResult == nil || ckResult.Hash == "" {
 		t.Fatal("expected a non-empty commit hash")
 	}
+	hash := ckResult.Hash
 
 	// The regression: verify the new file actually made it into the checkpoint commit's tree,
 	// not just that some commit was created (that part always "succeeded" even with the bug,
@@ -157,11 +158,11 @@ func TestCreateGitCheckpoint_EmptyCheckpointIsLogged(t *testing.T) {
 		}
 	}
 
-	hash, err := m.CreateGitCheckpoint(context.Background(), task, agent, "noop_step", "")
+	ckResult, err := m.CreateGitCheckpoint(context.Background(), task, agent, "noop_step", "")
 	if err != nil {
 		t.Fatalf("CreateGitCheckpoint failed: %v", err)
 	}
-	if hash == "" {
+	if ckResult == nil || ckResult.Hash == "" {
 		t.Fatal("expected a non-empty commit hash even for an empty checkpoint")
 	}
 	if len(warnings) == 0 {
@@ -184,10 +185,11 @@ func TestRestoreGitCheckpoint_DoesNotDiscardProgressAheadOfCheckpoint(t *testing
 	m, task, _, agent := newTestManager(t, repoDir)
 
 	// Checkpoint A: simulates the last successful code_backend_N step.
-	checkpointHash, err := m.CreateGitCheckpoint(context.Background(), task, agent, "code_backend_3", "")
+	ckResult, err := m.CreateGitCheckpoint(context.Background(), task, agent, "code_backend_3", "")
 	if err != nil {
 		t.Fatalf("CreateGitCheckpoint (checkpoint) failed: %v", err)
 	}
+	checkpointHash := ckResult.Hash
 
 	// Simulate a "fix" step's salvaged edit landing in a further commit on top of the checkpoint.
 	salvagedFile := filepath.Join(repoDir, "cmd", "sync-service", "main.go")

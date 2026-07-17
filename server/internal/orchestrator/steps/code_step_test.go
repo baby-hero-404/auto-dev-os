@@ -126,7 +126,7 @@ func TestCodeBackendStep_ReusesCurrentBackendAgent(t *testing.T) {
 	step := NewCodeBackendStep(
 		StepRuntime{Task: task, Agent: agent, JobID: "j1"},
 		&mockTaskReader{task: task},
-		&mockLLMRunner{result: StepResult{"parsed": map[string]any{}}},
+		&mockLLMRunner{result: StepResult{"parsed": map[string]any{"summary": "done"}}},
 		assigner,
 		&mockWorktreeManager{},
 		&mockPatchApplier{},
@@ -275,7 +275,7 @@ func TestCodeFrontendStep_ReleasesBorrowedAgent(t *testing.T) {
 	step := NewCodeFrontendStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRolePlanner}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		&mockLLMRunner{result: StepResult{"parsed": map[string]any{"patch": "diff --git a/file.tsx b/file.tsx\n+new content\n"}}},
+		&mockLLMRunner{result: StepResult{"parsed": map[string]any{"summary": "done", "patch": "diff --git a/file.tsx b/file.tsx\n+new content\n"}}},
 		assigner,
 		&mockWorktreeManager{},
 		&mockPatchApplier{},
@@ -315,7 +315,7 @@ func TestCodeFrontendStep_ReusesCurrentFrontendAgent(t *testing.T) {
 	step := NewCodeFrontendStep(
 		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", Role: models.AgentRoleFrontend}, JobID: "j1"},
 		&mockTaskReader{task: task},
-		&mockLLMRunner{result: StepResult{"parsed": map[string]any{}}},
+		&mockLLMRunner{result: StepResult{"parsed": map[string]any{"summary": "done"}}},
 		assigner,
 		&mockWorktreeManager{},
 		&mockPatchApplier{},
@@ -373,6 +373,7 @@ func TestCodeBackendStep_IncludesDirectoryScan(t *testing.T) {
 	llmMock := &mockLLMRunner{
 		result: StepResult{
 			"parsed": map[string]any{
+				"summary": "done",
 				"patch": "diff --git a/mock_backend_file_xxx.go b/mock_backend_file_xxx.go\n+new content\n",
 			},
 		},
@@ -432,6 +433,7 @@ func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
 	llmMock := &mockLLMRunner{
 		result: StepResult{
 			"parsed": map[string]any{
+				"summary": "done",
 				"patch": "diff --git a/some_file.go b/some_file.go\n+new content\n",
 			},
 		},
@@ -697,3 +699,58 @@ func TestCodeBackendStep_SlidingWindowRetry(t *testing.T) {
 		t.Error("agentic mode should never switch to the SEARCH/REPLACE format instructions")
 	}
 }
+
+func TestBuildPreHydratedContext_Truncation(t *testing.T) {
+	task := &models.Task{ID: "task-1"}
+	frozenCtx := &models.FrozenContext{
+		AffectedFiles: []models.AffectedFile{
+			{File: "short.go"},
+			{File: "long.go"},
+		},
+	}
+	
+	shortContent := "package short\n\nfunc Short() {}"
+	// Create a long content with > 200 lines
+	var longLines []string
+	for i := 0; i < 250; i++ {
+		longLines = append(longLines, "line "+string(rune('0'+(i%10))))
+	}
+	longContent := strings.Join(longLines, "\n")
+
+	// We need a custom mock for reading specific files
+	customReader := &customMockFileReader{
+		files: map[string]string{
+			"short.go": shortContent,
+			"long.go":  longContent,
+		},
+	}
+
+	result := buildPreHydratedContext(context.Background(), task, customReader, frozenCtx)
+
+	if !strings.Contains(result, "short.go") {
+		t.Error("expected result to contain short.go")
+	}
+	if !strings.Contains(result, "long.go") {
+		t.Error("expected result to contain long.go")
+	}
+	
+	// Verify truncation message
+	if !strings.Contains(result, "... (file truncated due to length)") {
+		t.Error("expected long.go to be truncated with message")
+	}
+	
+	// Verify line count (200 lines + 1 for truncation message + wrapper text)
+	if strings.Count(result, "line 0") > 200 {
+		t.Error("expected long.go to have max 200 lines of actual content")
+	}
+}
+
+type customMockFileReader struct {
+	files map[string]string
+}
+
+func (c *customMockFileReader) ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool) {
+	content, ok := c.files[file]
+	return content, ok
+}
+

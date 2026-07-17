@@ -39,7 +39,7 @@ func TestRunPatchRetryLoop_PartialResult_SalvagesSuccessfully(t *testing.T) {
 		JobID:      "job-1",
 		StepID:     "code_backend_0",
 		TestLabel:  "code_backend_test",
-		MaxRetries: 3,
+		MaxRetries: 1,
 		Agentic:    true,
 		LLM:        llmRunner,
 		Worktree:   worktree,
@@ -285,3 +285,54 @@ func TestRunPatchRetryLoop_TransientErrorNoWrap(t *testing.T) {
 		t.Errorf("expected transient error to NOT be wrapped in ErrNoProgress, got %v", err)
 	}
 }
+
+// TestRunPatchRetryLoop_PartialResult_EmptyCheckpoint verifies that when the tool loop
+// signals a partial result, but the resulting Git checkpoint is empty (no real edits),
+// the loop treats it as no progress and wraps the final error in ErrNoProgress (T-006).
+func TestRunPatchRetryLoop_PartialResult_EmptyCheckpoint(t *testing.T) {
+	task := &models.Task{ID: "task-1"}
+	agent := &models.Agent{ID: "agent-1"}
+
+	llmRunner := &mockLLMRunner{
+		result: StepResult{
+			"status":            "llm_partial",
+			"tool_loop_partial": true,
+			"edits_applied":     []string{"server/internal/foo.go"},
+		},
+	}
+	
+	// Mock returns IsEmpty = true
+	worktree := &mockWorktreeManager{
+		checkpointResult: &models.CheckpointResult{Hash: "mock-hash", IsEmpty: true},
+	}
+	diff := &mockDiffCapturer{hostPath: "/repo", changed: nil} // No changed files
+	tester := &mockTestRunner{}
+	tasks := &mockTaskReader{task: task}
+	logger := &mockLogger{}
+
+	cfg := patchRetryConfig{
+		Task:       task,
+		Agent:      agent,
+		JobID:      "job-1",
+		StepID:     "code_backend_0",
+		TestLabel:  "code_backend_test",
+		MaxRetries: 1, // Fail fast for test
+		Agentic:    true,
+		LLM:        llmRunner,
+		Worktree:   worktree,
+		Diff:       diff,
+		Tester:     tester,
+		Tasks:      tasks,
+		Log:        logger,
+	}
+
+	_, _, err := runPatchRetryLoop(context.Background(), cfg, "do the work")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, workflow.ErrNoProgress) {
+		t.Errorf("expected error to be wrapped in ErrNoProgress due to empty checkpoint, got %v", err)
+	}
+}
+

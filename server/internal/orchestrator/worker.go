@@ -183,12 +183,15 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 					worktreeSuffix = models.WorktreeSuffixFrontend
 				}
 				o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Creating git checkpoint commit for step %s", event.StepID))
-				commitHash, err := o.repoutil.CreateGitCheckpoint(ctx, task, agent, event.StepID, worktreeSuffix)
+				ckResult, err := o.repoutil.CreateGitCheckpoint(ctx, task, agent, event.StepID, worktreeSuffix)
 				if err != nil {
 					o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to create git checkpoint: %v", err))
-				} else {
-					state["commit_hash"] = commitHash
-					o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Checkpoint commit hash: %s", commitHash))
+				} else if ckResult != nil {
+					if ckResult.IsEmpty {
+						state["empty"] = true
+					}
+					state["commit_hash"] = ckResult.Hash
+					o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("Checkpoint commit hash: %s", ckResult.Hash))
 				}
 			}
 
@@ -303,6 +306,10 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				// Validate SpecHash: if the contract changed, throw away the checkpoint
 				if cpHash, ok := state["spec_hash"].(string); ok && cpHash != "" && currentSpecHash != "" && cpHash != currentSpecHash {
 					o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("SpecHash mismatch at step %s. Discarding checkpoint to force re-execution.", cp.Step))
+					continue
+				}
+
+				if isEmpty, _ := state["empty"].(bool); isEmpty {
 					continue
 				}
 
@@ -435,6 +442,10 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				var state map[string]any
 				if json.Unmarshal(cp.State, &state) == nil {
 					if cpHash, ok := state["spec_hash"].(string); ok && cpHash != "" && currentSpecHash != "" && cpHash != currentSpecHash {
+						continue
+					}
+
+					if isEmpty, _ := state["empty"].(bool); isEmpty {
 						continue
 					}
 

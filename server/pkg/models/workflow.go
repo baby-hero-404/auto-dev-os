@@ -64,6 +64,12 @@ func (c *WorkflowCheckpoint) GetCommitHash() string {
 	return ""
 }
 
+type CheckpointResult struct {
+	Hash        string
+	StagedCount int
+	IsEmpty     bool
+}
+
 type TaskLog struct {
 	ID        string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
 	TaskID    string    `json:"task_id" gorm:"type:uuid;not null"`

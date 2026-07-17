@@ -172,14 +172,22 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		}
 	}
 
+	var analysis models.TaskAnalysis
+	if t != nil {
+		_ = json.Unmarshal(t.Analysis, &analysis)
+	}
+	frozen := LoadFrozenContext(stepCtx, &analysis)
+	preHydratedCtx := buildPreHydratedContext(ctx, s.rt.Task, s.fileReader, frozen)
+
 	instruction, _, ctx := buildCodingInstruction(ctx, stepCtx, codingInstructionParams{
-		Task:            s.rt.Task,
-		Workspace:       s.workspace,
-		IsEasy:          t != nil && t.Complexity == models.TaskComplexityEasy,
-		Role:            "frontend",
-		SubtaskKey:      "frontend",
-		InstructionVerb: "Implement the frontend changes when applicable, using the available tools (e.g. search_replace, create_file) to edit files directly. Use run_tests/run_build/run_lint to verify your work before finishing.",
-		PRFeedback:      prFeedback,
+		Task:             s.rt.Task,
+		Workspace:        s.workspace,
+		IsEasy:           t != nil && t.Complexity == models.TaskComplexityEasy,
+		Role:             "frontend",
+		SubtaskKey:       "frontend",
+		InstructionVerb:  "Implement the frontend changes when applicable, using the available tools (e.g. search_replace, create_file) to edit files directly. Use run_tests/run_build/run_lint to verify your work before finishing.",
+		PRFeedback:       prFeedback,
+		PreHydratedFiles: preHydratedCtx,
 	})
 
 	out, _, err := runPatchRetryLoop(ctx, patchRetryConfig{

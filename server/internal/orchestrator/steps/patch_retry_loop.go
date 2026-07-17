@@ -87,6 +87,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		return e
 	}
 
+	var cumulativeFailedCalls []string
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		currentInstruction := baseInstruction
 		if attempt >= 3 && !cfg.Agentic {
@@ -115,6 +116,22 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		}
 
 		retryNeeded := false
+
+		if fc, ok := out["failed_calls"].([]string); ok && len(fc) > 0 {
+			for _, call := range fc {
+				found := false
+				for _, existing := range cumulativeFailedCalls {
+					if existing == call {
+						found = true
+						break
+					}
+				}
+				if !found {
+					cumulativeFailedCalls = append(cumulativeFailedCalls, call)
+				}
+			}
+		}
+
 		if cfg.Agentic {
 			filesReadPrevAttempt, _ := out["files_read"].([]string)
 
@@ -132,71 +149,93 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 				var salvageHash string
 				var useGitSalvage = !models.IsStateMachineEnabled(ctx)
 				if useGitSalvage && cfg.Worktree != nil {
-					hash, ckErr := cfg.Worktree.CreateGitCheckpoint(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_salvage", cfg.WorktreeSuffix)
+					ckResult, ckErr := cfg.Worktree.CreateGitCheckpoint(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_salvage", cfg.WorktreeSuffix)
 					if ckErr != nil {
 						cfg.logf(ctx, "error", "failed to create salvage checkpoint before testing partial result: %v", ckErr)
-					} else {
-						salvageHash = hash
+					} else if ckResult != nil {
+						if ckResult.IsEmpty {
+							cfg.logf(ctx, "warn", "salvage checkpoint is empty, treating partial result as no progress")
+							hasEditsApplied = false
+						} else {
+							salvageHash = ckResult.Hash
+						}
 					}
 				}
 
-				testsOK := true
-				if cfg.Tester != nil && cfg.Diff != nil {
-					if repoHostPath, errRP := cfg.Diff.GetTaskRepoHostPath(ctx, cfg.Task); errRP == nil {
-						if changedFiles, diffErr := cfg.Diff.GetChangedFiles(ctx, cfg.Task, cfg.Agent, repoHostPath, cfg.WorktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
-							if _, errT := cfg.Tester.RunTargetedTests(ctx, cfg.Task, cfg.Agent, cfg.JobID, cfg.TestLabel, changedFiles, cfg.WorktreeSuffix); errT != nil {
-								testsOK = false
-								cfg.logf(ctx, "warn", "targeted tests failed on salvaged partial result (attempt %d/%d): %v", attempt, maxRetries, errT)
-								if useGitSalvage {
-									if salvageHash != "" && cfg.Worktree != nil {
-										if restoreErr := cfg.Worktree.RestoreGitCheckpoint(ctx, cfg.Task, cfg.Agent, salvageHash, cfg.WorktreeSuffix); restoreErr != nil {
-											cfg.logf(ctx, "error", "failed to restore salvage checkpoint after failed test run: %v", restoreErr)
+				if !hasEditsApplied {
+					if attempt < maxRetries {
+						retryErrorMsg = "\n\nYour previous attempt ran out of iterations without making any changes. Please make sure to use edit tools to apply changes."
+						retryErrorMsg += filesReadNote(filesReadPrevAttempt)
+						retryNeeded = true
+					} else {
+						cfg.logf(ctx, "error", "Tool loop exhausted iterations with no edits applied after max retries")
+						return nil, false, wrapErr(fmt.Errorf("tool loop exhausted iterations with no progress made"))
+					}
+				} else {
+					testsOK := true
+					if cfg.Tester != nil && cfg.Diff != nil {
+						if repoHostPath, errRP := cfg.Diff.GetTaskRepoHostPath(ctx, cfg.Task); errRP == nil {
+							if changedFiles, diffErr := cfg.Diff.GetChangedFiles(ctx, cfg.Task, cfg.Agent, repoHostPath, cfg.WorktreeSuffix); diffErr == nil && len(changedFiles) > 0 {
+								if _, errT := cfg.Tester.RunTargetedTests(ctx, cfg.Task, cfg.Agent, cfg.JobID, cfg.TestLabel, changedFiles, cfg.WorktreeSuffix); errT != nil {
+									testsOK = false
+									cfg.logf(ctx, "warn", "targeted tests failed on salvaged partial result (attempt %d/%d): %v", attempt, maxRetries, errT)
+									if useGitSalvage {
+										if salvageHash != "" && cfg.Worktree != nil {
+											if restoreErr := cfg.Worktree.RestoreGitCheckpoint(ctx, cfg.Task, cfg.Agent, salvageHash, cfg.WorktreeSuffix); restoreErr != nil {
+												cfg.logf(ctx, "error", "failed to restore salvage checkpoint after failed test run: %v", restoreErr)
+											}
 										}
-									}
-								} else {
-									if cfg.Worktree != nil {
-										if errReset := cfg.Worktree.ResetRoleWorktrees(ctx, cfg.Task, cfg.Agent, cfg.WorktreeSuffix); errReset != nil {
-											cfg.logf(ctx, "error", "failed to reset worktree before snapshot restore: %v", errReset)
-										} else if cfg.Checkpoints != nil && cfg.Patcher != nil {
-											if snapLister, ok := cfg.Checkpoints.(interface {
-												GetLatestExecutionSnapshot(ctx context.Context, taskID string, step string) (*models.ExecutionSnapshot, bool)
-											}); ok {
-												if snap, exists := snapLister.GetLatestExecutionSnapshot(ctx, cfg.Task.ID, cfg.StepID); exists && snap.WorkspaceDiff != "" {
-													if errApply := cfg.Patcher.ApplyPatch(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_restore", snap.WorkspaceDiff, cfg.WorktreeSuffix); errApply != nil {
-														cfg.logf(ctx, "error", "failed to restore snapshot diff: %v", errApply)
-													} else {
-														cfg.logf(ctx, "info", "successfully restored workspace from execution snapshot diff")
+									} else {
+										if cfg.Worktree != nil {
+											if errReset := cfg.Worktree.ResetRoleWorktrees(ctx, cfg.Task, cfg.Agent, cfg.WorktreeSuffix); errReset != nil {
+												cfg.logf(ctx, "error", "failed to reset worktree before snapshot restore: %v", errReset)
+											} else if cfg.Checkpoints != nil && cfg.Patcher != nil {
+												if snapLister, ok := cfg.Checkpoints.(interface {
+													GetLatestExecutionSnapshot(ctx context.Context, taskID string, step string) (*models.ExecutionSnapshot, bool)
+												}); ok {
+													if snap, exists := snapLister.GetLatestExecutionSnapshot(ctx, cfg.Task.ID, cfg.StepID); exists && snap.WorkspaceDiff != "" {
+														if errApply := cfg.Patcher.ApplyPatch(ctx, cfg.Task, cfg.Agent, cfg.StepID+"_restore", snap.WorkspaceDiff, cfg.WorktreeSuffix); errApply != nil {
+															cfg.logf(ctx, "error", "failed to restore snapshot diff: %v", errApply)
+														} else {
+															cfg.logf(ctx, "info", "successfully restored workspace from execution snapshot diff")
+														}
 													}
 												}
 											}
 										}
 									}
-								}
-								updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)
-								if attempt < maxRetries {
-									retryErrorMsg = fmt.Sprintf("\n\nYour previous attempt ran out of iterations partway through, and the salvaged partial edits failed automated tests:\n%v\nPlease continue fixing this.", errT)
-									retryErrorMsg += filesReadNote(filesReadPrevAttempt)
-									retryNeeded = true
-								} else {
-									cfg.logf(ctx, "error", "Targeted tests failed on salvaged partial result after max retries")
-									return nil, false, wrapErr(fmt.Errorf("targeted tests failed on salvaged partial result: %w", errT))
+									updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)
+									if attempt < maxRetries {
+										retryErrorMsg = fmt.Sprintf("\n\nYour previous attempt ran out of iterations partway through, and the salvaged partial edits failed automated tests:\n```text\n%v\n```\nPlease continue fixing this.", compressErrorText(errT.Error()))
+										retryErrorMsg += filesReadNote(filesReadPrevAttempt)
+										retryNeeded = true
+									} else {
+										cfg.logf(ctx, "error", "Targeted tests failed on salvaged partial result after max retries")
+										return nil, false, wrapErr(fmt.Errorf("targeted tests failed on salvaged partial result: %w", errT))
+									}
 								}
 							}
 						}
 					}
-				}
-				if testsOK {
-					if attempt < maxRetries {
-						retryErrorMsg = "\n\nYour previous attempt ran out of iterations partway through. Please continue your work and finish the remaining tasks."
-						retryErrorMsg += filesReadNote(filesReadPrevAttempt)
-						retryNeeded = true
-					} else {
-						cfg.logf(ctx, "warn", "Tool loop exhausted iterations and max retries reached. Salvaging as partial success.")
-						patchApplied = true
+					if testsOK {
+						if attempt < maxRetries {
+							retryErrorMsg = "\n\nYour previous attempt ran out of iterations partway through. Please continue your work and finish the remaining tasks."
+							retryErrorMsg += filesReadNote(filesReadPrevAttempt)
+							retryNeeded = true
+						} else {
+							cfg.logf(ctx, "warn", "Tool loop exhausted iterations and max retries reached. Salvaging as partial success.")
+							patchApplied = true
+						}
 					}
 				}
 				if !retryNeeded {
 					break
+				}
+				if len(cumulativeFailedCalls) > 0 {
+					retryErrorMsg += "\n\nNEGATIVE MEMORY (DO NOT REPEAT):\nThe following tool calls failed in previous attempts. Do NOT try to run these exact same tool calls again, as they will fail. Find an alternative path:\n"
+					for _, call := range cumulativeFailedCalls {
+						retryErrorMsg += "- " + call + "\n"
+					}
 				}
 				continue
 			}
@@ -249,6 +288,12 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 			if !retryNeeded {
 				break
 			}
+			if len(cumulativeFailedCalls) > 0 {
+				retryErrorMsg += "\n\nNEGATIVE MEMORY (DO NOT REPEAT):\nThe following tool calls failed in previous attempts. Do NOT try to run these exact same tool calls again, as they will fail. Find an alternative path:\n"
+				for _, call := range cumulativeFailedCalls {
+					retryErrorMsg += "- " + call + "\n"
+				}
+			}
 			continue
 		}
 		if parsed, ok := out["parsed"].(map[string]any); ok {
@@ -297,7 +342,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 						out["patch_apply_error"] = applyErr.Error()
 						updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, applyErr)
 						if attempt < maxRetries {
-							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n%v\nPlease output a corrected patch that applies cleanly.", applyErr)
+							retryErrorMsg = fmt.Sprintf("\n\nYour previous patch failed to apply with error:\n```text\n%v\n```\nPlease output a corrected patch that applies cleanly.", compressErrorText(applyErr.Error()))
 							retryNeeded = true
 						} else {
 							cfg.logf(ctx, "error", "Patch apply failed after max retries")
@@ -313,7 +358,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 										cfg.logf(ctx, "warn", "targeted tests failed (attempt %d/%d): %v", attempt, maxRetries, errT)
 										updateAffectedFilesWithErrors(ctx, cfg.Task.ID, cfg.Tasks, cfg.Task, errT)
 										if attempt < maxRetries {
-											retryErrorMsg = fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n%v\nPlease analyze the test failure and output a new patch that fixes this issue.", errT)
+											retryErrorMsg = fmt.Sprintf("\n\nYour patch applied successfully, but the automated tests failed with the following error:\n```text\n%v\n```\nPlease analyze the test failure and output a new patch that fixes this issue.", compressErrorText(errT.Error()))
 											retryNeeded = true
 										} else {
 											cfg.logf(ctx, "error", "Targeted tests failed after max retries")
@@ -347,7 +392,29 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		if !retryNeeded {
 			break
 		}
+		if len(cumulativeFailedCalls) > 0 {
+			retryErrorMsg += "\n\nNEGATIVE MEMORY (DO NOT REPEAT):\nThe following tool calls failed in previous attempts. Do NOT try to run these exact same tool calls again, as they will fail. Find an alternative path:\n"
+			for _, call := range cumulativeFailedCalls {
+				retryErrorMsg += "- " + call + "\n"
+			}
+		}
 	}
 
 	return out, patchApplied, nil
+}
+
+func compressErrorText(errStr string) string {
+	lines := strings.Split(errStr, "\n")
+	if len(lines) <= 100 {
+		return errStr
+	}
+	var b strings.Builder
+	for i := 0; i < 20; i++ {
+		b.WriteString(lines[i] + "\n")
+	}
+	b.WriteString(fmt.Sprintf("\n... [TRUNCATED: %d lines omitted for brevity] ...\n\n", len(lines)-100))
+	for i := len(lines) - 80; i < len(lines); i++ {
+		b.WriteString(lines[i] + "\n")
+	}
+	return strings.TrimSpace(b.String())
 }

@@ -3,6 +3,7 @@ package repoutil
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,18 +140,63 @@ git -C %[1]s clean -fd`, paths.QuoteShellArg(containerWorktreePath))
 	return nil
 }
 
-func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
+func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (*models.CheckpointResult, error) {
 	targetRepos, err := m.LoadTargetRepositories(ctx, task)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	ws := m.GetTaskWorkspace(task)
 
-	var lastCommitHash string
+	result := &models.CheckpointResult{}
 	for _, repo := range targetRepos {
 		localPath := m.RepoHostPath(task, ws, repo)
 		worktreePath := m.HostWorktreePath(task, localPath, worktreeSuffix)
 		containerWorktreePath := m.ContainerPathForHostPath(task, worktreePath, "")
+		containerLocalPath := m.ContainerPathForHostPath(task, localPath, "")
+
+		// REQ-010: Validate worktree before git operations. If the worktree directory is
+		// missing or has a corrupt .git pointer (e.g. "fatal: not in a git directory"),
+		// prune stale worktree entries and auto-recreate it rather than letting the
+		// checkpoint script fail with an opaque git error.
+		var roleName string
+		switch worktreeSuffix {
+		case models.WorktreeSuffixBackend:
+			roleName = models.RoleBackend
+		case models.WorktreeSuffixFrontend:
+			roleName = models.RoleFrontend
+		}
+		if worktreeSuffix != "" {
+			roleBranch := fmt.Sprintf("feature/%s-%s", task.ID, roleName)
+			integrationBranch := fmt.Sprintf("feature/%s", task.ID)
+			validateScript := fmt.Sprintf(`set -e
+if [ ! -d %[1]s ] || ! grep -q '^gitdir:' %[1]s/.git 2>/dev/null; then
+  echo "WORKTREE_INVALID"
+  rm -rf %[1]s
+  git -C %[2]s worktree prune
+  git -C %[2]s show-ref --verify --quiet refs/heads/%[3]s || git -C %[2]s branch %[3]s %[4]s
+  git -C %[2]s worktree add %[1]s %[3]s
+  echo "WORKTREE_RECREATED"
+else
+  echo "WORKTREE_VALID"
+fi`,
+				paths.QuoteShellArg(containerWorktreePath),
+				paths.QuoteShellArg(containerLocalPath),
+				paths.QuoteShellArg(roleBranch),
+				paths.QuoteShellArg(integrationBranch),
+			)
+			valRes, valErr := m.RunSandboxStepInWorktree(ctx, task, agent, "validate_worktree_"+stepID, validateScript, worktreeSuffix)
+			if valErr != nil {
+				if m.Log != nil {
+					m.Log(ctx, task.ID, nil, "error", fmt.Sprintf("worktree validation failed for repo %s (suffix %s): %v — checkpoint will be attempted anyway", repo.URL, worktreeSuffix, valErr))
+				}
+			} else if stdout, ok := valRes["stdout"].(string); ok {
+				if strings.Contains(stdout, "WORKTREE_RECREATED") {
+					if m.Log != nil {
+						m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("worktree was invalid/missing for repo %s (suffix %s) — auto-recreated before checkpoint", repo.URL, worktreeSuffix))
+					}
+				}
+			}
+		}
 
 		identityScript := m.gitIdentityScript(containerWorktreePath, agent)
 		commitMsg := fmt.Sprintf("chore(auto-code-os): checkpoint %s", stepID)
@@ -172,21 +218,27 @@ git -C %[1]s rev-parse HEAD`, paths.QuoteShellArg(containerWorktreePath), paths.
 
 		res, err := m.RunSandboxStepInWorktree(ctx, task, agent, "checkpoint_"+stepID, script, worktreeSuffix)
 		if err != nil {
-			return "", fmt.Errorf("failed to create checkpoint commit for repo %s: %w", repo.URL, err)
+			return nil, fmt.Errorf("failed to create checkpoint commit for repo %s: %w", repo.URL, err)
 		}
 		if stdout, ok := res["stdout"].(string); ok {
 			lines := strings.Split(strings.TrimSpace(stdout), "\n")
 			if len(lines) > 0 {
-				lastCommitHash = strings.TrimSpace(lines[len(lines)-1])
+				result.Hash = strings.TrimSpace(lines[len(lines)-1])
 			}
 			for _, line := range lines {
-				if count, cut := strings.CutPrefix(strings.TrimSpace(line), "STAGED_COUNT="); cut && count == "0" && m.Log != nil {
-					m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("checkpoint %s for repo %s staged 0 files — commit is empty, nothing from this step was captured", stepID, repo.URL))
+				if count, cut := strings.CutPrefix(strings.TrimSpace(line), "STAGED_COUNT="); cut {
+					if c, err := strconv.Atoi(count); err == nil {
+						result.StagedCount += c
+					}
+					if count == "0" && m.Log != nil {
+						m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("checkpoint %s for repo %s staged 0 files — commit is empty, nothing from this step was captured", stepID, repo.URL))
+					}
 				}
 			}
 		}
 	}
-	return lastCommitHash, nil
+	result.IsEmpty = result.StagedCount == 0
+	return result, nil
 }
 
 func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error {
@@ -225,12 +277,15 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 		// not just an optimization.
 		script := fmt.Sprintf(`set -e
 %[4]s
-if [ ! -d %[1]s ]; then
-  echo "Recreating missing worktree directory..."
-  roleBranch="feature/%[5]s-%[6]s"
-  git -C %[7]s show-ref --verify --quiet refs/heads/$roleBranch || git -C %[7]s branch $roleBranch %[2]s
-  git -C %[7]s worktree prune
-  git -C %[7]s worktree add %[1]s $roleBranch
+if [ -n "%[8]s" ]; then
+  if [ ! -d %[1]s ] || ! grep -q '^gitdir:' %[1]s/.git 2>/dev/null; then
+    echo "Recreating missing or invalid worktree directory..."
+    rm -rf %[1]s
+    roleBranch="feature/%[5]s-%[6]s"
+    git -C %[7]s worktree prune
+    git -C %[7]s show-ref --verify --quiet refs/heads/$roleBranch || git -C %[7]s branch $roleBranch %[2]s
+    git -C %[7]s worktree add %[1]s $roleBranch
+  fi
 fi
 
 if git -C %[1]s merge-base --is-ancestor %[2]s HEAD 2>/dev/null; then
@@ -246,7 +301,7 @@ else
   git -C %[1]s checkout $roleBranch
   git -C %[1]s reset --hard %[2]s
   git -C %[1]s clean -fd
-fi`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript, task.ID, roleName, paths.QuoteShellArg(containerLocalPath))
+fi`, paths.QuoteShellArg(containerWorktreePath), paths.QuoteShellArg(commitHash), paths.QuoteShellArg(rescueBranch), identityScript, task.ID, roleName, paths.QuoteShellArg(containerLocalPath), worktreeSuffix)
 
 		if _, err := m.RunSandboxStepInWorktree(ctx, task, agent, "restore_checkpoint", script, worktreeSuffix); err != nil {
 			return fmt.Errorf("failed to restore checkpoint to %s for repo %s: %w", commitHash, repo.URL, err)

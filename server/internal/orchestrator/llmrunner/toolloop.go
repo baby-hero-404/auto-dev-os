@@ -88,6 +88,22 @@ type ToolLoopResult struct {
 	Partial      bool
 	EditsApplied []string // discriminators (paths) touched by successful edit tool calls
 	FilesRead    []string // discriminators (paths) touched by successful read_file calls
+	FailedCalls  []string // failed tool calls (name and args) to pass to negative memory
+}
+
+type discoveryTracker struct {
+	consecutiveReads int
+	nudged           bool
+	threshold        int
+}
+
+func (t *discoveryTracker) RecordCall(isWrite bool) {
+	if isWrite {
+		t.consecutiveReads = 0
+		t.nudged = false
+	} else {
+		t.consecutiveReads++
+	}
 }
 
 // RunToolLoop drives a native tool-calling agentic loop: call the LLM with tools, execute any
@@ -111,15 +127,17 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 	failureCounts := make(map[string]int)
 	readMemo := make(map[string]int) // (path, line-range) discriminator -> turn first read at
 	sg := newStallGuard()
+	dt := &discoveryTracker{threshold: 5}
 	var editsApplied []string
 	var filesRead []string
+	var failedCalls []string
 
 	for i := 0; i < maxIterations; i++ {
 		start := time.Now()
 		resp, err := cfg.Chat(ctx, messages, llm.ChatOptions{Tools: cfg.Tools, ToolChoice: "auto"})
 		latency := time.Since(start)
 		if err != nil {
-			return nil, messages, &ToolLoopResult{FilesRead: filesRead}, fmt.Errorf("llm tool loop call failed: %w", err)
+			return nil, messages, &ToolLoopResult{FilesRead: filesRead, FailedCalls: failedCalls}, fmt.Errorf("llm tool loop call failed: %w", err)
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -159,13 +177,31 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					continue
 				}
 
+				isWrite := editToolNames[call.Name]
+				if !isWrite && dt.consecutiveReads >= dt.threshold+2 {
+					dt.RecordCall(isWrite)
+					result := "Error: Discovery budget exhausted. You must make a code change before reading more files."
+					failureCounts[key]++
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
+					continue
+				}
+
 				result, toolErr := cfg.ExecuteTool(ctx, call.Name, call.Arguments)
 				if toolErr != nil {
-					return nil, messages, &ToolLoopResult{FilesRead: filesRead}, toolErr
+					return nil, messages, &ToolLoopResult{FilesRead: filesRead, FailedCalls: failedCalls}, toolErr
+				}
+
+				dt.RecordCall(isWrite)
+				if dt.consecutiveReads == dt.threshold && !dt.nudged && !isWrite {
+					dt.nudged = true
+					result += "\n\nSYSTEM NUDGE: You have made multiple read-only calls without making any changes. Please proceed to implement the required changes."
 				}
 
 				if strings.HasPrefix(result, "Error:") {
 					failureCounts[key]++
+					// Capture the first line of the error for negative memory
+					errDesc := strings.Split(result, "\n")[0]
+					failedCalls = append(failedCalls, fmt.Sprintf("%s(%s) - %s", call.Name, call.Arguments, errDesc))
 				} else {
 					failureCounts[key] = 0
 					sg.RecordSuccess(call.Name, call.Arguments, i+1)
@@ -221,16 +257,16 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 			}
 		}
 
-		return parsedJSON, messages, &ToolLoopResult{FilesRead: filesRead}, nil
+		return parsedJSON, messages, &ToolLoopResult{FilesRead: filesRead, FailedCalls: failedCalls}, nil
 	}
 
 	if len(editsApplied) > 0 {
 		// Exhausted without a valid final answer, but real edits were already applied to the
 		// workspace — surface a partial result instead of discarding that work outright (Issue 6).
-		return nil, messages, &ToolLoopResult{Partial: true, EditsApplied: editsApplied, FilesRead: filesRead}, nil
+		return nil, messages, &ToolLoopResult{Partial: true, EditsApplied: editsApplied, FilesRead: filesRead, FailedCalls: failedCalls}, nil
 	}
 
-	return nil, messages, &ToolLoopResult{FilesRead: filesRead}, fmt.Errorf("exceeded max iterations (%d)", maxIterations)
+	return nil, messages, &ToolLoopResult{FilesRead: filesRead, FailedCalls: failedCalls}, fmt.Errorf("exceeded max iterations (%d)", maxIterations)
 }
 
 // extractCallKey returns a discriminator for the circuit breaker's per-call key.

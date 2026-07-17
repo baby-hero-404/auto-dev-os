@@ -349,6 +349,9 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 			if shadowSM != nil {
 				if checkErr := shadowSM.CheckTool(name); checkErr != nil {
 					r.log(ctx, task.ID, nil, "warn", fmt.Sprintf("[TELEMETRY-VIOLATION] Shadow state machine: tool %s is not permitted during state %s", name, shadowSM.Current()))
+					if shadowSM.Current() == StateFailed || shadowSM.Current() == StateSalvaged {
+						return fmt.Sprintf("Error: tool %s is not permitted because the execution phase is %s", name, shadowSM.Current()), nil
+					}
 				}
 				if editToolNames[name] && len(resolvedTargets) > 0 {
 					var args struct {
@@ -412,6 +415,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 			"tool_loop_partial": true,
 			"edits_applied":     partial.EditsApplied,
 			"files_read":        partial.FilesRead,
+			"failed_calls":      partial.FailedCalls,
 		}, nil
 	}
 
@@ -432,7 +436,7 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		filesRead = partial.FilesRead
 	}
 
-	return map[string]any{
+	out := map[string]any{
 		"status":        "llm_completed",
 		"model":         model,
 		"content":       content,
@@ -440,7 +444,11 @@ func (r Runner) runAgentic(ctx context.Context, task *models.Task, agent *models
 		"prompt_tokens": promptTokens,
 		"output_tokens": outputTokens,
 		"files_read":    filesRead,
-	}, nil
+	}
+	if partial != nil && len(partial.FailedCalls) > 0 {
+		out["failed_calls"] = partial.FailedCalls
+	}
+	return out, nil
 }
 
 func (r Runner) validateSchema(stepID string, parsed map[string]any, agentic bool) error {

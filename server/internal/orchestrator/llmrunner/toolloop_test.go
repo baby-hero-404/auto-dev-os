@@ -3,6 +3,7 @@ package llmrunner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -491,5 +492,70 @@ func TestRunToolLoop_ReadFileMemoization_DifferentRangeNotMemoized(t *testing.T)
 	}
 	if readExecutions != 2 {
 		t.Errorf("expected both distinct line ranges to execute, got %d executions", readExecutions)
+	}
+}
+
+// TestRunToolLoop_DiscoveryTracker verifies that consecutive read-only calls correctly trigger
+// a system nudge at the threshold and block at threshold+2 (T-008).
+func TestRunToolLoop_DiscoveryTracker(t *testing.T) {
+	calls := 0
+	readExecutions := 0
+
+	cfg := ToolLoopConfig{
+		Messages:      []llm.Message{{Role: "user", Content: "do it"}},
+		Tools:         []llm.ToolDefinition{{Name: "read_file"}, {Name: "search_replace"}},
+		MaxIterations: 10,
+		Chat: func(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
+			calls++
+			// Make 8 consecutive read calls
+			if calls <= 8 {
+				return &llm.Response{
+					ToolCalls: []llm.ToolCall{{ID: fmt.Sprintf("call-%d", calls), Name: "read_file", Arguments: fmt.Sprintf(`{"path":"a.go","start_line":%d,"end_line":%d}`, calls, calls+10)}},
+				}, nil
+			}
+			return &llm.Response{Content: `{"summary":"done"}`}, nil
+		},
+		ExecuteTool: func(ctx context.Context, name, argumentsJSON string) (string, error) {
+			if name == "read_file" {
+				readExecutions++
+			}
+			return "content", nil
+		},
+	}
+
+	_, messages, _, err := RunToolLoop(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 5 threshold + 1 more before nudge + 1 block = 7 allowed executions
+	// Wait:
+	// Call 1-5: execution succeeds (reads = 1..5)
+	// Call 5 execution appends nudge.
+	// Call 6: consecutiveReads is 5. 5 >= 7 is false. Execution succeeds (reads = 6).
+	// Call 7: consecutiveReads is 6. 6 >= 7 is false. Execution succeeds (reads = 7).
+	// Call 8: consecutiveReads is 7. 7 >= 7 is true! Blocks. Execution does not happen (reads = 7).
+	
+	if readExecutions != 7 {
+		t.Errorf("expected 7 read executions before blocking, got %d", readExecutions)
+	}
+
+	var hasNudge bool
+	var hasBlock bool
+	for _, m := range messages {
+		if m.Role == "tool" {
+			if strings.Contains(m.Content, "SYSTEM NUDGE") {
+				hasNudge = true
+			}
+			if strings.Contains(m.Content, "Discovery budget exhausted") {
+				hasBlock = true
+			}
+		}
+	}
+	if !hasNudge {
+		t.Errorf("expected SYSTEM NUDGE message")
+	}
+	if !hasBlock {
+		t.Errorf("expected Discovery budget exhausted message")
 	}
 }

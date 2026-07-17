@@ -25,8 +25,9 @@ type codingInstructionParams struct {
 	IsEasy          bool
 	Role            string // "backend" | "frontend"
 	SubtaskKey      string // "backend" | "frontend"
-	InstructionVerb string // e.g. "Implement the backend changes."
-	PRFeedback      string
+	InstructionVerb  string // e.g. "Implement the backend changes."
+	PRFeedback       string
+	PreHydratedFiles string
 }
 
 type codingTemplateData struct {
@@ -37,6 +38,7 @@ type codingTemplateData struct {
 	AssignedSubtask  string
 	AssignedSubtasks []string
 	PriorFiles       []string
+	PreHydratedFiles string
 }
 
 // buildCodingInstruction assembles the base instruction text (role framing, repo path
@@ -78,9 +80,10 @@ func buildCodingInstruction(ctx context.Context, stepCtx workflow.StepContext, p
 	}
 
 	data := codingTemplateData{
-		InstructionVerb: p.InstructionVerb,
-		RepoContext:     repoContext,
-		PRFeedback:      p.PRFeedback,
+		InstructionVerb:  p.InstructionVerb,
+		RepoContext:      repoContext,
+		PRFeedback:       p.PRFeedback,
+		PreHydratedFiles: p.PreHydratedFiles,
 	}
 
 	// Perform repository structure scan
@@ -181,4 +184,39 @@ func buildCodingInstruction(ctx context.Context, stepCtx workflow.StepContext, p
 	}
 
 	return instruction, physicalRoot, ctx
+}
+
+func buildPreHydratedContext(ctx context.Context, task *models.Task, fileReader AffectedFileReader, frozenCtx *models.FrozenContext) string {
+	if frozenCtx == nil || fileReader == nil {
+		return ""
+	}
+	var sb strings.Builder
+	tokens := 0
+	const maxTokens = 4000 // roughly 16000 chars
+
+	for _, af := range frozenCtx.AffectedFiles {
+		content, ok := fileReader.ReadAffectedFileContent(ctx, task, af.File)
+		if !ok || content == "" {
+			continue
+		}
+		
+		lines := strings.Split(content, "\n")
+		if len(lines) > 200 {
+			lines = lines[:200]
+			lines = append(lines, "... (file truncated due to length)")
+			content = strings.Join(lines, "\n")
+		}
+
+		estTokens := len(content) / 4
+		if tokens+estTokens > maxTokens {
+			break
+		}
+		
+		if sb.Len() == 0 {
+			sb.WriteString("\n\n## Pre-Read Files (do NOT re-read these)\n")
+		}
+		sb.WriteString(fmt.Sprintf("\n### %s\n```\n%s\n```\n", af.File, content))
+		tokens += estTokens
+	}
+	return sb.String()
 }

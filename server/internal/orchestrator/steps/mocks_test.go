@@ -73,6 +73,7 @@ type mockWorktreeManager struct {
 
 	checkpointStepIDs []string // every stepID passed to CreateGitCheckpoint, in order
 	checkpointErr     error
+	checkpointResult  *models.CheckpointResult
 	restoredHashes    []string // every commitHash passed to RestoreGitCheckpoint, in order
 	restoreErr        error
 }
@@ -106,12 +107,15 @@ func (m *mockWorktreeManager) ResetRoleWorktrees(ctx context.Context, task *mode
 	return nil
 }
 
-func (m *mockWorktreeManager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (string, error) {
+func (m *mockWorktreeManager) CreateGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, worktreeSuffix string) (*models.CheckpointResult, error) {
 	m.checkpointStepIDs = append(m.checkpointStepIDs, stepID)
 	if m.checkpointErr != nil {
-		return "", m.checkpointErr
+		return nil, m.checkpointErr
 	}
-	return "mock-commit-hash-" + stepID, nil
+	if m.checkpointResult != nil {
+		return m.checkpointResult, nil
+	}
+	return &models.CheckpointResult{Hash: "mock-commit-hash-" + stepID}, nil
 }
 
 func (m *mockWorktreeManager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, agent *models.Agent, commitHash string, worktreeSuffix string) error {

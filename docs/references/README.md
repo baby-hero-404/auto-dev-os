@@ -1,62 +1,155 @@
-# 📚 Danh Mục Tài Liệu Tham Khảo & Học Hỏi Từ Các Dự Án Mã Nguồn Mở
+# 📚 Reference Projects Analysis
 
-Thư mục này chứa các phân tích chi tiết về 12 dự án mã nguồn mở và tài liệu kỹ thuật trong thư mục `references/`, đóng vai trò định hình kiến trúc phát triển cho **Auto Code OS**.
+> **Purpose**: Extract actionable learnings from 20 reference projects to improve Auto Code OS.
+> **Generated**: 2026-07-17 | **Focus**: What can we adopt to make our AI-native SDLC platform best-in-class.
 
-## 📁 Sơ Đồ Cấu Trúc Restructure Mới (`docs/references/`)
+## Reference Index
 
-Dưới đây là cấu trúc thư mục tài liệu tham khảo đã được sắp xếp lại gọn gàng, chia nhỏ theo từng dự án:
-
-```
-docs/references/
-├── README.md                           # File tổng hợp chung (Bản này)
-├── 9router.md                          # Local AI Gateway, RTK Token Saver
-├── ai-sdlc.md                          # Chu trình SDLC tự chủ, Cross-Harness Review
-├── agentmemory.md                      # Bộ nhớ 4 tầng, RAG 3 luồng (RRF), Ebbinghaus curve
-├── openspec.md                         # Phát triển song song, 3-way Spec Merge
-├── multica.md                          # CLI/Daemon, Workspace Garbage Collection
-├── openclaw.md                         # Docker Sandbox, Multi-channel Inbox
-├── superpowers.md                      # Quy trình TDD (Red-Green-Refactor)
-├── hermes-agent.md                     # Vòng lặp tự học (Closed learning loop), RPC Sub-agents
-├── free-claude-code.md                 # API Proxy CLI, Remote code control
-├── prompt-base.md                      # JIT Skill Loading, Minimal Viable Context
-├── antigravity-awesome-skills.md       # Thư viện 1,470+ Kỹ năng (Seed Data)
-└── llm-key-manager.md                  # Mã hóa vault, Effective Score key routing
-```
-
----
-
-## 📊 Bảng Tổng Hợp So Sánh & Bài Học Kinh Nghiệm
-
-| Dự Án | Tính Năng Hay Nhất | Bài Học Lớn Nhất Cho Auto Code OS | Tài Liệu Chi Tiết |
-|---|---|---|---|
-| **Multica** | CLI & Local Daemon nhận task qua Websockets | Tự động dọn dẹp Workspace cũ (GC) để tránh đầy đĩa | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/multica.md) |
-| **OpenClaw** | Control plane định tuyến kênh chat, Docker Sandbox | Xây dựng Sandbox Docker phân quyền bảo mật cao | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/openclaw.md) |
-| **AI-SDLC** | Vòng lặp SDLC kín, Review chéo (Cross-Harness) | Thiết lập chỉ số Tự chủ (Autonomy) và chặn cost LLM | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/ai-sdlc.md) |
-| **9router** | Nén token RTK, Fallback model 3 tầng | Nén terminal log của test run trước khi gửi AI | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/9router.md) |
-| **OpenSpec** | Phân rã spec thành sub-tasks, Merge spec song song | Dùng Fingerprint Hash để chống xung đột ghi đè spec | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/openspec.md) |
-| **AgentMemory** | Bộ nhớ 4 lớp (Working, Episodic, Semantic, Procedural) | Tìm kiếm RAG 3 luồng tích hợp RRF (Vector + BM25) | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/agentmemory.md) |
-| **Superpowers** | Cưỡng chế pipeline, TDD Red-Green-Refactor | Bắt AI tạo test case fail (RED) trước khi sửa code | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/superpowers.md) |
-| **Hermes Agent** | Tự động đúc kết Skill mới sau task khó | Vòng lặp tự học (Self-Improving) viết playbook | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/hermes-agent.md) |
-| **Free Claude Code** | API Proxy ghi đè endpoint cục bộ | Bọc (wrap) các công cụ AI CLI tiêu chuẩn vào sandbox | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/free-claude-code.md) |
-| **Prompt Base** | Nạp Skill JIT (Just-In-Time) | Tối ưu prompt động, tránh framework tax | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/prompt-base.md) |
-| **Awesome Skills** | 1,470+ Kỹ năng đóng gói bằng Markdown di động | Dùng làm seed data nạp sẵn vào Database PostgreSQL | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/antigravity-awesome-skills.md) |
-| **LLM Key Manager** | Vault client bảo mật, thuật toán Effective Score | Chạy công thức Effective Score chọn API Key tối ưu | [Xem chi tiết](file:///home/ubuntu/my_projects/auto_code_os/docs/references/llm-key-manager.md) |
+| # | Project | Category | Relevance | Report |
+|---|---------|----------|-----------|--------|
+| 1 | Multica | Agent Platform | ⭐⭐⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-multica.md) |
+| 2 | AI-SDLC | SDLC Framework | ⭐⭐⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-ai-sdlc.md) |
+| 3 | Hermes Agent | AI Agent | ⭐⭐⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-hermes-agent.md) |
+| 4 | AgentMemory | Agent Memory | ⭐⭐⭐⭐⭐ | [Report](./memory/DISCOVERY-agentmemory.md) |
+| 5 | Aider | AI Pair Programming | ⭐⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-aider.md) |
+| 6 | OpenSpec | Spec-Driven Dev | ⭐⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-openspec.md) |
+| 7 | 9Router | LLM Router | ⭐⭐⭐⭐ | [Report](./infrastructure/DISCOVERY-9router.md) |
+| 8 | Zep | Memory + Knowledge | ⭐⭐⭐⭐ | [Report](./memory/DISCOVERY-zep.md) |
+| 9 | Headroom | Token Compression | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-headroom.md) |
+| 10 | Claw Compactor | Token Compression | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-claw-compactor.md) |
+| 11 | RTK | Token Compression | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-rtk.md) |
+| 12 | Caveman | Output Reduction | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-caveman.md) |
+| 13 | TOON | Token Format | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-toon.md) |
+| 14 | LLMLingua | Prompt Compression | ⭐⭐⭐ | [Report](./token-compression/DISCOVERY-llmlingua.md) |
+| 15 | OpenClaw | AI Gateway | ⭐⭐⭐ | [Report](./infrastructure/DISCOVERY-openclaw.md) |
+| 16 | Free Claude Code | Proxy | ⭐⭐ | [Report](./infrastructure/DISCOVERY-free-claude-code.md) |
+| 17 | Superpowers | Skills Framework | ⭐⭐⭐ | [Report](./agent-platform/DISCOVERY-superpowers.md) |
+| 18 | Prompt Base | Skills Framework | ⭐⭐ | [Report](./infrastructure/DISCOVERY-prompt-base.md) |
+| 19 | Antigravity Skills | Skills Registry | ⭐⭐ | [Report](./infrastructure/DISCOVERY-antigravity-awesome-skills.md) |
+| 20 | LLM Key Manager | Key Management | ⭐⭐⭐ | [Report](./infrastructure/DISCOVERY-llm-key-manager.md) |
 
 ---
 
-## 🛠️ Tổng Hợp Sự Cố Patching & Giải Pháp Khắc Phục (Patching Remediation)
+## 🏆 Top 10 Applied Takeaways (Ranked by Priority)
 
-*(Thông tin tổng hợp và mở rộng từ báo cáo sự cố `llm-patching-issue-report.md` cũ)*
+> These are the most impactful ideas from ALL references, mapped onto Auto Code OS.
 
-### Vấn Đề
-Khi AI sinh file patch (unified diff) để áp dụng vào codebase thông qua lệnh `git apply`, hệ thống rất dễ gặp lỗi crash luồng (`exit code 2`) do:
-1. Thiếu thông tin dòng trống hoặc whitespace không khớp.
-2. Metadata header của diff hunk bị lệch số dòng.
-3. Không thể tự phục hồi khiến cả task bị hủy bỏ lãng phí token trước đó.
+### 1. **Agent Persistent Memory System** (from agentmemory + zep)
+- **What**: Hybrid search (FTS5 + vector/embedding) over session transcripts with confidence-scored knowledge items, auto-crystallization, and temporal decay.
+- **Apply to Auto Code OS**: Add an `agent_memory` PostgreSQL table with `tsvector` full-text search. Store learnings from each task run (what worked, what failed, common patterns in this repo). Let the orchestrator query past task knowledge before starting new tasks.
+- **Impact**: HIGH · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 3-5 days
 
-### Giải Pháp Đã Thử Nghiệm & Đề Xuất Cho Auto Code OS
-1. **Cơ chế Phục Hồi Nhẹ (Graceful Degradation):** Khi `git apply` lỗi, hệ thống không crash mà đánh dấu là *Sự kiện có thể khôi phục*. Task sẽ gửi file diff bị lỗi sang bước `ReviewerAgent` để AI tự chỉnh sửa lại các hunk bị lệch.
-2. **Hybrid Patch Engine:** Xây dựng một module Go có khả năng tự động chuyển đổi giữa 2 cơ chế:
-    *   *Ưu tiên 1:* **Unified Diff** (`git apply` nhanh, chính xác nếu diff chuẩn).
-    *   *Ưu tiên 2 (Fallback):* **Search & Replace Block Matching** (Fuzzy matching). AI chỉ cần sinh ra khối text cũ và khối text mới. Hệ thống Go sẽ tự động tìm kiếm khối cũ trong codebase (cho phép sai lệch nhỏ về whitespace) và thay thế bằng khối mới.
-3. **Patch Validator:** Chạy bộ kiểm duyệt cú pháp diff trước khi thực hiện ghi xuống ổ đĩa, đảm bảo độ an toàn cho mã nguồn.
+### 2. **Definition-of-Ready Gate** (from ai-sdlc)
+- **What**: A DoR gate refuses to dispatch tasks that haven't been fully specified. Operators resolve open questions before the agent starts, preventing waste.
+- **Apply to Auto Code OS**: Add a `dor_check` step between `spec_review` and `coding` in the orchestrator DAG. Validate that all required fields (acceptance criteria, test expectations, file scope) are populated before dispatching to the sandbox.
+- **Impact**: HIGH · **Effort**: LOW · **Risk**: LOW · **Est**: 1-2 days
+
+### 3. **Cross-Harness Review** (from ai-sdlc)
+- **What**: Different LLM providers review each other's work (Claude reviews Codex output, and vice versa). DSSE envelopes prevent "self-review" by construction.
+- **Apply to Auto Code OS**: In the `reviewing` step, use a different LLM provider than the one used for `coding`. Add a `review_harness` field to the task model. The unified LLM gateway (`pkg/llm`) already supports multiple providers — wire it to enforce cross-provider review.
+- **Impact**: HIGH · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 2-3 days
+
+### 4. **Reusable Skills System** (from multica + hermes-agent + superpowers)
+- **What**: Agents create skills from experience. After completing a complex task, the solution is abstracted into a reusable skill that future tasks can reference. Skills self-improve during use.
+- **Apply to Auto Code OS**: Add a `skills` table and `orchestrator/skills/` module (already exists as a dir!). After a task reaches `merged`, extract patterns (prompts that worked, tool sequences, test strategies) into a skill record. In `context_loading`, query relevant skills to bootstrap the agent.
+- **Impact**: HIGH · **Effort**: HIGH · **Risk**: MEDIUM · **Est**: 5-8 days
+
+### 5. **LLM Token Compression Layer** (from headroom + claw-compactor + rtk)
+- **What**: A proxy/middleware that compresses tool outputs, logs, and context before they reach the LLM. 50-90% reduction in token cost with CCR (Cached Compressible Retrieval).
+- **Apply to Auto Code OS**: Integrate `headroom` as a proxy layer in the sandbox agent's LLM calls. Add compression middleware in `pkg/llm/` that strips redundant file content, deduplicates context, and summarizes verbose tool outputs before sending to the model.
+- **Impact**: HIGH · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 2-3 days
+
+### 6. **Worktree-Based Task Isolation** (from ai-sdlc)
+- **What**: Each task runs in an isolated `git worktree` instead of branch switching. Parent worktree is read-only. Multiple tasks can execute in parallel without conflicts.
+- **Apply to Auto Code OS**: Replace the current sandbox branch-checkout model with `git worktree add .worktrees/<task-id>` in `orchestrator/gitops/`. This enables true parallel task execution and prevents half-completed work from polluting the main workspace.
+- **Impact**: HIGH · **Effort**: MEDIUM · **Risk**: MEDIUM · **Est**: 3-4 days
+
+### 7. **Real-Time WebSocket Execution Streaming** (from multica)
+- **What**: Full lifecycle events (enqueue → claim → start → progress → complete/fail) streamed to the frontend via WebSocket with real-time progress updates.
+- **Apply to Auto Code OS**: Enhance the existing log streaming. Add structured WebSocket events for each DAG step transition. The frontend can show a live execution timeline instead of polling for status updates.
+- **Impact**: MEDIUM · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 2-3 days
+
+### 8. **Smart LLM Router with Cost Optimization** (from 9router)
+- **What**: Route LLM requests to the cheapest capable model. Easy tasks → small models, complex tasks → large models. Token savings tracking dashboard.
+- **Apply to Auto Code OS**: Add complexity-based routing in `pkg/llm/`. Easy tasks use cheaper models for `context_loading` and `analyzing`, while `coding` uses the premium model. Add a `token_usage` table to track costs per task.
+- **Impact**: MEDIUM · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 3-4 days
+
+### 9. **Declarative Governance Schemas** (from ai-sdlc)
+- **What**: JSON Schema-defined resources for pipelines, quality gates, agent roles, and autonomy policies. Governance is configuration, not code.
+- **Apply to Auto Code OS**: Define JSON schemas for task types, pipeline configurations, and quality thresholds under `docs/schemas/`. Allow users to configure the DAG flow per-project without code changes (e.g., skip `spec_review` for hotfixes).
+- **Impact**: MEDIUM · **Effort**: HIGH · **Risk**: LOW · **Est**: 5-7 days
+
+### 10. **Attestation & Audit Trail** (from ai-sdlc)
+- **What**: Every code change carries a signed attestation envelope (DSSE) identifying who wrote it, who reviewed it, and which harness was used. Full audit trail.
+- **Apply to Auto Code OS**: Add attestation metadata to PRs created by the orchestrator. Store agent identity, model used, prompt hash, and review chain in the task record. Critical for enterprise adoption and compliance.
+- **Impact**: MEDIUM · **Effort**: MEDIUM · **Risk**: LOW · **Est**: 3-4 days
+
+---
+
+## 📊 Cross-Project Comparison
+
+### Architecture & Patterns
+
+| Project | Language | Architecture | State Management | Testing | DX |
+|---------|----------|-------------|-----------------|---------|-----|
+| AI-SDLC | TypeScript | Pipeline steps (0-13) | DAG + filter chain | ⭐⭐⭐⭐⭐ hermetic | ⭐⭐⭐ high config |
+| Multica | TypeScript | Turborepo monorepo | Convex reactive DB | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Hermes Agent | TypeScript | Event-driven agent | Learning loop + skills DB | ⭐⭐⭐ | ⭐⭐⭐ |
+| Aider | Python | CLI + repo map | Git diff tracking | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| OpenSpec | TypeScript | CLI + artifact graph | File-based spec sets | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Superpowers | TypeScript | Skill composition | Subagent delegation | ⭐⭐⭐ | ⭐⭐⭐ |
+| AgentMemory | Python | Library | SQLite + hybrid search | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Zep | Go | Microservice | PostgreSQL + Neo4j | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| Headroom | Rust | Proxy | CCR compression | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| 9Router | Go | Reverse proxy | Cost-based routing | ⭐⭐⭐ | ⭐⭐⭐ |
+
+### Token Cost Strategy
+
+| Project | Approach | Claimed Savings | Integration Effort |
+|---------|----------|----------------|--------------------|
+| Headroom | Proxy + CCR compression | 50-90% | LOW (drop-in proxy) |
+| Claw Compactor | 14-stage fusion pipeline | 60-80% | MEDIUM (Python lib) |
+| RTK | Rust CLI preprocessing | 40-60% | LOW (CLI wrapper) |
+| Caveman | Output shaping skill | 65% fewer output tokens | LOW (prompt skill) |
+| TOON | Compact notation format | 30-50% | LOW (format spec) |
+| LLMLingua | Research-grade compression | 2-10× | HIGH (model dependency) |
+
+### Memory & Learning Strategy
+
+| Project | Storage | Search | Knowledge Extraction |
+|---------|---------|--------|---------------------|
+| AgentMemory | SQLite (FTS5) | Hybrid (FTS + vector) | Auto-crystallization |
+| Zep | PostgreSQL + Neo4j | Knowledge graph traversal | Entity extraction + temporal |
+| Hermes Agent | File-based | Pattern matching | Skill creation from experience |
+
+---
+
+## Category Reports
+
+### Agent Platform
+- [DISCOVERY-multica.md](./agent-platform/DISCOVERY-multica.md) — Agent-as-teammate platform (highest relevance)
+- [DISCOVERY-ai-sdlc.md](./agent-platform/DISCOVERY-ai-sdlc.md) — Spec-driven SDLC framework
+- [DISCOVERY-hermes-agent.md](./agent-platform/DISCOVERY-hermes-agent.md) — Self-improving AI agent
+- [DISCOVERY-aider.md](./agent-platform/DISCOVERY-aider.md) — AI pair programming (Python)
+- [DISCOVERY-openspec.md](./agent-platform/DISCOVERY-openspec.md) — Spec-driven development CLI
+- [DISCOVERY-superpowers.md](./agent-platform/DISCOVERY-superpowers.md) — Composable skills framework
+
+### Memory & Knowledge
+- [DISCOVERY-agentmemory.md](./memory/DISCOVERY-agentmemory.md) — Persistent agent memory
+- [DISCOVERY-zep.md](./memory/DISCOVERY-zep.md) — Knowledge graphs & memory
+
+### Token Compression
+- [DISCOVERY-headroom.md](./token-compression/DISCOVERY-headroom.md) — Rust proxy, CCR compression
+- [DISCOVERY-claw-compactor.md](./token-compression/DISCOVERY-claw-compactor.md) — 14-stage fusion pipeline
+- [DISCOVERY-rtk.md](./token-compression/DISCOVERY-rtk.md) — Rust CLI, 100+ commands
+- [DISCOVERY-caveman.md](./token-compression/DISCOVERY-caveman.md) — Output token reduction
+- [DISCOVERY-toon.md](./token-compression/DISCOVERY-toon.md) — Token-Oriented Object Notation
+- [DISCOVERY-llmlingua.md](./token-compression/DISCOVERY-llmlingua.md) — Microsoft prompt compression
+
+### Infrastructure
+- [DISCOVERY-9router.md](./infrastructure/DISCOVERY-9router.md) — LLM routing & token saving
+- [DISCOVERY-openclaw.md](./infrastructure/DISCOVERY-openclaw.md) — Multi-channel AI gateway
+- [DISCOVERY-free-claude-code.md](./infrastructure/DISCOVERY-free-claude-code.md) — Local proxy
+- [DISCOVERY-llm-key-manager.md](./infrastructure/DISCOVERY-llm-key-manager.md) — Hybrid AI gateway
+- [DISCOVERY-prompt-base.md](./infrastructure/DISCOVERY-prompt-base.md) — Modular AI framework
+- [DISCOVERY-antigravity-awesome-skills.md](./infrastructure/DISCOVERY-antigravity-awesome-skills.md) — 1900+ skills registry

@@ -44,7 +44,7 @@ tmp/
 temp/
 
 # External cloned references
-references/
+./references/*
 
 .data/
 
@@ -58,3 +58,4 @@ web/.ds-sync-cache/
 .ai-memory/last_recall_session
 .ai-memory/memory.db
 .tokensave
+.claude/.headroom_wrap_marker.json

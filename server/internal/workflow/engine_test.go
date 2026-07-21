@@ -203,7 +203,7 @@ func TestEngine_ResumeFromPausedState(t *testing.T) {
 func TestEngine_ParallelStepRetrySkipsCompleted(t *testing.T) {
 	var mu sync.Mutex
 	executed := make(map[string]int)
-	
+
 	runFunc := func(id string, shouldFail bool) StepFunc {
 		return func(context.Context, StepContext) (map[string]any, error) {
 			mu.Lock()

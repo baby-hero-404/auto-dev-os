@@ -51,14 +51,14 @@ type UpdateProviderCredentialInput struct {
 }
 
 type ProviderCredentialResponse struct {
-	ID            string          `json:"id"`
-	Provider      string          `json:"provider"`
-	Label         string          `json:"label"`
-	BaseURL       string          `json:"base_url,omitempty"`
-	Status        string          `json:"status"`
-	Priority      int             `json:"priority"`
-	Configured    bool            `json:"configured"`
-	KeySuffix     string          `json:"key_suffix,omitempty"`
+	ID             string               `json:"id"`
+	Provider       string               `json:"provider"`
+	Label          string               `json:"label"`
+	BaseURL        string               `json:"base_url,omitempty"`
+	Status         string               `json:"status"`
+	Priority       int                  `json:"priority"`
+	Configured     bool                 `json:"configured"`
+	KeySuffix      string               `json:"key_suffix,omitempty"`
 	CooldownUntil  *time.Time           `json:"cooldown_until,omitempty"`
 	ModelCooldowns map[string]time.Time `json:"model_cooldowns,omitempty"`
 	Metadata       json.RawMessage      `json:"metadata,omitempty"`

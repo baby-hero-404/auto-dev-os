@@ -51,6 +51,10 @@ func (m *mockGitProvider) MergePR(ctx context.Context, owner, repo, prURL, token
 	return nil
 }
 
+func (m *mockGitProvider) IsPRMerged(ctx context.Context, owner, repo, prURL, token string) (bool, error) {
+	return false, nil
+}
+
 func (m *mockGitProvider) ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error) {
 	return nil, nil
 }
@@ -391,4 +395,3 @@ func TestGitOpsAdapter_ProviderAndTokenForRepo_OrgFallbackDecryptedOnce(t *testi
 		t.Errorf("expected decrypt to be called exactly once, called %d times", dec.decryptCount)
 	}
 }
-

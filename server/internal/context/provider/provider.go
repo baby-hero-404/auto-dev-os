@@ -24,6 +24,13 @@ type ContextKey string
 
 const WorkspaceRootKey ContextKey = "retriever_workspace_root"
 
+// TaskDescriptionKey carries free-text task title/description into GetRepoMap
+// so it can boost PageRank for files that define mentioned identifiers. Kept
+// out of the GetRepoMap signature (rather than adding a parameter) to avoid
+// touching every ContextEngine mock/call site; a missing or empty value is a
+// no-op and reproduces the pre-mention-boost ranking exactly.
+const TaskDescriptionKey ContextKey = "retriever_task_description"
+
 type RepoCommitInfo struct {
 	RepoName   string
 	RepoPath   string // absolute path to repository in workspace
@@ -309,7 +316,8 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 	graph.BuildGraph(allTags)
 
 	// 4. Personalized Importance Ranking
-	pageRank := graph.CalculatePageRank(activeFiles)
+	taskDescription, _ := ctx.Value(TaskDescriptionKey).(string)
+	pageRank := graph.CalculatePageRank(activeFiles, taskDescription)
 
 	// 5. Binary Pruning & Code-Body Stripping
 	result := repomap.PruneTags(allTags, pageRank, maxTokens, repomap.FormatSkeleton, repomap.CountTokens)

@@ -94,7 +94,7 @@ func NewRouter(d Deps) http.Handler {
 	auditH := NewAuditHandler(d.AuditSvc)
 	prH := NewPRHandler(d.TaskSvc, d.AuditSvc, d.Orch)
 	authH := NewAuthHandler(d.AuthSvc)
-	webhookH := NewWebhookHandler(d.TaskSvc)
+	webhookH := NewWebhookHandler(d.TaskSvc, d.Orch)
 	workflowH := NewWorkflowHandler(d.Orch)
 	memoryH := NewMemoryHandler(d.MemorySvc)
 	learningH := NewLearningHandler(d.LearningSvc)

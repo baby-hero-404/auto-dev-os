@@ -23,8 +23,6 @@ func NewMemoryService(memories *repository.MemoryRepo, edges *repository.Knowled
 	return &MemoryService{memories: memories, edges: edges}
 }
 
-
-
 func (s *MemoryService) SetEmbedder(embedder MemoryEmbedder) {
 	s.embedder = embedder
 }
@@ -126,8 +124,6 @@ func (s *MemoryService) PromoteToProcedural(ctx context.Context, memoryID string
 	return s.memories.UpdateTier(ctx, memoryID, models.MemoryTierProcedural, mem.Summary)
 }
 
-
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Maintenance
 // ──────────────────────────────────────────────────────────────────────────────
@@ -206,8 +202,6 @@ func (s *MemoryService) CreateEdge(ctx context.Context, edge *models.KnowledgeEd
 // Internal Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-
-
 // stripSecrets removes potential API keys, tokens, and passwords from content.
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|auth)\s*[:=]\s*\S+`),
@@ -242,5 +236,3 @@ func truncateSummary(content string, maxLen int) string {
 	}
 	return truncated + "..."
 }
-
-

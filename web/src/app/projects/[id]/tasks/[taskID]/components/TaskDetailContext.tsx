@@ -69,6 +69,7 @@ export function deriveImplementationItems(
     const isDone = completedSteps.has(stepId);
     const isRunning = !isDone && runningSteps.has(stepId);
     
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     const name = (unit as any).title || (unit as any).intent?.capability || unit.objective || `Unit ${idx}`;
     const description = (unit as any).description || unit.objective || '';
     const affectedFiles = (unit as any).affected_files || [];
@@ -83,6 +84,7 @@ export function deriveImplementationItems(
       checkpointExists: isDone,
       tasks: (unit as any).tasks || [],
     };
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   });
 }
 

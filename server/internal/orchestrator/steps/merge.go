@@ -7,6 +7,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 // MergeStep implements Step for the merge phase.
@@ -82,9 +83,9 @@ func (s *MergeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (
 		}
 	}
 
-	integrationBranch := fmt.Sprintf("feature/%s", s.rt.Task.ID)
-	beBranch := fmt.Sprintf("feature/%s-be", s.rt.Task.ID)
-	feBranch := fmt.Sprintf("feature/%s-fe", s.rt.Task.ID)
+	integrationBranch := paths.DeriveBranchName(s.rt.Task.ID, s.rt.Task.Title)
+	beBranch := paths.DeriveRoleBranchName(s.rt.Task.ID, s.rt.Task.Title, "be")
+	feBranch := paths.DeriveRoleBranchName(s.rt.Task.ID, s.rt.Task.Title, "fe")
 
 	hasConflicts := false
 	var conflictDetails []string

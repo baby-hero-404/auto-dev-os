@@ -185,7 +185,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		IsEasy:           t != nil && t.Complexity == models.TaskComplexityEasy,
 		Role:             "frontend",
 		SubtaskKey:       "frontend",
-		InstructionVerb:  "Implement the frontend changes when applicable, using the available tools (e.g. search_replace, create_file) to edit files directly. Use run_tests/run_build/run_lint to verify your work before finishing.",
+		InstructionVerb:  "Implement the frontend changes when applicable, using the available tools (e.g. search_replace, create_file) to edit files directly. Use verify_workspace to verify your work before finishing.",
 		PRFeedback:       prFeedback,
 		PreHydratedFiles: preHydratedCtx,
 	})

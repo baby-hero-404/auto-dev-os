@@ -161,7 +161,7 @@ func (s *CodeBackendStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		IsEasy:           isEasy,
 		Role:             "backend",
 		SubtaskKey:       "backend",
-		InstructionVerb:  "Implement the backend changes using the available tools (e.g. search_replace, create_file) to edit files directly. Use run_tests/run_build/run_lint to verify your work before finishing.",
+		InstructionVerb:  "Implement the backend changes using the available tools (e.g. search_replace, create_file) to edit files directly. Use verify_workspace to verify your work before finishing.",
 		PRFeedback:       prFeedback,
 		PreHydratedFiles: preHydratedCtx,
 	})

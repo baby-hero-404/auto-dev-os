@@ -42,9 +42,7 @@ func DefaultRegistry(runtime sandbox.Runtime, provider tool.AffectedFilesProvide
 
 	// 5. Build/Test Tools
 	if runtime != nil {
-		r.Register(NewRunTestsTool(runtime))
-		r.Register(NewRunBuildTool(runtime))
-		r.Register(NewRunLintTool(runtime))
+		r.Register(NewVerifyWorkspaceTool(runtime))
 	}
 
 	// 6. Context Tools

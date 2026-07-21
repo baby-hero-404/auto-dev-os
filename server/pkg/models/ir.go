@@ -22,7 +22,6 @@ func IsStateMachineEnabled(ctx context.Context) bool {
 	return enabled
 }
 
-
 //go:embed schemas/execution_ir.schema.json
 var executionIRSchemaJSON []byte
 
@@ -130,8 +129,8 @@ func ParseExecutionIR(data []byte) (ExecutionIR, error) {
 
 type ExecutionSnapshot struct {
 	ExecutionID   string           `json:"execution_id"`
-	CurrentState  string           `json:"current_state"` // one of the state machine states
-	Iteration     int              `json:"iteration"`     // within CurrentState
+	CurrentState  string           `json:"current_state"`  // one of the state machine states
+	Iteration     int              `json:"iteration"`      // within CurrentState
 	WorkspaceDiff string           `json:"workspace_diff"` // unified diff vs. node entry workspace
 	ToolHistory   []ToolCallRecord `json:"tool_history"`
 	PromptHash    string           `json:"prompt_hash"` // hash of compiled prompt for replay integrity
@@ -171,4 +170,3 @@ func ComputeSemanticHash(ir ExecutionIR, resolvedTargets []string) string {
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
-

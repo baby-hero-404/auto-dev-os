@@ -35,8 +35,6 @@ func (s *CredentialPoolService) TestConnection(ctx context.Context, orgID string
 	return nil
 }
 
-
-
 func testProviderConnection(ctx context.Context, cred models.ProviderCredential, apiKey string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

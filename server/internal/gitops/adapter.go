@@ -254,6 +254,28 @@ func (a *GitOpsAdapter) MergePullRequest(ctx context.Context, repoURL, prURL str
 	return provider.MergePR(ctx, owner, repoName, prURL, token)
 }
 
+func (a *GitOpsAdapter) IsPullRequestMerged(ctx context.Context, repoURL, prURL string) (bool, error) {
+	repoURL, repo, err := a.lookupRepository(ctx, repoURL)
+	if err != nil {
+		return false, err
+	}
+
+	owner, repoName, err := parseRepoOwnerName(repoURL)
+	if err != nil {
+		return false, err
+	}
+
+	provider, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	if provider == nil {
+		return false, fmt.Errorf("no provider available for repo %s", repoURL)
+	}
+
+	return provider.IsPRMerged(ctx, owner, repoName, prURL, token)
+}
+
 func (a *GitOpsAdapter) lookupRepository(ctx context.Context, repoURL string) (string, *models.Repository, error) {
 	if a.repoDb == nil {
 		return repoURL, nil, fmt.Errorf("repository lookup is not configured")

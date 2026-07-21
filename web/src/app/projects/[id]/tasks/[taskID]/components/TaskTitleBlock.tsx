@@ -7,10 +7,10 @@ import { DescriptionBody } from "./DescriptionBody";
 export function TaskTitleBlock() {
   const { task, workflow, isPaused } = useTaskDetail();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (!workflow?.checkpoints || workflow.checkpoints.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsedSeconds(0);
       return;
     }
@@ -38,10 +38,11 @@ export function TaskTitleBlock() {
   };
 
   const st = task?.status || "todo";
-  const P: Record<string, any> = {
+  const P: Record<string, [string, string, string, string, string]> = {
     todo:            ['Todo','todo','var(--surface)','var(--content-muted)','Preparation'],
     context_loading: ['Loading Context','context_loading','#e0efff','#005bb8','Preparation'],
     analyzing:       ['Analyzing','analyzing','#e0efff','#005bb8','Preparation'],
+    planning:        ['Planning','planning','#e0efff','#005bb8','Preparation'],
     spec_review:     ['Spec Review','spec_review','#fef3c6','#795800','Preparation · Gate'],
     coding:          ['Coding','coding','#e0efff','#005bb8','Execution'],
     testing:         ['Testing','testing','#e0efff','#005bb8','Execution'],
@@ -53,7 +54,7 @@ export function TaskTitleBlock() {
     failed:          ['Failed','failed','#ffe2e2','#bf000f','Finalization'],
   };
   const [label, , bg, fg, group] = P[st] || P.todo;
-  const running = ['context_loading','analyzing','coding','testing','reviewing','fixing'].includes(st);
+  const running = ['context_loading','analyzing','planning','coding','testing','reviewing','fixing'].includes(st);
   const paused = isPaused;
 
   return (

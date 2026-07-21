@@ -312,7 +312,6 @@ func (r *AgentRepo) ResetStuckAgents(ctx context.Context, cutoff time.Time) ([]m
 	return stuckAgents, nil
 }
 
-
 func (r *AgentRepo) orgIDForProject(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	if err := r.db.WithContext(ctx).Table("projects").Select("org_id").Where("id = ?", projectID).Scan(&orgID).Error; err != nil {

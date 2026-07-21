@@ -17,6 +17,7 @@ type GitProvider interface {
 	CommitAndPush(ctx context.Context, localPath, message, token, agentRole string) error
 	CreatePR(ctx context.Context, owner, repo, title, head, base, body, token string) (string, error)
 	MergePR(ctx context.Context, owner, repo, prURL, token string) error
+	IsPRMerged(ctx context.Context, owner, repo, prURL, token string) (bool, error)
 	ListRepos(ctx context.Context, token string) ([]models.RemoteRepository, error)
 	ValidateToken(ctx context.Context, token string) error
 }

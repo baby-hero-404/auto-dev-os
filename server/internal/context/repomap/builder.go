@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gonum.org/v1/gonum/graph/simple"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/source"
+	"gonum.org/v1/gonum/graph/simple"
 )
 
 // FileNode implements gonum's graph.Node
@@ -23,13 +23,18 @@ type DependencyGraph struct {
 	nodes  map[string]*FileNode
 	idToFn map[int64]string
 	nextID int64
+	// defsByFile maps a filepath to the base names of the symbols it defines,
+	// populated during BuildGraph. Used by mention-boost to find which nodes
+	// define an identifier mentioned in a task description.
+	defsByFile map[string][]string
 }
 
 func NewDependencyGraph() *DependencyGraph {
 	return &DependencyGraph{
-		Graph:  simple.NewWeightedDirectedGraph(0, 0),
-		nodes:  make(map[string]*FileNode),
-		idToFn: make(map[int64]string),
+		Graph:      simple.NewWeightedDirectedGraph(0, 0),
+		nodes:      make(map[string]*FileNode),
+		idToFn:     make(map[int64]string),
+		defsByFile: make(map[string][]string),
 	}
 }
 
@@ -55,6 +60,7 @@ func (g *DependencyGraph) BuildGraph(tags []source.Tag) {
 			parts := strings.SplitN(t.Name, ": ", 2)
 			baseName := parts[len(parts)-1]
 			defs[baseName] = append(defs[baseName], t.Filepath)
+			g.defsByFile[t.Filepath] = append(g.defsByFile[t.Filepath], baseName)
 			g.addNodeIfMissing(t.Filepath)
 		}
 	}
@@ -97,7 +103,7 @@ func (g *DependencyGraph) BuildGraph(tags []source.Tag) {
 		for targetFile, count := range targets {
 			targetNode := g.nodes[targetFile]
 			weight := math.Sqrt(float64(count))
-			
+
 			edge := g.Graph.WeightedEdge(srcNode.ID(), targetNode.ID())
 			if edge == nil {
 				g.Graph.SetWeightedEdge(simple.WeightedEdge{

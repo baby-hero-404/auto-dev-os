@@ -5,17 +5,17 @@ import { useTaskDetail } from "./TaskDetailContext";
 
 export function TaskSidebar() {
   const router = useRouter();
-  const { projectID, task, workflow, isPaused, cancel, deleteTask, workflowSteps, latest, analysisData, implementationItems, stepDurations } = useTaskDetail();
+  const { projectID, task, workflow, cancel, deleteTask, workflowSteps, latest, implementationItems, stepDurations } = useTaskDetail();
   const st = task?.status || "todo";
   
   const jobStatus = workflow?.job?.status?.toLowerCase();
   const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
-  const paused = isPaused;
 
-  const P: Record<string, any> = {
+  const P: Record<string, [string, string, string, string, string]> = {
     todo:            ['Todo','todo','var(--surface)','var(--content-muted)','Preparation'],
     context_loading: ['Loading Context','context_loading','#e0efff','#005bb8','Preparation'],
     analyzing:       ['Analyzing','analyzing','#e0efff','#005bb8','Preparation'],
+    planning:        ['Planning','planning','#e0efff','#005bb8','Preparation'],
     spec_review:     ['Spec Review','spec_review','#fef3c6','#795800','Preparation · Gate'],
     coding:          ['Coding','coding','#e0efff','#005bb8','Execution'],
     testing:         ['Testing','testing','#e0efff','#005bb8','Execution'],

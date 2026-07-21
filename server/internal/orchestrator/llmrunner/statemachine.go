@@ -59,7 +59,7 @@ var readOnlyTools = []string{
 var defaultToolAllowlists = map[NodeState]map[string]bool{
 	StateDiscovery:      toolSet(readOnlyTools...),
 	StateImplementation: toolSet(append(append([]string{}, readOnlyTools...), "search_replace", "create_file")...),
-	StateValidation:     toolSet(append(append([]string{}, readOnlyTools...), "run_tests", "run_lint", "run_build")...),
+	StateValidation:     toolSet(append(append([]string{}, readOnlyTools...), "verify_workspace")...),
 }
 
 func toolSet(tools ...string) map[string]bool {

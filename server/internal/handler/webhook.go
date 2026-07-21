@@ -6,15 +6,17 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 type WebhookHandler struct {
 	taskSvc TaskService
+	orch    *orchestrator.Orchestrator
 }
 
-func NewWebhookHandler(taskSvc TaskService) *WebhookHandler {
-	return &WebhookHandler{taskSvc: taskSvc}
+func NewWebhookHandler(taskSvc TaskService, orch *orchestrator.Orchestrator) *WebhookHandler {
+	return &WebhookHandler{taskSvc: taskSvc, orch: orch}
 }
 
 func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
@@ -23,16 +25,42 @@ func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := r.URL.Query().Get("project_id")
-	if projectID == "" {
-		writeJSON(w, http.StatusAccepted, envelope{"status": "ignored", "reason": "project_id query parameter is required to create tasks"})
-		return
-	}
-
 	event := r.Header.Get("X-GitHub-Event")
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid webhook payload")
+		return
+	}
+
+	if event == "pull_request" {
+		action, _ := payload["action"].(string)
+		pr, _ := payload["pull_request"].(map[string]any)
+		if pr != nil && action == "closed" {
+			merged, _ := pr["merged"].(bool)
+			if merged {
+				htmlURL, _ := pr["html_url"].(string)
+				if htmlURL != "" {
+					if h.orch == nil {
+						writeError(w, http.StatusInternalServerError, "orchestrator not configured")
+						return
+					}
+					task, err := h.orch.SyncPRMerged(r.Context(), htmlURL)
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					writeJSON(w, http.StatusOK, task)
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusAccepted, envelope{"status": "ignored", "reason": "not a merged pull request event"})
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		writeJSON(w, http.StatusAccepted, envelope{"status": "ignored", "reason": "project_id query parameter is required to create tasks"})
 		return
 	}
 

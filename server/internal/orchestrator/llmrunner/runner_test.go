@@ -256,7 +256,7 @@ func (m *mockStateMachineProvider) ChatWithOptions(ctx context.Context, messages
 		if len(m.calls) == 4 {
 			return &llm.Response{
 				Model:     "mock-model",
-				ToolCalls: []llm.ToolCall{{ID: "call-val", Name: "run_tests", Arguments: `{"command":"go test"}`}},
+				ToolCalls: []llm.ToolCall{{ID: "call-val", Name: "verify_workspace", Arguments: `{"command":"go test"}`}},
 			}, nil
 		}
 		return &llm.Response{Model: "mock-model", Content: `{"summary":"validation done"}`}, nil
@@ -300,7 +300,7 @@ func TestRunner_Run_StateMachineMode(t *testing.T) {
 		Provider: provider,
 		Tools: []llm.ToolDefinition{
 			{Name: "search_replace"},
-			{Name: "run_tests"},
+			{Name: "verify_workspace"},
 			{Name: "read_file"},
 		},
 		ToolExecutor: func(ctx context.Context, name, argumentsJSON string) (string, error) {
@@ -356,8 +356,8 @@ func TestRunner_Run_StateMachineMode(t *testing.T) {
 	if !executedTools["search_replace"] {
 		t.Error("expected search_replace tool to be executed")
 	}
-	if !executedTools["run_tests"] {
-		t.Error("expected run_tests tool to be executed")
+	if !executedTools["verify_workspace"] {
+		t.Error("expected verify_workspace tool to be executed")
 	}
 
 	parsed, ok := out["parsed"].(map[string]any)
@@ -405,7 +405,7 @@ func TestRunner_Run_StateMachineMode_SnapshotRoundTrip(t *testing.T) {
 		Provider: provider,
 		Tools: []llm.ToolDefinition{
 			{Name: "search_replace"},
-			{Name: "run_tests"},
+			{Name: "verify_workspace"},
 			{Name: "read_file"},
 		},
 		ToolExecutor: func(ctx context.Context, name, argumentsJSON string) (string, error) {

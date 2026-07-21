@@ -21,6 +21,15 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
+// dueForLearningNudge reports whether the mid-task learning nudge should
+// fire after successStepCount successful steps, given the configured
+// interval. Extracted as a pure function so the nudge cadence (fire every
+// Nth successful step, never on 0) is unit-testable without driving the
+// full workflow engine.
+func dueForLearningNudge(successStepCount, interval int) bool {
+	return interval > 0 && successStepCount > 0 && successStepCount%interval == 0
+}
+
 func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.run")
 	defer span.End()
@@ -135,6 +144,11 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 	_ = o.checkpoint(ctx, task.ID, &job.ID, "agent_confidence", learning.MarshalConfidenceToCheckpoint(confidence))
 
+	// Mid-task learning nudge: fires DetectPatterns periodically as steps complete,
+	// instead of only after the job reaches a terminal status (see below).
+	successStepCount := 0
+	const learningNudgeInterval = 4
+
 	engine := &workflow.Engine{
 		MaxParallel: 2,
 		OnEvent: func(ctx context.Context, event workflow.Event) error {
@@ -235,6 +249,17 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			// Record step observation memory
 			if o.memHooks != nil {
 				o.memHooks.PostStepRecord(ctx, agent.ID, task, sessionID, event.StepID, string(event.Status), event.Output)
+			}
+
+			// Mid-task learning nudge: periodically re-scan for recurring patterns
+			// while the task is still running, instead of waiting for it to finish.
+			// Non-blocking and cancellation-independent, mirroring the end-of-task call.
+			if event.Status == workflow.StepStatusSuccess {
+				successStepCount++
+				if o.learnEngine != nil && dueForLearningNudge(successStepCount, learningNudgeInterval) {
+					nudgeCtx := context.WithoutCancel(ctx)
+					go o.learnEngine.DetectPatterns(nudgeCtx, agent.ID)
+				}
 			}
 
 			if event.StepID == workflow.StepPlan && event.Status == workflow.StepStatusSuccess {
@@ -565,6 +590,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if finalStatus == models.WorkflowJobStatusDone {
 				le.DetectPatterns(leCtx, agent.ID)
 				le.SuggestRuleFromErrors(leCtx, agent.ID)
+				le.SuggestSkillFromTask(leCtx, leTask, leJob)
 			} else if finalStatus == models.WorkflowJobStatusFailed {
 				le.SuggestPromptPatch(leCtx, leTask, leJob)
 			}

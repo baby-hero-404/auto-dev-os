@@ -74,7 +74,7 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{
-				Integration: fmt.Sprintf("feature/%s", task.ID),
+				Integration: paths.DeriveBranchName(task.ID, task.Title),
 				Role:        make(map[string]string),
 			},
 		}
@@ -190,7 +190,7 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 
 		m.populateGoModulesCache(ctx, task.ID, repoAbsPath)
 
-		ws.Repos[i].Branches.Integration = fmt.Sprintf("feature/%s", task.ID)
+		ws.Repos[i].Branches.Integration = paths.DeriveBranchName(task.ID, task.Title)
 	}
 
 	if err := m.SaveTaskWorkspaceMetadata(task, ws); err != nil {

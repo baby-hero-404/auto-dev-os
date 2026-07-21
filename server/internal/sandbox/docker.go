@@ -122,11 +122,11 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 		// Define common language cache mappings: host absolute path -> container target path
 		cacheDirs := map[string]string{
-			goModCachePath:                          "/go/pkg/mod",
-			filepath.Join(homeDir, ".npm"):          "/root/.npm",
-			filepath.Join(homeDir, ".cache", "pip"): "/root/.cache/pip",
-			filepath.Join(homeDir, ".m2"):           "/root/.m2",
-			filepath.Join(homeDir, ".gradle"):       "/root/.gradle",
+			goModCachePath:                               "/go/pkg/mod",
+			filepath.Join(homeDir, ".npm"):               "/root/.npm",
+			filepath.Join(homeDir, ".cache", "pip"):      "/root/.cache/pip",
+			filepath.Join(homeDir, ".m2"):                "/root/.m2",
+			filepath.Join(homeDir, ".gradle"):            "/root/.gradle",
 			filepath.Join(homeDir, ".cargo", "registry"): "/root/.cargo/registry",
 		}
 

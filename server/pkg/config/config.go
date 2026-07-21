@@ -71,8 +71,8 @@ type SandboxConfig struct {
 }
 
 type WorkerConfig struct {
-	Enabled     bool `mapstructure:"enabled"`
-	IntervalMS  int  `mapstructure:"interval_ms"`
+	Enabled      bool    `mapstructure:"enabled"`
+	IntervalMS   int     `mapstructure:"interval_ms"`
 	Concurrency  int     `mapstructure:"concurrency"`
 	MaxPhaseCost float64 `mapstructure:"max_phase_cost"`
 }

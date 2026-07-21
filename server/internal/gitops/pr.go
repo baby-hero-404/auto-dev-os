@@ -128,3 +128,33 @@ func (p *GitHubProvider) MergePR(ctx context.Context, owner, repo, prURL, token 
 	}
 	return nil
 }
+
+func (p *GitHubProvider) IsPRMerged(ctx context.Context, owner, repo, prURL, token string) (bool, error) {
+	// Extract pull_number from prURL
+	parts := strings.Split(prURL, "/")
+	if len(parts) == 0 {
+		return false, fmt.Errorf("invalid PR URL: %s", prURL)
+	}
+	pullNumber := parts[len(parts)-1]
+
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/merge", p.baseURL, owner, repo, pullNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	p.authorize(req, token)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, fmt.Errorf("github check merge returned %s: %s", resp.Status, githubErrorMessage(resp.Body))
+}

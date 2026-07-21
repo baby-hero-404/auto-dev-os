@@ -22,6 +22,9 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
     const startMatch = log.message.match(/\[#\d+\] step ([\w-]+) running/);
     if (startMatch) {
       if (currentGroup) {
+        if (currentGroup.status === "running") {
+          currentGroup.status = "failed"; // Implicitly failed/interrupted if a new step starts
+        }
         result.push({ type: "group", ...currentGroup });
       }
       groupCount++;
@@ -148,14 +151,13 @@ export function parseMilestones(logs: RealtimeLog[]): MilestoneItem[] {
 
 interface LogConsoleProps {
   logs: RealtimeLog[];
-  isWorkflowRunning?: boolean;
   /** Controlled collapse state (REQ-006). When omitted, the console self-manages. */
   isExpanded?: boolean;
   onToggle?: () => void;
   hideHeader?: boolean;
 }
 
-export function LogConsole({ logs, isWorkflowRunning, isExpanded, onToggle, hideHeader = false }: LogConsoleProps) {
+export function LogConsole({ logs, isExpanded, onToggle, hideHeader = false }: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<"milestones" | "all">("all");
   const [isFullscreen, setIsFullscreen] = useState(false);

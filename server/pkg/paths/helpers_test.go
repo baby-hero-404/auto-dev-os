@@ -47,12 +47,12 @@ func TestResolveSafePath(t *testing.T) {
 
 func TestCanonicalizeRepoRelative(t *testing.T) {
 	tests := []struct {
-		name       string
-		path       string
-		repoName   string
-		branch     string
-		wantPath   string
-		wantOk     bool
+		name     string
+		path     string
+		repoName string
+		branch   string
+		wantPath string
+		wantOk   bool
 	}{
 		{
 			name:     "already relative",
@@ -132,3 +132,41 @@ func TestCanonicalizeRepoRelative(t *testing.T) {
 		})
 	}
 }
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Hello World", "hello-world"},
+		{"hello_world", "hello-world"},
+		{"Add billing reconcile schema!", "add-billing-reconcile-schema"},
+		{"Special!@#Characters$%^&*", "special-characters"},
+		{"A very long title that should be truncated because it is more than 30 characters long", "a-very-long-title-that-should"},
+	}
+
+	for _, tc := range tests {
+		got := Slugify(tc.input)
+		if got != tc.want {
+			t.Errorf("Slugify(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestDeriveBranchName(t *testing.T) {
+	taskID := "787ee609-85d5-4a04-8182-33e43df13685"
+	title := "Add billing reconcile schema"
+
+	got := DeriveBranchName(taskID, title)
+	want := "feature/add-billing-reconcile-schema-787ee609"
+	if got != want {
+		t.Errorf("DeriveBranchName(%q, %q) = %q, want %q", taskID, title, got, want)
+	}
+
+	gotRole := DeriveRoleBranchName(taskID, title, "be")
+	wantRole := "feature/add-billing-reconcile-schema-787ee609-be"
+	if gotRole != wantRole {
+		t.Errorf("DeriveRoleBranchName(%q, %q, \"be\") = %q, want %q", taskID, title, gotRole, wantRole)
+	}
+}
+

@@ -1,13 +1,13 @@
 "use client";
-
+ 
 import { useTaskDetail } from "./TaskDetailContext";
-import { AlertTriangle, Bot, Milestone, Calendar } from "lucide-react";
-
+import { AlertTriangle, Bot, Milestone, Calendar, Info } from "lucide-react";
+ 
 export function CheckpointsPanel() {
   const { task, workflow } = useTaskDetail();
-
+ 
   if (!workflow) return null;
-
+ 
   const agentName = task?.agent_id || "Unassigned";
   const attempts = workflow.job?.attempts ?? 0;
   const lastError = workflow.job?.last_error;
@@ -15,7 +15,11 @@ export function CheckpointsPanel() {
   
   // reversed checkpoints
   const reversedCheckpoints = [...checkpoints].reverse();
-
+  const isPauseReason = lastError && (
+    lastError.includes("workflow paused for human spec review") ||
+    lastError.includes("workflow paused for human task clarification")
+  );
+ 
   return (
     <div className="space-y-4 text-left">
       {/* Agent details */}
@@ -27,7 +31,7 @@ export function CheckpointsPanel() {
             <div className="text-sm font-semibold font-mono text-foreground mt-0.5">{agentName}</div>
           </div>
         </div>
-
+ 
         <div className="rounded-lg border border-stroke/50 bg-surface/30 p-3.5 flex items-center gap-3">
           <Milestone className="text-brand-primary shrink-0" size={18} />
           <div>
@@ -36,13 +40,29 @@ export function CheckpointsPanel() {
           </div>
         </div>
       </div>
-
+ 
       {lastError && (
-        <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3.5 flex items-start gap-2.5">
-          <AlertTriangle className="text-rose-500 shrink-0 mt-0.5" size={16} />
+        <div className={`rounded-lg border p-3.5 flex items-start gap-2.5 ${
+          isPauseReason
+            ? "border-amber-500/20 bg-amber-500/5 text-amber-500"
+            : "border-rose-500/20 bg-rose-500/5 text-rose-500"
+        }`}>
+          {isPauseReason ? (
+            <Info className="text-amber-500 shrink-0 mt-0.5" size={16} />
+          ) : (
+            <AlertTriangle className="text-rose-500 shrink-0 mt-0.5" size={16} />
+          )}
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-rose-500">Last Error</div>
-            <p className="text-xs font-mono bg-rose-500/10 border border-rose-500/20 rounded p-2.5 mt-1.5 break-all whitespace-pre-wrap text-rose-800 dark:text-rose-200">
+            <div className={`text-[10px] font-bold uppercase tracking-wider ${
+              isPauseReason ? "text-amber-500" : "text-rose-500"
+            }`}>
+              {isPauseReason ? "Pause Reason" : "Last Error"}
+            </div>
+            <p className={`text-xs font-mono rounded p-2.5 mt-1.5 break-all whitespace-pre-wrap ${
+              isPauseReason
+                ? "bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200"
+                : "bg-rose-500/10 border border-rose-500/20 text-rose-800 dark:text-rose-200"
+            }`}>
               {lastError}
             </p>
           </div>

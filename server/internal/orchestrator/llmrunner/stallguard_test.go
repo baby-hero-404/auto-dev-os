@@ -115,32 +115,22 @@ func TestRunToolLoop_StallGuardNoOpEdit(t *testing.T) {
 func TestStallGuard_InvalidationOnEdit(t *testing.T) {
 	sg := newStallGuard()
 
-	// 1. Record build and test runs
-	buildArgs := `{"target":"server"}`
-	testArgs := `{"package":"./..."}`
-	sg.RecordSuccess("run_build", buildArgs, 1)
-	sg.RecordSuccess("run_tests", testArgs, 2)
+	// 1. Record verify_workspace run
+	verifyArgs := `{"target":"server"}`
+	sg.RecordSuccess("verify_workspace", verifyArgs, 1)
 
-	// 2. Verify they are blocked when run again
-	_, blockedBuild := sg.Check("run_build", buildArgs)
-	if !blockedBuild {
-		t.Fatal("expected run_build to be blocked on duplicate call")
-	}
-	_, blockedTest := sg.Check("run_tests", testArgs)
-	if !blockedTest {
-		t.Fatal("expected run_tests to be blocked on duplicate call")
+	// 2. Verify it is blocked when run again
+	_, blockedVerify := sg.Check("verify_workspace", verifyArgs)
+	if !blockedVerify {
+		t.Fatal("expected verify_workspace to be blocked on duplicate call")
 	}
 
 	// 3. Record an edit tool success (e.g. search_replace or create_file)
-	sg.RecordSuccess("search_replace", `{"path":"main.go","search":"a","replace":"b"}`, 3)
+	sg.RecordSuccess("search_replace", `{"path":"main.go","search":"a","replace":"b"}`, 2)
 
-	// 4. Verify they are NO LONGER blocked
-	_, blockedBuildAfter := sg.Check("run_build", buildArgs)
-	if blockedBuildAfter {
-		t.Fatal("expected run_build to be invalidated and allowed after successful edit tool call")
-	}
-	_, blockedTestAfter := sg.Check("run_tests", testArgs)
-	if blockedTestAfter {
-		t.Fatal("expected run_tests to be invalidated and allowed after successful edit tool call")
+	// 4. Verify it is NO LONGER blocked
+	_, blockedVerifyAfter := sg.Check("verify_workspace", verifyArgs)
+	if blockedVerifyAfter {
+		t.Fatal("expected verify_workspace to be invalidated and allowed after successful edit tool call")
 	}
 }

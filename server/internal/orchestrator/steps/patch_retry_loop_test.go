@@ -300,7 +300,7 @@ func TestRunPatchRetryLoop_PartialResult_EmptyCheckpoint(t *testing.T) {
 			"edits_applied":     []string{"server/internal/foo.go"},
 		},
 	}
-	
+
 	// Mock returns IsEmpty = true
 	worktree := &mockWorktreeManager{
 		checkpointResult: &models.CheckpointResult{Hash: "mock-hash", IsEmpty: true},
@@ -335,4 +335,3 @@ func TestRunPatchRetryLoop_PartialResult_EmptyCheckpoint(t *testing.T) {
 		t.Errorf("expected error to be wrapped in ErrNoProgress due to empty checkpoint, got %v", err)
 	}
 }
-

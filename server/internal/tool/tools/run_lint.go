@@ -78,7 +78,7 @@ func (t *RunLintTool) Execute(ctx context.Context, call tool.Call) (tool.Result,
 		safePath, err := tool.SafeWorkspacePath(call.Workspace, args.Path)
 		if err != nil {
 			return tool.Result{
-				Success: false,
+				Success:     false,
 				Diagnostics: []tool.Diagnostic{{Severity: "error", Message: err.Error()}},
 			}, nil
 		}

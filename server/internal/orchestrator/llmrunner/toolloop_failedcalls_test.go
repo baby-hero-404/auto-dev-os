@@ -62,7 +62,7 @@ func TestToolLoop_NegativeMemory(t *testing.T) {
 
 func TestShadowStateMachine_HardGating(t *testing.T) {
 	budget := models.PhaseBudgets{Discovery: 1, Implementation: 1, Validation: 1}
-	
+
 	// Create StateMachine directly in Failed state
 	sm := NewStateMachineFrom(StateFailed, budget)
 

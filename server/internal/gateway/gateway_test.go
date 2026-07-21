@@ -744,10 +744,10 @@ func TestAIGatewayChatWithOptions_HarnessIndependenceGracefulFallback(t *testing
 
 func TestParseRetryDelay(t *testing.T) {
 	tests := []struct {
-		name    string
-		err     error
-		wantD   time.Duration
-		wantOk  bool
+		name   string
+		err    error
+		wantD  time.Duration
+		wantOk bool
 	}{
 		{
 			name:   "nil error",

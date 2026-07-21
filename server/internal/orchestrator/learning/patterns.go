@@ -128,6 +128,108 @@ func (le *LearningEngine) SuggestPromptPatch(ctx context.Context, task *models.T
 	}
 }
 
+// SuggestSkillFromTask proposes a reusable skill definition when a completed
+// task's memory record shows a non-trivial multi-step tool sequence. Mirrors
+// Hermes's `/learn` pattern: no separate distillation model call — this just
+// formats a CreateSuggestionInput from data already collected by
+// PostStepRecord/EvaluateOutcome, same as DetectPatterns does for pattern
+// suggestions. The suggestion always lands as "proposed" for HITL review;
+// this never registers a live, callable skill on its own.
+func (le *LearningEngine) SuggestSkillFromTask(ctx context.Context, task *models.Task, job *models.WorkflowJob) {
+	if le.memorySvc == nil || le.suggestionSvc == nil || task == nil {
+		return
+	}
+
+	memories, err := le.memorySvc.ListByAgent(ctx, safeAgentID(job.AgentID), models.MemoryTierWorking, 200, 0)
+	if err != nil {
+		slog.Warn("learning: failed to list memories for skill suggestion", "error", err)
+		return
+	}
+
+	stepSequence, toolCalls := taskToolCallSummary(task.ID, memories)
+
+	if len(toolCalls) < 3 {
+		return // not a non-trivial multi-tool-call task
+	}
+
+	taskID := task.ID
+	input := models.CreateSuggestionInput{
+		AgentID:        safeAgentID(job.AgentID),
+		ProjectID:      &task.ProjectID,
+		TaskID:         &taskID,
+		SuggestionType: models.SuggestionTypeSkill,
+		Title:          fmt.Sprintf("Reusable skill candidate from task '%s'", task.Title),
+		Description:    fmt.Sprintf("Task made %d distinct tool calls across steps (%s). Consider extracting it as a reusable skill.", len(toolCalls), strings.Join(stepSequence, " -> ")),
+		Content:        fmt.Sprintf("Proposed skill steps: %s\nTool calls: %s", strings.Join(stepSequence, " -> "), strings.Join(toolCalls, ", ")),
+		Confidence:     clampConfidence(float64(len(toolCalls)) * 0.1),
+	}
+
+	if _, err := le.suggestionSvc.CreateSuggestion(ctx, input); err != nil {
+		slog.Warn("learning: failed to create skill suggestion", "error", err)
+	}
+}
+
+// taskToolCallSummary extracts, from a task's step-observation memories, the
+// ordered distinct workflow steps the task went through and the distinct
+// tool-call proxies made along the way. Coding steps (CodeBackendStep et al)
+// record a "files_changed" entry in PostStepRecord's output for every file an
+// edit tool call (search_replace/create_file) touched; each distinct touched
+// file stands in for a distinct tool call, since the memory system does not
+// persist individual tool invocations directly (see memory_hooks.go
+// PostStepRecord, which only tags step-level observations).
+func taskToolCallSummary(taskID string, memories []models.EpisodicMemory) (stepSequence []string, toolCalls []string) {
+	seenSteps := make(map[string]bool)
+	seenFiles := make(map[string]bool)
+
+	for _, mem := range memories {
+		if mem.TaskID == nil || *mem.TaskID != taskID {
+			continue
+		}
+		if mem.Category != models.MemoryCategoryObservation && mem.Category != models.MemoryCategorySuccess {
+			continue
+		}
+		// PostStepRecord tags every step observation as ["workflow", stepID, status].
+		if len(mem.Tags) < 2 {
+			continue
+		}
+		stepID := mem.Tags[1]
+		if !seenSteps[stepID] {
+			seenSteps[stepID] = true
+			stepSequence = append(stepSequence, stepID)
+		}
+
+		for _, f := range extractChangedFiles(mem.Content) {
+			if !seenFiles[f] {
+				seenFiles[f] = true
+				toolCalls = append(toolCalls, f)
+			}
+		}
+	}
+
+	return stepSequence, toolCalls
+}
+
+// extractChangedFiles parses the "files_changed: [a.go b.go]" line that
+// PostStepRecord's content-building loop produces from a coding step's
+// output map (out["files_changed"] = changedFiles), returning the listed
+// file paths. Returns nil if the memory content contains no such line.
+func extractChangedFiles(content string) []string {
+	const marker = "files_changed: ["
+	_, rest, found := strings.Cut(content, marker)
+	if !found {
+		return nil
+	}
+	inner, _, found := strings.Cut(rest, "]")
+	if !found {
+		return nil
+	}
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return nil
+	}
+	return strings.Fields(inner)
+}
+
 func extractErrorTheme(lastError string) string {
 	lower := strings.ToLower(lastError)
 	themes := map[string]string{

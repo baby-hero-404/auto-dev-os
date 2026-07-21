@@ -145,6 +145,21 @@ func (r Runner) BuildInitialMessages(ctx context.Context, task *models.Task, age
 		}
 	}
 
+	if prevFiles, ok := ctx.Value("files_read_prev_attempt").([]string); ok {
+		for _, pf := range prevFiles {
+			found := false
+			for _, f := range filesToInclude {
+				if f == pf {
+					found = true
+					break
+				}
+			}
+			if !found {
+				filesToInclude = append(filesToInclude, pf)
+			}
+		}
+	}
+
 	if len(filesToInclude) > 0 && shouldIncludeAffectedFiles(stepID) && r.ReadAffectedFileContent != nil {
 		var b strings.Builder
 		b.WriteString("\n\n### Workspace Affected Files ###\n")
@@ -162,7 +177,7 @@ func (r Runner) BuildInitialMessages(ctx context.Context, task *models.Task, age
 	agentic := r.isAgentic()
 	if agentic {
 		if requiresPatch(stepID) {
-			fullInstruction += "\n\nCRITICAL REQUIREMENT: Use the provided tools (e.g. search_replace, create_file) to make the required code changes directly in the workspace. Use run_tests/run_build/run_lint to verify your work before finishing. When done, respond with a JSON object containing a 'summary' field describing what you changed. Do NOT output a patch or diff — your tool calls already applied the changes."
+			fullInstruction += "\n\nCRITICAL REQUIREMENT: Use the provided tools (e.g. search_replace, create_file) to make the required code changes directly in the workspace. Use verify_workspace to verify your work before finishing. When done, respond with a JSON object containing a 'summary' field describing what you changed. Do NOT output a patch or diff — your tool calls already applied the changes."
 		}
 	} else {
 		if requiresStrictJSON(stepID) {

@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { ChevronDown, ChevronRight, Check, AlertCircle, AlertTriangle } from "lucide-react";
+import { ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { SpecPanel } from "./SpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
-import { DescriptionBody } from "./DescriptionBody";
+import { CheckpointsPanel } from "./CheckpointsPanel";
 
 interface AccordionItemProps {
   title: string;
@@ -71,7 +71,6 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
     workflow,
     logs,
     analysisData,
-    descriptionParts,
   } = useTaskDetail();
 
   // Specification presence chips
@@ -110,16 +109,6 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
       </div>
     );
   }, [logs]);
-
-  // Description summary
-  const descriptionSummary = useMemo(() => {
-    if (!descriptionParts.body || !descriptionParts.body.trim()) {
-      return <span className="italic text-content-muted/80">No description provided</span>;
-    }
-    const cleanDesc = descriptionParts.body.replace(/[#*`_-]/g, "").trim();
-    if (cleanDesc.length <= 80) return cleanDesc;
-    return `${cleanDesc.substring(0, 80)}...`;
-  }, [descriptionParts.body]);
 
   // Checkpoints summary
   const checkpointCount = workflow?.checkpoints?.length || 0;
@@ -165,13 +154,25 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
         >
           <LogConsole
             logs={logs}
-            isWorkflowRunning={workflow?.job?.status === "running"}
             isExpanded={true}
             onToggle={() => {}}
           />
         </AccordionItem>
       )}
 
+      {/* Accordion 3: Checkpoints */}
+      <AccordionItem
+        title="Checkpoints"
+        isOpen={!!openSections.checkpoints}
+        onToggle={() => onToggleSection("checkpoints")}
+        summary={
+          <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] text-content-muted">
+            <span>{checkpointCount} recorded steps</span>
+          </div>
+        }
+      >
+        <CheckpointsPanel />
+      </AccordionItem>
     </section>
   );
 }

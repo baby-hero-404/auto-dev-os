@@ -3,6 +3,7 @@ import type { Task, Agent, TaskStatus } from "@/lib/types";
 const activeStatuses = new Set<TaskStatus>([
   "context_loading",
   "analyzing",
+  "planning",
   "coding",
   "reviewing",
   "fixing",
@@ -14,7 +15,7 @@ const failedStatuses = new Set<TaskStatus>(["failed"]);
 
 export const workflowStages = [
   { label: "Todo", statuses: ["todo"] },
-  { label: "Analyze", statuses: ["context_loading", "analyzing"] },
+  { label: "Analyze", statuses: ["context_loading", "analyzing", "planning"] },
   { label: "Spec Review", statuses: ["spec_review"] },
   { label: "Code", statuses: ["coding"] },
   { label: "Review/Fix", statuses: ["reviewing", "fixing"] },

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
@@ -24,35 +25,46 @@ func (t *ReadFileTool) Capabilities() []tool.Capability { return []tool.Capabili
 
 // Description returns a description for the LLM.
 func (t *ReadFileTool) Description() string {
-	return "Read contents of a workspace file. Supports reading the full file or targeting specific line ranges/contexts."
+	return "Read contents of one or more workspace files (use 'paths' to batch multiple files into a single call). Supports reading the full file or targeting specific line ranges/contexts. Output lines are prefixed with 1-indexed line numbers."
 }
 
 // Schema returns the JSON schema for tool inputs.
 func (t *ReadFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
-		"required": ["path"],
 		"properties": {
-			"path":        {"type": "string", "description": "Workspace-relative file path"},
+			"path":        {"type": "string", "description": "Workspace-relative file path (single-file mode)"},
+			"paths":       {"type": "array", "items": {"type": "string"}, "description": "Multiple workspace-relative file paths to read in one call (batch mode). Line-range/around_line args apply identically to every path."},
 			"start_line":  {"type": "integer", "description": "1-indexed start line (inclusive)"},
 			"end_line":    {"type": "integer", "description": "1-indexed end line (inclusive)"},
 			"around_line": {"type": "integer", "description": "1-indexed center line to read around"},
 			"radius":      {"type": "integer", "description": "Number of lines to read above and below around_line"},
-			"max_lines":   {"type": "integer", "default": 500, "description": "Maximum number of lines to return when reading full file"}
+			"max_lines":   {"type": "integer", "default": 500, "description": "Maximum number of lines to return per file when reading full file"}
 		}
 	}`)
 }
 
 type ReadFileArgs struct {
-	Path       string `json:"path"`
-	StartLine  int    `json:"start_line"`
-	EndLine    int    `json:"end_line"`
-	AroundLine int    `json:"around_line"`
-	Radius     int    `json:"radius"`
-	MaxLines   int    `json:"max_lines"`
+	Path       string   `json:"path"`
+	Paths      []string `json:"paths"`
+	StartLine  int      `json:"start_line"`
+	EndLine    int      `json:"end_line"`
+	AroundLine int      `json:"around_line"`
+	Radius     int      `json:"radius"`
+	MaxLines   int      `json:"max_lines"`
 }
 
-// Execute runs the file reading operation.
+type readFileOutcome struct {
+	path          string
+	output        string
+	totalLines    int
+	returnedLines int
+	startLine     int
+	endLine       int
+	err           string
+}
+
+// Execute runs the file reading operation for one or more files.
 func (t *ReadFileTool) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
 	var args ReadFileArgs
 	argsBytes, err := json.Marshal(call.Input)
@@ -63,28 +75,99 @@ func (t *ReadFileTool) Execute(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	if args.Path == "" {
-		return tool.Result{Success: false, Message: "missing required 'path' parameter"}, nil
+	paths := args.Paths
+	if args.Path != "" {
+		paths = append([]string{args.Path}, paths...)
+	}
+	if len(paths) == 0 {
+		return tool.Result{Success: false, Message: "missing required 'path' or 'paths' parameter"}, nil
 	}
 
-	fullPath, err := tool.SafeWorkspacePath(call.Workspace, args.Path)
-	if err != nil {
+	outcomes := make([]readFileOutcome, 0, len(paths))
+	var diagnostics []tool.Diagnostic
+	anySuccess := false
+
+	for _, p := range paths {
+		outcome := t.readOne(call, args, p)
+		if outcome.err != "" {
+			diagnostics = append(diagnostics, tool.Diagnostic{Severity: "error", File: p, Message: outcome.err})
+		} else {
+			anySuccess = true
+		}
+		outcomes = append(outcomes, outcome)
+	}
+
+	metadata := map[string]any{
+		"files": buildFileMetadata(outcomes),
+	}
+
+	// Single-file mode keeps the flat metadata shape callers already depend on.
+	if len(outcomes) == 1 {
+		o := outcomes[0]
+		metadata["total_lines"] = o.totalLines
+		metadata["returned_lines"] = o.returnedLines
+		metadata["start_line"] = o.startLine
+		metadata["end_line"] = o.endLine
 		return tool.Result{
-			Success: false,
-			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", Message: err.Error()},
-			},
+			Success:     o.err == "",
+			Output:      o.output,
+			Diagnostics: diagnostics,
+			Metadata:    metadata,
 		}, nil
+	}
+
+	return tool.Result{
+		Success:     anySuccess,
+		Output:      joinBatchOutput(outcomes),
+		Diagnostics: diagnostics,
+		Metadata:    metadata,
+	}, nil
+}
+
+func buildFileMetadata(outcomes []readFileOutcome) []map[string]any {
+	files := make([]map[string]any, 0, len(outcomes))
+	for _, o := range outcomes {
+		files = append(files, map[string]any{
+			"path":           o.path,
+			"total_lines":    o.totalLines,
+			"returned_lines": o.returnedLines,
+			"start_line":     o.startLine,
+			"end_line":       o.endLine,
+			"error":          o.err,
+		})
+	}
+	return files
+}
+
+func joinBatchOutput(outcomes []readFileOutcome) string {
+	var b strings.Builder
+	for i, o := range outcomes {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "### %s\n", o.path)
+		if o.err != "" {
+			fmt.Fprintf(&b, "error: %s", o.err)
+			continue
+		}
+		b.WriteString(o.output)
+	}
+	return b.String()
+}
+
+func (t *ReadFileTool) readOne(call tool.Call, args ReadFileArgs, path string) readFileOutcome {
+	outcome := readFileOutcome{path: path}
+
+	fullPath, err := tool.SafeWorkspacePath(call.Workspace, path)
+	if err != nil {
+		outcome.err = err.Error()
+		return outcome
 	}
 
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		return tool.Result{
-			Success: false,
-			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", File: args.Path, Message: fmt.Sprintf("cannot read file: %v", err)},
-			},
-		}, nil
+		outcome.err = fmt.Sprintf("cannot read file: %v", err)
+		return outcome
 	}
 
 	content := string(data)
@@ -100,10 +183,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, call tool.Call) (tool.Result
 	end := totalLines
 
 	if args.AroundLine > 0 {
-		radius := args.Radius
-		if radius < 0 {
-			radius = 0
-		}
+		radius := max(args.Radius, 0)
 		start = args.AroundLine - radius
 		end = args.AroundLine + radius
 	} else if args.StartLine > 0 {
@@ -136,16 +216,28 @@ func (t *ReadFileTool) Execute(ctx context.Context, call tool.Call) (tool.Result
 		returnedLines = lines[start-1 : end]
 	}
 
-	output := strings.Join(returnedLines, "\n")
+	outcome.output = formatNumberedLines(returnedLines, start)
+	outcome.totalLines = totalLines
+	outcome.returnedLines = len(returnedLines)
+	outcome.startLine = start
+	outcome.endLine = end
+	return outcome
+}
 
-	return tool.Result{
-		Success: true,
-		Output:  output,
-		Metadata: map[string]any{
-			"total_lines":    totalLines,
-			"returned_lines": len(returnedLines),
-			"start_line":     start,
-			"end_line":       end,
-		},
-	}, nil
+// formatNumberedLines prefixes each line with its 1-indexed line number,
+// starting at firstLineNo, in a "cat -n"-style right-aligned gutter.
+func formatNumberedLines(lines []string, firstLineNo int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(strconv.Itoa(firstLineNo + i))
+		b.WriteByte('\t')
+		b.WriteString(line)
+	}
+	return b.String()
 }

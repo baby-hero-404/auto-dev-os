@@ -374,7 +374,7 @@ func TestCodeBackendStep_IncludesDirectoryScan(t *testing.T) {
 		result: StepResult{
 			"parsed": map[string]any{
 				"summary": "done",
-				"patch": "diff --git a/mock_backend_file_xxx.go b/mock_backend_file_xxx.go\n+new content\n",
+				"patch":   "diff --git a/mock_backend_file_xxx.go b/mock_backend_file_xxx.go\n+new content\n",
 			},
 		},
 	}
@@ -434,7 +434,7 @@ func TestCodeBackendStep_PriorFilesPropagation(t *testing.T) {
 		result: StepResult{
 			"parsed": map[string]any{
 				"summary": "done",
-				"patch": "diff --git a/some_file.go b/some_file.go\n+new content\n",
+				"patch":   "diff --git a/some_file.go b/some_file.go\n+new content\n",
 			},
 		},
 	}
@@ -708,7 +708,7 @@ func TestBuildPreHydratedContext_Truncation(t *testing.T) {
 			{File: "long.go"},
 		},
 	}
-	
+
 	shortContent := "package short\n\nfunc Short() {}"
 	// Create a long content with > 200 lines
 	var longLines []string
@@ -733,12 +733,12 @@ func TestBuildPreHydratedContext_Truncation(t *testing.T) {
 	if !strings.Contains(result, "long.go") {
 		t.Error("expected result to contain long.go")
 	}
-	
+
 	// Verify truncation message
 	if !strings.Contains(result, "... (file truncated due to length)") {
 		t.Error("expected long.go to be truncated with message")
 	}
-	
+
 	// Verify line count (200 lines + 1 for truncation message + wrapper text)
 	if strings.Count(result, "line 0") > 200 {
 		t.Error("expected long.go to have max 200 lines of actual content")
@@ -753,4 +753,3 @@ func (c *customMockFileReader) ReadAffectedFileContent(ctx context.Context, task
 	content, ok := c.files[file]
 	return content, ok
 }
-

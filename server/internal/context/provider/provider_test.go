@@ -68,7 +68,7 @@ func MyFunc%d() {
 	if strings.Contains(repoMap, "secretLogicBody") {
 		t.Errorf("DATA LEAKAGE DETECTED: internal function body found in repo map:\n%s", repoMap)
 	}
-	
+
 	// 5. Reproducibility
 	if repoMap != repoMapHot {
 		t.Errorf("Hot cache output does not match cold run output.")
@@ -241,6 +241,69 @@ func TestGetRepoMapTokenPruningAndBuffing(t *testing.T) {
 	}
 }
 
+func TestGetRepoMapMentionBoostFromTaskDescription(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheDb := filepath.Join(tmpDir, "cache.db")
+	taskWS := filepath.Join(tmpDir, "task1")
+	codeRepoDir := filepath.Join(taskWS, "code", "repos", "app")
+	if err := os.MkdirAll(codeRepoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mention-boost only affects PageRank flow across existing edges, so the
+	// target files need real inbound references, not isolated definitions.
+	// main.go calls into both helper files' functions once each (equal edge
+	// weight), so without a mentioned identifier their ranks tie; with one
+	// mentioned, its inbound edge weight gets boosted above the other. The
+	// target file is named to sort *after* the other alphabetically, so any
+	// filename-based tiebreak in unboosted output works against — not for —
+	// the assertion below.
+	targetContent := "package main\n\nfunc HandleBillingReconciliation() {}\n"
+	if err := os.WriteFile(filepath.Join(codeRepoDir, "zbilling.go"), []byte(targetContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	otherContent := "package main\n\nfunc HandleInventorySync() {}\n"
+	if err := os.WriteFile(filepath.Join(codeRepoDir, "ainventory.go"), []byte(otherContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainContent := "package main\n\nfunc main() {\n\tHandleBillingReconciliation()\n\tHandleInventorySync()\n}\n"
+	if err := os.WriteFile(filepath.Join(codeRepoDir, "main.go"), []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewProvider(tmpDir, cacheDb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	ctx := context.WithValue(context.Background(), WorkspaceRootKey, taskWS)
+
+	// A tight token budget so only the highest-ranked non-active file survives pruning.
+	const maxTokens = 30
+
+	ctxNoTask := ctx
+	repoMapNoTask, err := provider.GetRepoMap(ctxNoTask, []string{}, maxTokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctxWithTask := context.WithValue(ctx, TaskDescriptionKey, "Fix a bug in HandleBillingReconciliation causing duplicate charges")
+	repoMapWithTask, err := provider.GetRepoMap(ctxWithTask, []string{}, maxTokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(repoMapNoTask, "zbilling.go") && !strings.Contains(repoMapNoTask, "ainventory.go") {
+		t.Skipf("zbilling.go already ranked above ainventory.go with no task description; budget too generous to demonstrate boost:\n%s", repoMapNoTask)
+	}
+
+	if !strings.Contains(repoMapWithTask, "zbilling.go") {
+		t.Errorf("expected mention-boosted zbilling.go (defines HandleBillingReconciliation, mentioned in task description) to be prioritized over ainventory.go:\nwithout task: %s\nwith task: %s", repoMapNoTask, repoMapWithTask)
+	}
+}
+
 func TestIndexWorkspaceScopingToAgentPathContext(t *testing.T) {
 	tmpDir := t.TempDir()
 	cacheDb := filepath.Join(tmpDir, "cache.db")
@@ -377,5 +440,3 @@ func TestDropUnresolvableSnippetPaths(t *testing.T) {
 		}
 	}
 }
-
-

@@ -37,12 +37,12 @@ func TestCreateGitCheckpoint_WorktreeResilience(t *testing.T) {
 			return hostPath
 		},
 	}
-	
+
 	result, err := manager.CreateGitCheckpoint(context.Background(), task, nil, "test_step", models.WorktreeSuffixBackend)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if result.Hash != "mock-hash" {
 		t.Errorf("expected hash mock-hash, got %s", result.Hash)
 	}
@@ -75,7 +75,7 @@ func TestRestoreGitCheckpoint_WorktreeResilience(t *testing.T) {
 			return hostPath
 		},
 	}
-	
+
 	err := manager.RestoreGitCheckpoint(context.Background(), task, nil, "mock-hash", models.WorktreeSuffixBackend)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

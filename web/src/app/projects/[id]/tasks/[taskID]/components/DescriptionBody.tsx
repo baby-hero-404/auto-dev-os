@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { Edit2, Check, X } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Edit2 } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { Markdown } from "@/components/ui/markdown";
 
@@ -16,12 +16,6 @@ export function DescriptionBody() {
   const [editedDesc, setEditedDesc] = useState(task?.description ?? "");
   const [isSaving, setIsSaving] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (task?.description) {
-      setEditedDesc(task.description);
-    }
-  }, [task?.description]);
 
   const handleStartEditDesc = useCallback(() => {
     setEditedDesc(task?.description ?? "");

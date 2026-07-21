@@ -9,6 +9,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
 type WorkflowCheckpointRepo interface {
@@ -353,9 +354,9 @@ func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (S
 	if s.worktree != nil {
 		targetRepos, errRepos := s.worktree.LoadTargetRepositories(ctx, s.rt.Task)
 		if errRepos == nil && len(targetRepos) > 0 {
-			integrationBranch := fmt.Sprintf("feature/%s", s.rt.Task.ID)
-			beBranch := fmt.Sprintf("feature/%s-be", s.rt.Task.ID)
-			feBranch := fmt.Sprintf("feature/%s-fe", s.rt.Task.ID)
+			integrationBranch := paths.DeriveBranchName(s.rt.Task.ID, s.rt.Task.Title)
+			beBranch := paths.DeriveRoleBranchName(s.rt.Task.ID, s.rt.Task.Title, "be")
+			feBranch := paths.DeriveRoleBranchName(s.rt.Task.ID, s.rt.Task.Title, "fe")
 
 			var ws *models.TaskWorkspace
 			if s.workspace != nil {

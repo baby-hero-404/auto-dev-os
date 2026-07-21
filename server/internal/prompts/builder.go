@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
@@ -1007,6 +1008,7 @@ func (a *PromptAssembler) buildRepoMapSection(ctx context.Context, task models.T
 	} else if maxMapTokens < minRepoMapTokens {
 		maxMapTokens = minRepoMapTokens
 	}
+	ctx = context.WithValue(ctx, provider.TaskDescriptionKey, task.Title+"\n"+task.Description)
 	repoMap, err := a.ctxEngine.GetRepoMap(ctx, activeFiles, maxMapTokens)
 	if err != nil {
 		slog.Warn("collect: GetRepoMap failed, proceeding without repository structure section", "task_id", task.ID, "step_id", stepIDFromCtx(ctx), "error", err)

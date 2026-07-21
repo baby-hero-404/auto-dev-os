@@ -104,8 +104,8 @@ func TestOrchestrator_Run_Integration(t *testing.T) {
 	}
 
 	// 3. Verify GitOps PR was created
-	if gitOps.createdBranch != "feature/task-123" {
-		t.Errorf("expected branch feature/task-123, got %s", gitOps.createdBranch)
+	if gitOps.createdBranch != "feature/test-task-task-123" {
+		t.Errorf("expected branch feature/test-task-task-123, got %s", gitOps.createdBranch)
 	}
 	if gitOps.prTitle != "AutoCodeOS: Test Task" {
 		t.Errorf("expected PR title AutoCodeOS: Test Task, got %s", gitOps.prTitle)

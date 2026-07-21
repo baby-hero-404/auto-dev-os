@@ -13,10 +13,10 @@ const (
 	TestStatusFailed  = "failed"
 	TestStatusSkipped = "skipped"
 
-	RoleBackend = "be"
+	RoleBackend  = "be"
 	RoleFrontend = "fe"
 
-	WorktreeSuffixBackend = "-be-worktree"
+	WorktreeSuffixBackend  = "-be-worktree"
 	WorktreeSuffixFrontend = "-fe-worktree"
 )
 

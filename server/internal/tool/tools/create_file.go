@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 )
@@ -83,10 +84,17 @@ func (t *CreateFileTool) Execute(ctx context.Context, call tool.Call) (tool.Resu
 	if os.IsNotExist(statErr) {
 		existed = false
 	} else if stat != nil && stat.Size() > 0 {
+		contentBytes, _ := os.ReadFile(fullPath)
+		content := string(contentBytes)
+		lines := strings.Split(content, "\n")
+		if len(lines) > 30 {
+			content = strings.Join(lines[:30], "\n") + "\n... (truncated)"
+		}
+		errMsg := fmt.Sprintf("file already exists and is not empty — use search_replace to modify it instead. Current content:\n%s", content)
 		return tool.Result{
 			Success: false,
 			Diagnostics: []tool.Diagnostic{
-				{Severity: "error", File: args.Path, Message: "file already exists and is not empty"},
+				{Severity: "error", File: args.Path, Message: errMsg},
 			},
 		}, nil
 	}

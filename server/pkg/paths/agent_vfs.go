@@ -35,14 +35,14 @@ func NewAgentPathContext(physicalRoot string, useRepoPrefix bool, repoName strin
 func (v *AgentPathContext) StripGitDiffArtifacts(path string) string {
 	path = filepath.ToSlash(filepath.Clean(path))
 	path = strings.TrimPrefix(path, "/")
-	
+
 	// Remove standard git diff prefixes
 	if strings.HasPrefix(path, "a/") {
 		path = strings.TrimPrefix(path, "a/")
 	} else if strings.HasPrefix(path, "b/") {
 		path = strings.TrimPrefix(path, "b/")
 	}
-	
+
 	return filepath.ToSlash(filepath.Clean(path))
 }
 

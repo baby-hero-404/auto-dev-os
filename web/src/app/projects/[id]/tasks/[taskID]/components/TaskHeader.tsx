@@ -12,9 +12,6 @@ export function TaskHeader() {
     analyze,
     retry,
     pause,
-    cancel,
-    requestSpecChanges,
-    approveSpec,
     isPaused,
     isExecutionReady,
   } = useTaskDetail();
@@ -24,6 +21,9 @@ export function TaskHeader() {
   const canResume = !!(
     task &&
     isPaused &&
+    task.status !== "pr_ready" &&
+    task.status !== "human_review" &&
+    task.status !== "merged" &&
     task.spec_status !== "pending_review" &&
     task.spec_status !== "changes_requested" &&
     task.spec_status !== "clarification_required"

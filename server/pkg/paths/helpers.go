@@ -116,9 +116,9 @@ func IsSafeRelativeSourcePath(path string) bool {
 // CanonicalizeRepoRelative normalizes a path that may carry workspace
 // prefixes into a clean repository-relative path.
 //
-//   "code/repos/tool_zentao/main/cmd/sync/main.go" → "cmd/sync/main.go"
-//   "cmd/sync/main.go"                             → "cmd/sync/main.go"
-//   "code/repos/x/main/code/repos/x/main/a.go"     → "a.go" (collapses duplicates)
+//	"code/repos/tool_zentao/main/cmd/sync/main.go" → "cmd/sync/main.go"
+//	"cmd/sync/main.go"                             → "cmd/sync/main.go"
+//	"code/repos/x/main/code/repos/x/main/a.go"     → "a.go" (collapses duplicates)
 //
 // Returns ok=false when the path escapes the repo or still contains a
 // foreign repo prefix after stripping (caller drops the finding + warns).
@@ -191,3 +191,52 @@ func CanonicalizeRepoRelative(p, repoName, branch string) (string, bool) {
 
 	return p, true
 }
+
+// DeriveBranchName generates a clean, URL/branch-safe branch name from task ID and title.
+// Format: feature/<slugified_title>-<short_task_id>
+func DeriveBranchName(taskID string, title string) string {
+	slug := Slugify(title)
+	shortID := taskID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	if slug == "" {
+		return "feature/" + shortID
+	}
+	return "feature/" + slug + "-" + shortID
+}
+
+// DeriveRoleBranchName generates a clean, URL/branch-safe branch name with a role suffix.
+func DeriveRoleBranchName(taskID string, title string, roleSuffix string) string {
+	branch := DeriveBranchName(taskID, title)
+	if roleSuffix == "" {
+		return branch
+	}
+	return branch + "-" + roleSuffix
+}
+
+// Slugify converts a string into a clean lowercase slug (dashes and alphanumeric characters only).
+func Slugify(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	lastWasDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastWasDash = false
+		} else {
+			if !lastWasDash {
+				b.WriteRune('-')
+				lastWasDash = true
+			}
+		}
+	}
+	res := b.String()
+	res = strings.Trim(res, "-")
+	if len(res) > 30 {
+		res = res[:30]
+	}
+	return strings.Trim(res, "-")
+}
+
+

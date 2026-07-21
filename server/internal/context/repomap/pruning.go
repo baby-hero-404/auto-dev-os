@@ -38,15 +38,15 @@ func PruneTags(tags []source.Tag, pageRank map[string]float64, maxTokens int, fo
 	var scored []ScoredTag
 	for _, t := range tags {
 		score := pageRank[t.Filepath]
-		
+
 		// Priority boost: Definitions are slightly more important than References
 		if t.Kind == "def" {
 			score *= 1.1
 		}
-		
+
 		scored = append(scored, ScoredTag{Tag: t, Score: score})
 	}
-	
+
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].Score > scored[j].Score
 	})
@@ -58,16 +58,16 @@ func PruneTags(tags []source.Tag, pageRank map[string]float64, maxTokens int, fo
 
 	for low <= high {
 		mid := (low + high) / 2
-		
+
 		// Slice top 'mid' tags
 		subset := make([]source.Tag, mid)
 		for i := 0; i < mid; i++ {
 			subset[i] = scored[i].Tag
 		}
-		
+
 		text := formatFn(subset)
 		tokens := countFn(text)
-		
+
 		if tokens <= maxTokens {
 			bestResult = text
 			low = mid + 1 // try to fit more tags safely

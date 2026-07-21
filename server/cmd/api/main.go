@@ -297,6 +297,12 @@ func run() error {
 		orchestrator.StartAgentWatchdog(workerCtx, agentRepo, 5*time.Minute, 30*time.Minute)
 	}()
 	slog.Info("agent watchdog worker started")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orchestrator.StartPRSyncWorker(workerCtx, orch, time.Minute)
+	}()
+	slog.Info("PR sync worker started")
 	go func() {
 		slog.Info("api server starting", "port", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

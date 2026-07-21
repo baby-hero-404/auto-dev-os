@@ -535,7 +535,7 @@ func TestRunToolLoop_DiscoveryTracker(t *testing.T) {
 	// Call 6: consecutiveReads is 5. 5 >= 7 is false. Execution succeeds (reads = 6).
 	// Call 7: consecutiveReads is 6. 6 >= 7 is false. Execution succeeds (reads = 7).
 	// Call 8: consecutiveReads is 7. 7 >= 7 is true! Blocks. Execution does not happen (reads = 7).
-	
+
 	if readExecutions != 7 {
 		t.Errorf("expected 7 read executions before blocking, got %d", readExecutions)
 	}

@@ -20,11 +20,11 @@ import (
 // code_backend and code_frontend (Issue 3: these two files duplicated the same ~80 lines of
 // repo-context/tree/subtask/prior-files construction, only varying by role strings).
 type codingInstructionParams struct {
-	Task            *models.Task
-	Workspace       WorkspaceLoader
-	IsEasy          bool
-	Role            string // "backend" | "frontend"
-	SubtaskKey      string // "backend" | "frontend"
+	Task             *models.Task
+	Workspace        WorkspaceLoader
+	IsEasy           bool
+	Role             string // "backend" | "frontend"
+	SubtaskKey       string // "backend" | "frontend"
 	InstructionVerb  string // e.g. "Implement the backend changes."
 	PRFeedback       string
 	PreHydratedFiles string
@@ -199,7 +199,7 @@ func buildPreHydratedContext(ctx context.Context, task *models.Task, fileReader 
 		if !ok || content == "" {
 			continue
 		}
-		
+
 		lines := strings.Split(content, "\n")
 		if len(lines) > 200 {
 			lines = lines[:200]
@@ -211,7 +211,7 @@ func buildPreHydratedContext(ctx context.Context, task *models.Task, fileReader 
 		if tokens+estTokens > maxTokens {
 			break
 		}
-		
+
 		if sb.Len() == 0 {
 			sb.WriteString("\n\n## Pre-Read Files (do NOT re-read these)\n")
 		}

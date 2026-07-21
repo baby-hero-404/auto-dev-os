@@ -88,6 +88,7 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 	}
 
 	var cumulativeFailedCalls []string
+	var filesReadPrevAttempt []string
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		currentInstruction := baseInstruction
 		if attempt >= 3 && !cfg.Agentic {
@@ -110,9 +111,27 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		if attempt >= 3 && !cfg.Agentic {
 			llmCtx = prompts.WithSearchReplace(llmCtx)
 		}
+		if len(filesReadPrevAttempt) > 0 {
+			llmCtx = context.WithValue(llmCtx, "files_read_prev_attempt", filesReadPrevAttempt)
+		}
 		out, err = cfg.LLM.RunLLMStep(llmCtx, cfg.Task, cfg.Agent, cfg.JobID, cfg.StepID, currentInstruction)
 		if err != nil {
 			return nil, false, wrapErr(err)
+		}
+
+		if fr, ok := out["files_read"].([]string); ok && len(fr) > 0 {
+			for _, f := range fr {
+				found := false
+				for _, exist := range filesReadPrevAttempt {
+					if exist == f {
+						found = true
+						break
+					}
+				}
+				if !found {
+					filesReadPrevAttempt = append(filesReadPrevAttempt, f)
+				}
+			}
 		}
 
 		retryNeeded := false
@@ -133,7 +152,6 @@ func runPatchRetryLoop(ctx context.Context, cfg patchRetryConfig, baseInstructio
 		}
 
 		if cfg.Agentic {
-			filesReadPrevAttempt, _ := out["files_read"].([]string)
 
 			if toolLoopPartial, _ := out["tool_loop_partial"].(bool); toolLoopPartial {
 				// The tool loop exhausted its iteration budget, but real edits already landed

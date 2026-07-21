@@ -111,6 +111,7 @@ export default function AnalyticsPage() {
       provider: string;
       model: string;
       level_group: string;
+      key_label?: string;
       requests: number;
       total_tokens: number;
       cost_usd: number;
@@ -118,12 +119,14 @@ export default function AnalyticsPage() {
     }> = {};
 
     tokenUsageList.forEach((item) => {
-      const key = `${item.provider}:${item.model}:${item.level_group}`;
+      const label = item.key_label || "No Label";
+      const key = `${item.provider}:${item.model}:${label}:${item.level_group}`;
       if (!groups[key]) {
         groups[key] = {
           provider: item.provider,
           model: item.model,
           level_group: item.level_group,
+          key_label: label,
           requests: 0,
           total_tokens: 0,
           cost_usd: 0,

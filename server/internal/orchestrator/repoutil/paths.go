@@ -101,7 +101,7 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 	} else if role == "frontend" {
 		roleSuffix = "fe"
 	}
-	rWS.Branches.Role[role] = fmt.Sprintf("feature/%s-%s", task.ID, roleSuffix)
+	rWS.Branches.Role[role] = paths.DeriveRoleBranchName(task.ID, task.Title, roleSuffix)
 
 	if wsLoaded, errLoad := m.LoadTaskWorkspace(ctx, task); errLoad == nil {
 		for i := range wsLoaded.Repos {

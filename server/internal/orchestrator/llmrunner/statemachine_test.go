@@ -232,16 +232,16 @@ func TestStateMachine_ToolAllowlist_Implementation(t *testing.T) {
 	if !sm.ToolAllowed("read_file") {
 		t.Error("expected read_file still allowed in IMPLEMENTATION")
 	}
-	if sm.ToolAllowed("run_tests") {
-		t.Error("expected run_tests denied in IMPLEMENTATION")
+	if sm.ToolAllowed("verify_workspace") {
+		t.Error("expected verify_workspace denied in IMPLEMENTATION")
 	}
 }
 
 func TestStateMachine_ToolAllowlist_Validation(t *testing.T) {
 	sm := NewStateMachine(budgets(3, 3, 3))
 	advanceToValidation(sm)
-	if !sm.ToolAllowed("run_tests") || !sm.ToolAllowed("run_lint") || !sm.ToolAllowed("run_build") {
-		t.Error("expected test/lint/build tools allowed in VALIDATION")
+	if !sm.ToolAllowed("verify_workspace") {
+		t.Error("expected verify_workspace allowed in VALIDATION")
 	}
 	if sm.ToolAllowed("create_file") {
 		t.Error("expected create_file denied in VALIDATION")

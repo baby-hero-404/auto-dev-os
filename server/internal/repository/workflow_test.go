@@ -128,7 +128,7 @@ func TestWorkflowRepo_LogHubConcurrency(t *testing.T) {
 	repo := NewWorkflowRepo(nil)
 	repo.SetLogFileRoot(tempDir)
 	taskID := "task-hub"
-	
+
 	// Start 10 subscribers
 	var subs []chan models.TaskLog
 	for i := 0; i < 10; i++ {

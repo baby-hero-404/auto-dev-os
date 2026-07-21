@@ -43,6 +43,7 @@ type GitOpsClient interface {
 	CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error
 	CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error)
 	MergePullRequest(ctx context.Context, repoURL, prURL string) error
+	IsPullRequestMerged(ctx context.Context, repoURL, prURL string) (bool, error)
 }
 
 // MemoryRecorder tracks episodic memories across workflow sessions.
@@ -59,6 +60,7 @@ type LearningRecorder interface {
 	DetectPatterns(ctx context.Context, agentID string)
 	SuggestRuleFromErrors(ctx context.Context, agentID string)
 	SuggestPromptPatch(ctx context.Context, task *models.Task, job *models.WorkflowJob)
+	SuggestSkillFromTask(ctx context.Context, task *models.Task, job *models.WorkflowJob)
 }
 
 // ArtifactRepository persists workflow step artifacts.
@@ -84,6 +86,7 @@ type ProjectRepository interface {
 type TaskRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Task, error)
 	Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error)
+	ListRecentByStatus(ctx context.Context, statuses []string, limit int) ([]models.Task, error)
 }
 
 // WorkflowRepository manages workflow jobs, checkpoints, and logs.

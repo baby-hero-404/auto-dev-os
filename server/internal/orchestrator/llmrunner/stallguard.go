@@ -9,9 +9,7 @@ import (
 var stallGuardReadOnlyTools = map[string]bool{
 	"list_files":          true,
 	"read_file":           true,
-	"run_lint":            true,
-	"run_tests":           true,
-	"run_build":           true,
+	"verify_workspace":    true,
 	"grep_search":         true,
 	"find_symbol":         true,
 	"git_status":          true,
@@ -82,7 +80,7 @@ func (g *stallGuard) RecordSuccess(name, argsJSON string, turn int) {
 	} else {
 		// Invalidate workspace-state-dependent read-only tools on successful edit/write tool
 		for key := range g.successfulCalls {
-			if strings.HasPrefix(key, "run_tests:") || strings.HasPrefix(key, "run_build:") || strings.HasPrefix(key, "run_lint:") {
+			if strings.HasPrefix(key, "verify_workspace:") {
 				delete(g.successfulCalls, key)
 			}
 		}

@@ -21,13 +21,13 @@ func TestCompressErrorText_Long(t *testing.T) {
 		sb.WriteString("\n")
 	}
 	longErr := strings.TrimSpace(sb.String())
-	
+
 	compressed := compressErrorText(longErr)
-	
+
 	if !strings.Contains(compressed, "... [TRUNCATED: 50 lines omitted for brevity] ...") {
 		t.Errorf("expected compressed error to contain truncation marker, got:\n%s", compressed)
 	}
-	
+
 	lines := strings.Split(compressed, "\n")
 	if len(lines) < 101 { // 20 + marker + 80 + newlines
 		t.Errorf("expected at least 101 lines in compressed output, got %d", len(lines))

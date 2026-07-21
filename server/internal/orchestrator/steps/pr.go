@@ -9,6 +9,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 	"github.com/lib/pq"
 )
 
@@ -195,7 +196,7 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 			baseBranch = "main"
 		}
 
-		branchName := fmt.Sprintf("feature/%s", s.rt.Task.ID)
+		branchName := paths.DeriveBranchName(s.rt.Task.ID, s.rt.Task.Title)
 		if err := s.git.CheckoutNewBranch(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, branchName); err != nil {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("checkout branch failed for %s: %v", repo.URL, err))
 			return nil, fmt.Errorf("checkout branch failed for %s: %w", repo.URL, err)
@@ -292,16 +293,8 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 	}
 
 	status := models.TaskStatusPrReady
-	var shouldWait bool
-	if len(createdPRSummaries) > 0 {
-		shouldWait = true
-	} else {
-		if len(s.rt.Task.PRURLs) > 0 {
-			status = models.TaskStatusPrReady
-			shouldWait = true
-		} else {
-			status = models.TaskStatusPrReady
-			shouldWait = true
+	if len(createdPRSummaries) == 0 {
+		if len(s.rt.Task.PRURLs) == 0 {
 			noChangesSummaries := []models.PRSummary{{
 				Title:  "No changes detected",
 				Body:   "No code modifications were required.",
@@ -322,15 +315,11 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		}
 	}
 
-	if shouldWait {
-		return nil, workflow.ErrWaitingApproval
-	}
-
 	return StepResult{
-		"status":   "no_changes_detected",
+		"status":   "pr_created",
 		"branches": createdBranches,
 		"pr_urls":  createdPRs,
-	}, nil
+	}, workflow.ErrWaitingApproval
 }
 
 // reviewSelfReviewFallback scans checkpoints for the most recent successful

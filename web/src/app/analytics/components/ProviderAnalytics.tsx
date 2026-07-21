@@ -14,6 +14,7 @@ export function ProviderAnalytics({ providerUsage }: { providerUsage: TokenUsage
             <tr>
               <th className="px-4 py-3">Provider</th>
               <th className="px-4 py-3">Model</th>
+              <th className="px-4 py-3">Key Label</th>
               <th className="px-4 py-3">Level</th>
               <th className="px-4 py-3">Requests</th>
               <th className="px-4 py-3">Tokens</th>
@@ -23,9 +24,14 @@ export function ProviderAnalytics({ providerUsage }: { providerUsage: TokenUsage
           </thead>
           <tbody>
             {providerUsage.map((item) => (
-              <tr key={`${item.provider}:${item.model}:${item.level_group}`} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+              <tr key={`${item.provider}:${item.model}:${item.key_label || "No Label"}:${item.level_group}`} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
                 <td className="px-4 py-3 font-medium capitalize">{item.provider}</td>
                 <td className="px-4 py-3 font-mono text-xs text-content-muted">{item.model}</td>
+                <td className="px-4 py-3">
+                  <span className="font-mono text-xs text-brand-primary" title={item.key_label}>
+                    {item.key_label || "No Label"}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-content-muted">{item.level_group || "unknown"}</td>
                 <td className="px-4 py-3 font-mono">{compactNumber(item.requests)}</td>
                 <td className="px-4 py-3 font-mono">{compactNumber(item.total_tokens)}</td>
@@ -35,7 +41,7 @@ export function ProviderAnalytics({ providerUsage }: { providerUsage: TokenUsage
             ))}
             {providerUsage.length === 0 && (
               <tr>
-                <td className="px-4 py-8 text-center text-content-muted" colSpan={7}>
+                <td className="px-4 py-8 text-center text-content-muted" colSpan={8}>
                   No provider usage recorded.
                 </td>
               </tr>

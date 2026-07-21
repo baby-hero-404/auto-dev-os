@@ -19,7 +19,7 @@ func ExtractFallbackTags(filepath string) ([]source.Tag, error) {
 	}
 
 	matches := wordRegex.FindAllString(string(content), -1)
-	
+
 	var tags []source.Tag
 	// In fallback mode, everything is a "ref" to ensure we don't miss calls.
 	for _, match := range matches {
@@ -31,6 +31,6 @@ func ExtractFallbackTags(filepath string) ([]source.Tag, error) {
 			Filepath: filepath,
 		})
 	}
-	
+
 	return tags, nil
 }

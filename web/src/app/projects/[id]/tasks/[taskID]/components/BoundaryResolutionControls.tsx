@@ -140,7 +140,7 @@ export function BoundaryResolutionControls({
             <div className="mb-2">
               <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">Option A: Approve Edits</h4>
               <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-                Authorize the agent to edit these directories by automatically appending them to the task's execution boundaries.
+                Authorize the agent to edit these directories by automatically appending them to the task&apos;s execution boundaries.
               </p>
             </div>
             <button onClick={handleApprove} disabled={submitting} className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm mt-1">

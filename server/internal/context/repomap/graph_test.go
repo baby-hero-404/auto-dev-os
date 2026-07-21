@@ -1,8 +1,8 @@
 package repomap
 
 import (
-	"testing"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/source"
+	"testing"
 )
 
 func TestGraphAndPageRank(t *testing.T) {
@@ -12,23 +12,23 @@ func TestGraphAndPageRank(t *testing.T) {
 		{Name: "User", Kind: "ref", Filepath: "auth.go"},  // auth.go depends on models.go
 		{Name: "Login", Kind: "ref", Filepath: "main.go"}, // main.go depends on auth.go
 	}
-	
+
 	g := NewDependencyGraph()
 	g.BuildGraph(tags)
-	
+
 	// Test edges
 	if g.Graph.Nodes().Len() != 3 {
 		t.Fatalf("Expected 3 nodes in graph, got %d", g.Graph.Nodes().Len())
 	}
-	
+
 	// Test Personalized PageRank logic
 	active := []string{"main.go"}
-	pr := g.CalculatePageRank(active)
-	
+	pr := g.CalculatePageRank(active, "")
+
 	if len(pr) != 3 {
 		t.Fatal("Expected ranks for exactly 3 files")
 	}
-	
+
 	// A random surfer starting heavily at main.go will visit auth.go, then models.go.
 	// Therefore, models.go must receive a non-zero rank.
 	if pr["models.go"] == 0 {
@@ -49,8 +49,8 @@ func TestPageRankDanglingNode(t *testing.T) {
 	g := NewDependencyGraph()
 	g.BuildGraph(tags)
 
-	pr := g.CalculatePageRank([]string{})
-	
+	pr := g.CalculatePageRank([]string{}, "")
+
 	// Sum of all ranks must equal 1.0 (rank conservation)
 	sum := 0.0
 	for _, val := range pr {
@@ -90,5 +90,54 @@ func TestDuplicateSymbolRouting(t *testing.T) {
 
 	if g.Graph.HasEdgeFromTo(srcNode.ID(), targetNodeFar.ID()) {
 		t.Error("Did not expect edge from app/main.go to farther target other/pkg2/pkg2.go")
+	}
+}
+
+func TestCalculatePageRankMentionBoost(t *testing.T) {
+	// main.go -> auth.go -> models.go, and main.go -> billing.go (unrelated dependency).
+	tags := []source.Tag{
+		{Name: "AuthenticateUser", Kind: "def", Filepath: "auth.go"},
+		{Name: "AuthenticateUser", Kind: "ref", Filepath: "main.go"},
+		{Name: "ChargeCustomer", Kind: "def", Filepath: "billing.go"},
+		{Name: "ChargeCustomer", Kind: "ref", Filepath: "main.go"},
+	}
+
+	g := NewDependencyGraph()
+	g.BuildGraph(tags)
+
+	baseline := g.CalculatePageRank([]string{}, "")
+	boosted := g.CalculatePageRank([]string{}, "please fix AuthenticateUser flow")
+
+	if boosted["auth.go"] <= baseline["auth.go"] {
+		t.Errorf("expected mention-boost to raise auth.go rank above baseline: baseline=%f boosted=%f", baseline["auth.go"], boosted["auth.go"])
+	}
+	// Boosting the main.go->auth.go edge redistributes main.go's outbound
+	// weight, so billing.go's share necessarily drops even though it is not
+	// itself mentioned; what matters is that auth.go pulls ahead of it.
+	if boosted["auth.go"]-boosted["billing.go"] <= baseline["auth.go"]-baseline["billing.go"] {
+		t.Errorf("expected mention-boost to widen the gap between auth.go and billing.go: baseline gap=%f boosted gap=%f",
+			baseline["auth.go"]-baseline["billing.go"], boosted["auth.go"]-boosted["billing.go"])
+	}
+}
+
+func TestCalculatePageRankEmptyTaskDescriptionIsNoOp(t *testing.T) {
+	tags := []source.Tag{
+		{Name: "User", Kind: "def", Filepath: "models.go"},
+		{Name: "Login", Kind: "def", Filepath: "auth.go"},
+		{Name: "User", Kind: "ref", Filepath: "auth.go"},
+		{Name: "Login", Kind: "ref", Filepath: "main.go"},
+	}
+
+	g := NewDependencyGraph()
+	g.BuildGraph(tags)
+
+	active := []string{"main.go"}
+	withEmpty := g.CalculatePageRank(active, "")
+	withoutParam := g.CalculatePageRank(active, "")
+
+	for k, v := range withEmpty {
+		if withoutParam[k] != v {
+			t.Errorf("expected identical ranks for empty taskDescription, file %s: %f vs %f", k, v, withoutParam[k])
+		}
 	}
 }

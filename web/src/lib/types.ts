@@ -52,6 +52,7 @@ export type TaskStatus =
   | "todo"
   | "context_loading"
   | "analyzing"
+  | "planning"
   | "spec_review"
   | "coding"
   | "reviewing"

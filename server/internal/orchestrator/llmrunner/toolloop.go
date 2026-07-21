@@ -161,6 +161,21 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					}
 				}
 
+				if call.Name == "create_file" && discriminator != "" {
+					alreadyCreated := false
+					for _, ea := range editsApplied {
+						if ea == discriminator {
+							alreadyCreated = true
+							break
+						}
+					}
+					if alreadyCreated {
+						result := "Already created this file in this session — use search_replace to modify it."
+						messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})
+						continue
+					}
+				}
+
 				if failureCounts[key] >= 2 {
 					var result string
 					if discriminator != "" {
@@ -207,6 +222,9 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					sg.RecordSuccess(call.Name, call.Arguments, i+1)
 					if editToolNames[call.Name] && discriminator != "" {
 						editsApplied = append(editsApplied, discriminator)
+						// Reset failure counts for verification tools after a successful edit
+						// so the LLM isn't blocked from verifying its new changes
+						delete(failureCounts, "verify_workspace:")
 					}
 					if call.Name == "read_file" && discriminator != "" {
 						filesRead = append(filesRead, discriminator)

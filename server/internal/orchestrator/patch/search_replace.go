@@ -135,14 +135,36 @@ func ApplySearchReplace(blocks []EditBlock, basePath string) error {
 				content = replace
 			} else {
 				count := strings.Count(content, search)
-				if count == 0 {
-					return fmt.Errorf("search block not found in %s", relPath)
+				if count == 1 {
+					content = strings.Replace(content, search, replace, 1)
+					continue
 				}
 				if count > 1 {
 					return fmt.Errorf("ambiguous match in %s (found %d times)", relPath, count)
 				}
 
-				content = strings.Replace(content, search, replace, 1)
+				// Exact match failed (count == 0) — try fallback strategies before giving up.
+				start, end, deltas, indentChar, ok, ambiguous := trimmedLineMatch(content, search)
+				if ambiguous {
+					return fmt.Errorf("ambiguous match in %s (trimmed-whitespace fallback found multiple candidates)", relPath)
+				}
+				if !ok {
+					start, end, deltas, indentChar, ok, ambiguous = relativeIndentMatch(content, search)
+					if ambiguous {
+						return fmt.Errorf("ambiguous match in %s (relative-indent fallback found multiple candidates)", relPath)
+					}
+				}
+
+				if ok {
+					content = content[:start] + reindentReplace(replace, deltas, indentChar) + content[end:]
+					continue
+				}
+
+				startLine, endLine, snippet := nearestSimilarRange(content, search)
+				if snippet == "" {
+					return fmt.Errorf("search block not found in %s", relPath)
+				}
+				return fmt.Errorf("search block not found in %s; closest match is lines %d-%d:\n%s", relPath, startLine, endLine, snippet)
 			}
 		}
 

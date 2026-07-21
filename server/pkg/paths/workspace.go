@@ -159,5 +159,3 @@ func IsWorkspaceInternalPath(path string) bool {
 	}
 	return false
 }
-
-

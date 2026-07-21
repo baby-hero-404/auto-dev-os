@@ -27,7 +27,9 @@ func (t *ReadAffectedFilesTool) Name() string { return "read_affected_files" }
 func (t *ReadAffectedFilesTool) Category() tool.Category { return tool.CategoryContext }
 
 // Capabilities returns the capability permissions required.
-func (t *ReadAffectedFilesTool) Capabilities() []tool.Capability { return []tool.Capability{tool.CapContext} }
+func (t *ReadAffectedFilesTool) Capabilities() []tool.Capability {
+	return []tool.Capability{tool.CapContext}
+}
 
 // Description returns a description for the LLM.
 func (t *ReadAffectedFilesTool) Description() string {

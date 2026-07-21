@@ -81,7 +81,7 @@ type WorkflowRepo struct {
 
 func NewWorkflowRepo(db *gorm.DB) *WorkflowRepo {
 	return &WorkflowRepo{
-		db: db,
+		db:     db,
 		LogHub: NewLogHub(),
 	}
 }

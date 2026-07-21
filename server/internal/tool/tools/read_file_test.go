@@ -49,7 +49,7 @@ func TestReadFileTool(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("tool execution failed: %s", res.Message)
 	}
-	expectedOutput := "line 1\nline 2\nline 3\nline 4\nline 5"
+	expectedOutput := "1\tline 1\n2\tline 2\n3\tline 3\n4\tline 4\n5\tline 5"
 	if res.Output != expectedOutput {
 		t.Errorf("expected output %q, got %q", expectedOutput, res.Output)
 	}
@@ -69,7 +69,7 @@ func TestReadFileTool(t *testing.T) {
 	if !resRange.Success {
 		t.Fatalf("tool execution failed: %s", resRange.Message)
 	}
-	expectedRange := "line 3\nline 4\nline 5\nline 6"
+	expectedRange := "3\tline 3\n4\tline 4\n5\tline 5\n6\tline 6"
 	if resRange.Output != expectedRange {
 		t.Errorf("expected range output %q, got %q", expectedRange, resRange.Output)
 	}
@@ -90,7 +90,7 @@ func TestReadFileTool(t *testing.T) {
 	if !resAround.Success {
 		t.Fatalf("tool execution failed: %s", resAround.Message)
 	}
-	expectedAround := "line 3\nline 4\nline 5\nline 6\nline 7"
+	expectedAround := "3\tline 3\n4\tline 4\n5\tline 5\n6\tline 6\n7\tline 7"
 	if resAround.Output != expectedAround {
 		t.Errorf("expected around output %q, got %q", expectedAround, resAround.Output)
 	}
@@ -108,5 +108,46 @@ func TestReadFileTool(t *testing.T) {
 	}
 	if len(resTraversal.Diagnostics) != 1 || resTraversal.Diagnostics[0].Severity != "error" {
 		t.Errorf("expected error diagnostic on path traversal failure")
+	}
+
+	// Test 5: Batch read via "paths" (multiple files in one call)
+	testFilePath2 := filepath.Join(tmpDir, "second.txt")
+	if err := os.WriteFile(testFilePath2, []byte("alpha\nbeta"), 0o644); err != nil {
+		t.Fatalf("failed to write second test file: %v", err)
+	}
+	resBatch, err := rft.Execute(context.Background(), tool.Call{
+		Input:     map[string]any{"paths": []string{"test.txt", "second.txt"}, "start_line": 1, "end_line": 2},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute tool: %v", err)
+	}
+	if !resBatch.Success {
+		t.Fatalf("batch tool execution failed: %s", resBatch.Message)
+	}
+	if !strings.Contains(resBatch.Output, "### test.txt") || !strings.Contains(resBatch.Output, "### second.txt") {
+		t.Errorf("expected batch output to contain per-file headers, got %q", resBatch.Output)
+	}
+	if !strings.Contains(resBatch.Output, "1\talpha\n2\tbeta") {
+		t.Errorf("expected batch output to contain numbered content for second.txt, got %q", resBatch.Output)
+	}
+	files, _ := resBatch.Metadata["files"].([]map[string]any)
+	if len(files) != 2 {
+		t.Errorf("expected files metadata for 2 files, got %d", len(files))
+	}
+
+	// Test 6: Batch read where one path fails should still return partial success
+	resBatchPartial, err := rft.Execute(context.Background(), tool.Call{
+		Input:     map[string]any{"paths": []string{"test.txt", "missing.txt"}},
+		Workspace: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to execute tool: %v", err)
+	}
+	if !resBatchPartial.Success {
+		t.Errorf("expected partial batch success when at least one file reads successfully")
+	}
+	if len(resBatchPartial.Diagnostics) != 1 {
+		t.Errorf("expected exactly one diagnostic for the missing file, got %d", len(resBatchPartial.Diagnostics))
 	}
 }

@@ -10,10 +10,10 @@ import (
 
 type dummyTool struct{}
 
-func (t *dummyTool) Name() string             { return "dummy" }
-func (t *dummyTool) Description() string      { return "dummy tool" }
-func (t *dummyTool) Schema() json.RawMessage  { return json.RawMessage(`{}`) }
-func (t *dummyTool) Category() Category       { return CategorySearch }
+func (t *dummyTool) Name() string               { return "dummy" }
+func (t *dummyTool) Description() string        { return "dummy tool" }
+func (t *dummyTool) Schema() json.RawMessage    { return json.RawMessage(`{}`) }
+func (t *dummyTool) Category() Category         { return CategorySearch }
 func (t *dummyTool) Capabilities() []Capability { return []Capability{CapSearch} }
 func (t *dummyTool) Execute(ctx context.Context, call Call) (Result, error) {
 	val, _ := call.Input["foo"].(string)

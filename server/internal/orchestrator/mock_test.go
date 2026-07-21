@@ -39,6 +39,17 @@ func (m *mockTaskRepo) Update(ctx context.Context, id string, input models.Updat
 	return m.task, nil
 }
 
+func (m *mockTaskRepo) ListRecentByStatus(ctx context.Context, statuses []string, limit int) ([]models.Task, error) {
+	if m.task != nil {
+		for _, s := range statuses {
+			if m.task.Status == s {
+				return []models.Task{*m.task}, nil
+			}
+		}
+	}
+	return []models.Task{}, nil
+}
+
 type mockWorkflowRepo struct {
 	job            *models.WorkflowJob
 	checkpoint     *models.WorkflowCheckpoint
@@ -327,6 +338,10 @@ func (m *mockGitOpsClient) CreatePullRequest(ctx context.Context, repoURL, branc
 
 func (m *mockGitOpsClient) MergePullRequest(ctx context.Context, repoURL, prURL string) error {
 	return nil
+}
+
+func (m *mockGitOpsClient) IsPullRequestMerged(ctx context.Context, repoURL, prURL string) (bool, error) {
+	return false, nil
 }
 
 type mockArtifactRepo struct {

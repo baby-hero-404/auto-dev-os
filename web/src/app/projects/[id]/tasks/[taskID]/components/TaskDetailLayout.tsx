@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { TaskHeader } from "./TaskHeader";
@@ -24,6 +24,21 @@ export function TaskDetailLayout() {
   const toggleSection = useCallback((key: string) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
+
+  useEffect(() => {
+    const runningStatuses = ["context_loading", "analyzing", "planning", "coding", "testing", "reviewing", "fixing"];
+    if (task && runningStatuses.includes(task.status)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOpenSections((prev) => {
+        if (!prev.logs || !prev.checkpoints) {
+          return { ...prev, logs: true, checkpoints: true };
+        }
+        return prev;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.status]);
+
 
   if (isTaskLoading) {
     return (
@@ -54,27 +69,30 @@ export function TaskDetailLayout() {
     <div className="min-h-screen bg-background text-content font-sans">
       <TaskHeader />
 
-      <div className="max-w-[1180px] mx-auto px-8 pt-7 pb-12">
+      <div className="max-w-295 mx-auto px-8 pt-7 pb-12">
         <TaskTitleBlock />
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start mb-8">
-          <div className="flex flex-col gap-4">
+          <div id="hero-cards-section" className="flex flex-col gap-4">
             <TaskHeroCards />
+            <TaskSubtasks />
           </div>
 
           <div className="flex flex-col gap-4">
             <TaskSidebar />
           </div>
         </div>
-        
+
         <SupportingAccordion openSections={openSections} onToggleSection={toggleSection} />
       </div>
-      
+
       {workflow?.job?.status === "paused" &&
         workflow?.job?.last_error &&
-        !workflow.job.last_error.includes("workflow paused for human spec review") &&
-        !workflow.job.last_error.includes("workflow paused for human task clarification") && (
-          <div className="max-w-[1180px] mx-auto px-8 pb-12">
+        !workflow.job.last_error.includes("workflow paused for human task clarification") &&
+        task?.status !== "pr_ready" &&
+        task?.status !== "human_review" &&
+        task?.status !== "merged" && (
+          <div className="max-w-295 mx-auto px-8 pb-12">
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 flex flex-col gap-2">
               <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
                 <AlertCircle size={16} className="shrink-0 text-amber-500" />
@@ -92,7 +110,7 @@ export function TaskDetailLayout() {
               />
             </div>
           </div>
-      )}
+        )}
     </div>
   );
 }

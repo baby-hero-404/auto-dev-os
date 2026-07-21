@@ -221,7 +221,7 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 			pathInstruction = "repository-relative"
 		}
 		instruction += fmt.Sprintf("IMPORTANT: The diff above shows the current proposed changes. Use the available tools (e.g. search_replace, create_file) to fix ONLY the findings directly in the workspace. DO NOT recreate files that the diff already creates. All file paths are %s.\n", pathInstruction)
-		instruction += "Use run_tests/run_build/run_lint to verify your fix before finishing. When done, respond with JSON containing fixes_applied and summary."
+		instruction += "Use verify_workspace to verify your fix before finishing. When done, respond with JSON containing fixes_applied and summary."
 
 		_, patchApplied, err := runPatchRetryLoop(ctx, patchRetryConfig{
 			Task:           s.rt.Task,

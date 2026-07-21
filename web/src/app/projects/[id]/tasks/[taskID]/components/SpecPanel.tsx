@@ -50,6 +50,7 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
       const boundariesVal = localStorage.getItem(`task-boundaries-collapsed-${taskID}`);
       const storedRisks = localStorage.getItem(`task-risks-collapsed-${taskID}`);
 
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsDescCollapsed(descVal !== null ? descVal === "true" : true);
       setIsBoundariesCollapsed(boundariesVal !== null ? boundariesVal === "true" : true);
 

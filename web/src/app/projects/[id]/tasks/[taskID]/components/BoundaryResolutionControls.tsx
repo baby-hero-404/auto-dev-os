@@ -44,6 +44,8 @@ export function BoundaryResolutionControls({
     }
   }
 
+  const showApproveOption = violatedFiles.length > 0;
+
   const handleApprove = async () => {
     if (violatedFiles.length === 0) return;
     setSubmitting(true);
@@ -59,11 +61,28 @@ export function BoundaryResolutionControls({
         const lastSlashIndex = relativePath.lastIndexOf("/");
         const rootDir = lastSlashIndex !== -1 ? relativePath.substring(0, lastSlashIndex) : ".";
         const moduleName = rootDir !== "." ? rootDir.substring(rootDir.lastIndexOf("/") + 1) : "root";
+        
+        const caps = ["modify_existing", "create_test", "create_helper"];
+        const cleanFile = file.toLowerCase();
+        const isSensitive =
+          cleanFile.includes("makefile") ||
+          cleanFile.includes("dockerfile") ||
+          cleanFile.includes("docker-compose") ||
+          cleanFile.startsWith(".github/") ||
+          cleanFile.startsWith("terraform/") ||
+          cleanFile.startsWith("scripts/") ||
+          cleanFile.startsWith(".env") ||
+          cleanFile.includes("credential") ||
+          cleanFile.includes("secret");
+        if (isSensitive) {
+          caps.push("modify_infrastructure");
+        }
+
         return {
           module: moduleName,
           root: rootDir,
           repo_name: repoName,
-          capabilities: ["modify_existing", "create_test", "create_helper"],
+          capabilities: caps,
         };
       });
 
@@ -120,41 +139,43 @@ export function BoundaryResolutionControls({
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-4 border-t border-amber-500/25 pt-3 text-slate-800 dark:text-slate-100">
+    <div className="mt-3 flex flex-col gap-4 border-t border-amber-500/15 pt-4 text-slate-800 dark:text-slate-100">
       {violatedFiles.length > 0 && (
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-400 mb-1">
-            Violating Files:
+        <div className="mb-1">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500/80 mb-2">
+            Violating Files
           </div>
-          <ul className="list-inside list-disc pl-1 text-xs font-mono space-y-0.5 text-amber-900 dark:text-amber-100">
+          <div className="flex flex-wrap gap-1.5">
             {violatedFiles.map((f) => (
-              <li key={f}>{f}</li>
+              <span key={f} className="inline-flex items-center rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-mono font-medium text-amber-800 dark:text-amber-300 border border-amber-500/20 shadow-sm">
+                {f}
+              </span>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-        {violatedFiles.length > 0 && (
-          <div className="flex-1 flex flex-col justify-between rounded-lg border border-amber-500/10 bg-amber-500/5 p-3">
+      <div className="flex flex-col gap-3.5 sm:flex-row sm:items-stretch">
+        {showApproveOption && (
+          <div className="flex-1 flex flex-col justify-between rounded-xl border border-amber-500/10 bg-amber-500/5 hover:bg-amber-500/[0.08] p-4 transition-all duration-200 shadow-sm">
             <div className="mb-2">
               <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">Option A: Approve Edits</h4>
-              <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
+              <p className="text-xs text-amber-900/75 dark:text-amber-200/75 leading-normal mt-1">
                 Authorize the agent to edit these directories by automatically appending them to the task&apos;s execution boundaries.
               </p>
             </div>
-            <button onClick={handleApprove} disabled={submitting} className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-sm mt-1">
+            <button onClick={handleApprove} disabled={submitting} className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:from-amber-500 hover:to-orange-500 disabled:opacity-50 cursor-pointer shadow-md shadow-orange-500/10 active:scale-[0.98] mt-2">
               {submitting ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
               Approve & Expand Boundaries
             </button>
           </div>
         )}
 
-        <div className={violatedFiles.length > 0 ? "flex-[1.5] flex flex-col rounded-lg border border-amber-500/10 bg-amber-500/5 p-3" : "w-full flex flex-col rounded-lg border border-amber-500/10 bg-amber-500/5 p-3"}>
+        <div className={showApproveOption ? "flex-[1.5] flex flex-col rounded-xl border border-amber-500/10 bg-amber-500/5 p-4 justify-between transition-all duration-200 shadow-sm" : "w-full flex flex-col rounded-xl border border-amber-500/10 bg-amber-500/5 p-4 shadow-sm"}>
           <div className="mb-2">
-            <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">{violatedFiles.length > 0 ? "Option B: Block & Provide Guidance" : "Provide Guidance & Retry"}</h4>
-            <p className="text-xs text-amber-900/80 dark:text-amber-100/80 leading-normal mt-0.5">
-              {violatedFiles.length > 0
+            <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">{showApproveOption ? "Option B: Block & Provide Guidance" : "Provide Guidance & Retry"}</h4>
+            <p className="text-xs text-amber-900/75 dark:text-amber-200/75 leading-normal mt-1">
+              {showApproveOption
                 ? "Prevent changes to these files. Instruct the agent on what to do instead (e.g., use mock data or existing functions)."
                 : "Instruct the agent on how to adjust its strategy."}
             </p>
@@ -163,11 +184,11 @@ export function BoundaryResolutionControls({
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Guidance..."
+              placeholder="Provide prompt details or alternative files/methods..."
               rows={2}
-              className="w-full rounded border border-amber-500/20 bg-background/50 p-1.5 text-xs font-sans placeholder:opacity-60 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full rounded-lg border border-amber-500/20 bg-background/40 p-2 text-xs font-sans placeholder:opacity-50 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:bg-background/80 transition-all duration-150 resize-none"
             />
-            <button onClick={handleSendFeedback} disabled={submitting || !feedback.trim()} className="inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:opacity-50 cursor-pointer shadow-sm ml-auto">
+            <button onClick={handleSendFeedback} disabled={submitting || !feedback.trim()} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-700 to-amber-800 px-3.5 py-2 text-xs font-semibold text-white transition hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 cursor-pointer shadow-md active:scale-[0.98] ml-auto mt-1">
               {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               Send Guidance & Retry
             </button>

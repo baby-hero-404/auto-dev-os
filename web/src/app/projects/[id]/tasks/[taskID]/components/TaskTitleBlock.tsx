@@ -58,28 +58,33 @@ export function TaskTitleBlock() {
   const paused = isPaused;
 
   return (
-    <div className="flex items-start justify-between gap-6 mb-5.5">
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-5 border-b border-stroke/10">
       <div className="flex-1">
-        <h1 className="m-0 mb-2.5 text-[26px] font-bold tracking-tight text-foreground">{task?.title || "Task"}</h1>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border border-stroke/20" style={{ background: paused && running ? '#fef3c6' : bg, color: paused && running ? '#795800' : fg }}>
+        <h1 className="m-0 mb-3 text-2xl md:text-3xl font-extrabold tracking-tight text-foreground bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 dark:from-white dark:via-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+          {task?.title || "Task"}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border border-stroke/20 shadow-sm transition-all" style={{ background: paused && running ? '#fef3c6' : bg, color: paused && running ? '#795800' : fg }}>
             <span className={`w-1.5 h-1.5 rounded-full ${running && !paused ? 'animate-pulse' : ''}`} style={{ background: paused && running ? '#795800' : fg }}></span>
             {paused && running ? 'Paused' : label}
           </span>
-          <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface text-content-muted border border-stroke">
+          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-slate-500/5 text-content-muted border border-stroke/15 shadow-sm">
             {group}
           </span>
-          <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#ffe2e2] text-[#bf000f]">
+          <span className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shadow-sm">
             P{task?.priority || 0}
           </span>
         </div>
-        <div className="mt-4">
+        <div className="mt-4 bg-slate-500/[0.02] dark:bg-slate-900/10 rounded-2xl border border-stroke/10 p-4 shadow-sm">
           <DescriptionBody />
         </div>
       </div>
-      <div className="text-right shrink-0">
-        <div className="text-xs text-content-muted">Elapsed</div>
-        <div className="font-mono text-[15px] font-semibold">{formatTime(elapsedSeconds)}</div>
+      <div className="md:text-right shrink-0 self-start md:self-center bg-slate-500/5 dark:bg-slate-900/30 border border-stroke/10 rounded-xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all duration-200">
+        <div className="text-[10px] uppercase font-bold tracking-wider text-content-muted mb-0.5">Elapsed</div>
+        <div className="font-mono text-base font-bold text-foreground flex items-center md:justify-end gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${running && !paused ? 'animate-ping' : ''}`}></span>
+          {formatTime(elapsedSeconds)}
+        </div>
       </div>
     </div>
   );

@@ -209,6 +209,10 @@ fi`,
 		// deletes that never-committed, still-untracked work. `-A` mirrors the same-file rescue
 		// snapshot in RestoreGitCheckpoint below, which already stages this way successfully.
 		script := fmt.Sprintf(`set -e
+if [ ! -d %[1]s ]; then
+  echo "checkpoint aborted: worktree directory %[1]s does not exist" >&2
+  exit 1
+fi
 %[3]s
 git -C %[1]s add -A
 staged_count=$(git -C %[1]s diff --cached --name-only | wc -l | tr -d ' ')

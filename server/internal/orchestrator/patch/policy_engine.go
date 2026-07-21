@@ -69,8 +69,85 @@ func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAna
 	}
 
 	// 1. Critical infrastructure / security check
+	isCritical := false
 	for _, pat := range criticalPatterns {
 		if pat.MatchString(file) {
+			isCritical = true
+			break
+		}
+	}
+
+	if isCritical {
+		// Check if there is an execution boundary that explicitly authorizes modifying infrastructure files.
+		hasInfraCap := false
+		if analysis != nil {
+			// Check if the file is explicitly estimated/pre-approved in the task's planned AffectedFiles
+			isPreApprovedInSpec := false
+			for _, af := range analysis.AffectedFiles {
+				afFile := filepath.ToSlash(filepath.Clean(strings.TrimSpace(af.File)))
+				if file == afFile || strings.HasSuffix(file, "/"+afFile) || strings.HasSuffix(afFile, "/"+file) {
+					isPreApprovedInSpec = true
+					break
+				}
+			}
+
+			for _, b := range analysis.ExecutionBoundaries {
+				cleanRoot := filepath.ToSlash(filepath.Clean(b.Root))
+				if cleanRoot == "." || cleanRoot == "/" {
+					cleanRoot = ""
+				}
+				isMatch := false
+				if cleanRoot == "" {
+					isMatch = true
+				} else if file == cleanRoot || strings.HasPrefix(file, cleanRoot+"/") {
+					isMatch = true
+				}
+				if !isMatch && b.RepoName != "" {
+					prefix := b.RepoName + "/"
+					if strings.HasPrefix(file, prefix) {
+						stripped := strings.TrimPrefix(file, prefix)
+						if cleanRoot == "" || stripped == cleanRoot || strings.HasPrefix(stripped, cleanRoot+"/") {
+							isMatch = true
+						}
+					} else if file == b.RepoName && cleanRoot == "" {
+						isMatch = true
+					}
+				}
+				if !isMatch && b.RepoName != "" && cleanRoot != "" {
+					repoRoot := b.RepoName + "/" + cleanRoot
+					if file == repoRoot || strings.HasPrefix(file, repoRoot+"/") {
+						isMatch = true
+					}
+				}
+
+				if isMatch {
+					if isPreApprovedInSpec {
+						hasInfraCap = true
+						break
+					}
+					// We allow infrastructure edits under two conditions:
+					// 1. The boundary explicitly grants "modify_infrastructure" or "modify_sensitive" capability.
+					// 2. The boundary has a specific root (not general repository root like "." or "")
+					//    and grants "modify_existing" or "create_helper".
+					isSpecificRoot := cleanRoot != "" && cleanRoot != "." && cleanRoot != "/"
+					for _, cap := range b.Capabilities {
+						if cap == "modify_infrastructure" || cap == "modify_sensitive" {
+							hasInfraCap = true
+							break
+						}
+						if isSpecificRoot && (cap == "modify_existing" || cap == "create_helper") {
+							hasInfraCap = true
+							break
+						}
+					}
+				}
+				if hasInfraCap {
+					break
+				}
+			}
+		}
+
+		if !hasInfraCap {
 			return PolicyDecision{
 				Severity: SeverityCritical,
 				Reason:   fmt.Sprintf("modification to infrastructure/security-sensitive file: %q", file),
@@ -105,7 +182,23 @@ func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAna
 				Risk:       "MEDIUM",
 			}
 		}
-		// If not explicitly approved, we auto-expand with warning
+
+		// If not explicitly approved, check if pre-approved in spec!
+		if analysis != nil {
+			for _, af := range analysis.AffectedFiles {
+				afFile := filepath.ToSlash(filepath.Clean(strings.TrimSpace(af.File)))
+				if file == afFile || strings.HasSuffix(file, "/"+afFile) || strings.HasSuffix(afFile, "/"+file) {
+					return PolicyDecision{
+						Severity:   SeverityInfo,
+						Reason:     fmt.Sprintf("dependency config file pre-approved in planning spec: %q", file),
+						Capability: "add_dependency",
+						Risk:       "MEDIUM",
+					}
+				}
+			}
+		}
+
+		// If not explicitly approved and not in spec, we auto-expand with warning
 		return PolicyDecision{
 			Severity:   SeverityWarning,
 			Reason:     fmt.Sprintf("auto-expanding boundary for dependency config file: %q", file),
@@ -211,7 +304,22 @@ func EvaluatePolicy(file string, currentOldFile string, analysis *models.TaskAna
 		}
 	}
 
-	// 4. Outside of all approved boundaries -> Soft Retry (SeverityError)
+	// 4. Outside of all approved boundaries -> check pre-approval bypass!
+	if analysis != nil {
+		for _, af := range analysis.AffectedFiles {
+			afFile := filepath.ToSlash(filepath.Clean(strings.TrimSpace(af.File)))
+			if file == afFile || strings.HasSuffix(file, "/"+afFile) || strings.HasSuffix(afFile, "/"+file) {
+				return PolicyDecision{
+					Severity:   SeverityWarning,
+					Reason:     fmt.Sprintf("file %q is outside execution boundaries but pre-approved in planning spec; auto-expanding boundary", file),
+					Capability: requiredCap,
+					Risk:       "MEDIUM",
+				}
+			}
+		}
+	}
+
+	// 5. Outside of all approved boundaries and not pre-approved -> Soft Retry (SeverityError)
 	return PolicyDecision{
 		Severity:   SeverityError,
 		Reason:     fmt.Sprintf("file %q is outside of all approved execution boundaries", file),

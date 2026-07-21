@@ -59,7 +59,12 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 	}
 
 	containerWorkDir := o.containerPathForHostPath(task, hostWorkspacePath, "")
-	wrappedCommand := fmt.Sprintf("cd %s && %s", paths.QuoteShellArg(containerWorkDir), command)
+	// Use `;` rather than `&&`: the worktree directory may not exist yet (e.g. it was
+	// pruned or never created). The wrapped scripts use absolute paths (`git -C <path>`)
+	// and don't depend on cwd, and some of them (see REQ-010 validate_worktree in
+	// repoutil/worktrees.go) are specifically responsible for recreating a missing
+	// worktree. A failed `cd` must not short-circuit before that recovery logic runs.
+	wrappedCommand := fmt.Sprintf("cd %s 2>/dev/null; %s", paths.QuoteShellArg(containerWorkDir), command)
 
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
 	defer span.End()

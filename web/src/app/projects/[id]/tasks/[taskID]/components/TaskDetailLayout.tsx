@@ -72,6 +72,36 @@ export function TaskDetailLayout() {
       <div className="max-w-295 mx-auto px-8 pt-7 pb-12">
         <TaskTitleBlock />
 
+        {workflow?.job?.status === "paused" &&
+          workflow?.job?.last_error &&
+          !workflow.job.last_error.includes("workflow paused for human task clarification") &&
+          task?.status !== "pr_ready" &&
+          task?.status !== "human_review" &&
+          task?.status !== "merged" && (
+            <div className="mb-6 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-orange-500/5 backdrop-blur-md shadow-lg shadow-amber-500/5 p-5 text-sm flex flex-col gap-3 relative overflow-hidden transition-all duration-300 hover:shadow-amber-500/10">
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="flex items-center gap-2.5 font-bold text-amber-800 dark:text-amber-400 text-sm tracking-wide z-10">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                Task Execution Paused (Action Required)
+              </div>
+              <p className="text-xs font-mono bg-amber-500/[0.03] dark:bg-amber-950/20 border border-amber-500/10 dark:border-amber-900/20 rounded-xl p-3.5 break-all whitespace-pre-wrap text-amber-900/90 dark:text-amber-200/95 leading-relaxed shadow-inner z-10">
+                {workflow.job.last_error}
+              </p>
+              <div className="z-10">
+                <BoundaryResolutionControls
+                  errorMsg={workflow.job.last_error}
+                  task={task}
+                  updateTask={updateTask}
+                  execute={execute}
+                  setError={setError}
+                />
+              </div>
+            </div>
+          )}
+
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start mb-8">
           <div id="hero-cards-section" className="flex flex-col gap-4">
             <TaskHeroCards />
@@ -85,32 +115,6 @@ export function TaskDetailLayout() {
 
         <SupportingAccordion openSections={openSections} onToggleSection={toggleSection} />
       </div>
-
-      {workflow?.job?.status === "paused" &&
-        workflow?.job?.last_error &&
-        !workflow.job.last_error.includes("workflow paused for human task clarification") &&
-        task?.status !== "pr_ready" &&
-        task?.status !== "human_review" &&
-        task?.status !== "merged" && (
-          <div className="max-w-295 mx-auto px-8 pb-12">
-            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300 flex flex-col gap-2">
-              <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
-                <AlertCircle size={16} className="shrink-0 text-amber-500" />
-                Task Execution Paused (Human Action Required)
-              </div>
-              <p className="text-xs font-mono bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/10 dark:border-amber-900/30 rounded-lg p-3 break-all whitespace-pre-wrap text-amber-800 dark:text-amber-200">
-                {workflow.job.last_error}
-              </p>
-              <BoundaryResolutionControls
-                errorMsg={workflow.job.last_error}
-                task={task}
-                updateTask={updateTask}
-                execute={execute}
-                setError={setError}
-              />
-            </div>
-          </div>
-        )}
     </div>
   );
 }

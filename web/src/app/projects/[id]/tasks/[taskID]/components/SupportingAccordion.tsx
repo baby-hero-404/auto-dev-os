@@ -20,25 +20,25 @@ function AccordionItem({ title, summary, isOpen, onToggle, children, keepMounted
   const Icon = isOpen ? ChevronDown : ChevronRight;
 
   return (
-    <div className="border border-stroke/40 rounded-xl bg-card shadow-sm overflow-hidden text-foreground">
+    <div className="border border-stroke/10 rounded-2xl bg-card shadow-sm overflow-hidden text-foreground hover:shadow-md transition-all duration-300">
       {/* Accordion Header */}
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between gap-4 p-4 text-left hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors cursor-pointer select-none"
+        className="w-full flex items-center justify-between gap-4 p-4.5 text-left hover:bg-slate-500/5 transition-colors cursor-pointer select-none"
         aria-expanded={isOpen}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon size={18} className="text-content-muted shrink-0" />
-          <h3 className="font-heading text-sm font-bold shrink-0">{title}</h3>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Icon size={16} className="text-content-muted shrink-0" />
+          <h3 className="font-heading text-xs font-extrabold tracking-wide uppercase text-slate-800 dark:text-slate-200 shrink-0">{title}</h3>
           {!isOpen && (
-            <div className="flex-1 min-w-0 truncate text-xs text-content-muted flex items-center gap-1.5 ml-2 border-l border-stroke/40 pl-2.5">
+            <div className="flex-1 min-w-0 truncate text-xs text-content-muted flex items-center gap-1.5 ml-2 border-l border-stroke/15 pl-3">
               {summary}
             </div>
           )}
         </div>
         {!isOpen && (
-          <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary shrink-0 hover:underline">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 shrink-0 hover:underline">
             Expand
           </span>
         )}
@@ -46,12 +46,12 @@ function AccordionItem({ title, summary, isOpen, onToggle, children, keepMounted
 
       {/* Accordion Body */}
       {keepMounted ? (
-        <div className={isOpen ? "border-t border-stroke/30 p-5 bg-card/40" : "hidden"}>
+        <div className={isOpen ? "border-t border-stroke/10 p-5 bg-slate-500/[0.02]" : "hidden"}>
           {children}
         </div>
       ) : (
         isOpen && (
-          <div className="border-t border-stroke/30 p-5 bg-card/40">
+          <div className="border-t border-stroke/10 p-5 bg-slate-500/[0.02]">
             {children}
           </div>
         )
@@ -130,9 +130,9 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
               {presenceChips.map((c) => (
                 <span
                   key={c.label}
-                  className="inline-flex items-center gap-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400"
+                  className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 shadow-sm"
                 >
-                  <Check size={8} />
+                  <Check size={9} className="stroke-[3]" />
                   {c.label}
                 </span>
               ))}

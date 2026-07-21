@@ -200,6 +200,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				ckResult, err := o.repoutil.CreateGitCheckpoint(ctx, task, agent, event.StepID, worktreeSuffix)
 				if err != nil {
 					o.log(ctx, task.ID, &job.ID, "error", fmt.Sprintf("Failed to create git checkpoint: %v", err))
+					state["checkpoint_failed"] = true
 				} else if ckResult != nil {
 					if ckResult.IsEmpty {
 						state["empty"] = true

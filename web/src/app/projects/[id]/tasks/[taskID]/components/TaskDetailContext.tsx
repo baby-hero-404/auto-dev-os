@@ -37,7 +37,7 @@ export function deriveImplementationItems(
     for (const cp of checkpoints) {
       if (!cp.step.startsWith("code_")) continue;
       const status = cp.state?.status;
-      if (status === "success" || status === "recorded" || status === "skipped") {
+      if (status === "success" || status === "recorded" || status === "skipped" || status === "waiting_approval") {
         completedSteps.add(cp.step);
       } else if (status === "running") {
         runningSteps.add(cp.step);
@@ -305,7 +305,7 @@ export function getStepTasks(step: string, analysisData?: Partial<TaskAnalysis>)
 
 export function getSemanticStatusColor(status: string): { bg: string; text: string; border: string; ring: string; dot: string } {
   const norm = status?.toLowerCase() ?? "";
-  if (norm === "success" || norm === "recorded" || norm === "skipped" || norm === "completed" || norm === "merged") {
+  if (norm === "success" || norm === "recorded" || norm === "skipped" || norm === "completed" || norm === "merged" || norm === "waiting_approval") {
     return {
       bg: "bg-emerald-500/10",
       text: "text-emerald-500",
@@ -654,7 +654,7 @@ export function TaskDetailProvider({
   const workflowCompletion = useMemo(() => {
     const finished = workflowSteps.filter((step) => {
       const status = latest.get(step);
-      return status === "success" || status === "recorded" || status === "skipped";
+      return status === "success" || status === "recorded" || status === "skipped" || status === "waiting_approval";
     }).length;
     return Math.round((finished / workflowSteps.length) * 100);
   }, [latest, workflowSteps]);
@@ -663,7 +663,7 @@ export function TaskDetailProvider({
     const counts = { done: 0, running: 0, failed: 0, pending: 0 };
     for (const step of workflowSteps) {
       const status = latest.get(step) ?? "pending";
-      if (status === "success" || status === "recorded" || status === "skipped") {
+      if (status === "success" || status === "recorded" || status === "skipped" || status === "waiting_approval") {
         counts.done += 1;
       } else if (status === "running") {
         counts.running += 1;

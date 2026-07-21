@@ -1,17 +1,50 @@
 # Báo Cáo Phân Tích — 9Router
 
-## Tổng Quan
-9Router là một local AI routing gateway + dashboard, cung cấp một endpoint duy nhất OpenAI-compatible (`/v1/*`) và route traffic tới 40+ upstream providers (Anthropic, OpenAI, Gemini, Kiro, Cursor, Antigravity, GLM, MiniMax...) với format translation, model-combo fallback, multi-account fallback, OAuth/token refresh, RTK token compression và usage tracking.
-Stack: Plain JavaScript (ESM, không TypeScript), Next.js 16 (App Router) làm cả dashboard lẫn API layer, SQLite (đa driver: `bun:sqlite`/`better-sqlite3`/`node:sqlite`/`sql.js`) cho persistence, Zustand cho state client, Express chỉ dùng trong `custom-server.js` để wrap Next standalone server.
-Quy mô: repo lớn, hai package độc lập trong cùng monorepo — dashboard/gateway (`9router-app`, root) và CLI launcher (`cli/`, publish npm riêng `9router`). Core routing engine (`open-sse/`) tách biệt hoàn toàn khỏi Next.js app, có thể dùng standalone.
-Độ trưởng thành: cao — có `docs/ARCHITECTURE.md` chính thức (mermaid diagrams đầy đủ), `AGENTS.md` riêng cho engine, test suite vitest ~1000 tests, changelog conventional commits. Auto Code OS đã có sẵn provider client `server/pkg/llm/nine_router.go` coi 9Router như một OpenAI-compatible gateway — báo cáo này so sánh trực tiếp routing/cost logic của 9Router với `server/pkg/llm/router.go`.
+## Tổng Quan (TL;DR)
+9Router là một chương trình chạy trên máy tính cá nhân, đóng vai trò "trạm trung chuyển" cho các công cụ AI (như Claude Code, Cursor...): thay vì mỗi công cụ phải tự kết nối riêng tới từng nhà cung cấp AI khác nhau, 9Router gom hết lại thành một cửa duy nhất, tự động chọn nhà cung cấp nào đang hoạt động tốt, tự chuyển sang nhà cung cấp khác nếu cái đang dùng bị lỗi hoặc hết hạn mức, và còn nén bớt dữ liệu gửi đi để tiết kiệm chi phí.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Plain JavaScript (ESM, không TypeScript), Next.js 16 (App Router) làm cả dashboard lẫn API layer, SQLite (đa driver: `bun:sqlite`/`better-sqlite3`/`node:sqlite`/`sql.js`) cho persistence, Zustand cho state client, Express chỉ dùng trong `custom-server.js` để wrap Next standalone server. Cung cấp một endpoint duy nhất OpenAI-compatible (`/v1/*`) và route traffic tới 40+ upstream providers (Anthropic, OpenAI, Gemini, Kiro, Cursor, Antigravity, GLM, MiniMax...) với format translation, model-combo fallback, multi-account fallback, OAuth/token refresh, RTK token compression và usage tracking.
+- **Quy mô/Độ trưởng thành:** repo lớn, hai package độc lập trong cùng monorepo — dashboard/gateway (`9router-app`, root) và CLI launcher (`cli/`, publish npm riêng `9router`). Core routing engine (`open-sse/`) tách biệt hoàn toàn khỏi Next.js app, có thể dùng standalone. Độ trưởng thành cao — có `docs/ARCHITECTURE.md` chính thức (mermaid diagrams đầy đủ), `AGENTS.md` riêng cho engine, test suite vitest ~1000 tests, changelog conventional commits. Auto Code OS đã có sẵn provider client `server/pkg/llm/nine_router.go` coi 9Router như một OpenAI-compatible gateway — báo cáo này so sánh trực tiếp routing/cost logic của 9Router với `server/pkg/llm/router.go`.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A["POST /v1/chat/completions"] --> B["handleChat (src/sse/handlers/chat.js)"]
+    B --> C{"Model là combo?"}
+    C -- Yes/fusion --> D["handleFusionChat: fan-out panel + judge"]
+    C -- Yes/fallback,round-robin --> E["handleComboChat: thử tuần tự/round-robin"]
+    C -- No --> F["handleSingleModelChat"]
+    D --> F
+    E --> F
+    F --> G["getProviderCredentials + checkAndRefreshToken"]
+    G --> H["handleChatCore (open-sse/handlers/chatCore.js)"]
+    H --> I["RTK compress (fail-open)"]
+    I --> J["translateRequest: source→openai→target hoặc direct route"]
+    J --> K["Executor.execute() gọi upstream"]
+    K --> L{"Lỗi fallback-eligible?"}
+    L -- Yes --> M["markAccountUnavailable + cooldown backoff"]
+    M --> G
+    L -- No/Success --> N["translateResponse → SSE client"]
+    N --> O["usageDb ghi usage + log"]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Config-driven Error-based Fallback với Exponential Backoff** (`open-sse/services/accountFallback.js:9-50`): `checkFallbackError()` match lỗi qua bảng `ERROR_RULES` (text-substring trước, status-code sau) thay vì if/else cứng, mỗi rule có thể gắn cờ `backoff` để leo thang cooldown theo cấp số nhân (`getQuotaCooldown`, base × 2^level, cap 4 phút). Kết quả: logic phân loại lỗi 429 vs 401 vs 5xx transient hoàn toàn tách khỏi code gọi API, dễ mở rộng rule mới mà không sửa business logic.
-2. **Model Combo với 3 chiến lược fallback/round-robin/fusion** (`open-sse/services/combo.js`): `handleComboChat` thử tuần tự các model trong combo khi lỗi fallback-eligible; `handleFusionChat` (dòng 496-571) fan-out song song ra một "panel" model, dùng một "judge" model tổng hợp câu trả lời cuối — áp dụng ý tưởng OpenRouter Fusion, có quorum-grace collection (`collectPanel`, dòng 444-471) để giới hạn độ trễ do straggler mà vẫn ưu tiên panel đầy đủ khi mọi model nhanh.
-3. **RTK (Request Token Killer) — nén tool_result trong request** (`open-sse/rtk/index.js`, `open-sse/rtk/filters/*`): trước khi translate format, RTK duyệt `messages`/`input`/Kiro `conversationState`, tự động detect loại tool output (git diff, git log, git status, grep, ls, tree, find...) qua `autodetect.js` và áp filter nén riêng cho từng loại — ví dụ `filters/gitDiff.js` cắt hunk > 100 dòng, gom `+N -M` thay vì giữ toàn bộ diff. Toàn bộ pipeline **fail-open**: lỗi bất kỳ trả `null`, giữ nguyên body gốc, không bao giờ throw ra ngoài — README công bố tiết kiệm 20-40% token.
-4. **SQLite Multi-Adapter Driver Chain** (`src/lib/db/driver.js:55-64`): tự động thử `bun:sqlite` → `better-sqlite3` (optionalDependency, không fail install nếu thiếu build tools) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS, luôn chạy được) theo thứ tự runtime-aware. Đảm bảo app chạy được trên mọi môi trường (kể cả không có compiler) mà không cần cấu hình thủ công.
-5. **Translator Registry pivot-qua-OpenAI với Direct Route override** (`open-sse/translator/index.js:52-154`): mọi cặp format request/response mặc định đi qua 2 bước `source→openai→target`, nhưng nếu có translator đăng ký trực tiếp cho cặp `source:target` (vd `claude:kiro`), engine dùng route đó để tránh mất dữ liệu qua double-hop (thinking blocks, tool ids, ảnh non-base64). Cơ chế self-register qua side-effect import (`register()` gọi khi module load) giữ cho việc thêm translator mới zero-touch với code điều phối.
+1. **Config-driven Error-based Fallback với Exponential Backoff**
+   - *Là gì:* Khi một nhà cung cấp AI bị lỗi (hết hạn mức, sai khóa, lỗi tạm thời...), 9Router tự động biết nên chờ bao lâu trước khi thử lại, và thời gian chờ tăng dần nếu lỗi lặp lại thay vì thử lại liên tục làm tình hình tệ hơn.
+   - *Cách triển khai:* `checkFallbackError()` (`open-sse/services/accountFallback.js:9-50`) match lỗi qua bảng `ERROR_RULES` (text-substring trước, status-code sau) thay vì if/else cứng, mỗi rule có thể gắn cờ `backoff` để leo thang cooldown theo cấp số nhân (`getQuotaCooldown`, base × 2^level, cap 4 phút). Kết quả: logic phân loại lỗi 429 vs 401 vs 5xx transient hoàn toàn tách khỏi code gọi API, dễ mở rộng rule mới mà không sửa business logic.
+2. **Model Combo với 3 chiến lược fallback/round-robin/fusion**
+   - *Là gì:* 9Router có thể gọi nhiều model AI khác nhau cho cùng một yêu cầu — hoặc thử lần lượt cho tới khi có model trả lời được, hoặc hỏi song song nhiều model rồi dùng một model khác tổng hợp lại câu trả lời tốt nhất.
+   - *Cách triển khai:* (`open-sse/services/combo.js`): `handleComboChat` thử tuần tự các model trong combo khi lỗi fallback-eligible; `handleFusionChat` (dòng 496-571) fan-out song song ra một "panel" model, dùng một "judge" model tổng hợp câu trả lời cuối — áp dụng ý tưởng OpenRouter Fusion, có quorum-grace collection (`collectPanel`, dòng 444-471) để giới hạn độ trễ do straggler mà vẫn ưu tiên panel đầy đủ khi mọi model nhanh.
+3. **RTK (Request Token Killer) — nén tool_result trong request**
+   - *Là gì:* Trước khi gửi yêu cầu tới AI, 9Router tự động nén bớt các đoạn dữ liệu dài dòng (như kết quả lệnh git, log, danh sách file) để tiết kiệm chi phí, nhưng nếu quá trình nén gặp lỗi thì nó âm thầm bỏ qua và gửi dữ liệu gốc chứ không bao giờ làm hỏng yêu cầu.
+   - *Cách triển khai:* (`open-sse/rtk/index.js`, `open-sse/rtk/filters/*`): trước khi translate format, RTK duyệt `messages`/`input`/Kiro `conversationState`, tự động detect loại tool output (git diff, git log, git status, grep, ls, tree, find...) qua `autodetect.js` và áp filter nén riêng cho từng loại — ví dụ `filters/gitDiff.js` cắt hunk > 100 dòng, gom `+N -M` thay vì giữ toàn bộ diff. Toàn bộ pipeline **fail-open**: lỗi bất kỳ trả `null`, giữ nguyên body gốc, không bao giờ throw ra ngoài — README công bố tiết kiệm 20-40% token.
+4. **SQLite Multi-Adapter Driver Chain**
+   - *Là gì:* 9Router tự động chọn cách lưu trữ dữ liệu phù hợp với máy đang chạy nó, kể cả khi máy đó thiếu công cụ biên dịch cần thiết — người dùng không cần cấu hình gì thêm.
+   - *Cách triển khai:* (`src/lib/db/driver.js:55-64`): tự động thử `bun:sqlite` → `better-sqlite3` (optionalDependency, không fail install nếu thiếu build tools) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS, luôn chạy được) theo thứ tự runtime-aware. Đảm bảo app chạy được trên mọi môi trường (kể cả không có compiler) mà không cần cấu hình thủ công.
+5. **Translator Registry pivot-qua-OpenAI với Direct Route override**
+   - *Là gì:* Vì mỗi công cụ AI (Claude, OpenAI, Kiro...) nói một "ngôn ngữ" định dạng dữ liệu khác nhau, 9Router cần dịch qua lại giữa chúng — với những cặp hay bị mất dữ liệu khi dịch, nó có đường dịch trực tiếp riêng, còn lại thì dịch qua một định dạng trung gian chung để đỡ tốn công viết đường dịch cho từng cặp.
+   - *Cách triển khai:* (`open-sse/translator/index.js:52-154`): mọi cặp format request/response mặc định đi qua 2 bước `source→openai→target`, nhưng nếu có translator đăng ký trực tiếp cho cặp `source:target` (vd `claude:kiro`), engine dùng route đó để tránh mất dữ liệu qua double-hop (thinking blocks, tool ids, ảnh non-base64). Cơ chế self-register qua side-effect import (`register()` gọi khi module load) giữ cho việc thêm translator mới zero-touch với code điều phối.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Config-driven fallback rule table thay vì hard-coded status check** — What: `ERROR_RULES` (danh sách rule text/status → shouldFallback + cooldown) trong `open-sse/config/errorConfig.js`, dùng bởi `checkFallbackError()` (`open-sse/services/accountFallback.js:23-50`). Apply: `server/pkg/llm/router.go` hiện chỉ có retry với backoff cố định (`chatWithRetry`, dòng 215-241) không phân biệt lỗi transient/rate-limit/auth. Thêm bảng rule tương tự trong `server/pkg/llm/transient_error.go` (đã tồn tại, kiểm tra mở rộng) để account/provider bị 429 có cooldown leo thang riêng thay vì retry đồng nhất. Impact: H · Effort: M · Risk: L · Est: 2 ngày.
@@ -47,28 +80,6 @@ flowchart LR
 | SQLite multi-adapter thay Postgres | `src/lib/db/driver.js`, comment trong `package.json` về `better-sqlite3` optional | Zero-config local-first, chạy mọi máy dev | Không phù hợp multi-tenant/cloud scale; phải giữ 4 adapter đồng bộ schema | High |
 | Translator pivot qua OpenAI + direct-route override | `open-sse/translator/index.js:79-104`, `AGENTS.md` mục Pitfalls | DRY cho N×M format pairs, chỉ viết N+M thay vì N×M converters | Double-hop mất field (thinking, tool id) cho cặp không có direct route | High |
 | RTK/headroom fail-open, không throw | `open-sse/AGENTS.md` mục Pitfalls, `open-sse/rtk/index.js:83-86` | An toàn tuyệt đối — compression bug không bao giờ chặn request thật | Có thể âm thầm bỏ qua nén khi lỗi, khó phát hiện regression nếu không log | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A["POST /v1/chat/completions"] --> B["handleChat (src/sse/handlers/chat.js)"]
-    B --> C{"Model là combo?"}
-    C -- Yes/fusion --> D["handleFusionChat: fan-out panel + judge"]
-    C -- Yes/fallback,round-robin --> E["handleComboChat: thử tuần tự/round-robin"]
-    C -- No --> F["handleSingleModelChat"]
-    D --> F
-    E --> F
-    F --> G["getProviderCredentials + checkAndRefreshToken"]
-    G --> H["handleChatCore (open-sse/handlers/chatCore.js)"]
-    H --> I["RTK compress (fail-open)"]
-    I --> J["translateRequest: source→openai→target hoặc direct route"]
-    J --> K["Executor.execute() gọi upstream"]
-    K --> L{"Lỗi fallback-eligible?"}
-    L -- Yes --> M["markAccountUnavailable + cooldown backoff"]
-    M --> G
-    L -- No/Success --> N["translateResponse → SSE client"]
-    N --> O["usageDb ghi usage + log"]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Registry pattern lặp lại nhất quán**: translator (`register(from,to,...)`), executor (`executors/index.js` map, fallback `DefaultExecutor`), provider (`providers/registry/*` auto-generated) — cùng một triết lý "thêm file mới, tự động được nhặt qua import side-effect hoặc generated index", giảm boilerplate khi mở rộng 40+ provider.

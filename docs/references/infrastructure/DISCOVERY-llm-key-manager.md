@@ -1,14 +1,50 @@
 # Báo Cáo Phân Tích — LLM Key Manager (Hybrid AI Gateway)
 
-## Tổng Quan
-Thư viện TypeScript/React chạy hoàn toàn trong browser (zero backend), đóng vai trò "Hybrid AI Gateway" cho các API OpenAI/Anthropic/Gemini: quản lý nhiều API key, mã hoá bằng Web Crypto API (AES-256-GCM) + IndexedDB (Dexie), tự động chọn key/model tốt nhất qua công thức "Effective Score", failover và circuit breaker khi lỗi. Stack: TypeScript, React 18 (peer dep), Dexie 4 (IndexedDB wrapper), Vite build lib, Vitest (24 file test), pnpm. Quy mô: ~10.2K dòng `src/` (không tính tests/components UI), kiến trúc theo domain-service khá rõ ràng, maturity ở mức "hardened side-project/small-lib" — có state machine, test coverage tốt cho phần lõi, nhưng vẫn còn code có ghi chú "Phase 1/Phase 6 Refactoring" cho thấy đang tái cấu trúc dần.
+## Tổng Quan (TL;DR)
+Đây là một thư viện nhúng vào trình duyệt web, giúp ứng dụng quản lý nhiều tài khoản/API key của các dịch vụ AI (OpenAI, Anthropic, Gemini) một cách an toàn — key được mã hoá và lưu ngay trên máy người dùng, không gửi lên server nào cả. Nó tự động chọn key và model AI "khoẻ" nhất để dùng, tự chuyển sang key khác khi một key bị lỗi hoặc hết hạn mức, giúp ứng dụng luôn hoạt động trơn tru mà không cần người dùng can thiệp thủ công.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** TypeScript, React 18 (peer dep), Dexie 4 (IndexedDB wrapper), Vite build lib, Vitest (24 file test), pnpm. Đóng vai trò "Hybrid AI Gateway" chạy hoàn toàn client-side (zero backend), mã hoá key bằng Web Crypto API (AES-256-GCM) + IndexedDB, tự động chọn key/model tốt nhất qua công thức "Effective Score", failover và circuit breaker khi lỗi.
+- **Quy mô/Độ trưởng thành:** ~10.2K dòng `src/` (không tính tests/components UI), kiến trúc theo domain-service khá rõ ràng, maturity ở mức "hardened side-project/small-lib" — có state machine, test coverage tốt cho phần lõi, nhưng vẫn còn code có ghi chú "Phase 1/Phase 6 Refactoring" cho thấy đang tái cấu trúc dần.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[App gọi useLLM/chat] --> B[UnifiedLLMClient.chat]
+    B --> C[resolveChain: custom/static fallback chain + sticky-first]
+    C --> D{Còn model trong chain?}
+    D -- No --> Z[Throw lastError]
+    D -- Yes --> E[keyResolver.resolve modelId]
+    E --> F{safetyGuard cho phép?}
+    F -- No, disabled/circuit open --> D
+    F -- Yes --> G[availabilityCache.getUsableModels O1 + sort effectiveScore]
+    G --> H[vaultService.getKey decrypt API key]
+    H --> I[Provider Adapter .chat]
+    I --> J{Thành công?}
+    J -- Yes --> K[markModelAvailable + markSuccess + sticky update + analytics]
+    K --> L[Return ChatResponse]
+    J -- No --> M[availabilityManager.handleRuntimeError: classify + calculateRetry]
+    M --> N[circuitBreaker.recordKeyFailure/ProviderFailure]
+    N --> O[exclude key khỏi vòng lặp, thử key khác cùng model]
+    O --> E
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Effective Score Routing Engine**: Công thức đơn giản nhưng hiệu quả `Score = PowerScore + PriorityBonus + HealthBonus − LatencyPenalty` tính real-time cho từng cặp (key, model), pre-sort thành index O(1) để chọn key tốt nhất tức thời. (`src/services/availability/availability.cache.ts:140-236`)
-2. **State Machine cho vòng đời Model Availability**: Bảng transition tường minh (`NEW → CHECKING → AVAILABLE/TEMP_FAILED/PERM_FAILED → COOLDOWN → CHECKING`), có docstring vẽ ASCII diagram, và class `ModelStateMachine` là single source of truth mọi state transition. (`src/services/availability/state-machine.ts:1-260`)
-3. **Error-Aware Retry Strategy**: Phân loại lỗi thành 7 category (AUTH_INVALID, RATE_LIMITED, SERVER_ERROR, NETWORK_ERROR...) mỗi loại có config backoff/jitter/max-retry riêng, cộng thêm priority multiplier (model ưu tiên cao được retry nhanh hơn 50%). (`src/services/availability/retry-strategy.ts:106-262`)
-4. **Two-Layer Circuit Breaker (Key + Provider)**: Circuit breaker độc lập cho từng key VÀ từng provider, config threshold khác nhau theo provider (Gemini chịu 10 lỗi mới OPEN vì "rất ổn định", OpenAI chỉ 5). Có đầy đủ CLOSED → OPEN → HALF_OPEN → CLOSED với sliding failure window + persist qua localStorage. (`src/services/safety/circuit-breaker.ts:26-48, 249-356`)
-5. **Client-side Vault mã hoá AES-256-GCM**: Key API không rời trình duyệt, mã hoá bằng `window.crypto.subtle`, có fingerprint SHA-256 để chống trùng key, decrypted-key cache trong memory để tránh decrypt lại mỗi request. (`src/services/vault/crypto.service.ts:1-95`, `src/services/vault/vault.service.ts:64-101, 145-157`)
+1. **Effective Score Routing Engine**
+   - *Là gì:* Khi có nhiều key/model AI khả dụng, thư viện cần chọn ngay lập tức key/model nào tốt nhất để dùng cho mỗi yêu cầu, tính đến độ mạnh, độ ưu tiên, độ ổn định và độ trễ.
+   - *Cách triển khai:* Công thức đơn giản nhưng hiệu quả `Score = PowerScore + PriorityBonus + HealthBonus − LatencyPenalty` tính real-time cho từng cặp (key, model), pre-sort thành index O(1) để chọn key tốt nhất tức thời. (`src/services/availability/availability.cache.ts:140-236`)
+2. **State Machine cho vòng đời Model Availability**
+   - *Là gì:* Mỗi cặp key/model luôn ở một trạng thái rõ ràng (đang kiểm tra, khả dụng, lỗi tạm thời, lỗi vĩnh viễn, đang chờ nguội...) thay vì dùng nhiều cờ đúng/sai rời rạc dễ gây nhầm lẫn.
+   - *Cách triển khai:* Bảng transition tường minh (`NEW → CHECKING → AVAILABLE/TEMP_FAILED/PERM_FAILED → COOLDOWN → CHECKING`), có docstring vẽ ASCII diagram, và class `ModelStateMachine` là single source of truth mọi state transition. (`src/services/availability/state-machine.ts:1-260`)
+3. **Error-Aware Retry Strategy**
+   - *Là gì:* Không phải lỗi nào cũng nên thử lại theo cùng một cách — lỗi do sai mật khẩu thì thử lại vô ích, còn lỗi do quá tải server thì nên chờ rồi thử lại; hệ thống phân biệt rõ từng loại lỗi để xử lý đúng.
+   - *Cách triển khai:* Phân loại lỗi thành 7 category (AUTH_INVALID, RATE_LIMITED, SERVER_ERROR, NETWORK_ERROR...) mỗi loại có config backoff/jitter/max-retry riêng, cộng thêm priority multiplier (model ưu tiên cao được retry nhanh hơn 50%). (`src/services/availability/retry-strategy.ts:106-262`)
+4. **Two-Layer Circuit Breaker (Key + Provider)**
+   - *Là gì:* Khi một key hoặc cả một nhà cung cấp AI liên tục bị lỗi, hệ thống tạm ngưng gọi tới nó trong một khoảng thời gian thay vì cứ thử lại liên tục gây lãng phí và làm chậm ứng dụng — mỗi nhà cung cấp có ngưỡng chịu lỗi khác nhau tuỳ độ ổn định thực tế.
+   - *Cách triển khai:* Circuit breaker độc lập cho từng key VÀ từng provider, config threshold khác nhau theo provider (Gemini chịu 10 lỗi mới OPEN vì "rất ổn định", OpenAI chỉ 5). Có đầy đủ CLOSED → OPEN → HALF_OPEN → CLOSED với sliding failure window + persist qua localStorage. (`src/services/safety/circuit-breaker.ts:26-48, 249-356`)
+5. **Client-side Vault mã hoá AES-256-GCM**
+   - *Là gì:* API key của người dùng được cất giữ an toàn ngay trên trình duyệt của họ, không bao giờ gửi ra ngoài, và hệ thống có thể phát hiện nếu người dùng vô tình nhập trùng một key đã có mà không cần "mở khoá" để so sánh.
+   - *Cách triển khai:* Key API không rời trình duyệt, mã hoá bằng `window.crypto.subtle`, có fingerprint SHA-256 để chống trùng key, decrypted-key cache trong memory để tránh decrypt lại mỗi request. (`src/services/vault/crypto.service.ts:1-95`, `src/services/vault/vault.service.ts:64-101, 145-157`)
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Effective Score cho LLM Gateway multi-key** — What: Cache in-memory pre-sorted theo `effectiveScore = power + priorityBonus + healthBonus - latencyPenalty` để chọn key O(1) (`src/services/availability/availability.cache.ts:140-237`). Apply: `server/pkg/llm/` hiện là Go — port ý tưởng thành 1 struct `KeyScoreCache` giữ map `provider → []scoredKey` sắp xếp sẵn, refresh khi key/model đổi trạng thái, thay vì tính điểm mỗi request. Impact: H · Effort: M · Risk: L · Est: 3-4 days.
@@ -62,28 +98,6 @@ flowchart TD
 | Tách `availability.cache.ts` (in-memory) khỏi `availability.manager.ts` (nguồn sự thật ở IndexedDB) | Docstring "Eliminates expensive IndexedDB queries on the hot path"; `requestSync()`/`syncFromDB()` debounce 100ms | Hot path chọn key đạt O(1), tránh IndexedDB latency mỗi request | Rủi ro cache lệch với DB tạm thời (đã có `isStale()` + TTL 5 phút để bù) | High |
 | State machine tường minh thay vì cờ boolean rải rác | Comment "IMPORTANT: All state changes MUST go through ModelStateMachine.transition()" (`availability.manager.ts:8`) dù thực tế `handleRuntimeError`/`markModelAvailable` set state trực tiếp không luôn gọi `transition()` | Tránh trạng thái không hợp lệ, dễ audit/debug qua console log transition | Có khoảng cách giữa lý tưởng kiến trúc và implementation thực tế (code không luôn tuân thủ rule tự đặt) | Medium |
 | Circuit breaker cấu hình riêng theo provider | `PROVIDER_CIRCUIT_CONFIGS` (openai/anthropic/gemini có threshold khác nhau) | Phản ánh đặc tính ổn định thực tế của từng provider, giảm false-positive OPEN cho Gemini | Cần bảo trì config thủ công khi thêm provider mới, giá trị "5 vs 8 vs 10" mang tính kinh nghiệm/heuristic không có công thức rõ | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[App gọi useLLM/chat] --> B[UnifiedLLMClient.chat]
-    B --> C[resolveChain: custom/static fallback chain + sticky-first]
-    C --> D{Còn model trong chain?}
-    D -- No --> Z[Throw lastError]
-    D -- Yes --> E[keyResolver.resolve modelId]
-    E --> F{safetyGuard cho phép?}
-    F -- No, disabled/circuit open --> D
-    F -- Yes --> G[availabilityCache.getUsableModels O1 + sort effectiveScore]
-    G --> H[vaultService.getKey decrypt API key]
-    H --> I[Provider Adapter .chat]
-    I --> J{Thành công?}
-    J -- Yes --> K[markModelAvailable + markSuccess + sticky update + analytics]
-    K --> L[Return ChatResponse]
-    J -- No --> M[availabilityManager.handleRuntimeError: classify + calculateRetry]
-    M --> N[circuitBreaker.recordKeyFailure/ProviderFailure]
-    N --> O[exclude key khỏi vòng lặp, thử key khác cùng model]
-    O --> E
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Adapter Pattern**: `IProviderAdapter` interface thống nhất OpenAI/Anthropic/Gemini, đăng ký qua registry (`src/providers/provider.registry.ts:7-16`) — dễ thêm provider mới mà không sửa core.

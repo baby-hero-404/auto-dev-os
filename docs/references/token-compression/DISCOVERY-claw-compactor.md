@@ -1,20 +1,51 @@
 # Báo Cáo Phân Tích — Claw Compactor
 
-## Tổng Quan
-Engine nén token cho LLM mã nguồn mở, kiến trúc **14-stage Fusion Pipeline** viết bằng Python (package `claw_compactor`, v7.1.0), đi kèm proxy Node.js (`proxy/server.mjs`, ~2100 dòng) đóng vai trò gateway giữa OpenClaw instances và Claude CLI. Đạt 15–82% giảm token tùy loại nội dung, không cần LLM inference (zero cost), có cơ chế **reversible compression** qua `RewindStore`. Quy mô: ~16k dòng Python/JS, 1600+ test (`tests/` có 59 file, hàng nghìn test case), maturity cao (CI, codecov, PyPI package, changelog dài).
+## Tổng Quan (TL;DR)
+Claw Compactor là một công cụ giúp giảm bớt độ dài văn bản gửi cho AI, để tiết kiệm chi phí và tăng tốc độ, mà vẫn có thể lấy lại đúng nội dung gốc khi cần. Nó phân tích từng đoạn nội dung (code, log, JSON, văn xuôi...) rồi áp dụng cách rút gọn phù hợp cho từng loại, thay vì dùng một cách rút gọn chung cho tất cả.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Engine nén token cho LLM mã nguồn mở, kiến trúc **14-stage Fusion Pipeline** viết bằng Python (package `claw_compactor`, v7.1.0), đi kèm proxy Node.js (`proxy/server.mjs`, ~2100 dòng) đóng vai trò gateway giữa OpenClaw instances và Claude CLI. Đạt 15–82% giảm token tùy loại nội dung, không cần LLM inference (zero cost), có cơ chế **reversible compression** qua `RewindStore`.
+- **Quy mô/Độ trưởng thành:** ~16k dòng Python/JS, 1600+ test (`tests/` có 59 file, hàng nghìn test case), maturity cao (CI, codecov, PyPI package, changelog dài).
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[FusionEngine.compress_messages messages] --> B[dedup_across_messages\ncross-msg simhash dedup]
+    B --> C{Với mỗi message}
+    C --> D{content là string hay multipart?}
+    D -- string --> E[_compress_text_message]
+    D -- list/multipart --> F[_compress_multipart_message\nchỉ nén phần type=text]
+    E --> G[FusionEngine.compress text, role]
+    G --> H[build FusionContext frozen]
+    H --> I[pipeline.run ctx\nchạy tuần tự 14 stage]
+    I --> J[_build_stats\ntính reduction_pct, per_stage timing]
+    J --> K[trả về compressed + stats + markers + warnings]
+    F --> K
+    K --> L[Aggregate stats toàn bộ conversation]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Content-aware routing qua Cortex + ContentDetector**: Stage đầu tiên (`order=5`) phân loại nội dung thành 6 loại (`code|json|log|diff|search|text`) và 16 ngôn ngữ bằng cascade heuristic có ưu tiên rõ ràng — code fence > diff header > JSON parse > shebang > log density > search density > keyword density > fallback text (`scripts/lib/fusion/content_detector.py:1-14`, `scripts/lib/fusion/cortex.py:19-48`). Nhờ vậy các stage sau chỉ chạy khi phù hợp, tránh phá hỏng code/JSON bằng abbreviation dành cho văn xuôi.
-2. **Immutable pipeline với gate-before-compress**: `FusionContext` và `FusionResult` là `frozen dataclass`; mỗi stage chỉ implement `should_apply()` (gate rẻ, O(1)) và `apply()` (nén thật). `FusionPipeline.run()` chạy tuần tự, output stage N là input stage N+1 (`scripts/lib/fusion/base.py:34-97`, `scripts/lib/fusion/pipeline.py:57-94`). Kết quả đo được: 10/14 stage skip trên nội dung không phù hợp gần như miễn phí — tổng latency 10-80ms cho context 8K-128K token (`ARCHITECTURE.md:503-507`).
-3. **Reversible compression qua RewindStore (hash-addressed LRU)**: Các stage lossy (Ionizer, LogCrunch, SearchCrunch, Photon) lưu nội dung gốc vào `RewindStore` (LRU 500 entries, TTL 600s, key = SHA-256[:24]) và chèn marker `[[REWIND:sha256:...]]` vào output nén. LLM có thể gọi tool `rewind_retrieve(hash)` để lấy lại bản gốc khi cần chi tiết (`scripts/lib/rewind/store.py:34-90`, `ARCHITECTURE.md:266-317`). Đây là cơ chế cho phép nén aggressive (Ionizer đạt 81.9% trên JSON 100 item) mà không mất thông tin vĩnh viễn.
-4. **QuantumLock — ổn định KV-cache prefix**: Stage `order=3` (chạy trước cả Cortex) chỉ áp dụng cho message `role=system`, dùng 7 regex pattern (ISO date, JWT, API key, UUID, unix timestamp, hex id...) để thay thế nội dung động (date, token, session id) bằng placeholder cố định, rồi gộp giá trị thật vào một "appendix" ở cuối message (`scripts/lib/fusion/quantum_lock.py:44-175`). Mục đích: giữ prefix system prompt bất biến giữa các request để tối đa hóa tỉ lệ cache-hit của Anthropic prompt caching — một request thay đổi 1 token ở đầu prompt vốn sẽ làm mất toàn bộ cache.
-5. **Neurosyntax — AST-aware compression an toàn về semantics**: Dùng `tree-sitter` (qua `tree_sitter_language_pack`, optional dependency) để parse code, áp dụng các biến đổi giữ nguyên cấu trúc (loại bỏ dead code, chuẩn hóa whitespace/comment, xóa type annotation dư thừa) nhưng **tuyệt đối không rút gọn identifier** — "Class/function/variable names are semantic anchors that LLMs use to understand code context. Shortening them destroys comprehension and causes downstream task failures (validated on SWE-bench)" (`scripts/lib/fusion/neurosyntax.py:1-16`). Khi tree-sitter không khả dụng/parse fail, fallback về regex an toàn (strip comment, blank-line normalize) chứ không bao giờ đoán mò sửa cú pháp.
+1. **Content-aware routing qua Cortex + ContentDetector**
+   - *Là gì:* Công cụ tự động nhận diện loại nội dung (code, JSON, log, diff, văn xuôi...) trước khi quyết định cách rút gọn, để tránh làm hỏng cấu trúc dữ liệu khi áp dụng nhầm kỹ thuật rút gọn dành cho loại khác.
+   - *Cách triển khai:* Stage đầu tiên (`order=5`) phân loại nội dung thành 6 loại (`code|json|log|diff|search|text`) và 16 ngôn ngữ bằng cascade heuristic có ưu tiên rõ ràng — code fence > diff header > JSON parse > shebang > log density > search density > keyword density > fallback text (`scripts/lib/fusion/content_detector.py:1-14`, `scripts/lib/fusion/cortex.py:19-48`). Nhờ vậy các stage sau chỉ chạy khi phù hợp, tránh phá hỏng code/JSON bằng abbreviation dành cho văn xuôi.
+2. **Immutable pipeline với gate-before-compress**
+   - *Là gì:* Quy trình xử lý gồm nhiều bước nối tiếp nhau, mỗi bước tự kiểm tra có cần chạy hay không trước khi thực sự xử lý, giúp hệ thống nhanh và an toàn hơn vì không sửa đổi dữ liệu ngoài ý muốn.
+   - *Cách triển khai:* `FusionContext` và `FusionResult` là `frozen dataclass`; mỗi stage chỉ implement `should_apply()` (gate rẻ, O(1)) và `apply()` (nén thật). `FusionPipeline.run()` chạy tuần tự, output stage N là input stage N+1 (`scripts/lib/fusion/base.py:34-97`, `scripts/lib/fusion/pipeline.py:57-94`). Kết quả đo được: 10/14 stage skip trên nội dung không phù hợp gần như miễn phí — tổng latency 10-80ms cho context 8K-128K token (`ARCHITECTURE.md:503-507`).
+3. **Reversible compression qua RewindStore (hash-addressed LRU)**
+   - *Là gì:* Dù nội dung được rút gọn rất mạnh, bản gốc vẫn được giữ lại ở nơi khác để lấy lại khi cần — giống như "xóa tạm" thay vì "xóa vĩnh viễn", cho phép nén mạnh tay mà không sợ mất thông tin quan trọng.
+   - *Cách triển khai:* Các stage lossy (Ionizer, LogCrunch, SearchCrunch, Photon) lưu nội dung gốc vào `RewindStore` (LRU 500 entries, TTL 600s, key = SHA-256[:24]) và chèn marker `[[REWIND:sha256:...]]` vào output nén. LLM có thể gọi tool `rewind_retrieve(hash)` để lấy lại bản gốc khi cần chi tiết (`scripts/lib/rewind/store.py:34-90`, `ARCHITECTURE.md:266-317`). Đây là cơ chế cho phép nén aggressive (Ionizer đạt 81.9% trên JSON 100 item) mà không mất thông tin vĩnh viễn.
+4. **QuantumLock — ổn định KV-cache prefix**
+   - *Là gì:* Kỹ thuật tách những phần nội dung hay thay đổi (như ngày giờ, mã phiên) ra khỏi phần đầu của lời nhắc hệ thống, để phần đầu luôn giống hệt nhau giữa các lần gọi — nhờ đó AI có thể tái sử dụng bộ nhớ đệm, tiết kiệm chi phí đáng kể.
+   - *Cách triển khai:* Stage `order=3` (chạy trước cả Cortex) chỉ áp dụng cho message `role=system`, dùng 7 regex pattern (ISO date, JWT, API key, UUID, unix timestamp, hex id...) để thay thế nội dung động (date, token, session id) bằng placeholder cố định, rồi gộp giá trị thật vào một "appendix" ở cuối message (`scripts/lib/fusion/quantum_lock.py:44-175`). Mục đích: giữ prefix system prompt bất biến giữa các request để tối đa hóa tỉ lệ cache-hit của Anthropic prompt caching — một request thay đổi 1 token ở đầu prompt vốn sẽ làm mất toàn bộ cache.
+5. **Neurosyntax — AST-aware compression an toàn về semantics**
+   - *Là gì:* Cách rút gọn code thông minh, hiểu được cấu trúc thật của mã nguồn thay vì chỉ cắt chữ, đặc biệt không bao giờ đổi tên biến/hàm vì tên gọi là manh mối quan trọng giúp AI hiểu đúng ngữ cảnh code.
+   - *Cách triển khai:* Dùng `tree-sitter` (qua `tree_sitter_language_pack`, optional dependency) để parse code, áp dụng các biến đổi giữ nguyên cấu trúc (loại bỏ dead code, chuẩn hóa whitespace/comment, xóa type annotation dư thừa) nhưng **tuyệt đối không rút gọn identifier** — "Class/function/variable names are semantic anchors that LLMs use to understand code context. Shortening them destroys comprehension and causes downstream task failures (validated on SWE-bench)" (`scripts/lib/fusion/neurosyntax.py:1-16`). Khi tree-sitter không khả dụng/parse fail, fallback về regex an toàn (strip comment, blank-line normalize) chứ không bao giờ đoán mò sửa cú pháp.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Content-type-aware compression pipeline trước khi gọi LLM** — What: Cortex phân loại nội dung rồi route tới stage phù hợp, thay vì một bộ regex chung cho mọi loại text (`scripts/lib/fusion/cortex.py`, `content_detector.py`). Apply: Thêm bước tiền xử lý trong `server/pkg/llm/pricing.go` (cạnh hàm `EstimateMessageTokens`, dòng 74) hoặc một package mới `server/pkg/llm/compact/` chạy trước khi build request — phân loại nội dung tool-result (log build, diff git, JSON từ `server/internal/context/repomap`) và áp compressor tương ứng (fold log lặp, gấp diff context, sample JSON array) trước khi đưa vào `server/internal/orchestrator/llm_step.go`. Impact: H · Effort: M · Risk: L · Est: 4-5 ngày.
 2. **DiffCrunch — gấp git diff context giống pattern GitOps của Auto Code OS** — What: Parse unified diff hunks, chỉ giữ dòng thay đổi + window context (mặc định 3 dòng), gấp phần unchanged còn lại thành marker đếm dòng, giảm 60-80% trên diff lớn (`ARCHITECTURE.md:187-193`). Apply: Áp dụng trực tiếp cho diff output ở `server/internal/gitops/` và `server/internal/orchestrator/gitops/` trước khi đưa vào prompt review/commit-message step — vì repo có sẵn full diff trong VCS, không cần RewindStore, chỉ cần reference marker. Impact: M · Effort: L · Risk: L · Est: 2-3 ngày.
 3. **Reversible compression (Rewind pattern) cho tool-result lớn** — What: Lưu bản gốc vào hash-addressed store, cho phép LLM tool-call lấy lại khi cần (`scripts/lib/rewind/store.py`). Apply: Auto Code OS đã có `server/internal/tool/` framework — thêm 1 tool mới `context_retrieve(hash)` đọc từ Postgres/Redis (thay LRU in-memory) lưu output tool gốc trước khi nén, dùng cho output dài từ `server/internal/sandbox/` (test logs, build logs). Impact: H · Effort: M · Risk: M (cần schema lưu trữ + TTL cleanup) · Est: 3-4 ngày.
-4. **QuantumLock — ổn định prompt prefix cho prompt caching** — What: Regex tách phần động (date/uuid/token) ra khỏi system prompt để giữ prefix cố định, tối ưu cache-hit rate (`scripts/lib/fusion/quantum_lock.py`). Apply: Áp dụng cho `server/internal/prompts/` (Go templates) — tách các giá trị runtime-injected (timestamp, task ID, session ID) khỏi phần đầu system prompt, đẩy xuống cuối, giúp Anthropic prompt caching (nếu `server/pkg/llm/anthropic.go` đã dùng `cache_control`) đạt hit-rate cao hơn giữa các step trong cùng 1 task. Impact: M · Effort: S · Risk: L · Est: 1-2 ngày.
+4. **QuantumLock — ổn định prompt prefix cho prompt caching** — What: Regex tách phần động (date/uuid/token) ra khỏi system prompt để giữ prefix cố định, tối ưu cache-hit rate (`scripts/lib/fusion/quantum_lock.py`). Apply: **Đã verify**: `server/pkg/llm/anthropic.go` **chưa dùng `cache_control` ở đâu cả** (`grep -rn "cache_control\|CacheControl" server/pkg/llm` rỗng) — nghĩa là takeaway này phụ thuộc vào 1 prerequisite chưa tồn tại. Thứ tự đúng: (1) bật Anthropic prompt caching trước bằng cách thêm `cache_control: {type: ephemeral}` vào block system + tool-defs trong `ChatWithOptions` (`anthropic.go:51`); (2) sau đó mới áp QuantumLock — tách timestamp/task ID/session ID ra khỏi đầu system prompt trong `server/internal/prompts/` (Go templates), đẩy các giá trị runtime-injected xuống cuối hoặc vào user message, giữ phần đầu (instructions + tool list) cố định để tối đa cache-hit. Impact: M (phụ thuộc bước 1 H trước) · Effort: S · Risk: L · Est: 0.5 ngày (bật caching) + 1-2 ngày (tách prefix).
 5. **Tiered compaction với CircuitBreaker (micro/auto/full)** — What: `tiered_compaction.py` chọn mức nén theo % context đầy (60/80/95%), có `CircuitBreaker` tự tắt compaction sau 3 lần thất bại liên tiếp để tránh vòng lặp retry vô hạn (bug đã từng làm Claude Code tốn 250K API call/ngày) (`scripts/lib/fusion/tiered_compaction.py:1-127`). Apply: Orchestrator hiện có `agent_watchdog.go` theo dõi agent — bổ sung logic tương tự: khi `EstimateMessageTokens` vượt ngưỡng token_budget của task, kích hoạt nén theo tầng (trim tool-result → summarize hội thoại → nén toàn bộ context) thay vì fail cứng; thêm circuit-breaker để tránh loop nén thất bại liên tục. Impact: H · Effort: M · Risk: M · Est: 4 ngày.
 
 ## Kiến Trúc (Architecture)
@@ -56,23 +87,6 @@ flowchart LR
 | Rewind thay vì drop cứng dữ liệu | `rewind/store.py` + marker `[[REWIND:sha256:...]]` trong output | Cho phép nén aggressive (Ionizer 81.9%) mà vẫn recoverable | Cần thêm 1 tool-call round-trip nếu LLM cần dữ liệu gốc; tăng độ phức tạp prompt | High |
 | Zero-dependency core (không bắt buộc torch/transformers) | So sánh bảng "How It Compares" trong README, `tree_sitter_language_pack` là optional import (`neurosyntax.py:27-33`) | Cài đặt nhẹ, chạy được ở môi trường không có GPU | Chất lượng nén thấp hơn ML-based approach (LLMLingua) trên 1 số loại text; Nexus fallback về stopword-list khi không có model | Medium (suy luận từ code, chưa thấy benchmark ROUGE chi tiết cho case fallback) |
 | Tách proxy Node.js khỏi core Python | `proxy/server.mjs` độc lập hoàn toàn, import riêng các `.mjs` module | Cho phép compression core dùng lại như thư viện Python thuần, proxy layer xử lý routing/queueing riêng theo nhu cầu OpenClaw | Duy trì 2 codebase (Python + JS) — thấy dấu hiệu bản `quantum-lock.mjs` song song `quantum_lock.py`, dễ lệch pha khi update 1 bên | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[FusionEngine.compress_messages messages] --> B[dedup_across_messages\ncross-msg simhash dedup]
-    B --> C{Với mỗi message}
-    C --> D{content là string hay multipart?}
-    D -- string --> E[_compress_text_message]
-    D -- list/multipart --> F[_compress_multipart_message\nchỉ nén phần type=text]
-    E --> G[FusionEngine.compress text, role]
-    G --> H[build FusionContext frozen]
-    H --> I[pipeline.run ctx\nchạy tuần tự 14 stage]
-    I --> J[_build_stats\ntính reduction_pct, per_stage timing]
-    J --> K[trả về compressed + stats + markers + warnings]
-    F --> K
-    K --> L[Aggregate stats toàn bộ conversation]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Strategy/Chain-of-Responsibility**: mỗi `FusionStage` là 1 strategy độc lập, `FusionPipeline` là chain executor — pattern giáo khoa, dễ đọc (`base.py`, `pipeline.py`).

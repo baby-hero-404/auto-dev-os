@@ -1,17 +1,43 @@
 # Báo Cáo Phân Tích — OpenClaw
 
-## Tổng Quan
-"Personal AI assistant" chạy trên thiết bị của chính người dùng, kết nối tới ~20+ kênh nhắn tin (WhatsApp, Telegram, Slack, Discord, Signal, iMessage, Matrix...) qua một Gateway daemon trung tâm.
-Stack: TypeScript ESM strict monorepo (pnpm workspaces), Node 22-25, kiến trúc plugin cực lớn — `src/` (core, ~10.9k file TS), `extensions/` (152 plugin: channel + LLM provider + tool), `packages/` (23 thư viện dùng chung: `agent-core`, `gateway-protocol`, `llm-core`...), `apps/` (Android/iOS/macOS/Linux/Windows-hub native clients).
-Quy mô: ~20.5k file `.ts` trong repo (2.7GB), `package.json` gốc 118KB với 63 deps + 37 devDeps. Maturity rất cao: có `AGENTS.md` gốc dài (~54KB) đóng vai trò "hiến pháp kiến trúc", CI/CD phức tạp (Crabbox/Testbox remote proof), quy trình release theo train `YYYY.M.PATCH`.
-File tham chiếu: `/home/ubuntu/my_projects/auto_code_os/references/openclaw/package.json`, `README.md`, `AGENTS.md`.
+## Tổng Quan (TL;DR)
+OpenClaw là một "trợ lý AI cá nhân" chạy ngay trên thiết bị của người dùng, có thể nhắn tin qua lại với bạn trên hơn 20 ứng dụng chat khác nhau (WhatsApp, Telegram, Slack, Discord, Signal, iMessage...) thông qua một chương trình trung tâm luôn chạy nền. Nó được thiết kế như một nền tảng mở rộng khổng lồ — gần như mọi tính năng (kết nối kênh chat, kết nối nhà cung cấp AI, công cụ mà trợ lý có thể dùng) đều là các "phần mở rộng" cắm vào, giúp dễ dàng thêm bớt mà không đụng vào phần lõi.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** TypeScript ESM strict monorepo (pnpm workspaces), Node 22-25, kiến trúc plugin cực lớn — `src/` (core, ~10.9k file TS), `extensions/` (152 plugin: channel + LLM provider + tool), `packages/` (23 thư viện dùng chung: `agent-core`, `gateway-protocol`, `llm-core`...), `apps/` (Android/iOS/macOS/Linux/Windows-hub native clients).
+- **Quy mô/Độ trưởng thành:** ~20.5k file `.ts` trong repo (2.7GB), `package.json` gốc 118KB với 63 deps + 37 devDeps. Maturity rất cao: có `AGENTS.md` gốc dài (~54KB) đóng vai trò "hiến pháp kiến trúc", CI/CD phức tạp (Crabbox/Testbox remote proof), quy trình release theo train `YYYY.M.PATCH`. File tham chiếu: `references/openclaw/package.json`, `README.md`, `AGENTS.md`.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[Tin nhắn đến từ kênh: Telegram/Slack/...] --> B[Channel Plugin extensions/*]
+    B -->|qua plugin-sdk barrel| C[src/channels/** inbound-event]
+    C --> D[routing/resolve-route.ts: map channel+account+peer -> agentId+sessionKey]
+    D --> E[sessions/*: load/append session state SQLite]
+    E --> F[agents/* + packages/agent-core: agent loop]
+    F --> G[llm/* + extensions/<provider>: gọi model, tool-call]
+    G --> H{Cần gửi lại kênh?}
+    H -- Yes --> I[channel outbound.ts: format + gửi trả lời]
+    H -- No/Silent --> J[SILENT_REPLY_TOKEN, không gửi]
+    I --> K[Người dùng nhận reply trên kênh gốc]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Plugin Boundary tách Control-Plane / Runtime-Plane**: `src/plugins/` sở hữu discovery, manifest validation, activation planning (control-plane); việc *chạy* plugin thuộc runtime resolution riêng. Nguyên tắc "manifest-first": discovery/config validation/setup phải hoạt động được từ metadata *trước khi* plugin runtime được import — tránh việc mọi lệnh CLI đơn giản (vd `openclaw --version`) phải load hết 152 extension. (`src/plugins/AGENTS.md:22-49`)
-2. **Session-Key Routing Engine**: `resolveAgentRoute`-style resolver map `(channel, accountId, peer, guildId, teamId, memberRoleIds)` → `{agentId, sessionKey, dmScope, lastRoutePolicy, matchedBy}` với thứ tự ưu tiên binding rõ ràng (`binding.peer` > `binding.peer.parent` > `binding.guild+roles` > ... > `default`). Đây là lớp trừu tượng biến 20 kênh chat khác nhau thành một mô hình session thống nhất. (`src/routing/resolve-route.ts:34-70`, 822 dòng)
-3. **SecretRef Fail-Closed Credential Model**: thất bại khi resolve secret bị cô lập vào "smallest known owning surface" — nếu owner chưa rõ thì fail-closed toàn bộ, nếu owner đã biết inactive thì skip; Gateway chỉ từ chối khởi động khi ingress protection hoặc config gốc không hợp lệ, còn lại thì start nhưng đánh dấu capability/route đó "configured-unavailable" + phát diagnostic đã redact. (`AGENTS.md` mục Security/Release)
-4. **BOOT.md — Workspace Boot Hook chạy qua Agent Session**: mỗi workspace có thể có file `BOOT.md`; Gateway đọc, bọc nó trong delimiter `INTERNAL_RUNTIME_CONTEXT_BEGIN/END` để model không lặp lại nội dung nội bộ ra người dùng, rồi chạy như một agent turn ẩn danh (`sessionKey = agent:<id>:boot`), có cơ chế `preserveTemporarySessionMapping` để không làm bẩn session chính. (`src/gateway/boot.ts:44-159`)
-5. **Storage Discipline — "SQLite-only, no sidecar files"**: chính sách kiến trúc cấm tuyệt đối JSON/JSONL/TXT cho state nội bộ; mọi state ghi vào `state/openclaw.sqlite` (global) hoặc `agents/<id>/agent/openclaw-agent.sqlite` (per-agent) qua Kysely helpers, transaction ghi phải đồng bộ (không `await` trong callback transaction). Migration cũ → mới chỉ chạy 1 lần qua `openclaw doctor --fix`, runtime không giữ fallback đọc format cũ. (`AGENTS.md` mục Architecture)
+1. **Plugin Boundary tách Control-Plane / Runtime-Plane**
+   - *Là gì:* Với 152 phần mở rộng, hệ thống cần biết "phần mở rộng nào tồn tại, cấu hình có hợp lệ không" mà không phải khởi động toàn bộ chúng — nhờ vậy các lệnh đơn giản (như xem phiên bản) chạy nhanh, không bị kéo theo tải nặng không cần thiết.
+   - *Cách triển khai:* `src/plugins/` sở hữu discovery, manifest validation, activation planning (control-plane); việc *chạy* plugin thuộc runtime resolution riêng. Nguyên tắc "manifest-first": discovery/config validation/setup phải hoạt động được từ metadata *trước khi* plugin runtime được import — tránh việc mọi lệnh CLI đơn giản (vd `openclaw --version`) phải load hết 152 extension. (`src/plugins/AGENTS.md:22-49`)
+2. **Session-Key Routing Engine**
+   - *Là gì:* Vì trợ lý nói chuyện với người dùng qua hơn 20 kênh chat khác nhau, hệ thống cần một cách thống nhất để biết "tin nhắn này thuộc về cuộc trò chuyện nào" bất kể nó đến từ kênh nào, nhóm nào, hay người nào.
+   - *Cách triển khai:* `resolveAgentRoute`-style resolver map `(channel, accountId, peer, guildId, teamId, memberRoleIds)` → `{agentId, sessionKey, dmScope, lastRoutePolicy, matchedBy}` với thứ tự ưu tiên binding rõ ràng (`binding.peer` > `binding.peer.parent` > `binding.guild+roles` > ... > `default`). Đây là lớp trừu tượng biến 20 kênh chat khác nhau thành một mô hình session thống nhất. (`src/routing/resolve-route.ts:34-70`, 822 dòng)
+3. **SecretRef Fail-Closed Credential Model**
+   - *Là gì:* Nếu một tài khoản/khóa bí mật (như API key) bị lỗi hoặc thiếu, hệ thống chỉ tắt đúng tính năng liên quan tới nó thay vì làm sập toàn bộ trợ lý — người dùng vẫn dùng được các tính năng khác bình thường.
+   - *Cách triển khai:* thất bại khi resolve secret bị cô lập vào "smallest known owning surface" — nếu owner chưa rõ thì fail-closed toàn bộ, nếu owner đã biết inactive thì skip; Gateway chỉ từ chối khởi động khi ingress protection hoặc config gốc không hợp lệ, còn lại thì start nhưng đánh dấu capability/route đó "configured-unavailable" + phát diagnostic đã redact. (`AGENTS.md` mục Security/Release)
+4. **BOOT.md — Workspace Boot Hook chạy qua Agent Session**
+   - *Là gì:* Mỗi không gian làm việc có thể có một file "hướng dẫn khởi động" riêng cho trợ lý AI đọc lúc bắt đầu, nhưng nội dung đó được giấu kín khỏi người dùng cuối để tránh model vô tình lộ ra thông tin nội bộ.
+   - *Cách triển khai:* mỗi workspace có thể có file `BOOT.md`; Gateway đọc, bọc nó trong delimiter `INTERNAL_RUNTIME_CONTEXT_BEGIN/END` để model không lặp lại nội dung nội bộ ra người dùng, rồi chạy như một agent turn ẩn danh (`sessionKey = agent:<id>:boot`), có cơ chế `preserveTemporarySessionMapping` để không làm bẩn session chính. (`src/gateway/boot.ts:44-159`)
+5. **Storage Discipline — "SQLite-only, no sidecar files"**
+   - *Là gì:* Toàn bộ dữ liệu trạng thái của hệ thống bắt buộc phải lưu vào một nơi duy nhất có tính toàn vẹn (giao dịch) cao, cấm tuyệt đối rải rác ra các file tạm rời rạc dễ gây mất đồng bộ.
+   - *Cách triển khai:* chính sách kiến trúc cấm tuyệt đối JSON/JSONL/TXT cho state nội bộ; mọi state ghi vào `state/openclaw.sqlite` (global) hoặc `agents/<id>/agent/openclaw-agent.sqlite` (per-agent) qua Kysely helpers, transaction ghi phải đồng bộ (không `await` trong callback transaction). Migration cũ → mới chỉ chạy 1 lần qua `openclaw doctor --fix`, runtime không giữ fallback đọc format cũ. (`AGENTS.md` mục Architecture)
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Boundary Rules dạng `AGENTS.md` theo từng subtree** — What: Mỗi thư mục lõi (`src/plugins/`, `src/channels/`, `src/gateway/`, `src/plugin-sdk/`) có file `AGENTS.md` riêng nêu rõ "ai được import ai", "hot path nào không được kéo runtime nặng vào", kèm lệnh verify cụ thể (`pnpm build`, profiler script). Apply: Auto Code OS đã có `AGENTS.md`/`CLAUDE.md` gốc; bổ sung file boundary tương tự cho `server/internal/orchestrator/AGENTS.md`, `server/internal/tool/AGENTS.md`, `server/internal/sandbox/AGENTS.md` — quy định handler nào không được import trực tiếp `internal/orchestrator/engine`, tool nào phải qua interface generic thay vì reach vào internals. Impact: M · Effort: L · Risk: L · Est: 2 ngày viết + review liên tục.
@@ -73,21 +99,6 @@ flowchart TD
 | SecretRef + fail-closed theo owning surface nhỏ nhất | `AGENTS.md` mục Security/Release | Không sập toàn hệ thống khi 1 credential lỗi; audit rõ ràng | Logic resolve phức tạp hơn nhiều so với "throw nếu thiếu key" | Medium (suy luận từ policy doc, chưa đọc hết code triển khai) |
 | Base Docker image pin theo SHA256 digest, không dùng tag | `Dockerfile:16-19` | Build reproducible, tránh supply-chain drift | Cần quy trình cập nhật digest thủ công định kỳ | High |
 | Bundled plugin chọn qua build-arg `OPENCLAW_EXTENSIONS` khi build Docker | `Dockerfile:1-3,11-13` | Image nhỏ hơn, chỉ ship extension cần dùng | Build matrix phức tạp hơn cho các preset khác nhau | High |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[Tin nhắn đến từ kênh: Telegram/Slack/...] --> B[Channel Plugin extensions/*]
-    B -->|qua plugin-sdk barrel| C[src/channels/** inbound-event]
-    C --> D[routing/resolve-route.ts: map channel+account+peer -> agentId+sessionKey]
-    D --> E[sessions/*: load/append session state SQLite]
-    E --> F[agents/* + packages/agent-core: agent loop]
-    F --> G[llm/* + extensions/<provider>: gọi model, tool-call]
-    G --> H{Cần gửi lại kênh?}
-    H -- Yes --> I[channel outbound.ts: format + gửi trả lời]
-    H -- No/Silent --> J[SILENT_REPLY_TOKEN, không gửi]
-    I --> K[Người dùng nhận reply trên kênh gốc]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Facade/Barrel Pattern có kiểm soát**: `api.ts`/`runtime-api.ts` là "cửa" duy nhất giữa plugin và core; barrel "nặng" (async-only: send/monitor/probe/login) tách khỏi barrel "nhẹ" import lúc khởi động — tránh cold-start phải load hết mọi async runtime. (`src/channels/AGENTS.md:25-31`)

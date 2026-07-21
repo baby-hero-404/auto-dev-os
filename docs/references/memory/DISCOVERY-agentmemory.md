@@ -1,22 +1,57 @@
 # Báo Cáo Phân Tích — agentmemory
 
-## Tổng Quan
-Persistent memory engine cho AI coding agents (Claude Code, Cursor, Copilot CLI, Codex, OpenClaw, pi, OpenCode...), publish dưới `@agentmemory/agentmemory` trên npm, build trên "iii-engine" (Worker/Function/Trigger primitives qua WebSocket, port 49134) với SQLite làm state store — zero external DB. Stack: TypeScript ESM thuần (không framework web), `tsdown` build, `vitest` test (1.423+ tests). Quy mô lớn: ~50 iii functions trong `src/functions/`, 53 MCP tools, 128 REST endpoints, 12 hook scripts, 15 skills — v0.9.27, maturity cao (6 GHSA security advisories đã vá, benchmark riêng LongMemEval-S đạt R@5 95.2%).
+## Tổng Quan (TL;DR)
+agentmemory là một "bộ nhớ" gắn thêm cho các AI coding agent (như Claude Code, Cursor...) để chúng nhớ được thông tin giữa các phiên làm việc thay vì quên sạch mỗi lần mở lại. Nó tự chạy trên máy người dùng, không cần cài thêm cơ sở dữ liệu ngoài, và tự động gom nhặt, dọn dẹp, tìm lại những gì agent đã học được trước đó khi cần.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** TypeScript ESM thuần (không framework web), build trên "iii-engine" tự chế (Worker/Function/Trigger primitives qua WebSocket, port 49134), SQLite làm state store — zero external DB, build bằng `tsdown`, test bằng `vitest` (1.423+ tests).
+- **Quy mô/Độ trưởng thành:** Quy mô lớn — ~50 iii functions trong `src/functions/`, 53 MCP tools, 128 REST endpoints, 12 hook scripts, 15 skills; publish dưới `@agentmemory/agentmemory` trên npm, phiên bản v0.9.27, maturity cao (6 GHSA security advisories đã vá, benchmark riêng LongMemEval-S đạt R@5 95.2%).
+
+## Luồng Chính (Main Flow)
+Ví dụ luồng `memory_recall` (MCP tool phổ biến nhất, dùng trong `PreToolUse`/`SessionStart` hook):
+
+```mermaid
+flowchart TD
+    A[Hook / MCP client gọi memory_recall query] --> B[src/mcp/server.ts case memory_recall]
+    B --> C[sdk.trigger mem::smart-search]
+    C --> D[HybridSearch.search query, limit]
+    D --> E[BM25 SearchIndex.search]
+    D --> F[VectorIndex.search nếu có embedding provider]
+    D --> G[GraphRetrieval.searchByEntities]
+    E & F & G --> H[RRF merge theo rank, weight tự re-normalize]
+    H --> I[diversifyBySession tối đa 3/session]
+    I --> J[enrichResults: kv.get observation hoặc memory fallback]
+    J --> K{RERANK_ENABLED?}
+    K -- yes --> L[rerank top 20 qua cross-encoder]
+    K -- no --> M[Trả kết quả]
+    L --> M
+    M --> N[format full/compact/narrative, cắt theo token_budget]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Triple-Stream Hybrid Search với Reciprocal Rank Fusion (RRF)**: `HybridSearch.tripleStreamSearch()` (`src/state/hybrid-search.ts:77-240`) chạy song song BM25 (`SearchIndex`), Vector (`VectorIndex`, cosine similarity) và Graph (entity BFS qua `GraphRetrieval`), merge bằng công thức RRF chuẩn `1/(RRF_K + rank)` với `RRF_K=60`, tự động re-normalize trọng số khi một stream rỗng (vd. không có embedding provider → fallback BM25+Graph). Kết quả đo được: R@5 = 95.2% trên LongMemEval-S với embedding local `all-MiniLM-L6-v2` (`benchmark/LONGMEMEVAL.md`), so với 86.2% nếu chỉ BM25.
-2. **BM25 tự viết tay không phụ thuộc thư viện** (`src/state/search-index.ts`): inverted index + doc-term-count Maps, công thức BM25 chuẩn (`k1=1.2, b=0.75`), có prefix-matching qua binary-search trên sorted terms (`lowerBound`), synonym expansion (weight 0.7), CJK segmentation riêng (`cjk-segmenter.ts`) và Porter-like stemmer riêng — toàn bộ pipeline BM25 tự chủ, serialize/deserialize được để persist ra disk.
-3. **4-Tier Memory Consolidation Pipeline** (`src/functions/consolidate.ts`, `consolidation-pipeline.ts`): observation → memory qua LLM XML-prompt consolidation theo concept-group (Jaccard similarity > 0.7 để supersede), giới hạn `MAX_LLM_CALLS = 10` mỗi lần chạy để chặn chi phí, và guard project-scoping tường minh (comment tại dòng 162-168 giải thích rõ lý do tránh cross-project memory corruption).
-4. **Vận hành phòng thủ (defensive ops) ở tầng boot**: `src/index.ts:395-447` — khi load lại vector index đã persist, hệ thống validate dimension của TỪNG vector (không chỉ vector đầu tiên) trước khi phục hồi, vì cosine similarity giữa 2 vector khác chiều luôn trả 0 và làm hỏng recall một cách âm thầm. Nếu lệch dimension, mặc định **refuse to start** với thông báo lỗi chi tiết + 3 hướng khắc phục, trừ khi set `AGENTMEMORY_DROP_STALE_INDEX=true`.
-5. **Circuit Breaker cho LLM Provider** (`src/providers/circuit-breaker.ts` + `resilient.ts`): state machine `closed → open → half-open` với `failureThreshold=3`, `failureWindowMs=60s`, `recoveryTimeoutMs=30s`, wrap mọi provider (`ResilientProvider implements MemoryProvider`) để consolidation/crystallize/summarize không dội request liên tục vào một provider đang down.
+1. **Triple-Stream Hybrid Search với Reciprocal Rank Fusion (RRF)**
+   - *Là gì:* Khi tìm lại một ký ức cũ, hệ thống không chỉ dò từ khoá đơn thuần mà kết hợp 3 cách tìm khác nhau cùng lúc rồi gộp kết quả lại, giúp tìm đúng thứ cần nhớ dù người dùng diễn đạt khác đi so với lúc lưu.
+   - *Cách triển khai:* `HybridSearch.tripleStreamSearch()` (`src/state/hybrid-search.ts:77-240`) chạy song song BM25 (`SearchIndex`), Vector (`VectorIndex`, cosine similarity) và Graph (entity BFS qua `GraphRetrieval`), merge bằng công thức RRF chuẩn `1/(RRF_K + rank)` với `RRF_K=60`, tự động re-normalize trọng số khi một stream rỗng (vd. không có embedding provider → fallback BM25+Graph). Kết quả đo được: R@5 = 95.2% trên LongMemEval-S với embedding local `all-MiniLM-L6-v2` (`benchmark/LONGMEMEVAL.md`), so với 86.2% nếu chỉ BM25.
+2. **BM25 tự viết tay không phụ thuộc thư viện**
+   - *Là gì:* Cơ chế tìm kiếm theo từ khoá cốt lõi được tự xây dựng từ đầu thay vì đi mượn thư viện ngoài, giúp hệ thống chạy độc lập, nhẹ và hiểu được cả tiếng Á Đông.
+   - *Cách triển khai:* (`src/state/search-index.ts`): inverted index + doc-term-count Maps, công thức BM25 chuẩn (`k1=1.2, b=0.75`), có prefix-matching qua binary-search trên sorted terms (`lowerBound`), synonym expansion (weight 0.7), CJK segmentation riêng (`cjk-segmenter.ts`) và Porter-like stemmer riêng — toàn bộ pipeline BM25 tự chủ, serialize/deserialize được để persist ra disk.
+3. **4-Tier Memory Consolidation Pipeline**
+   - *Là gì:* Những ghi nhận rời rạc mà agent thu thập được theo thời gian sẽ được tự động gom lại thành các "ký ức" cô đọng, có ý nghĩa hơn, thay vì để chồng chất thông tin trùng lặp mãi.
+   - *Cách triển khai:* (`src/functions/consolidate.ts`, `consolidation-pipeline.ts`): observation → memory qua LLM XML-prompt consolidation theo concept-group (Jaccard similarity > 0.7 để supersede), giới hạn `MAX_LLM_CALLS = 10` mỗi lần chạy để chặn chi phí, và guard project-scoping tường minh (comment tại dòng 162-168 giải thích rõ lý do tránh cross-project memory corruption).
+4. **Vận hành phòng thủ (defensive ops) ở tầng boot**
+   - *Là gì:* Hệ thống chủ động kiểm tra tính toàn vẹn dữ liệu lưu trữ ngay khi khởi động, thà dừng lại báo lỗi rõ ràng còn hơn chạy tiếp với dữ liệu hỏng ngầm mà không ai biết.
+   - *Cách triển khai:* `src/index.ts:395-447` — khi load lại vector index đã persist, hệ thống validate dimension của TỪNG vector (không chỉ vector đầu tiên) trước khi phục hồi, vì cosine similarity giữa 2 vector khác chiều luôn trả 0 và làm hỏng recall một cách âm thầm. Nếu lệch dimension, mặc định **refuse to start** với thông báo lỗi chi tiết + 3 hướng khắc phục, trừ khi set `AGENTMEMORY_DROP_STALE_INDEX=true`.
+5. **Circuit Breaker cho LLM Provider**
+   - *Là gì:* Khi nhà cung cấp AI bên ngoài (dùng để tóm tắt/gộp ký ức) gặp sự cố, hệ thống tự động "nghỉ" gọi tới nó một thời gian thay vì dội request liên tục vào một dịch vụ đang chết, giúp hệ thống ổn định hơn.
+   - *Cách triển khai:* (`src/providers/circuit-breaker.ts` + `resilient.ts`): state machine `closed → open → half-open` với `failureThreshold=3`, `failureWindowMs=60s`, `recoveryTimeoutMs=30s`, wrap mọi provider (`ResilientProvider implements MemoryProvider`) để consolidation/crystallize/summarize không dội request liên tục vào một provider đang down.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 
 > Ghi chú quan trọng: Auto Code OS **đã có** một hệ thống memory 4-tier + triple-stream RRF search gần như song song với agentmemory (`server/internal/service/memory.go`, `memory_search.go`, `server/internal/repository/memory.go`, `server/pkg/models/memory.go` — tier `working/episodic/semantic/procedural`, RRF merge với `rrfK=60` y hệt). Các takeaway dưới đây tập trung vào **khoảng trống cụ thể** giữa 2 implementation, không phải đề xuất xây lại từ đầu.
 
-1. **Mở rộng bộ regex strip-secret** — What: `src/functions/privacy.ts:5-20` có 14 pattern (Bearer token, `sk-proj-`, `sk-ant-`, `gh[pus]_`, `github_pat_`, `xoxb-`, AWS `AKIA`, Google `AIza`, JWT `eyJ...`, `npm_`, `glpat-`, DigitalOcean `dop_v1_`...) — được bổ sung sau GHSA advisory #06 (`.github/security-advisories/06-privacy-redaction-incomplete.md`) khi phát hiện thiếu Bearer/`sk-proj-`/`ghs_`/`ghu_`. Apply: `server/internal/service/memory.go:213-218` hiện chỉ có 5 pattern (`api_key/token/secret`, `bearer`, `sk-`, `ghp_`, `glpat-`) — **thiếu chính xác các pattern mà agentmemory phải vá do lỗ hổng thực tế**: `sk-proj-`, `sk-ant-`, `ghs_/ghu_/github_pat_`, AWS `AKIA`, Google `AIza`, JWT, `npm_`. Bổ sung các regex này vào `secretPatterns` trong `stripSecrets()`. Impact: H (an ninh — memory là nơi lưu observation từ tool output, dễ dính leaked secrets) · Effort: L · Risk: L · Est: 0.5 day.
-2. **Circuit breaker quanh embedding/LLM call trong MemoryService** — What: `ResilientProvider`/`CircuitBreaker` (`src/providers/resilient.ts`, `circuit-breaker.ts`) chặn consolidation dội request vào provider đang lỗi. Apply: `server/internal/service/memory.go` gọi `s.embedder.Embed()` trực tiếp (dòng ~50, ~SearchMemory) chỉ có `slog.Warn` fallback, không có breaker — nếu embedding provider (`server/pkg/llm/embedding.go`) rate-limit/down, mỗi `RecordObservation`/`Search` vẫn thử gọi lại. Thêm 1 struct `CircuitBreaker` tương tự (closed/open/half-open, ngưỡng lỗi + cửa sổ + recovery timeout) bọc quanh `MemoryEmbedder.Embed()` trong `server/pkg/llm/embedding.go`. Impact: M · Effort: L · Risk: L · Est: 1 day.
-3. **Auto-forget / decay sweep định kỳ** — What: `src/functions/auto-forget.ts` chạy theo interval (`AUTO_FORGET_INTERVAL_MS`, mặc định 1h — wired ở `src/index.ts:539-547`), xử lý 3 việc: xoá memory hết TTL (`forgetAfter`), phát hiện contradiction giữa 2 memory cùng concept (Jaccard token similarity > 0.9 → memory cũ hơn bị đánh `isLatest=false`), và xoá observation cũ >180 ngày có `importance <= 2`. Apply: `MemoryService.ApplyDecay()` (`server/internal/service/memory.go:136`) hiện có logic decay nhưng cần verify có contradiction-detection và TTL sweep theo interval hay chỉ decay strength — nếu chưa có, bổ sung 1 cron job Go (giống `autoForgetTimer` pattern) gọi `ApplyDecay` mỗi giờ qua `time.NewTicker`, đăng ký trong `server/cmd/api/` bootstrap. Impact: M · Effort: M · Risk: L · Est: 2 days.
+1. **Mở rộng bộ regex strip-secret** — What: `src/functions/privacy.ts:5-20` có 14 pattern (Bearer token, `sk-proj-`, `sk-ant-`, `gh[pus]_`, `github_pat_`, `xoxb-`, AWS `AKIA`, Google `AIza`, JWT `eyJ...`, `npm_`, `glpat-`, DigitalOcean `dop_v1_`...) — được bổ sung sau GHSA advisory #06 (`.github/security-advisories/06-privacy-redaction-incomplete.md`) khi phát hiện thiếu Bearer/`sk-proj-`/`ghs_`/`ghu_`. Apply: **Đã verify trực tiếp** `server/internal/service/memory.go:212-217` — `secretPatterns` chỉ có đúng 5 regex: `(api[_-]?key|token|secret|password|auth)\s*[:=]\s*\S+`, `bearer\s+...`, `sk-[A-Za-z0-9]{20,}`, `ghp_[A-Za-z0-9]{36,}`, `glpat-[A-Za-z0-9\-]{20,}`. **Thiếu hoàn toàn**: `sk-proj-`/`sk-ant-` (2 pattern `sk-` hiện tại thực ra khớp được vì prefix `sk-` là substring, nhưng `sk-ant-api03-...` của Anthropic có thể không đủ 20 ký tự liền sau `sk-` nếu có dấu `-` xen giữa — cần test lại regex thực tế), `ghs_`/`ghu_`/`github_pat_` (chỉ có `ghp_`, bỏ sót 3 loại GitHub token khác), AWS `AKIA[0-9A-Z]{16}`, Google `AIza[0-9A-Za-z_-]{35}`, JWT `eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`, `npm_[A-Za-z0-9]{36}`. Bổ sung các regex này vào `secretPatterns` (`server/internal/service/memory.go:212-217`) trong `stripSecrets()`. Impact: H (an ninh — memory là nơi lưu observation từ tool output, dễ dính leaked secrets) · Effort: L · Risk: L · Est: 0.5 day.
+2. **Circuit breaker quanh embedding/LLM call trong MemoryService** — What: `ResilientProvider`/`CircuitBreaker` (`src/providers/resilient.ts`, `circuit-breaker.ts`) chặn consolidation dội request vào provider đang lỗi. Apply: **Đã verify trực tiếp** `server/internal/service/memory.go:49-50` (`RecordObservation`) và `server/internal/service/memory_search.go:35-36` (`Search`) — cả hai gọi `s.embedder.Embed(ctx, ...)` thẳng, không có try/catch fallback, không retry, không breaker; `server/pkg/llm/embedding.go` (`OpenAIEmbedder.Embed`, 84 dòng) là 1 HTTP call trần không wrap resilience nào. Nếu OpenAI rate-limit, mỗi `RecordObservation` sẽ trả lỗi thẳng lên caller thay vì fallback về BM25-only như agentmemory làm khi vector stream rỗng. Thêm 1 struct `CircuitBreaker` (closed/open/half-open, `failureThreshold`/`failureWindow`/`recoveryTimeout` giống `circuit-breaker.ts`) bọc quanh `Embed()` trong `embedding.go`, khi open thì `Search`/`RecordObservation` fallback về BM25-only (bỏ qua embedding, giữ path chạy được) thay vì lỗi cứng. Impact: M · Effort: L · Risk: L · Est: 1 day.
+3. **Auto-forget / decay sweep định kỳ — hiện KHÔNG được wire vào đâu cả** — What: `src/functions/auto-forget.ts` chạy theo interval (`AUTO_FORGET_INTERVAL_MS`, mặc định 1h — wired ở `src/index.ts:539-547`), xử lý 3 việc: xoá memory hết TTL (`forgetAfter`), phát hiện contradiction giữa 2 memory cùng concept (Jaccard token similarity > 0.9 → memory cũ hơn bị đánh `isLatest=false`), và xoá observation cũ >180 ngày có `importance <= 2`. Apply: **Đã verify** `MemoryService.ApplyDecay()` (`server/internal/service/memory.go:136`) chỉ gọi `MemoryRepo.UpdateDecay()` (`server/internal/repository/memory.go:198-208`) — một `UPDATE ... SET decay_score = decay_score * 0.95 WHERE last_accessed < now()-7d`, không có contradiction-detection, không có TTL/importance-based delete. Nghiêm trọng hơn: `grep -rn "ApplyDecay" server` chỉ ra **hàm này không có caller nào trong toàn bộ codebase** — không cron, không ticker, không endpoint gọi tới. So sánh: `PruneWorkingMemory` (repository/memory.go:219) có được gọi, nhưng chỉ từ `CleanupSession` (memory.go:166) khi 1 session kết thúc, không phải sweep định kỳ độc lập. Cần 2 việc: (a) đăng ký `ApplyDecay` vào 1 ticker giống pattern `cache_workers.go:19` (`time.NewTicker(15*time.Minute)`) trong bootstrap orchestrator; (b) port thêm contradiction-detection (Jaccard similarity giữa 2 memory cùng `agent_id`+category) vào `UpdateDecay` hoặc 1 hàm riêng. Impact: M · Effort: M · Risk: L · Est: 2 days.
 4. **Vector-index dimension guard khi đổi embedding model** — What: `src/index.ts:395-447` refuse-to-start khi phát hiện vector đã lưu có dimension khác model đang active, kèm thông báo lỗi liệt kê rõ obsId mẫu + hướng dẫn 3 cách khắc phục. Apply: pgvector column trong Postgres (`server/pkg/models/memory.go`) có fixed dimension theo schema migration, nên lỗi loại này ít xảy ra hơn ở tầng DB, nhưng nếu đổi `MemoryEmbedder` sang model khác dimension, INSERT sẽ lỗi runtime khó debug. Thêm 1 check ở boot (`server/cmd/api/`) so `embedder.Dimensions()` với dimension cột `embedding vector(N)` trong migration, log cảnh báo rõ ràng thay vì để Postgres trả lỗi generic. Impact: L · Effort: L · Risk: L · Est: 0.5 day.
 5. **MCP tool surface có default "core 8" + `AGENTMEMORY_TOOLS=all`** — What: 53 MCP tools tổng nhưng chỉ 8 tool hiển thị mặc định (`CORE_TOOLS` trong `src/mcp/tools-registry.ts`), tránh làm ngợp context window của agent với danh sách tool quá dài; set env var để mở full surface khi cần. Apply: nếu Auto Code OS lộ MCP tools qua `server/internal/tool/registry.go`, áp dụng cùng pattern 2-tier (core subset mặc định + full registry opt-in qua flag) thay vì expose toàn bộ registry cho mọi agent invocation. Impact: M · Effort: L · Risk: L · Est: 1 day.
 
@@ -52,27 +87,6 @@ flowchart TD
 | Optional embedding provider (BM25+Graph fallback khi không có) | `src/index.ts:178-184`: `bootLog("Embedding provider: none (BM25-only mode)")`; benchmark riêng cho BM25-only (86.2%) | Dùng được hoàn toàn free/offline, không cần API key | Recall thấp hơn ~9 điểm R@5 so với có vector | High |
 | Circuit breaker + resilient wrapper quanh mọi LLM provider | `src/providers/resilient.ts`, `circuit-breaker.ts`, dùng trong `consolidate`, `crystallize`, `summarize` | Cô lập lỗi provider, tránh cascading failure khi rate-limited | Thêm độ phức tạp state machine cho mọi lời gọi LLM | High |
 | Auto-compress và context-injection **tắt mặc định**, cảnh báo rõ khi bật | `src/index.ts:277-295` in 2 đoạn `bootLog` WARNING dài giải thích chi phí token | Người dùng mới không bị đốt token âm thầm | Trải nghiệm mặc định "kém thông minh hơn" cho tới khi user tự bật | High |
-
-## Luồng Chính (Main Flow)
-Ví dụ luồng `memory_recall` (MCP tool phổ biến nhất, dùng trong `PreToolUse`/`SessionStart` hook):
-
-```mermaid
-flowchart TD
-    A[Hook / MCP client gọi memory_recall query] --> B[src/mcp/server.ts case memory_recall]
-    B --> C[sdk.trigger mem::smart-search]
-    C --> D[HybridSearch.search query, limit]
-    D --> E[BM25 SearchIndex.search]
-    D --> F[VectorIndex.search nếu có embedding provider]
-    D --> G[GraphRetrieval.searchByEntities]
-    E & F & G --> H[RRF merge theo rank, weight tự re-normalize]
-    H --> I[diversifyBySession tối đa 3/session]
-    I --> J[enrichResults: kv.get observation hoặc memory fallback]
-    J --> K{RERANK_ENABLED?}
-    K -- yes --> L[rerank top 20 qua cross-encoder]
-    K -- no --> M[Trả kết quả]
-    L --> M
-    M --> N[format full/compact/narrative, cắt theo token_budget]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Function-as-capability registration pattern**: mọi feature (dù nhỏ như `mem::privacy`) đều là 1 `sdk.registerFunction` riêng biệt, độc lập test được (`test/*.test.ts` mock `vi.mock("iii-sdk")`). Ưu điểm: cô lập tốt, dễ enable/disable theo feature flag (`isSlotsEnabled()`, `isGraphExtractionEnabled()`...). Nhược điểm: `src/index.ts` dài 612 dòng chỉ để wiring, phải đọc tuần tự để hiểu boot order.

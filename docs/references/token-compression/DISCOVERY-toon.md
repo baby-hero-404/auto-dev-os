@@ -1,14 +1,56 @@
 # Báo Cáo Phân Tích — TOON (Token-Oriented Object Notation)
 
-## Tổng Quan
-TOON là một encoding thay thế cho JSON, tối ưu cho việc đưa dữ liệu structured vào LLM prompt (input), giảm số token trong khi vẫn giữ tính lossless và dễ parse bởi model. Stack: TypeScript monorepo (pnpm workspaces), core lib `packages/toon` (~3.800 dòng, zero-dependency), CLI `packages/cli` (dùng `citty`), docs (VitePress), benchmark harness riêng đo token count + độ chính xác LLM trên nhiều model. Maturity cao: SPEC v3.3 đã ổn định, version `2.3.1`, có test bảo mật (prototype pollution) và 20+ implementation ở ngôn ngữ khác (Go, Rust, Python, Java...).
+## Tổng Quan (TL;DR)
+TOON là một cách viết lại dữ liệu có cấu trúc (như danh sách, bảng thông tin) sao cho gọn hơn định dạng JSON quen thuộc, giúp gửi dữ liệu cho AI tốn ít chi phí hơn mà AI vẫn đọc hiểu và khôi phục lại đúng dữ liệu gốc.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** TOON là một encoding thay thế cho JSON, tối ưu cho việc đưa dữ liệu structured vào LLM prompt (input), giảm số token trong khi vẫn giữ tính lossless và dễ parse bởi model. TypeScript monorepo (pnpm workspaces), core lib `packages/toon` (~3.800 dòng, zero-dependency), CLI `packages/cli` (dùng `citty`), docs (VitePress), benchmark harness riêng đo token count + độ chính xác LLM trên nhiều model.
+- **Quy mô/Độ trưởng thành:** Maturity cao: SPEC v3.3 đã ổn định, version `2.3.1`, có test bảo mật (prototype pollution) và 20+ implementation ở ngôn ngữ khác (Go, Rust, Python, Java...).
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A["encode(jsValue, options)"] --> B[normalizeValue: xử lý toJSON, undefined, NaN...]
+    B --> C{replacer set?}
+    C -- yes --> D[applyReplacer theo path]
+    C -- no --> E[encodeJsonValue depth=0]
+    D --> E
+    E --> F{Kiểu giá trị?}
+    F -- primitive --> G[encodePrimitive]
+    F -- object --> H[encodeObjectLines: duyệt key, thử keyFolding]
+    F -- array --> I{Loại array?}
+    I -- primitives --> J[encodeInlineArrayLine key,N: v1,v2,...]
+    I -- objects đồng nhất --> K["encodeArrayOfObjectsAsTabularLines key[N]{fields}:"]
+    I -- mixed/nested --> L[encodeMixedArrayAsListItemsLines dạng '- item']
+    G & H & J & K & L --> M[join lines bằng '\n']
+
+    N["decode(toonString, options)"] --> O[split lines]
+    O --> P[scanner.parseLineIncremental: tính indent/depth]
+    P --> Q[parser: parseArrayHeaderLine / parseKeyToken / parseDelimitedValues]
+    Q --> R[decoders: state machine cursor, emit JsonStreamEvent]
+    R --> S[event-builder.buildValueFromEvents]
+    S --> T{expandPaths='safe'?}
+    T -- yes --> U[expandPathsSafe: dotted key → nested object]
+    T -- no --> V[JsonValue kết quả]
+    U --> V
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Tabular arrays (CSV-style cho array of objects đồng nhất)**: Khi tất cả phần tử của array là object có cùng field set, TOON in ra 1 dòng header `key[N]{f1,f2,...}:` rồi N dòng giá trị phân tách bằng delimiter, thay vì lặp lại tên field ở mỗi object như JSON. Đây là cơ chế tiết kiệm token lớn nhất. Cài đặt tại `packages/toon/src/encode/encoders.ts:203-267` (`encodeArrayOfObjectsAsTabularLines`, `extractTabularHeader`, `isTabularArray`). Kết quả đo (`benchmarks/results/token-efficiency.md:52-77`): giảm 59% token so với JSON pretty, chỉ đắt hơn CSV thuần 6-9% nhưng CSV không encode được nested data.
-2. **Explicit length + field guardrails cho LLM reliability**: Mỗi array luôn khai báo độ dài `[N]` và field list `{...}` ngay ở header — không chỉ để tiết kiệm token mà còn cho model một "schema" tường minh để tự validate. Decoder strict-mode enforce đúng N dòng, không thừa không thiếu (`packages/toon/src/decode/validation.ts:11-24, 45-60`, hàm `assertExpectedCount`, `validateNoExtraTabularRows`). Benchmark "Structural validation" cho thấy TOON đạt 70% so với JSON pretty 60% khi phải phát hiện dữ liệu bị cắt/thừa (`benchmarks/results/retrieval-accuracy.md:104-105, 183-203`).
-3. **Streaming architecture xuyên suốt encode/decode**: Encoder là generator (`function* encodeJsonValue`, `packages/toon/src/encode/encoders.ts:9-26`) yield từng dòng, không build full string trước. Decoder có `decodeStreamSync`/`decodeStream` (async) phát ra `JsonStreamEvent` (startObject/key/primitive/...) mà không cần buffer toàn bộ document (`packages/toon/src/decode/decoders.ts:116-193, 580-663`). Phù hợp xử lý payload lớn (context files) mà không tốn RAM đột biến.
-4. **Key folding an toàn (`keyFolding: 'safe'`)**: Gộp chuỗi object 1-key lồng nhau thành dotted path (`data.metadata.items: value` thay vì 3 tầng indent), với kiểm tra collision và identifier-safety nghiêm ngặt trước khi fold (`packages/toon/src/encode/folding.ts:58-115`, `tryFoldKeyChain`). Có `expandPaths: 'safe'` ở decode để round-trip lossless (`packages/toon/src/decode/expand.ts`).
-5. **Prototype-pollution hardening tại tầng object construction**: Toàn bộ decode path dùng `getOwnProperty`/`setOwnProperty` (`packages/toon/src/shared/object-utils.ts:9-33`) thay vì gán trực tiếp `obj[key] = value`, xử lý riêng case `__proto__` bằng `Object.defineProperty` để tránh leak vào `Object.prototype`. Có bộ test riêng `packages/toon/test/decode-security.test.ts` và `encode-security.test.ts` (tổng ~1.650 dòng test cho 1 package nhỏ) chuyên kiểm tra pollution qua mọi đường: literal key, dotted-path expansion, replacer injection, tabular row với inherited property.
+1. **Tabular arrays (CSV-style cho array of objects đồng nhất)**
+   - *Là gì:* Khi có một danh sách nhiều mục có cùng cấu trúc (giống một bảng dữ liệu), TOON viết tên các cột một lần duy nhất ở đầu thay vì lặp lại cho mỗi mục — giống cách một bảng Excel gọn hơn nhiều so với việc ghi lại tên cột ở từng dòng.
+   - *Cách triển khai:* Khi tất cả phần tử của array là object có cùng field set, TOON in ra 1 dòng header `key[N]{f1,f2,...}:` rồi N dòng giá trị phân tách bằng delimiter, thay vì lặp lại tên field ở mỗi object như JSON. Đây là cơ chế tiết kiệm token lớn nhất. Cài đặt tại `packages/toon/src/encode/encoders.ts:203-267` (`encodeArrayOfObjectsAsTabularLines`, `extractTabularHeader`, `isTabularArray`). Kết quả đo (`benchmarks/results/token-efficiency.md:52-77`): giảm 59% token so với JSON pretty, chỉ đắt hơn CSV thuần 6-9% nhưng CSV không encode được nested data.
+2. **Explicit length + field guardrails cho LLM reliability**
+   - *Là gì:* Mỗi danh sách luôn ghi rõ trước "có bao nhiêu mục" và "gồm những trường nào" — giúp AI tự kiểm tra được liệu dữ liệu có bị thiếu hoặc cắt xén hay không, thay vì chỉ đoán.
+   - *Cách triển khai:* Mỗi array luôn khai báo độ dài `[N]` và field list `{...}` ngay ở header — không chỉ để tiết kiệm token mà còn cho model một "schema" tường minh để tự validate. Decoder strict-mode enforce đúng N dòng, không thừa không thiếu (`packages/toon/src/decode/validation.ts:11-24, 45-60`, hàm `assertExpectedCount`, `validateNoExtraTabularRows`). Benchmark "Structural validation" cho thấy TOON đạt 70% so với JSON pretty 60% khi phải phát hiện dữ liệu bị cắt/thừa (`benchmarks/results/retrieval-accuracy.md:104-105, 183-203`).
+3. **Streaming architecture xuyên suốt encode/decode**
+   - *Là gì:* Dữ liệu lớn được xử lý dần từng phần nhỏ thay vì phải tải hết vào bộ nhớ trước khi bắt đầu, giúp xử lý được các tệp/dữ liệu lớn mà không tốn nhiều bộ nhớ máy tính.
+   - *Cách triển khai:* Encoder là generator (`function* encodeJsonValue`, `packages/toon/src/encode/encoders.ts:9-26`) yield từng dòng, không build full string trước. Decoder có `decodeStreamSync`/`decodeStream` (async) phát ra `JsonStreamEvent` (startObject/key/primitive/...) mà không cần buffer toàn bộ document (`packages/toon/src/decode/decoders.ts:116-193, 580-663`). Phù hợp xử lý payload lớn (context files) mà không tốn RAM đột biến.
+4. **Key folding an toàn (`keyFolding: 'safe'`)**
+   - *Là gì:* Khi dữ liệu có nhiều tầng lồng nhau nhưng mỗi tầng chỉ có đúng một trường, TOON gộp chúng lại thành một dòng ngắn gọn thay vì thụt lề nhiều tầng rườm rà, mà vẫn đảm bảo có thể khôi phục đúng cấu trúc gốc.
+   - *Cách triển khai:* Gộp chuỗi object 1-key lồng nhau thành dotted path (`data.metadata.items: value` thay vì 3 tầng indent), với kiểm tra collision và identifier-safety nghiêm ngặt trước khi fold (`packages/toon/src/encode/folding.ts:58-115`, `tryFoldKeyChain`). Có `expandPaths: 'safe'` ở decode để round-trip lossless (`packages/toon/src/decode/expand.ts`).
+5. **Prototype-pollution hardening tại tầng object construction**
+   - *Là gì:* Một lớp bảo vệ chống lại kiểu tấn công phổ biến trong JavaScript, nơi dữ liệu đầu vào độc hại có thể thao túng ngầm hành vi của toàn bộ chương trình nếu không được xử lý cẩn thận khi đọc dữ liệu từ nguồn không tin cậy.
+   - *Cách triển khai:* Toàn bộ decode path dùng `getOwnProperty`/`setOwnProperty` (`packages/toon/src/shared/object-utils.ts:9-33`) thay vì gán trực tiếp `obj[key] = value`, xử lý riêng case `__proto__` bằng `Object.defineProperty` để tránh leak vào `Object.prototype`. Có bộ test riêng `packages/toon/test/decode-security.test.ts` và `encode-security.test.ts` (tổng ~1.650 dòng test cho 1 package nhỏ) chuyên kiểm tra pollution qua mọi đường: literal key, dotted-path expansion, replacer injection, tabular row với inherited property.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Tabular encoding cho context injection vào LLM prompt** — What: cơ chế `encodeArrayOfObjectsAsTabularLines` biến array-of-uniform-objects thành 1 header + N dòng CSV-style, giảm ~40-60% token cho dữ liệu bảng. Apply: Auto Code OS build context (file lists, diff summaries, task lists, tool call history) trong `server/internal/context/` và `server/internal/prompts/` — hiện rất có thể đang serialize sang JSON trước khi nhét vào Go template prompt. Viết một helper Go nhỏ (`server/pkg/toon/` hoặc dùng thẳng lib TS qua CLI nếu build step JS có sẵn) để encode các slice `[]struct` đồng nhất (ví dụ danh sách file đã đổi, danh sách test result, danh sách symbol từ tree-sitter) sang dạng TOON-like trước khi ghép vào prompt template. Impact: H (giảm chi phí LLM Gateway trực tiếp) · Effort: M (viết encoder Go ~500 dòng theo spec) · Risk: L (chỉ ảnh hưởng prompt formatting, không đổi logic) · Est: 3-4 ngày.
@@ -53,34 +95,6 @@ Confidence: High (đọc trực tiếp toàn bộ 19 file trong `packages/toon/s
 | Generator-based streaming (`function*`) thay vì build string/array | `encodeJsonValue`, `decodeStreamSync` đều là generator | Memory-efficient cho document lớn, composable (`Array.from(encodeLines(...))` cho non-streaming use) | API phức tạp hơn — 4 hàm export tương tự nhau (`encode`, `encodeLines`, `decode`, `decodeFromLines`, `decodeStreamSync`, `decodeStream`) | High |
 | Strict mode mặc định `true` khi decode | `resolveDecodeOptions` trong `index.ts:232-238`, default `strict: true` | An toàn — phát hiện dữ liệu hỏng/truncate ngay khi parse | Cần opt-out tường minh (`strict: false`) cho input "bẩn" từ nguồn không kiểm soát (vd LLM tự sinh) | High |
 | Tabular chỉ kích hoạt khi 100% object cùng field set | `isTabularArray()` reject nếu bất kỳ row nào thiếu/thừa field (`encoders.ts:230-254`) | Tránh sai lệch dữ liệu khi convert (không "đoán" giá trị thiếu) | Semi-uniform data (50% tabular eligibility) không hưởng lợi nhiều — token saving giảm còn ~15% (đo trong benchmark) | High |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A["encode(jsValue, options)"] --> B[normalizeValue: xử lý toJSON, undefined, NaN...]
-    B --> C{replacer set?}
-    C -- yes --> D[applyReplacer theo path]
-    C -- no --> E[encodeJsonValue depth=0]
-    D --> E
-    E --> F{Kiểu giá trị?}
-    F -- primitive --> G[encodePrimitive]
-    F -- object --> H[encodeObjectLines: duyệt key, thử keyFolding]
-    F -- array --> I{Loại array?}
-    I -- primitives --> J[encodeInlineArrayLine key,N: v1,v2,...]
-    I -- objects đồng nhất --> K["encodeArrayOfObjectsAsTabularLines key[N]{fields}:"]
-    I -- mixed/nested --> L[encodeMixedArrayAsListItemsLines dạng '- item']
-    G & H & J & K & L --> M[join lines bằng '\n']
-
-    N["decode(toonString, options)"] --> O[split lines]
-    O --> P[scanner.parseLineIncremental: tính indent/depth]
-    P --> Q[parser: parseArrayHeaderLine / parseKeyToken / parseDelimitedValues]
-    Q --> R[decoders: state machine cursor, emit JsonStreamEvent]
-    R --> S[event-builder.buildValueFromEvents]
-    S --> T{expandPaths='safe'?}
-    T -- yes --> U[expandPathsSafe: dotted key → nested object]
-    T -- no --> V[JsonValue kết quả]
-    U --> V
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Generator/Iterator pattern nhất quán**: mọi hàm encode/decode cấp thấp đều là `function*`/`async function*`, cho phép compose lazy mà không cần callback hay observable lib (`packages/toon/src/encode/encoders.ts` toàn bộ dùng `yield*` để compose).

@@ -1,14 +1,56 @@
 # Báo Cáo Phân Tích — LLMLingua
 
-## Tổng Quan
-Thư viện nghiên cứu của Microsoft để nén prompt cho LLM, đạt tỉ lệ nén tới 20x với mất mát chất lượng tối thiểu. Gồm 3 thế hệ thuật toán trong cùng một package: **LLMLingua** (perplexity-based, dùng causal LM nhỏ như GPT2/LLaMA/Phi-2 để đo "độ bất ngờ" của từng token), **LongLLMLingua** (mở rộng cho RAG dài, chống "lost in the middle"), và **LLMLingua-2** (token-classification nhanh hơn 3-6x, huấn luyện qua data distillation từ GPT-4). Toàn bộ core logic nằm trong đúng 1 file `llmlingua/prompt_compressor.py` (2455 dòng). Stack: Python, PyTorch, HuggingFace Transformers, tiktoken, nltk. Maturity: nghiên cứu production-grade (đã tích hợp LangChain, LlamaIndex, Prompt flow), version hiện tại 0.2.2, MIT license.
+## Tổng Quan (TL;DR)
+LLMLingua là một thư viện giúp rút gọn văn bản đưa vào các mô hình AI mà vẫn giữ được phần lớn ý nghĩa — có thể nén tới 20 lần trong khi chất lượng câu trả lời gần như không đổi. Nó dùng chính các mô hình ngôn ngữ nhỏ để "đoán" phần nào của văn bản quan trọng cần giữ, phần nào có thể bỏ bớt.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Thư viện nghiên cứu của Microsoft, Python, PyTorch, HuggingFace Transformers, tiktoken, nltk. Gồm 3 thế hệ thuật toán trong cùng một package: **LLMLingua** (perplexity-based, dùng causal LM nhỏ như GPT2/LLaMA/Phi-2 để đo "độ bất ngờ" của từng token), **LongLLMLingua** (mở rộng cho RAG dài, chống "lost in the middle"), và **LLMLingua-2** (token-classification nhanh hơn 3-6x, huấn luyện qua data distillation từ GPT-4). Toàn bộ core logic nằm trong đúng 1 file `llmlingua/prompt_compressor.py` (2455 dòng).
+- **Quy mô/Độ trưởng thành:** Maturity: nghiên cứu production-grade (đã tích hợp LangChain, LlamaIndex, Prompt flow), version hiện tại 0.2.2, MIT license.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[User gọi compress_prompt context, instruction, question, rate/target_token] --> B{use_llmlingua2?}
+    B -- Yes --> C[compress_prompt_llmlingua2]
+    C --> C1[Chunk context theo chunk_end_tokens]
+    C1 --> C2{use_context_level_filter?}
+    C2 -- Yes --> C3[__get_context_prob: score cấp context]
+    C3 --> C4[Threshold percentile -> giữ context liên quan]
+    C2 -- No --> C5[Giữ toàn bộ context]
+    C4 --> C6[__compress: token classification model]
+    C5 --> C6
+    C6 --> C7[merge sub-token -> word, threshold theo percentile]
+    C7 --> Z[Trả compressed_prompt + origin/compressed_tokens + ratio + saving]
+    B -- No --> D[Pipeline LLMLingua/LongLLMLingua]
+    D --> D1{len context > 1 và use_context_level_filter?}
+    D1 -- Yes --> D2[control_context_budget: rank bằng get_rank_results bm25/gzip/sentbert/longllmlingua]
+    D1 -- No --> D3[Giữ nguyên context]
+    D2 --> D4{use_sentence_level_filter?}
+    D3 --> D4
+    D4 -- Yes --> D5[control_sentence_budget: loại câu theo perplexity]
+    D4 -- No --> D6[Giữ nguyên câu]
+    D5 --> D7[iterative_compress_prompt: sliding-window PPL + KV-cache reuse]
+    D6 --> D7
+    D7 --> D8[get_compressed_input: áp threshold động, drop token]
+    D8 --> Z
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Coarse-to-Fine 3-Tầng Compression (Context → Sentence → Token)**: Pipeline nén theo 3 mức độ hạt: `control_context_budget` loại bỏ toàn bộ đoạn văn (context) không liên quan bằng ranking (`llmlingua/prompt_compressor.py:1173-1241`), `control_sentence_budget` loại câu (`:1243` trở đi), và `iterative_compress_prompt` loại từng token dựa trên perplexity (`:1523-1749`). Thiết kế cho phép áp dụng ngân sách token (`target_token`) phân bổ dần qua từng tầng — giảm chi phí tính toán vì các tầng thô loại bỏ nhanh trước khi tầng tinh (tốn kém nhất, cần forward-pass LM) chỉ chạy trên phần còn lại.
-2. **KV-Cache Reuse trong Iterative Token Dropping**: Vòng lặp `iterative_compress_prompt` (`:1523`) chia văn bản thành cửa sổ `iterative_size` (mặc định 200 token), tính perplexity bằng 1 forward-pass duy nhất có `past_key_values` tái sử dụng qua các cửa sổ kế tiếp (`:1636-1662`), tránh phải re-encode toàn bộ context mỗi vòng. Khi vượt `max_position_embeddings`, có cơ chế "pop" KV-cache cũ (`:1588-1634`) để giữ cửa sổ trượt trong giới hạn context length của model nén — một kỹ thuật quản lý bộ nhớ tinh vi hiếm gặp trong code nghiên cứu.
-3. **Question-Conditioned Perplexity (LongLLMLingua)**: `condition_in_question`/`condition_compare` cho phép tính perplexity của mỗi token *có điều kiện theo câu hỏi* (đặt câu hỏi trước context khi encode, `condition_in_question="after"`), rồi so sánh với perplexity không điều kiện để ước lượng "độ liên quan đến câu hỏi" của từng đoạn (`get_distance_longllmlingua` trong `get_rank_results`, `:2032`). Đây là ý tưởng cốt lõi giúp LongLLMLingua giữ lại thông tin liên quan tới câu hỏi thay vì chỉ giữ thông tin "informative" chung chung.
-4. **LLMLingua-2: Token Classification thay Perplexity**: Thay vì cần 1 causal LM sinh perplexity (chậm, cần nhiều forward pass tuần tự), LLMLingua-2 dùng encoder nhỏ (BERT/XLM-RoBERTa) làm bài toán classification nhị phân "giữ/bỏ" cho mỗi token, chạy 1 forward-pass duy nhất, batch song song (`__compress`, `:2304-2453`). Có `__merge_token_to_word` + `__token_prob_to_word_prob` để gộp xác suất sub-token thành xác suất cấp từ (đảm bảo không cắt giữa từ), threshold chọn bằng percentile của phân phối xác suất (`np.percentile`, `:2407`). Nhanh hơn 3-6x, tốt hơn khi domain khác với data huấn luyện của causal LM gốc.
-5. **Structured JSON Compression**: `compress_json`/`structured_compress_prompt` (`:215-424`) cho phép áp đặt tag `<llmlingua rate=... compress=...>` lồng trong JSON để nén selective theo từng key/value (ví dụ giữ nguyên key nhưng nén value dài), dùng trong RAG có payload có cấu trúc. `process_structured_json_data` trong `llmlingua/utils.py:123-151` build lại chuỗi context với annotation tag.
+1. **Coarse-to-Fine 3-Tầng Compression (Context → Sentence → Token)**
+   - *Là gì:* Thay vì rút gọn văn bản trong một bước, hệ thống lọc dần từ thô đến tinh — bỏ hẳn đoạn không liên quan trước, rồi bỏ câu, rồi mới bỏ từng từ — để việc tính toán tốn kém nhất chỉ phải chạy trên phần văn bản còn ít ỏi cuối cùng.
+   - *Cách triển khai:* `control_context_budget` loại bỏ toàn bộ đoạn văn (context) không liên quan bằng ranking (`llmlingua/prompt_compressor.py:1173-1241`), `control_sentence_budget` loại câu (`:1243` trở đi), và `iterative_compress_prompt` loại từng token dựa trên perplexity (`:1523-1749`). Thiết kế cho phép áp dụng ngân sách token (`target_token`) phân bổ dần qua từng tầng — giảm chi phí tính toán vì các tầng thô loại bỏ nhanh trước khi tầng tinh (tốn kém nhất, cần forward-pass LM) chỉ chạy trên phần còn lại.
+2. **KV-Cache Reuse trong Iterative Token Dropping**
+   - *Là gì:* Khi xử lý văn bản dài theo từng đoạn nhỏ nối tiếp nhau, hệ thống tái sử dụng những gì đã tính được từ đoạn trước thay vì tính lại từ đầu — giúp xử lý văn bản rất dài nhanh hơn nhiều mà không tốn thêm bộ nhớ.
+   - *Cách triển khai:* Vòng lặp `iterative_compress_prompt` (`:1523`) chia văn bản thành cửa sổ `iterative_size` (mặc định 200 token), tính perplexity bằng 1 forward-pass duy nhất có `past_key_values` tái sử dụng qua các cửa sổ kế tiếp (`:1636-1662`), tránh phải re-encode toàn bộ context mỗi vòng. Khi vượt `max_position_embeddings`, có cơ chế "pop" KV-cache cũ (`:1588-1634`) để giữ cửa sổ trượt trong giới hạn context length của model nén — một kỹ thuật quản lý bộ nhớ tinh vi hiếm gặp trong code nghiên cứu.
+3. **Question-Conditioned Perplexity (LongLLMLingua)**
+   - *Là gì:* Khi biết trước câu hỏi người dùng đang hỏi, hệ thống ưu tiên giữ lại những phần văn bản thực sự liên quan tới câu hỏi đó, thay vì giữ lại những phần "nghe có vẻ quan trọng" một cách chung chung.
+   - *Cách triển khai:* `condition_in_question`/`condition_compare` cho phép tính perplexity của mỗi token *có điều kiện theo câu hỏi* (đặt câu hỏi trước context khi encode, `condition_in_question="after"`), rồi so sánh với perplexity không điều kiện để ước lượng "độ liên quan đến câu hỏi" của từng đoạn (`get_distance_longllmlingua` trong `get_rank_results`, `:2032`). Đây là ý tưởng cốt lõi giúp LongLLMLingua giữ lại thông tin liên quan tới câu hỏi thay vì chỉ giữ thông tin "informative" chung chung.
+4. **LLMLingua-2: Token Classification thay Perplexity**
+   - *Là gì:* Một phiên bản nhanh hơn nhiều lần, dùng một mô hình nhỏ gọn để phân loại trực tiếp "giữ hay bỏ" từng từ, thay vì phải suy luận từng bước tuần tự như phiên bản gốc — phù hợp hơn khi cần tốc độ cao.
+   - *Cách triển khai:* Thay vì cần 1 causal LM sinh perplexity (chậm, cần nhiều forward pass tuần tự), LLMLingua-2 dùng encoder nhỏ (BERT/XLM-RoBERTa) làm bài toán classification nhị phân "giữ/bỏ" cho mỗi token, chạy 1 forward-pass duy nhất, batch song song (`__compress`, `:2304-2453`). Có `__merge_token_to_word` + `__token_prob_to_word_prob` để gộp xác suất sub-token thành xác suất cấp từ (đảm bảo không cắt giữa từ), threshold chọn bằng percentile của phân phối xác suất (`np.percentile`, `:2407`). Nhanh hơn 3-6x, tốt hơn khi domain khác với data huấn luyện của causal LM gốc.
+5. **Structured JSON Compression**
+   - *Là gì:* Cho phép nén có chọn lọc bên trong dữ liệu có cấu trúc như JSON — ví dụ giữ nguyên tên trường nhưng rút gọn nội dung giá trị dài, hữu ích khi dữ liệu đưa vào AI có định dạng rõ ràng thay vì chỉ là văn xuôi.
+   - *Cách triển khai:* `compress_json`/`structured_compress_prompt` (`:215-424`) cho phép áp đặt tag `<llmlingua rate=... compress=...>` lồng trong JSON để nén selective theo từng key/value (ví dụ giữ nguyên key nhưng nén value dài), dùng trong RAG có payload có cấu trúc. `process_structured_json_data` trong `llmlingua/utils.py:123-151` build lại chuỗi context với annotation tag.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Token-classification compression cho context injection (kiểu LLMLingua-2)** — What: Thay vì causal-LM perplexity (chậm, cần GPU riêng), dùng encoder nhỏ fine-tuned để phân loại "giữ/bỏ" từng token trong context được đưa vào prompt (file tree, diff, log). Cơ chế: `PromptCompressor.compress_prompt_llmlingua2` (`llmlingua/prompt_compressor.py:727-973`). Apply: Auto Code OS build context cho agent tại `server/internal/context/` (repo analysis) trước khi nạp vào `server/internal/prompts/`. Thêm bước "context compression" tùy chọn (gọi ra 1 service Python nhỏ hoặc port logic threshold-based sang Go) áp dụng cho các block context lớn (file content, test output) trước khi nhét vào prompt template, giảm token spend trên LLM Gateway (`server/pkg/llm/`). Impact: H · Effort: H (cần model riêng hoặc port thuật toán) · Risk: M (nén sai có thể làm mất thông tin quan trọng, cần test kỹ) · Est: 1-2 tuần (PoC).
@@ -46,34 +88,6 @@ Confidence: High (đọc trực tiếp `__init__.py`, `prompt_compressor.py`, `u
 | Threshold chọn bằng percentile động (`np.percentile`) thay vì ngưỡng cố định | `:850`, `:2407` | Tự động thích nghi theo phân phối perplexity/probability của từng batch, không cần tune tay | Không đảm bảo target_token chính xác tuyệt đối (chỉ xấp xỉ) — README ghi rõ "actual compression rate is generally lower than specified" | High |
 | Tái sử dụng KV-cache qua sliding window trong `iterative_compress_prompt` | `:1636-1662`, `past_key_values` cat/pop | Giảm re-computation, quan trọng khi context dài hơn `max_position_embeddings` | Code phức tạp, nhiều edge-case off-by-one (index `end - iterative_size`) khó bảo trì | Medium |
 | Tag `<llmlingua rate=... compress=...>` nhúng trong chuỗi text cho structured compression | `structured_compress_prompt` docstring (`:306-309`), `utils.py:123-238` | Không cần thay đổi schema API, tận dụng lại pipeline compress cũ | Parse tag bằng string manipulation dễ vỡ nếu payload chứa ký tự đặc biệt | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[User gọi compress_prompt context, instruction, question, rate/target_token] --> B{use_llmlingua2?}
-    B -- Yes --> C[compress_prompt_llmlingua2]
-    C --> C1[Chunk context theo chunk_end_tokens]
-    C1 --> C2{use_context_level_filter?}
-    C2 -- Yes --> C3[__get_context_prob: score cấp context]
-    C3 --> C4[Threshold percentile -> giữ context liên quan]
-    C2 -- No --> C5[Giữ toàn bộ context]
-    C4 --> C6[__compress: token classification model]
-    C5 --> C6
-    C6 --> C7[merge sub-token -> word, threshold theo percentile]
-    C7 --> Z[Trả compressed_prompt + origin/compressed_tokens + ratio + saving]
-    B -- No --> D[Pipeline LLMLingua/LongLLMLingua]
-    D --> D1{len context > 1 và use_context_level_filter?}
-    D1 -- Yes --> D2[control_context_budget: rank bằng get_rank_results bm25/gzip/sentbert/longllmlingua]
-    D1 -- No --> D3[Giữ nguyên context]
-    D2 --> D4{use_sentence_level_filter?}
-    D3 --> D4
-    D4 -- Yes --> D5[control_sentence_budget: loại câu theo perplexity]
-    D4 -- No --> D6[Giữ nguyên câu]
-    D5 --> D7[iterative_compress_prompt: sliding-window PPL + KV-cache reuse]
-    D6 --> D7
-    D7 --> D8[get_compressed_input: áp threshold động, drop token]
-    D8 --> Z
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Strategy Pattern qua flag, không qua interface**: `rank_method` (`"llmlingua"`, `"longllmlingua"`, `"bm25"`, `"gzip"`, `"sentbert"`, ...) chọn strategy ranking bằng if/elif string bên trong `get_rank_results` (`:1818-2071`), mỗi biến thể là 1 closure lồng nhau (`get_distance_bm25`, `get_distance_gzip`, `get_distance_sentbert`, v.v.). Đơn giản, dễ thêm biến thể mới, nhưng không type-safe và khó unit test độc lập từng strategy vì chúng là hàm lồng bên trong method lớn.

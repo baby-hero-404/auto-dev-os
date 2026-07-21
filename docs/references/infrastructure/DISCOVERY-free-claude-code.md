@@ -1,14 +1,52 @@
 # Báo Cáo Phân Tích — Free Claude Code (FCC)
 
-## Tổng Quan
-Local proxy Python cho phép chạy Claude Code, Codex, hoặc Pi qua 25 provider LLM (cloud lẫn local) thay vì trả tiền Anthropic trực tiếp. Stack: Python 3.14, FastAPI (ASGI), Pydantic, `uv` cho package/venv, Loguru, Ruff + `ty` type checker. Quy mô: ~200 module production trong `src/free_claude_code/`, ~150 file test (`tests/` unit/contract, `smoke/` live). Maturity rất cao: có `ARCHITECTURE.md` 1366 dòng làm nguồn sự thật kiến trúc, chính sách dependency giữa package được **enforce bằng AST test** (`tests/contracts/test_import_boundaries.py`), và CLAUDE.md/AGENTS.md ép buộc versioning + CI 5 bước cho mọi PR.
+## Tổng Quan (TL;DR)
+FCC là một chương trình chạy trên máy cá nhân, đứng giữa các công cụ AI coding (Claude Code, Codex, Pi) và các nhà cung cấp AI để bạn có thể dùng 25 nhà cung cấp khác nhau (kể cả AI chạy ngay trên máy mình, miễn phí) thay vì phải trả tiền trực tiếp cho Anthropic. Nó tự động chuyển đổi định dạng dữ liệu giữa các bên, đổi nhà cung cấp mà không cần khởi động lại, và cố gắng "vá" lại phản hồi bị đứt giữa chừng để cuộc trò chuyện không bị gián đoạn.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Python 3.14, FastAPI (ASGI), Pydantic, `uv` cho package/venv, Loguru, Ruff + `ty` type checker.
+- **Quy mô/Độ trưởng thành:** ~200 module production trong `src/free_claude_code/`, ~150 file test (`tests/` unit/contract, `smoke/` live). Maturity rất cao: có `ARCHITECTURE.md` 1366 dòng làm nguồn sự thật kiến trúc, chính sách dependency giữa package được **enforce bằng AST test** (`tests/contracts/test_import_boundaries.py`), và CLAUDE.md/AGENTS.md ép buộc versioning + CI 5 bước cho mọi PR.
+
+## Luồng Chính (Main Flow)
+```mermaid
+sequenceDiagram
+    participant Client as Claude Code / Codex / Pi
+    participant Route as FastAPI Route (api/routes.py)
+    participant Handler as MessagesHandler / ResponsesHandler
+    participant Router as ModelRouter (application/routing.py)
+    participant Exec as ProviderExecutor (application/execution.py)
+    participant Lease as ProviderGenerationLease
+    participant Provider as OpenAIChatProvider / Specialized Adapter
+
+    Client->>Route: POST /v1/messages (Anthropic SSE)
+    Route->>Route: require_proxy_auth()
+    Route->>Lease: acquire current generation
+    Route->>Handler: create message
+    Handler->>Router: resolve_messages_request(model)
+    Router-->>Handler: RoutedMessagesRequest (provider_id, reasoning policy)
+    Handler->>Exec: stream(routed, wire_api="messages")
+    Exec->>Provider: preflight_stream() (sync validate)
+    Exec->>Provider: stream_response() (async iterator)
+    Provider-->>Client: Anthropic SSE events
+    Route->>Lease: release() sau khi body đóng hoàn toàn
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Provider Abstraction hai tầng (Profile-first, Adapter-exception)**: 25 provider được khai báo, nhưng chỉ 8 provider có adapter Python riêng (`nvidia_nim`, `open_router`, `mistral`, `deepseek`, `lmstudio`, `cloudflare`, `gemini`, `github_models`); 17 provider còn lại (Groq, Cerebras, Fireworks, Z.ai, Kimi, MiniMax, Wafer, Cohere, Vercel AI Gateway, HuggingFace, SambaNova, Ollama, Ollama Cloud, llama.cpp, OpenCode Zen/Go...) chỉ là **data-only profile** (`OPENAI_CHAT_PROFILES`) tái dùng một `OpenAIChatProvider` chung. Bất biến này được test tự kiểm bằng assertion tại import-time: `_profiled_ids | _special_ids == set(PROVIDER_CATALOG)` (`src/free_claude_code/providers/runtime/factory.py:121-130`). Kết quả đo được: thêm 1 provider OpenAI-compatible mới chỉ cần vài dòng profile, không cần class mới.
-2. **Reasoning Policy trung lập theo provider** (`src/free_claude_code/core/reasoning.py`, mô tả tại `ARCHITECTURE.md:607-663`): tách rõ 3 khái niệm bất biến — `control` (off/on/default), `effort` (named), `budget_tokens` (exact) — và cấm tuyệt đối việc "đọc tên model để suy đoán khả năng reasoning" (rule 1 trong 4 hard rules). Route theo tier (Fable/Opus/Sonnet/Haiku) độc lập với override.
-3. **Response chain với "transitive close-ownership"** (`ARCHITECTURE.md:392-417`, `src/free_claude_code/api/response_streams.py`): stream Anthropic SSE chỉ commit (trả 2xx) sau khi nhận được chunk đầu tiên từ upstream — do đó lỗi trước điểm commit vẫn là JSON lỗi có `status_code` đúng, còn lỗi sau điểm commit chuyển thành `event: error` SSE. Mỗi lớp (response → replay iterator → protocol adapter → executor body → provider iterator → upstream stream) sở hữu việc đóng input trực tiếp của nó, đảm bảo cleanup idempotent kể cả khi client ngắt kết nối giữa chừng.
-4. **Provider Generation Lease cho Hot-Reload cấu hình** (`src/free_claude_code/runtime/provider_manager.py`): khi user đổi API key/model trong Admin UI, `ProviderRuntimeManager` publish "generation" mới thay vì restart server; generation cũ được "retired" và tiếp tục phục vụ các request đang bay (`active_leases`) cho tới khi drain xong rồi mới cleanup — không có race giữa request cũ và cấu hình mới, không mất quota rate-limit đang tồn tại.
-5. **Import-boundary như hợp đồng kiến trúc thực thi bằng test** (`tests/contracts/test_import_boundaries.py`): dùng `ast` để parse mọi file, so khớp với bảng `ALLOWED_PACKAGE_DEPENDENCIES` (`config→∅`, `core→∅`, `application→{config,core}`, `providers→{application,config,core}`, `api→{application,config,core}`, `runtime→{api,application,cli,config,core,messaging,providers}`...). Chỉ có đúng 1 exception whitelist rõ ràng. Bất kỳ import vi phạm boundary nào sẽ fail CI ngay, biến kiến trúc từ "quy ước trong doc" thành "assertion máy chạy được".
+1. **Provider Abstraction hai tầng (Profile-first, Adapter-exception)**
+   - *Là gì:* Để hỗ trợ 25 nhà cung cấp AI khác nhau mà không phải viết 25 bộ code riêng biệt, hầu hết nhà cung cấp chỉ cần khai báo vài thông tin cấu hình đơn giản; chỉ những nhà cung cấp có hành vi đặc biệt mới cần code riêng.
+   - *Cách triển khai:* 25 provider được khai báo, nhưng chỉ 8 provider có adapter Python riêng (`nvidia_nim`, `open_router`, `mistral`, `deepseek`, `lmstudio`, `cloudflare`, `gemini`, `github_models`); 17 provider còn lại (Groq, Cerebras, Fireworks, Z.ai, Kimi, MiniMax, Wafer, Cohere, Vercel AI Gateway, HuggingFace, SambaNova, Ollama, Ollama Cloud, llama.cpp, OpenCode Zen/Go...) chỉ là **data-only profile** (`OPENAI_CHAT_PROFILES`) tái dùng một `OpenAIChatProvider` chung. Bất biến này được test tự kiểm bằng assertion tại import-time: `_profiled_ids | _special_ids == set(PROVIDER_CATALOG)` (`src/free_claude_code/providers/runtime/factory.py:121-130`). Kết quả đo được: thêm 1 provider OpenAI-compatible mới chỉ cần vài dòng profile, không cần class mới.
+2. **Reasoning Policy trung lập theo provider**
+   - *Là gì:* Nhiều model AI hiện đại có khả năng "suy nghĩ kỹ hơn" trước khi trả lời, và mức độ suy nghĩ đó cần được cấu hình rõ ràng thay vì đoán mò dựa trên tên model — cách đoán mò rất dễ sai khi có model mới ra mắt.
+   - *Cách triển khai:* (`src/free_claude_code/core/reasoning.py`, mô tả tại `ARCHITECTURE.md:607-663`): tách rõ 3 khái niệm bất biến — `control` (off/on/default), `effort` (named), `budget_tokens` (exact) — và cấm tuyệt đối việc "đọc tên model để suy đoán khả năng reasoning" (rule 1 trong 4 hard rules). Route theo tier (Fable/Opus/Sonnet/Haiku) độc lập với override.
+3. **Response chain với "transitive close-ownership"**
+   - *Là gì:* Khi trả lời theo kiểu "gõ dần từng chữ" (streaming), hệ thống phải quyết định rất sớm xem có báo lỗi hay không — chờ quá lâu thì mất trải nghiệm mượt, báo quá sớm thì có nguy cơ báo sai. FCC giải quyết vấn đề này bằng cách xác định rõ một "điểm mốc" duy nhất để chuyển từ chế độ báo lỗi sang chế độ vẫn tiếp tục trả lời.
+   - *Cách triển khai:* (`ARCHITECTURE.md:392-417`, `src/free_claude_code/api/response_streams.py`): stream Anthropic SSE chỉ commit (trả 2xx) sau khi nhận được chunk đầu tiên từ upstream — do đó lỗi trước điểm commit vẫn là JSON lỗi có `status_code` đúng, còn lỗi sau điểm commit chuyển thành `event: error` SSE. Mỗi lớp (response → replay iterator → protocol adapter → executor body → provider iterator → upstream stream) sở hữu việc đóng input trực tiếp của nó, đảm bảo cleanup idempotent kể cả khi client ngắt kết nối giữa chừng.
+4. **Provider Generation Lease cho Hot-Reload cấu hình**
+   - *Là gì:* Khi người dùng đổi API key hoặc model trong giao diện quản trị, hệ thống không cần khởi động lại — những yêu cầu đang xử lý dở vẫn dùng cấu hình cũ cho tới khi xong, còn yêu cầu mới thì dùng cấu hình mới ngay lập tức.
+   - *Cách triển khai:* (`src/free_claude_code/runtime/provider_manager.py`): `ProviderRuntimeManager` publish "generation" mới thay vì restart server; generation cũ được "retired" và tiếp tục phục vụ các request đang bay (`active_leases`) cho tới khi drain xong rồi mới cleanup — không có race giữa request cũ và cấu hình mới, không mất quota rate-limit đang tồn tại.
+5. **Import-boundary như hợp đồng kiến trúc thực thi bằng test**
+   - *Là gì:* Thay vì chỉ viết trong tài liệu rằng "module A không được phép dùng module B", hệ thống có một bài kiểm tra tự động chặn đứng ngay lập tức nếu ai đó vi phạm quy tắc kiến trúc này khi code.
+   - *Cách triển khai:* (`tests/contracts/test_import_boundaries.py`): dùng `ast` để parse mọi file, so khớp với bảng `ALLOWED_PACKAGE_DEPENDENCIES` (`config→∅`, `core→∅`, `application→{config,core}`, `providers→{application,config,core}`, `api→{application,config,core}`, `runtime→{api,application,cli,config,core,messaging,providers}`...). Chỉ có đúng 1 exception whitelist rõ ràng. Bất kỳ import vi phạm boundary nào sẽ fail CI ngay, biến kiến trúc từ "quy ước trong doc" thành "assertion máy chạy được".
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Profile-first Provider Model cho `server/pkg/llm/`** — What: FCC tách `ProviderDescriptor` (catalog trung lập, không biết implementation) khỏi factory (`providers/runtime/factory.py`) và request-policy profile (`OpenAIChatProfile`) — hầu hết provider OpenAI-compatible chỉ cần data, không cần struct Go mới. Apply: Auto Code OS hiện có `NewProvider()` switch cứng trong `server/pkg/llm/provider.go:133-148` (chỉ 4 case: openai/anthropic/gemini/9router) và `FallbackChain` build thủ công trong `fallback.go` + `router.go:89-118`. Thêm 1 struct `ChatProfile` (base URL, header, field mapping) cho các provider tương thích OpenAI Chat Completions (Groq, Fireworks, Together, Mistral...) và 1 factory duy nhất `newOpenAICompatProvider(profile, cfg)`, tránh phải viết N file `xxx.go` riêng như hiện tại đang có nguy cơ khi mở rộng provider. Impact: H · Effort: M · Risk: L · Est: 3-4 days.
@@ -61,30 +99,6 @@ flowchart TD
 | Profile-data thay vì subclass cho hầu hết provider OpenAI-compatible | `providers/openai_chat/profiles.py`, `providers/runtime/factory.py:110-130` với assertion tự kiểm | Giảm boilerplate cực mạnh khi thêm provider #26, #27... | Provider có quirk thật sự (Gemini thought signature, NIM tool alias) vẫn cần adapter riêng — ranh giới "khi nào cần adapter" phải do người review giữ kỷ luật | High |
 | `ExecutionFailure` là exception nhưng immutable (`FrozenInstanceError` tự custom qua `__setattr__`) | `core/failures.py:20-37` | Failure semantics không bị provider/route mutate giữa chừng, an toàn truyền qua nhiều layer | Phải tự viết `__setattr__` thủ công vì `frozen=True` dataclass xung đột với `Exception.__init__` set `args` | Medium |
 | Hot-reload cấu hình bằng "provider generation" thay vì restart | `runtime/provider_manager.py` (`_ProviderGeneration`, `ProviderGenerationLease`, `active_leases`, `drained` event) | Đổi API key qua Admin UI không rớt request đang chạy | Thêm độ phức tạp đáng kể (asyncio.Lock kép, retired dict, refresh task) so với 1 global singleton | High |
-
-## Luồng Chính (Main Flow)
-```mermaid
-sequenceDiagram
-    participant Client as Claude Code / Codex / Pi
-    participant Route as FastAPI Route (api/routes.py)
-    participant Handler as MessagesHandler / ResponsesHandler
-    participant Router as ModelRouter (application/routing.py)
-    participant Exec as ProviderExecutor (application/execution.py)
-    participant Lease as ProviderGenerationLease
-    participant Provider as OpenAIChatProvider / Specialized Adapter
-
-    Client->>Route: POST /v1/messages (Anthropic SSE)
-    Route->>Route: require_proxy_auth()
-    Route->>Lease: acquire current generation
-    Route->>Handler: create message
-    Handler->>Router: resolve_messages_request(model)
-    Router-->>Handler: RoutedMessagesRequest (provider_id, reasoning policy)
-    Handler->>Exec: stream(routed, wire_api="messages")
-    Exec->>Provider: preflight_stream() (sync validate)
-    Exec->>Provider: stream_response() (async iterator)
-    Provider-->>Client: Anthropic SSE events
-    Route->>Lease: release() sau khi body đóng hoàn toàn
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Structural typing qua Protocol/port thay vì base-class bắt buộc**: `application/ports.py` định nghĩa `ProviderPort` chỉ với `preflight_stream()`/`stream_response()`; API và execution phụ thuộc port này chứ không phải `BaseProvider` cụ thể (`ARCHITECTURE.md:543-547`).

@@ -30,10 +30,6 @@ Auto Code OS là một AI-native SDLC platform đang phát triển. Để đạt
 - Top 10 Applied Takeaways xếp hạng theo ưu tiên áp dụng
 - Bảng so sánh cross-project theo từng khía cạnh (architecture, testing, DX, etc.)
 
-### Issue 4: Script tự động loop qua từng project
-- Script `scripts/analyze_references.sh` liệt kê và phân loại các repo (đã tồn tại — chỉ cần verify hoạt động đúng với 4 category)
-- Hỗ trợ chạy lần lượt từng project
-
 ### Issue 5: Cleanup reports cũ
 - Root `docs/references/` hiện còn 13 report cũ dạng `{project}.md` (không có prefix `DISCOVERY-`, không nằm trong subfolder)
 - Xóa toàn bộ file `.md` cũ ở root, trừ `README.md` (sẽ được ghi đè ở Issue 3)
@@ -44,7 +40,6 @@ Auto Code OS là một AI-native SDLC platform đang phát triển. Để đạt
 - **Reference Analysis System**: Bộ tài liệu phân tích 20 reference projects
 - **Cross-Project Comparison**: Bảng so sánh kiến trúc, patterns, và kỹ thuật
 - **Applied Takeaways Registry**: Danh sách ranked các ý tưởng áp dụng cho Auto Code OS
-- **Analysis Script**: Script hỗ trợ loop qua từng project
 
 ### Modified Capabilities
 - Không có
@@ -61,7 +56,6 @@ Auto Code OS là một AI-native SDLC platform đang phát triển. Để đạt
 | Memory Reports | `docs/references/memory/DISCOVERY-{project}.md` (2 projects) |
 | Token Compression Reports | `docs/references/token-compression/DISCOVERY-{project}.md` (6 projects) |
 | Infrastructure Reports | `docs/references/infrastructure/DISCOVERY-{project}.md` (6 projects) |
-| Scripts | `scripts/analyze_references.sh` (đã tồn tại — verify) |
 | Cleanup | Xóa 13 report cũ dạng `{project}.md` ở root `docs/references/` |
 
 ## Open Questions

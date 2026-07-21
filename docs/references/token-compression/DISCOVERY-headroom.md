@@ -1,21 +1,56 @@
 # Báo Cáo Phân Tích — Headroom
 
-## Tổng Quan
-Headroom là một "context compression layer" chạy trước LLM: reverse proxy (Rust/axum) + library (Python/TypeScript) chặn mọi request tới Anthropic/OpenAI/Bedrock/Vertex, nén tool outputs/logs/JSON/diff, và cache lại bản gốc để LLM có thể "retrieve" khi cần (CCR — Compress-Cache-Retrieve). Repo đang trong quá trình port lõi từ Python sang Rust (workspace 5 crates, ~72.9k dòng Rust: `headroom-core`, `headroom-proxy`, `headroom-simulators`, `headroom-py` bindings PyO3, `headroom-parity` harness so khớp Python↔Rust). Dự án rất trưởng thành: CI, benchmarks (`benchmarks/*.py`, 20+ script), release trên PyPI/npm, docs site riêng, ~0.31.0 release qua release-please.
+## Tổng Quan (TL;DR)
+Headroom đứng chắn giữa các công cụ lập trình AI và nhà cung cấp mô hình AI, tự động rút gọn nội dung nặng (log, dữ liệu, kết quả công cụ) trước khi gửi đi để tiết kiệm chi phí, nhưng vẫn giữ lại bản gốc ở một nơi lưu trữ riêng để AI có thể xin lại đầy đủ khi thực sự cần. Nhờ vậy người dùng vừa tiết kiệm tiền vừa không mất thông tin quan trọng.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Reverse proxy (Rust/axum) + library (Python/TypeScript) chặn mọi request tới Anthropic/OpenAI/Bedrock/Vertex, nén tool outputs/logs/JSON/diff, và cache lại bản gốc để LLM có thể "retrieve" khi cần (CCR — Compress-Cache-Retrieve). Repo đang trong quá trình port lõi từ Python sang Rust (workspace 5 crates, ~72.9k dòng Rust: `headroom-core`, `headroom-proxy`, `headroom-simulators`, `headroom-py` bindings PyO3, `headroom-parity` harness so khớp Python↔Rust).
+- **Quy mô/Độ trưởng thành:** Dự án rất trưởng thành: CI, benchmarks (`benchmarks/*.py`, 20+ script), release trên PyPI/npm, docs site riêng, ~0.31.0 release qua release-please.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A["Client (Claude Code/Codex/...) gửi request"] --> B["axum Router (proxy.rs)"]
+    B --> C{"classify_compressible_path\n(compression/mod.rs)"}
+    C -- "không khớp endpoint" --> Z["Forward passthrough nguyên văn"]
+    C -- "/v1/messages, /v1/chat/completions, /v1/responses" --> D["classify_auth_mode (auth_mode.rs)\n→ Payg / OAuth / Subscription"]
+    D --> E["live_zone dispatcher\nxác định floor=frozen_message_count,\nceiling=latest user message"]
+    E --> F["Với mỗi block trong live zone:\ndetect() → ContentType"]
+    F --> G["CompressionPipeline.run()\nreformat (rayon) ‖ estimate_bloat (rayon)"]
+    G --> H{"bytes_saved > 0 &&\ncompressed_tokens < original_tokens?"}
+    H -- "no" --> I["Giữ nguyên block gốc"]
+    H -- "yes" --> J["Ghi CcrStore.put(hash, original)\nsplice marker <<ccr:HASH>> vào output"]
+    I --> K["Byte-range surgery: body[..start] + block + body[end..]"]
+    J --> K
+    K --> L["cache_stabilization: hash hot-zone,\nso khớp drift_state theo session"]
+    L --> M["Forward request đã nén tới upstream LLM"]
+    M --> N["Nếu model gọi tool headroom_retrieve(hash)"]
+    N --> O["CcrStore.get(hash) → trả bản gốc"]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **CCR (Compress-Cache-Retrieve) — nén "reversible" bằng marker thay vì xoá vĩnh viễn**: mỗi transform khi cắt bớt payload sẽ lưu bản gốc vào một `CcrStore` (SQLite mặc định — WAL mode; hoặc Redis đa-worker; hoặc `DashMap` in-memory cho test) keyed theo BLAKE3 hash 24-hex-char, rồi chèn marker `<<ccr:HASH>>` vào output. Model có thể gọi tool `headroom_retrieve` để lấy lại nguyên văn. Thiết kế đảm bảo "lossy trên wire, lossless end-to-end". File: `crates/headroom-core/src/ccr/mod.rs:1-119` (đặc biệt `compute_key`, `marker_for`), backend SQLite tại `crates/headroom-core/src/ccr/backends/sqlite.rs`.
-2. **Cache-safety invariant bằng byte-range surgery, không phải serialize lại JSON**: dispatcher live-zone (`crates/headroom-core/src/transforms/live_zone.rs:63-86`) không parse-rồi-serialize body — nó định vị block cần nén bằng con trỏ vào `serde_json::value::RawValue` (giữ nguyên offset gốc) và splice: `out = body[..start] || replacement || body[end..]`. Nhờ đó phần "cache hot zone" (system prompt, tools, message cũ) được copy byte-for-byte, đảm bảo SHA-256 của phần không đổi luôn khớp — giữ nguyên KV-cache của provider (tránh "cache bust" làm tăng chi phí ngược).
-3. **ContentRouter 3 tầng, không lệ thuộc regex trong production**: `crates/headroom-core/src/transforms/detection.rs` — Tier 1 Magika (ONNX content classifier của Google), Tier 2 `unidiff` parser (oracle "parse được → là diff"), Tier 3 fallthrough PlainText. Quyết định khoá thiết kế (2026-04-25) loại regex detector khỏi production path vì false-positive cao trên diff không có header `diff --git`; regex chỉ còn làm "comparison oracle" cho parity test. Mỗi tier lỗi (vd. ONNX AVX2 không khả dụng) chỉ log warn rồi fallthrough, không bao giờ panic hay chặn chain.
-4. **CompressionPipeline — reformat lossless trước, offload lossy sau, chạy song song bằng rayon**: `crates/headroom-core/src/transforms/pipeline/orchestrator.rs:82-269`. Pha reformat (VD `JsonMinifier`, `LogTemplate` — lossless, dừng sớm khi đạt tỉ lệ mục tiêu) và pha ước lượng "bloat" của từng offload chạy đồng thời qua `rayon::join` (cùng quét buffer, không tranh chấp bộ nhớ vì đều read-only). Offload chỉ chạy khi `bloat_score >= threshold` HOẶC (`reformat_ratio` vẫn > `offload_fallback_ratio` VÀ `score > 0`) — cơ chế "gate kép" tránh chạy nén tốn kém khi reformat đã đủ tốt, nhưng vẫn có fallback khi reformat "underwhelm".
-5. **AuthMode classifier điều khiển toàn bộ policy nén theo hình thức thanh toán**: `crates/headroom-core/src/auth_mode.rs:1-65`. Phân loại request thành `Payg` (nén aggressive vì tiết kiệm tiền trực tiếp), `OAuth` (chỉ nén lossless, không tự thêm `cache_control` vì scope OAuth pin theo account/model/session), `Subscription` (thêm yêu cầu "stealth" — giữ nguyên `User-Agent`, không inject header `X-Headroom-*`, không strip `accept-encoding` để không bị provider fingerprint là traffic proxy). Đây là một layer chính sách rõ ràng tách biệt khỏi cơ chế nén, chạy <10μs/call, không bao giờ panic trên header lỗi (fallback an toàn về `Payg` kèm log warn).
+1. **CCR (Compress-Cache-Retrieve) — nén "reversible" bằng marker thay vì xoá vĩnh viễn**
+   - *Là gì:* Khi rút gọn một phần nội dung, hệ thống không xóa hẳn mà cất bản gốc sang một chỗ lưu trữ riêng và để lại một "dấu tham chiếu" ngắn gọn — AI có thể yêu cầu lấy lại nguyên văn nếu thực sự cần.
+   - *Cách triển khai:* Mỗi transform khi cắt bớt payload sẽ lưu bản gốc vào một `CcrStore` (SQLite mặc định — WAL mode; hoặc Redis đa-worker; hoặc `DashMap` in-memory cho test) keyed theo BLAKE3 hash 24-hex-char, rồi chèn marker `<<ccr:HASH>>` vào output. Model có thể gọi tool `headroom_retrieve` để lấy lại nguyên văn. Thiết kế đảm bảo "lossy trên wire, lossless end-to-end". File: `crates/headroom-core/src/ccr/mod.rs:1-119` (đặc biệt `compute_key`, `marker_for`), backend SQLite tại `crates/headroom-core/src/ccr/backends/sqlite.rs`.
+2. **Cache-safety invariant bằng byte-range surgery, không phải serialize lại JSON**
+   - *Là gì:* Khi chỉnh sửa một phần nhỏ của tin nhắn gửi đi, hệ thống cố tình không đụng vào các phần còn lại — để nhà cung cấp AI vẫn nhận ra "phần quen thuộc" và tận dụng được bộ nhớ đệm của họ, tránh bị tính phí cao hơn do mất cache.
+   - *Cách triển khai:* Dispatcher live-zone (`crates/headroom-core/src/transforms/live_zone.rs:63-86`) không parse-rồi-serialize body — nó định vị block cần nén bằng con trỏ vào `serde_json::value::RawValue` (giữ nguyên offset gốc) và splice: `out = body[..start] || replacement || body[end..]`. Nhờ đó phần "cache hot zone" (system prompt, tools, message cũ) được copy byte-for-byte, đảm bảo SHA-256 của phần không đổi luôn khớp — giữ nguyên KV-cache của provider (tránh "cache bust" làm tăng chi phí ngược).
+3. **ContentRouter 3 tầng, không lệ thuộc regex trong production**
+   - *Là gì:* Hệ thống nhận diện loại nội dung (code, diff, văn bản thường...) bằng nhiều lớp kiểm tra nối tiếp, ưu tiên độ chính xác cao hơn là quy tắc đoán mò đơn giản, để tránh nhận diện sai và nén nhầm.
+   - *Cách triển khai:* `crates/headroom-core/src/transforms/detection.rs` — Tier 1 Magika (ONNX content classifier của Google), Tier 2 `unidiff` parser (oracle "parse được → là diff"), Tier 3 fallthrough PlainText. Quyết định khoá thiết kế (2026-04-25) loại regex detector khỏi production path vì false-positive cao trên diff không có header `diff --git`; regex chỉ còn làm "comparison oracle" cho parity test. Mỗi tier lỗi (vd. ONNX AVX2 không khả dụng) chỉ log warn rồi fallthrough, không bao giờ panic hay chặn chain.
+4. **CompressionPipeline — reformat lossless trước, offload lossy sau, chạy song song**
+   - *Là gì:* Hệ thống thử cách rút gọn an toàn (không mất thông tin) trước, chỉ chuyển sang cách rút gọn mạnh tay hơn khi thực sự cần, và làm cả hai việc cùng lúc để tiết kiệm thời gian xử lý.
+   - *Cách triển khai:* `crates/headroom-core/src/transforms/pipeline/orchestrator.rs:82-269`. Pha reformat (VD `JsonMinifier`, `LogTemplate` — lossless, dừng sớm khi đạt tỉ lệ mục tiêu) và pha ước lượng "bloat" của từng offload chạy đồng thời qua `rayon::join` (cùng quét buffer, không tranh chấp bộ nhớ vì đều read-only). Offload chỉ chạy khi `bloat_score >= threshold` HOẶC (`reformat_ratio` vẫn > `offload_fallback_ratio` VÀ `score > 0`) — cơ chế "gate kép" tránh chạy nén tốn kém khi reformat đã đủ tốt, nhưng vẫn có fallback khi reformat "underwhelm".
+5. **AuthMode classifier điều khiển toàn bộ policy nén theo hình thức thanh toán**
+   - *Là gì:* Mức độ rút gọn nội dung được điều chỉnh tùy theo cách người dùng trả tiền cho dịch vụ AI — nén mạnh hơn khi trả theo lượt dùng (tiết kiệm tiền trực tiếp), nén nhẹ nhàng và kín đáo hơn khi dùng gói thuê bao để không bị phát hiện là đang qua trung gian.
+   - *Cách triển khai:* `crates/headroom-core/src/auth_mode.rs:1-65`. Phân loại request thành `Payg` (nén aggressive vì tiết kiệm tiền trực tiếp), `OAuth` (chỉ nén lossless, không tự thêm `cache_control` vì scope OAuth pin theo account/model/session), `Subscription` (thêm yêu cầu "stealth" — giữ nguyên `User-Agent`, không inject header `X-Headroom-*`, không strip `accept-encoding` để không bị provider fingerprint là traffic proxy). Đây là một layer chính sách rõ ràng tách biệt khỏi cơ chế nén, chạy <10μs/call, không bao giờ panic trên header lỗi (fallback an toàn về `Payg` kèm log warn).
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Thay truncation "chặt cụt" bằng content-aware compression cho tool results** — What: Auto Code OS hiện cắt tool result thô ở `server/internal/orchestrator/llmrunner/toolloop.go:44-58` (`maxToolResultChars = 8000`, cắt chuỗi ký tự cứng + note "[truncated N chars]"), tức là bỏ hẳn phần đuôi output của `run_tests`/`run_build`/`run_lint` không phân biệt log lặp lại hay lỗi thực. Headroom dùng `ContentRouter` (`detection.rs`) để nhận diện log/diff/JSON rồi áp `LogTemplate`/`LogOffload`/`DiffOffload` — nén theo cấu trúc (gom dòng lặp, giữ dòng lỗi) thay vì cắt mù. Apply: thêm bước phân loại content-type đơn giản (regex log pattern, JSON detect) trước khi gọi `truncateToolResult`, ưu tiên giữ lại các dòng chứa `FAIL|ERROR|Traceback` giống `error_keywords.rs`. Impact: H · Effort: M · Risk: L · Est: 3-4 ngày.
 2. **CCR-style retrieval cho phần bị cắt, thay vì mất vĩnh viễn** — What: `crates/headroom-core/src/ccr/mod.rs` lưu bản gốc theo hash + marker `<<ccr:HASH>>`, cho phép model tự yêu cầu lại nguyên văn nếu cần debug sâu. Hiện tại `truncateToolResult` xoá thẳng phần vượt 8000 ký tự, không có cách nào LLM lấy lại được nếu thực sự cần (VD stack trace dài bị cắt mất phần gốc lỗi). Apply: thêm bảng/tool "retrieve_tool_output" trong `server/internal/tool/tools/` — lưu full output vào Postgres (hoặc Redis) keyed theo hash SHA-256 24 ký tự đầu, expose thêm 1 tool cho LLM gọi lại khi cần. Impact: M · Effort: M · Risk: L · Est: 2-3 ngày.
 3. **Tokenizer-validated compression gate** — What: Live-zone dispatcher của Headroom có "per-block tokenizer-validation gate": nếu `compressed.tokens >= original.tokens` thì fallback về bản gốc (`live_zone.rs` §PR-B4, xác nhận trong `observability/compression_ratio.rs` comment: "`BlockAction::Compressed` enforces compressed_tokens < original_tokens"). Auto Code OS đã có bộ đếm token chính xác ở `server/internal/context/repomap/pruning.go:15-29` (`tiktoken-go`, `CountTokens`) dùng cho repomap nhưng chưa áp dụng cho tool-result truncation. Apply: gọi `CountTokens` trước/sau khi cắt tool result để đảm bảo không "nén" ngược làm phình token (VD marker text dài hơn nội dung ngắn). Impact: M · Effort: L · Risk: L · Est: 1 ngày.
 4. **AuthMode / policy tách biệt khỏi cơ chế nén** — What: `auth_mode.rs` là pure function ánh xạ HeaderMap → policy 3 lớp (Payg/OAuth/Subscription), mọi quyết định nén sau đó đọc từ đây thay vì rải rác if/else. Auto Code OS gọi nhiều LLM provider qua `server/pkg/llm/router.go` + `provider.go` nhưng chưa có lớp policy tương tự cho "mức độ nén context theo provider/subscription". Apply: thêm `server/internal/context` một `CompressionPolicy` nhỏ (enum theo provider/plan) để `repomap/pruning.go` và tool-result truncation cùng đọc, tránh policy rời rạc từng chỗ. Impact: L · Effort: M · Risk: L · Est: 2 ngày.
-5. **Cache-hot-zone / cache-drift observability cho prompt caching** — What: `crates/headroom-proxy/src/cache_stabilization/drift_detector.rs` băm SHA-256 system+tools+3 message đầu theo session, log `cache_drift_observed` khi phần "hot zone" đổi ngoài dự kiến (phá vỡ KV-cache provider, tăng cost/latency âm thầm). Auto Code OS build prompt qua `server/internal/prompts/assembler.go`/`compiler.go` — không rõ có theo dõi việc prompt prefix (system + repomap + tool list) có ổn định giữa các lượt gọi LLM hay không. Apply: thêm log/metric đơn giản hash `system prompt + tool defs` mỗi lần gọi `llm.Chat`, cảnh báo khi hash đổi giữa 2 lượt trong cùng task — phát hiện sớm chỗ vô tình phá cache Anthropic prompt caching. Impact: M · Effort: M · Risk: L · Est: 2-3 ngày.
+5. **Cache-hot-zone / cache-drift observability cho prompt caching** — What: `crates/headroom-proxy/src/cache_stabilization/drift_detector.rs` băm SHA-256 system+tools+3 message đầu theo session, log `cache_drift_observed` khi phần "hot zone" đổi ngoài dự kiến (phá vỡ KV-cache provider, tăng cost/latency âm thầm). Apply: **Đã verify — vấn đề còn cơ bản hơn dự đoán ban đầu**: `grep -rn "cache_control\|CacheControl" server/pkg/llm` trả về **rỗng**. Auto Code OS **chưa hề dùng Anthropic prompt caching** (`server/pkg/llm/anthropic.go:51` `ChatWithOptions` build request map thủ công, không có field `cache_control` trên block system/tools nào). Nghĩa là trước khi làm drift-detector kiểu headroom, việc cần làm trước là thêm `"cache_control": {"type": "ephemeral"}` vào block system prompt + tool definitions cố định trong `anthropicMessage`/`ChatWithOptions` — đây là quick win giảm cost/latency ngay lập tức cho mọi task nhiều-turn (tool loop), độc lập với drift detection. Sau khi có caching, mới cần drift-detector (hash `system prompt + tool defs` mỗi lần gọi `llm.Chat`, cảnh báo khi hash đổi giữa 2 lượt trong cùng task) để tránh vô tình phá cache. Impact: H (bước 1 — bật caching) rồi M (bước 2 — drift detection) · Effort: S (bước 1, ~0.5 ngày) + M (bước 2) · Risk: L · Est: 0.5 ngày + 2-3 ngày.
 
 ## Kiến Trúc (Architecture)
 - **Style**: Cargo workspace nhiều crate theo layer rõ ràng — `headroom-core` (thuần logic: transforms, tokenizer, relevance, CCR — không biết HTTP) → `headroom-proxy` (axum server, biết HTTP/SSE/WS/Bedrock/Vertex, phụ thuộc `headroom-core`) → `headroom-py` (PyO3 binding, phụ thuộc `headroom-core`, không phụ thuộc `headroom-proxy`) → `headroom-simulators` (mock provider server độc lập cho test) → `headroom-parity` (harness so sánh Rust vs Python, phụ thuộc cả hai qua CLI subprocess). Hướng phụ thuộc chỉ đi một chiều: proxy/py → core; không có phụ thuộc ngược.
@@ -63,27 +98,6 @@ flowchart LR
 | Không dùng regex detector trong production detection chain | Comment khoá thiết kế trong `detection.rs:13-19`, ngày 2026-04-25 | Giảm false-positive trên input dị hình (diff không header, log giống code) | Phải cõng ONNX runtime (Magika) — thêm build complexity, cần fallback AVX2 | High |
 | SQLite làm CCR backend mặc định, Redis opt-in qua feature flag | `Cargo.toml` core: `rusqlite bundled`, `redis optional` | Zero external dependency cho single-instance deploy; multi-worker cần Redis mới bật | Redis feature tăng compile matrix; SQLite không scale multi-instance nếu không bật Redis | Medium |
 | Panic-unwind giữ nguyên (không set `panic=abort`) dù build release tối ưu size | Comment trong `Cargo.toml` root profile.release | Một request lỗi không kéo sập cả proxy đang phục vụ nhiều client đồng thời | Bỏ lỡ phần tối ưu size/perf mà `panic=abort` mang lại | High |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A["Client (Claude Code/Codex/...) gửi request"] --> B["axum Router (proxy.rs)"]
-    B --> C{"classify_compressible_path\n(compression/mod.rs)"}
-    C -- "không khớp endpoint" --> Z["Forward passthrough nguyên văn"]
-    C -- "/v1/messages, /v1/chat/completions, /v1/responses" --> D["classify_auth_mode (auth_mode.rs)\n→ Payg / OAuth / Subscription"]
-    D --> E["live_zone dispatcher\nxác định floor=frozen_message_count,\nceiling=latest user message"]
-    E --> F["Với mỗi block trong live zone:\ndetect() → ContentType"]
-    F --> G["CompressionPipeline.run()\nreformat (rayon) ‖ estimate_bloat (rayon)"]
-    G --> H{"bytes_saved > 0 &&\ncompressed_tokens < original_tokens?"}
-    H -- "no" --> I["Giữ nguyên block gốc"]
-    H -- "yes" --> J["Ghi CcrStore.put(hash, original)\nsplice marker <<ccr:HASH>> vào output"]
-    I --> K["Byte-range surgery: body[..start] + block + body[end..]"]
-    J --> K
-    K --> L["cache_stabilization: hash hot-zone,\nso khớp drift_state theo session"]
-    L --> M["Forward request đã nén tới upstream LLM"]
-    M --> N["Nếu model gọi tool headroom_retrieve(hash)"]
-    N --> O["CcrStore.get(hash) → trả bản gốc"]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Trait-based transform pipeline (Strategy pattern)**: `ReformatTransform` / `OffloadTransform` (`transforms/pipeline/traits.rs`) là trait object (`Arc<dyn ...>`), đăng ký qua builder `CompressionPipelineBuilder::with_reformat/with_offload` theo `ContentType`. Thêm compressor mới không cần sửa orchestrator.

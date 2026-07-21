@@ -65,14 +65,6 @@
 - AND mỗi project tạo 1 report tương ứng trong subfolder phù hợp
 - AND không skip project nào
 
-### REQ-008: Script liệt kê & phân loại reference projects
-> ✅ Status: Done (script đã tồn tại)
-
-**Scenario:**
-- WHEN chạy `scripts/analyze_references.sh`
-- THEN liệt kê 20 repo theo đúng 4 category (khớp với phân loại trong design.md)
-- AND đánh dấu repo nào đã clone / chưa clone trong `references/`
-
 ## Modified Requirements
 - Không có
 

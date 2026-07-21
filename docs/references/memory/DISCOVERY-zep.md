@@ -1,19 +1,51 @@
 # Báo Cáo Phân Tích — Zep
 
-## Tổng Quan
-Repo `references/zep` hiện tại **không phải** engine chính của Zep nữa — nó là repo "Zep Cloud: Examples & Integrations" (SDK examples, framework integrations, benchmarks). Zep đã pivot sang SaaS đóng nguồn (Zep Cloud) và tách phần knowledge-graph engine sang project riêng tên **Graphiti** (Python). Phần có giá trị phân tích Go thực sự nằm ở `legacy/src/` — mã nguồn **Zep Community Edition (đã deprecated, không còn maintain)**, ~7.9K LOC Go, dùng `chi` router, `bun` ORM (Postgres + pgvector), `zap` logging, `watermill` cho task queue. Đây là bức ảnh chụp một backend Go production-grade tại thời điểm bị khai tử, **0 file test** còn sót lại trong `legacy/src` — cảnh báo rõ về maturity thấp của phần này dù pattern code khá sạch.
+## Tổng Quan (TL;DR)
+Zep từng là một dự án cung cấp "bộ nhớ" dạng đồ thị tri thức cho AI agent, nhưng đã chuyển hướng thành dịch vụ đám mây đóng nguồn và tách phần lõi công nghệ ra một dự án riêng. Phần còn xem được hôm nay chỉ là bản cũ, không còn được duy trì, cho thấy hình ảnh một hệ thống lưu trữ hội thoại/bộ nhớ đã từng chạy thật ở quy mô production trước khi bị khai tử.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Go, dùng `chi` router, `bun` ORM (Postgres + pgvector), `zap` logging, `watermill` cho task queue.
+- **Quy mô/Độ trưởng thành:** Repo hiện tại là "Zep Cloud: Examples & Integrations" (SDK examples, framework integrations, benchmarks) — không phải engine chính; phần có giá trị phân tích thực sự nằm ở `legacy/src/`, mã nguồn Zep Community Edition đã deprecated, không còn maintain, ~7.9K LOC, 0 file test còn sót lại — cảnh báo rõ về maturity thấp của phần này dù pattern code khá sạch.
+
+## Luồng Chính (Main Flow)
+Luồng "get memory cho 1 session" — từ HTTP request đến response, minh hoạ cách `RequestState` bind store và cách gọi song song Postgres store + Graphiti service:
+
+```mermaid
+flowchart TD
+    A[GET /sessions/id/memory] --> B[handlertools.NewRequestState: bind stores theo ProjectUUID]
+    B --> C[extractMemoryFilterOptions từ query params]
+    C --> D[GetMemoryHandler gọi rs.Memories.GetMemory]
+    D --> E[memoryStore.dao sessionID lastNMessages]
+    E --> F[memoryDAO.Get: query bun trên schema riêng của project]
+    F --> G{lastNMessages == 0?}
+    G -- yes --> H[dùng DefaultLastNMessages]
+    G -- no --> I[query LIMIT lastN]
+    H --> J[trả về models.Memory: messages + facts]
+    I --> J
+    J --> K[handlertools.EncodeJSON response 200]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Error Taxonomy tập trung, giàu ngữ cảnh (`zerrors` package)**: Mỗi loại lỗi domain (`NotFoundError`, `BadRequestError`, `UnauthorizedError`, `SessionEndedError`, `AdvisoryLockError`, `CustomMessageInternalError`...) là một struct riêng implement `error` + `Unwrap() error` trỏ về sentinel `Err*` dùng chung. HTTP layer chỉ cần `errors.Is(err, zerrors.ErrNotFound)` để map sang status code — tách hoàn toàn lỗi domain khỏi lỗi HTTP. (`legacy/src/lib/zerrors/errors.go`, `legacy/src/api/handlertools/tools.go:64-81` hàm `HandleErrorRequestState`)
-2. **Postgres Advisory Lock làm distributed lock cho ghi đồng thời**: `generateLockID` hash key bằng SHA-256 rồi lấy 8 byte đầu làm `uint64`, dùng `pg_try_advisory_lock` kèm `failsafe-go` retry policy (backoff 200ms→30s, tối đa 15 lần) để tránh race khi nhiều request cùng cập nhật metadata một session. (`legacy/src/store/memorystore_common.go:148-205`)
-3. **Maximal Marginal Relevance (MMR) tự triển khai cho search đa dạng hoá kết quả**: Thuật toán MMR (mượn ý tưởng từ LangChain) cân bằng độ liên quan (cosine similarity với query) và độ đa dạng (giảm trùng lặp giữa các kết quả đã chọn) bằng công thức `λ*queryScore - (1-λ)*redundantScore`, dùng thư viện SIMD `viterin/vek` cho cosine similarity vector float32. (`legacy/src/lib/search/mmr.go`)
-4. **Multi-tenant qua Postgres schema-per-project**: Mọi bảng (`SessionSchema`, `MessageStoreSchema`, `UserSchema`) đều có `BaseSchema{SchemaName, TableName}` và build table name động qua `bun.Ident(pgMessage.GetTableName())` — dữ liệu của mỗi project nằm ở schema Postgres riêng thay vì cột `tenant_id` chung một schema, giảm rủi ro leak chéo tenant ở tầng query. (`legacy/src/store/schema_common.go:18-37`, `legacy/src/store/message_common.go:44-52`)
-5. **Interface + Mock song song theo naming convention nhất quán**: Mọi package `lib/*` pluggable (enablement, telemetry, observability, communication) đều có bộ 3 file `service.go` (interface), `service_mock.go` (test double), `<name>_ce.go` (implementation thật cho Community Edition) + singleton `_instance`/`Setup()`/`I()`. Tách biệt interface khỏi implementation rất rõ ràng mà không cần DI framework. (`legacy/src/lib/enablement/service.go`, `legacy/src/lib/graphiti/service_ce.go:91-116`)
+1. **Error Taxonomy tập trung, giàu ngữ cảnh (`zerrors` package)**
+   - *Là gì:* Mỗi loại lỗi trong hệ thống được đặt tên rõ ràng và mang theo ngữ cảnh cụ thể (thay vì chỉ là một thông báo lỗi chung chung), giúp phần trả kết quả cho người dùng biết chính xác nên báo lỗi gì.
+   - *Cách triển khai:* Mỗi loại lỗi domain (`NotFoundError`, `BadRequestError`, `UnauthorizedError`, `SessionEndedError`, `AdvisoryLockError`, `CustomMessageInternalError`...) là một struct riêng implement `error` + `Unwrap() error` trỏ về sentinel `Err*` dùng chung. HTTP layer chỉ cần `errors.Is(err, zerrors.ErrNotFound)` để map sang status code — tách hoàn toàn lỗi domain khỏi lỗi HTTP. (`legacy/src/lib/zerrors/errors.go`, `legacy/src/api/handlertools/tools.go:64-81` hàm `HandleErrorRequestState`)
+2. **Postgres Advisory Lock làm distributed lock cho ghi đồng thời**
+   - *Là gì:* Khi nhiều yêu cầu cùng cố gắng sửa cùng một dữ liệu cùng lúc, hệ thống dùng cơ chế khoá tạm thời của cơ sở dữ liệu để đảm bảo chỉ một yêu cầu được xử lý tại một thời điểm, tránh ghi đè/sai lệch dữ liệu.
+   - *Cách triển khai:* `generateLockID` hash key bằng SHA-256 rồi lấy 8 byte đầu làm `uint64`, dùng `pg_try_advisory_lock` kèm `failsafe-go` retry policy (backoff 200ms→30s, tối đa 15 lần) để tránh race khi nhiều request cùng cập nhật metadata một session. (`legacy/src/store/memorystore_common.go:148-205`)
+3. **Maximal Marginal Relevance (MMR) tự triển khai cho search đa dạng hoá kết quả**
+   - *Là gì:* Khi trả kết quả tìm kiếm, hệ thống không chỉ lấy những kết quả "đúng nhất" mà còn cố tình chọn những kết quả khác nhau, tránh tình trạng cả danh sách kết quả đều gần giống hệt nhau và không mang thêm thông tin gì mới.
+   - *Cách triển khai:* Thuật toán MMR (mượn ý tưởng từ LangChain) cân bằng độ liên quan (cosine similarity với query) và độ đa dạng (giảm trùng lặp giữa các kết quả đã chọn) bằng công thức `λ*queryScore - (1-λ)*redundantScore`, dùng thư viện SIMD `viterin/vek` cho cosine similarity vector float32. (`legacy/src/lib/search/mmr.go`)
+4. **Multi-tenant qua Postgres schema-per-project**
+   - *Là gì:* Dữ liệu của mỗi khách hàng/dự án được tách vật lý riêng biệt trong cơ sở dữ liệu, thay vì trộn chung rồi lọc bằng điều kiện — giảm nguy cơ một dự án vô tình nhìn thấy dữ liệu của dự án khác.
+   - *Cách triển khai:* Mọi bảng (`SessionSchema`, `MessageStoreSchema`, `UserSchema`) đều có `BaseSchema{SchemaName, TableName}` và build table name động qua `bun.Ident(pgMessage.GetTableName())` — dữ liệu của mỗi project nằm ở schema Postgres riêng thay vì cột `tenant_id` chung một schema, giảm rủi ro leak chéo tenant ở tầng query. (`legacy/src/store/schema_common.go:18-37`, `legacy/src/store/message_common.go:44-52`)
+5. **Interface + Mock song song theo naming convention nhất quán**
+   - *Là gì:* Mỗi thành phần phụ trợ của hệ thống (theo dõi, log, thông báo...) được thiết kế theo một khuôn mẫu cố định giúp việc viết test dễ dàng mà không cần công cụ hỗ trợ phức tạp.
+   - *Cách triển khai:* Mọi package `lib/*` pluggable (enablement, telemetry, observability, communication) đều có bộ 3 file `service.go` (interface), `service_mock.go` (test double), `<name>_ce.go` (implementation thật cho Community Edition) + singleton `_instance`/`Setup()`/`I()`. Tách biệt interface khỏi implementation rất rõ ràng mà không cần DI framework. (`legacy/src/lib/enablement/service.go`, `legacy/src/lib/graphiti/service_ce.go:91-116`)
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Nâng cấp `DomainError` thành taxonomy giàu ngữ cảnh theo kiểu `zerrors`** — What: Zep dùng struct riêng cho từng loại lỗi (`NotFoundError{Resource}`, `AdvisoryLockError{Err}`...) thay vì 1 struct `DomainError{Kind, Msg}` chung chung như hiện tại. Apply: Mở rộng `server/internal/service/errors.go` (hiện chỉ có `DomainError{Kind, Msg}`, 4 sentinel `ErrNotFound/ErrConflict/ErrAuthorization/ErrInvalid`) thêm struct lỗi có field ngữ cảnh (vd `NotFoundError{Resource string}`) để log/observability giàu thông tin hơn mà vẫn giữ `errors.Is` hoạt động qua `Unwrap()`. Impact: M · Effort: L · Risk: L · Est: 1 day.
 2. **Postgres advisory lock cho các thao tác ghi đồng thời trên cùng 1 task/step** — What: `pg_try_advisory_lock` + retry backoff tránh 2 worker cùng update 1 record. Apply: `server/internal/orchestrator/` hiện có nhiều nơi update trạng thái task/step đồng thời (cache_workers, agent_watchdog) — nếu chưa dùng row-lock/`SELECT FOR UPDATE`, có thể thêm advisory-lock helper trong `server/internal/repository/` (tương tự `mapError` hiện có trong `repository/errors.go`) cho các thao tác idempotent-update tránh lost update mà không cần transaction dài. Impact: M · Effort: M · Risk: M · Est: 2 days.
-3. **Áp dụng MMR cho kết quả tìm kiếm memory/context để tránh trùng lặp** — What: Thuật toán MMR chọn top-k cân bằng relevance/diversity. Apply: `server/internal/handler/memory.go` (`MemoryHandler.Search`) và `server/internal/context/` khi truy vấn context cho agent — nếu retrieval hiện tại chỉ sort theo cosine similarity thuần, thêm bước MMR re-rank (port thẳng logic từ `lib/search/mmr.go`, ~90 dòng, không phụ thuộc Zep-specific) sẽ giảm việc nhồi nhiều đoạn context gần giống nhau vào prompt, tiết kiệm token. Impact: M · Effort: L · Risk: L · Est: 1 day.
+3. **Áp dụng MMR cho kết quả tìm kiếm memory/context để tránh trùng lặp** — What: Thuật toán MMR chọn top-k cân bằng relevance/diversity, công thức `λ*relevance - (1-λ)*maxSimilarityToSelected`. Apply: **Đã verify** `MemoryHandler.Search` (`server/internal/handler/memory.go:41`) chỉ gọi thẳng `MemoryService.Search` (`server/internal/service/memory_search.go:21`), và `rrfMerge()` (`memory_search.go:78`) chỉ merge rank giữa BM25/Vector/Graph rồi trả nguyên top-N theo `rrfScore` — **không có bước diversity/dedup nào sau RRF**, nên nếu top-5 kết quả đều gần giống nhau về nội dung (vd 3 memory cùng ghi nhận 1 lỗi tương tự ở 3 thời điểm khác nhau), cả 3 đều lọt vào context injection, tốn token cho thông tin trùng lặp. `grep` xác nhận không có `MMR`/`dedup`/`diversif` trong `server/internal/handler/` hay `server/internal/context/`. Thêm bước MMR re-rank ngay sau `rrfMerge()` trong `memory_search.go` (port thẳng logic từ `lib/search/mmr.go`, ~90 dòng, không phụ thuộc Zep-specific, cần có sẵn embedding vector của từng result để tính similarity-to-selected) sẽ giảm việc nhồi nhiều đoạn context gần giống nhau vào prompt. Impact: M · Effort: L · Risk: L · Est: 1 day.
 4. **Convention interface/mock/impl 3-file nhất quán cho các service pluggable** — What: `service.go` + `service_mock.go` + `<name>_ce.go` + singleton `I()`. Apply: Chuẩn hoá các package trong `server/pkg/llm/` (LLM Gateway) và `server/internal/observability/` theo cùng convention (hiện đã có interfaces qua `interfaces.go` ở orchestrator nhưng chưa nhất quán toàn repo) giúp mock hoá dễ hơn khi viết test cho orchestrator mà không cần gọi LLM thật. Impact: L · Effort: M · Risk: L · Est: 2 days.
 5. **Schema-per-tenant thay vì cột `tenant_id` cho các workspace nhạy cảm** — What: Zep cô lập dữ liệu multi-project bằng Postgres schema riêng. Apply: Auto Code OS hiện dùng GORM + `pgconn` (thấy trong `server/internal/repository/errors.go`) trên schema chung; nếu roadmap có multi-tenant SaaS, cân nhắc pattern schema-per-organization cho bảng `tasks`/`memories` nhạy cảm nhất thay vì chỉ dựa vào `WHERE org_id = ?` — giảm rủi ro thiếu điều kiện lọc gây leak dữ liệu. Impact: H (nếu multi-tenant) · Effort: H · Risk: M · Est: 1-2 tuần — chỉ nên làm khi đã có yêu cầu tenant isolation rõ ràng, không làm speculative.
 
@@ -43,24 +75,6 @@ flowchart LR
 | Postgres schema-per-project thay vì cột tenant_id | `BaseSchema{SchemaName}`, `ModelTableExpr("?.messages", bun.Ident(schemaName))` | Cô lập vật lý mạnh, dễ backup/xoá theo tenant | Số lượng schema tăng theo số project → khó quản lý migration hàng loạt | High |
 | Watermill làm task queue nội bộ (không dùng Kafka/RabbitMQ trực tiếp) | `models/tasks_common.go` dùng `watermill/message`; `logger.go` có `watermillLogger` adapter | Trừu tượng hoá pub/sub, dễ đổi backend (in-memory/Kafka/GCP PubSub) | Thêm 1 lớp abstraction, phải viết adapter logger riêng | Medium |
 | Naming convention `_common.go` / `_ce.go` xuyên suốt codebase | Áp dụng nhất quán ở `models/`, `store/`, `lib/*` | Ngụ ý từng có kiến trúc build-tag tách Cloud/Community Edition (dù hiện không còn `//go:build` tag) | Legacy naming gây khó hiểu cho người đọc mới không biết lịch sử | Medium |
-
-## Luồng Chính (Main Flow)
-Luồng "get memory cho 1 session" — từ HTTP request đến response, minh hoạ cách `RequestState` bind store và cách gọi song song Postgres store + Graphiti service:
-
-```mermaid
-flowchart TD
-    A[GET /sessions/id/memory] --> B[handlertools.NewRequestState: bind stores theo ProjectUUID]
-    B --> C[extractMemoryFilterOptions từ query params]
-    C --> D[GetMemoryHandler gọi rs.Memories.GetMemory]
-    D --> E[memoryStore.dao sessionID lastNMessages]
-    E --> F[memoryDAO.Get: query bun trên schema riêng của project]
-    F --> G{lastNMessages == 0?}
-    G -- yes --> H[dùng DefaultLastNMessages]
-    G -- no --> I[query LIMIT lastN]
-    H --> J[trả về models.Memory: messages + facts]
-    I --> J
-    J --> K[handlertools.EncodeJSON response 200]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Repository/DAO pattern rõ ràng**: `store` package chia nhỏ theo domain (`memoryStore`, `messageDAO`, `sessionStore`, `userStore`), mỗi DAO nhận `as *models.AppState, rs *models.RequestState` qua constructor — không có global state ẩn ngoài 2 singleton hợp lý (`config`, `logger`). (`legacy/src/store/memorystore_common.go:22-40`)

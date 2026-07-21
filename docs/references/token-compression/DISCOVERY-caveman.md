@@ -1,15 +1,48 @@
 # Báo Cáo Phân Tích — Caveman
 
-## Tổng Quan
-Skill/plugin cho AI coding agent (Claude Code, Codex, Gemini CLI, Cursor, Windsurf, Cline, Copilot, 30+ agents khác) khiến agent trả lời theo văn phong "caveman" (tối giản, bỏ mạo từ/filler/hedging) — giảm trung bình **65% output tokens** (đo thật qua Claude API, 10 prompts, dao động 22–87%), giữ nguyên độ chính xác kỹ thuật. Toàn bộ cơ chế nằm ở **prompt engineering** (nội dung `SKILL.md`) cộng một lớp hook Node.js nhỏ để bật/tắt mode, không có mô hình ML hay thuật toán nén phức tạp nào. Stack: Node.js (hooks/installer) + Python 3.10+ (`caveman-compress` script) + Markdown (skill prompts). Quy mô nhỏ (~3.8k dòng JS cho hooks+installer, skill files vài chục dòng mỗi cái), nhưng cực kỳ trưởng thành về vận hành: security hardening (symlink-safe file I/O), CI sync, eval harness 3-arm, tài liệu "Honest Numbers" thẳng thắn về khi nào kỹ thuật này *lỗ* token.
+## Tổng Quan (TL;DR)
+Caveman là một tiện ích cài thêm vào các trợ lý AI lập trình để chúng trả lời ngắn gọn hơn — bỏ bớt từ thừa, câu rào đón, phép lịch sự không cần thiết — mà vẫn giữ đúng nội dung kỹ thuật. Nhờ vậy mỗi câu trả lời tốn ít hơn trung bình khoảng 65% số từ so với bình thường, giúp tiết kiệm chi phí và thời gian đọc.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Node.js (hooks/installer) + Python 3.10+ (`caveman-compress` script) + Markdown (skill prompts). Cơ chế chính là **prompt engineering** (nội dung `SKILL.md`) cộng một lớp hook Node.js nhỏ để bật/tắt mode; giảm trung bình **65% output tokens** (đo thật qua Claude API, 10 prompts, dao động 22–87%), không có mô hình ML hay thuật toán nén phức tạp nào.
+- **Quy mô/Độ trưởng thành:** Quy mô nhỏ (~3.8k dòng JS cho hooks+installer, skill files vài chục dòng mỗi cái), nhưng cực kỳ trưởng thành về vận hành: security hardening (symlink-safe file I/O), CI sync, eval harness 3-arm, tài liệu "Honest Numbers" thẳng thắn về khi nào kỹ thuật này *lỗ* token.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[User gõ /caveman hoặc nói talk like caveman] --> B[caveman-mode-tracker.js UserPromptSubmit hook]
+    B --> C{Regex match activation/deactivation intent?}
+    C -- activate --> D[getDefaultMode từ config resolution chain]
+    D --> E[recordModeChange ghi .caveman-mode-log.jsonl]
+    E --> F[safeWriteFlag ghi .caveman-active]
+    C -- deactivate --> G[unlink flag file]
+    F --> H[Mỗi turn sau: hook đọc flag qua readFlag]
+    H --> I[Emit hookSpecificOutput.additionalContext nhắc lại rule ngắn]
+    I --> J[Model sinh câu trả lời nén theo level]
+    F --> K[caveman-statusline.sh đọc flag hiển thị badge CAVEMAN]
+    L[/caveman-stats] --> M[caveman-stats.js đọc session JSONL + mode-log]
+    M --> N[Tính token thật + ước lượng saved theo COMPRESSION ratio 65%]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Compression bằng prompt rule thuần túy, không cần code nén** — Toàn bộ giảm token dựa vào một tập luật ngôn ngữ trong `skills/caveman/SKILL.md` (drop mạo từ, filler, pleasantries, hedging; câu rời rạc "fragments OK"; giữ nguyên code/lệnh/error message). Không finetune, không thuật toán, chỉ system-prompt injection. Đo được 65% giảm output token trung bình, có bộ benchmark thật trong `benchmarks/` và `evals/` (không phải số tự bịa). File: `skills/caveman/SKILL.md:11-30`.
-2. **6 mức cường độ (intensity levels) chọn được runtime** — `lite / full / ultra / wenyan-lite / wenyan-full / wenyan-ultra`, mode "wenyan" dùng văn ngôn cổ Trung Quốc vì mật độ ngữ nghĩa/token cao nhất trong các ngôn ngữ tự nhiên hiện có. Người dùng đổi mode bằng `/caveman <level>`, mode "dính" (persist) tới hết session hoặc user đổi tay. File: `skills/caveman/SKILL.md:32-56`.
-3. **Auto-Clarity guard-rail** — Tự động rời khỏi caveman-mode khi gặp: security warning, xác nhận hành động không thể hoàn tác (destructive op), chuỗi multi-step dễ hiểu nhầm do thiếu liên từ, hoặc user hỏi lại vì không hiểu. Đây là cơ chế an toàn quan trọng nhất của kỹ thuật nén output — tránh nén quá đà gây hiểu sai lệnh nguy hiểm. File: `skills/caveman/SKILL.md:58-74`.
-4. **Symlink-safe flag I/O layer** — Toàn bộ state (mode hiện tại, lịch sử session, thống kê) được ghi qua `safeWriteFlag()`/`readFlag()`/`appendFlag()` trong `src/hooks/caveman-config.js:112-300`: mở file bằng `O_NOFOLLOW`, ghi atomic (temp + rename), cap kích thước đọc (`MAX_FLAG_BYTES = 64`), whitelist giá trị hợp lệ (`VALID_MODES`), kiểm tra ownership khi parent dir là symlink. Chống local attacker thay flag file bằng symlink trỏ tới `~/.ssh/id_rsa` để exfiltrate secret qua statusline/hook output.
-5. **`caveman-shrink` — MCP middleware nén mô tả tool** — Một proxy MCP thuần Node (`src/mcp-servers/caveman-shrink/compress.js`) áp dụng cùng luật nén (bỏ filler/pleasantries/hedging/mạo từ) lên trường `description` trong response `tools/list`/`prompts/list`/`resources/list` của bất kỳ MCP server nào, bảo vệ code block, inline code, URL, path, CONST_CASE, hàm gọi (`func()`), số version bằng cơ chế "sentinel + restore" (thay thế tạm bằng số index, xử lý xong thì khôi phục). Publish độc lập trên npm, tách biệt khỏi luồng skill chính.
-6. **Eval harness 3-arm trung thực (`__baseline__` / `__terse__` / skill)** — So sánh caveman với "Answer concisely." system prompt trần (`__terse__`), không so với baseline verbose mặc định — tránh đánh lận "hiệu quả của caveman" với "hiệu quả của việc yêu cầu ngắn gọn nói chung". `evals/llm_run.py` + `evals/measure.py`, kết quả commit vào `evals/snapshots/results.json` để CI đọc offline không tốn API call.
+1. **Compression bằng prompt rule thuần túy, không cần code nén**
+   - *Là gì:* Toàn bộ việc giảm token dựa vào một tập luật ngôn ngữ đơn giản — bỏ mạo từ, từ thừa, phép lịch sự, câu rào đón; cho phép viết câu rời rạc "fragments OK"; giữ nguyên code/lệnh/error message. Không cần huấn luyện lại mô hình, không thuật toán, chỉ là một đoạn hướng dẫn chèn vào lời gọi hệ thống.
+   - *Cách triển khai:* Luật nằm trong `skills/caveman/SKILL.md:11-30`. Đo được 65% giảm output token trung bình, có bộ benchmark thật trong `benchmarks/` và `evals/` (không phải số tự bịa).
+2. **6 mức cường độ (intensity levels) chọn được runtime**
+   - *Là gì:* Người dùng có thể chọn mức độ nén mạnh nhẹ khác nhau tùy nhu cầu, kể cả một chế độ dùng văn phong cổ có mật độ thông tin trên mỗi từ cao nhất mà kỹ thuật này tìm được.
+   - *Cách triển khai:* `lite / full / ultra / wenyan-lite / wenyan-full / wenyan-ultra`, mode "wenyan" dùng văn ngôn cổ Trung Quốc vì mật độ ngữ nghĩa/token cao nhất trong các ngôn ngữ tự nhiên hiện có. Người dùng đổi mode bằng `/caveman <level>`, mode "dính" (persist) tới hết session hoặc user đổi tay. File: `skills/caveman/SKILL.md:32-56`.
+3. **Auto-Clarity guard-rail**
+   - *Là gì:* Cơ chế an toàn tự động tắt chế độ nói ngắn gọn khi tình huống rủi ro — tránh việc nén quá đà khiến người dùng hiểu nhầm một lệnh nguy hiểm.
+   - *Cách triển khai:* Tự động rời khỏi caveman-mode khi gặp: security warning, xác nhận hành động không thể hoàn tác (destructive op), chuỗi multi-step dễ hiểu nhầm do thiếu liên từ, hoặc user hỏi lại vì không hiểu. File: `skills/caveman/SKILL.md:58-74`.
+4. **Symlink-safe flag I/O layer**
+   - *Là gì:* Lớp lưu trạng thái (đang bật chế độ nào, lịch sử, thống kê) được thiết kế để không bị kẻ tấn công cục bộ lợi dụng đọc trộm hoặc ghi đè file nhạy cảm.
+   - *Cách triển khai:* Ghi qua `safeWriteFlag()`/`readFlag()`/`appendFlag()` trong `src/hooks/caveman-config.js:112-300`: mở file bằng `O_NOFOLLOW`, ghi atomic (temp + rename), cap kích thước đọc (`MAX_FLAG_BYTES = 64`), whitelist giá trị hợp lệ (`VALID_MODES`), kiểm tra ownership khi parent dir là symlink. Chống local attacker thay flag file bằng symlink trỏ tới `~/.ssh/id_rsa` để exfiltrate secret qua statusline/hook output.
+5. **`caveman-shrink` — MCP middleware nén mô tả tool**
+   - *Là gì:* Một lớp trung gian áp dụng cùng nguyên tắc nói ngắn gọn lên phần mô tả của các công cụ (tools) mà AI agent dùng, giúp giảm chi phí token ngay từ định nghĩa công cụ chứ không chỉ câu trả lời.
+   - *Cách triển khai:* Một proxy MCP thuần Node (`src/mcp-servers/caveman-shrink/compress.js`) áp dụng cùng luật nén (bỏ filler/pleasantries/hedging/mạo từ) lên trường `description` trong response `tools/list`/`prompts/list`/`resources/list` của bất kỳ MCP server nào, bảo vệ code block, inline code, URL, path, CONST_CASE, hàm gọi (`func()`), số version bằng cơ chế "sentinel + restore" (thay thế tạm bằng số index, xử lý xong thì khôi phục). Publish độc lập trên npm, tách biệt khỏi luồng skill chính.
+6. **Eval harness 3-arm trung thực (`__baseline__` / `__terse__` / skill)**
+   - *Là gì:* Một cách đo lường trung thực để chứng minh việc nén output có thực sự hiệu quả hơn là chỉ đơn giản yêu cầu AI "trả lời ngắn gọn hơn" hay không.
+   - *Cách triển khai:* So sánh caveman với "Answer concisely." system prompt trần (`__terse__`), không so với baseline verbose mặc định — tránh đánh lận "hiệu quả của caveman" với "hiệu quả của việc yêu cầu ngắn gọn nói chung". `evals/llm_run.py` + `evals/measure.py`, kết quả commit vào `evals/snapshots/results.json` để CI đọc offline không tốn API call.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **System-prompt style rule để nén output của LLM agent trong orchestrator** — What: `skills/caveman/SKILL.md` chứng minh chỉ cần một đoạn rule ngắn (~1–1.5k token) chèn vào system prompt là giảm được 65% output token mà không đổi model/pipeline. Apply: Auto Code OS đang render prompt qua Go templates ở `server/internal/prompts/` (`assembler.go`, `builder.go`, `compiler.go`). Thêm 1 template fragment "terse-output" tùy chọn (bật qua flag per-task hoặc per-workspace) chèn vào system prompt khi gọi LLM cho các bước sinh review comment, log tóm tắt, PR description — nơi output dài nhưng ít khi cần đọc verbatim. Impact: M · Effort: L · Risk: L · Est: 0.5-1 day.
@@ -42,23 +75,6 @@ flowchart TD
 | Flag file trên đĩa thay vì biến môi trường / IPC | `caveman-config.js` toàn bộ xoay quanh flag file `$CLAUDE_CONFIG_DIR/.caveman-active` | Đơn giản, cross-process (hook + statusline + CLI đọc chung), không cần daemon | Cần lớp bảo mật symlink-safe phức tạp (100+ dòng) để bù lại rủi ro file-based state | High |
 | SKILL.md đọc runtime thay vì hardcode trong hook | `caveman-activate.js:59-85` — comment giải thích rõ lý do (tránh duplicate đi lệch) | Một nguồn sự thật, sửa 1 file lan tỏa mọi agent | Cần fallback ruleset hardcode phòng khi không tìm thấy file — thêm code path phải test riêng | High |
 | Compress-nén description bằng regex thuần, không gọi LLM | `src/mcp-servers/caveman-shrink/compress.js` chỉ dùng RegExp, không có network call | Nhanh, không tốn thêm token/API call, chạy được ở proxy layer | Kém "thông minh" hơn LLM-based compression — chỉ xử lý được filler/hedging cấp câu, không rewrite ý | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[User gõ /caveman hoặc nói talk like caveman] --> B[caveman-mode-tracker.js UserPromptSubmit hook]
-    B --> C{Regex match activation/deactivation intent?}
-    C -- activate --> D[getDefaultMode từ config resolution chain]
-    D --> E[recordModeChange ghi .caveman-mode-log.jsonl]
-    E --> F[safeWriteFlag ghi .caveman-active]
-    C -- deactivate --> G[unlink flag file]
-    F --> H[Mỗi turn sau: hook đọc flag qua readFlag]
-    H --> I[Emit hookSpecificOutput.additionalContext nhắc lại rule ngắn]
-    I --> J[Model sinh câu trả lời nén theo level]
-    F --> K[caveman-statusline.sh đọc flag hiển thị badge CAVEMAN]
-    L[/caveman-stats] --> M[caveman-stats.js đọc session JSONL + mode-log]
-    M --> N[Tính token thật + ước lượng saved theo COMPRESSION ratio 65%]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Single source of truth + sync mirror pattern**: `skills/*/SKILL.md` là nguồn duy nhất, mọi bản copy khác (`plugins/caveman/skills/`, `dist/caveman.skill`) đều auto-sync qua CI (`.github/workflows/sync-skill.yml`), không cho phép edit tay bản mirror — giảm drift.

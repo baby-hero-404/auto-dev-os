@@ -5,7 +5,6 @@
 
 - [x] **T-000**: Clean old reports — xóa **tất cả** file `.md` cũ ở root `docs/references/` trừ `README.md` ✅
 - [x] **T-001**: Tạo cấu trúc subfolder: `agent-platform/`, `memory/`, `token-compression/`, `infrastructure/` ✅
-- [x] **T-002**: Script `scripts/analyze_references.sh` — liệt kê & phân loại 20 repo theo 4 category ✅
 
 ## Phase 1: Agent Platform (6 projects)
 > Priority: P0 — Relevance cao nhất với Auto Code OS

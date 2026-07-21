@@ -1,14 +1,42 @@
 # Báo Cáo Phân Tích — Prompt Base
 
-## Tổng Quan
-Framework AI orchestration dạng **global-only** (cài vào `~/.gemini` và/hoặc `~/.claude`, không sống trong repo dự án), biến trợ lý AI thành một "đội chuyên gia" gồm 14 agent, 54 skill, 14 slash-command workflow, được nạp theo cơ chế Progressive Disclosure ("Librarian Protocol"). Stack: thuần Markdown + YAML frontmatter cho phần "prompt", Python (zero/low-dependency) cho tooling (lint, registry gen, memory engine, install). Quy mô nhỏ (341 file, 4.6MB, 34 commit) nhưng độ trưởng thành cao: có test suite riêng (`tools/tests/`), golden-eval LLM-as-judge, 5-tier skill quality gate. **Lưu ý quan trọng**: đây chính là framework đang chạy `~/.claude/CLAUDE.md` của user trong phiên làm việc này — `references/prompt_base/CLAUDE.md` giống hệt cấu hình global hiện tại, và `docs/openspecs/reference-analysis/design.md` của Auto Code OS lấy đúng template 12-perspective từ `antigravity/skills/custom/explore-codebase/SKILL.md` của repo này.
+## Tổng Quan (TL;DR)
+Prompt Base là một bộ "hướng dẫn hành xử" được cài đặt một lần trên máy tính cá nhân để biến một trợ lý AI (như Claude hoặc Gemini) thành một đội gồm nhiều "chuyên gia ảo" — mỗi chuyên gia giỏi một việc riêng (viết backend, thiết kế UI, kiểm thử...) — và tự động gọi đúng chuyên gia phù hợp khi cần, thay vì nạp hết mọi kiến thức cùng lúc gây chậm và tốn kém. Đáng chú ý: đây chính là bộ hướng dẫn đang chi phối cách trợ lý AI hành xử trong chính phiên làm việc hiện tại.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** thuần Markdown + YAML frontmatter cho phần "prompt", Python (zero/low-dependency) cho tooling (lint, registry gen, memory engine, install). Cài đặt dạng **global-only** (vào `~/.gemini` và/hoặc `~/.claude`, không sống trong repo dự án).
+- **Quy mô/Độ trưởng thành:** 14 agent, 54 skill, 14 slash-command workflow, nạp theo cơ chế Progressive Disclosure ("Librarian Protocol"). Quy mô nhỏ (341 file, 4.6MB, 34 commit) nhưng độ trưởng thành cao: có test suite riêng (`tools/tests/`), golden-eval LLM-as-judge, 5-tier skill quality gate. `references/prompt_base/CLAUDE.md` giống hệt cấu hình global hiện tại, và `docs/openspecs/reference-analysis/design.md` của Auto Code OS lấy đúng template 12-perspective từ `antigravity/skills/custom/explore-codebase/SKILL.md` của repo này.
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[User gõ prompt hoặc /slash command] --> B{core/classifier.md<br/>phân loại request}
+    B -->|COMPLEX CODE / DESIGN| C[Kiểm tra Plan Artifact<br/>OpenSpec ưu tiên hơn PLAN-*.md]
+    C --> D[Socratic Gate: hỏi >=3 câu<br/>system_prompt.md]
+    D --> E[grep registry.min.json<br/>tìm agent + skill theo trigger keyword]
+    E --> F[Load agent .md<br/>antigravity/agents/*.md]
+    F --> G[JIT load section-level SKILL.md<br/>gán vào Slot UX/APP/OPS/QA]
+    G --> H[Thực thi task]
+    H --> I[quality-gatekeeper review]
+    I --> J[UNLOAD slot, cập nhật tasks.md]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Librarian Protocol (Progressive Disclosure) 3 tầng — Rules/Workflows/Skills**: Rules (`CLAUDE.md`/`GEMINI.md`) luôn active, Workflows (`antigravity/global_workflows/*.md`) kích hoạt qua slash-command, Skills (`antigravity/skills/{core,tech,process,custom}/SKILL.md`) tự trigger theo từ khóa tra trong `registry.min.json`. Tách biệt rõ "luôn nạp" vs "nạp khi cần" giúp giữ context window nhỏ. (`CLAUDE.md:31-51`, `ARCHITECTURE.md`)
-2. **Dual-target install từ một nguồn Markdown duy nhất**: `GEMINI.md` và `CLAUDE.md` là **byte-identical** ngoại trừ chuỗi `~/.gemini` ↔ `~/.claude` (verify bằng `diff` — chỉ khác 2 dòng path). `scripts/install_manifest.py` + `install.manifest.json` copy có filter (exclude `docs/`, `scripts/`, `.git*`...) vào cả hai target, và `Makefile:81-100` backup/restore `settings.json` của user trước khi merge hook bằng `install_settings.py` để không đè config có sẵn.
-3. **5-Tier Skill Quality Gate**: Tier 1 Lint (`scripts/skill_lint.py` — kiểm YAML frontmatter, độ dài mô tả, cảnh báo body >150 dòng/lỗi >300 dòng, đồng bộ với registry), Tier 2 Trigger Precision/Recall (`scripts/trigger_test.py` — tính precision/recall theo `tests/skills/trigger_cases.json`, ngưỡng 0.9, cảnh báo trùng từ khóa trigger giữa các skill), Tier 0 Contract (`scripts/skill_contract.py`), Tier 3 Golden Eval LLM-as-judge (`scripts/golden_eval.py`, dùng Gemini function-calling với 3 tool ảo `read_file/list_files/grep`), Tier 4 Journal (`docs/reports/skill-feedback.md`). (`docs/quality-gates-summary.md`, `Makefile:23-48`)
-4. **Context Memory Engine hook-enforced, không chỉ advisory**: `tools/memory_engine.py` là thư viện dùng chung cho hook `PreCompact` (`tools/memory_compact.py`) và `UserPromptSubmit` (`tools/memory_recall.py`), đăng ký qua `settings.json`. Lưu trữ ở `~/.claude/prompt_base_memory/{project}-{sha256_hash}` (global, không rác vào repo, override bằng `PB_LOCAL_MEMORY=1`), dùng sqlite-vec + fastembed (`bge-small-en-v1.5`, 384-dim) khi có, **degrade an toàn về FTS5 keyword search** khi thiếu dependency — không bao giờ raise. Có secret-scrubbing regex trước khi lưu (`memory_engine.py:48-54`, bắt OpenAI/Anthropic key, AWS key, GitHub token, PEM private key).
-5. **JIT Knowledge / Section-Level Skill Loading**: `skill-loading/SKILL.md` quy định "Always-Load Floor" (chỉ đọc frontmatter + "Core Principles"), "Heading-Match Protocol" (grep heading thay vì đọc cả file), "Escalation Rule" khi section không đủ thông tin, và giới hạn cứng "never load more than 3-4 skills at once". Kết hợp với `memory_rules.md` "Slot System" (5 slot cố định `SLOT_UX/APP/OPS/QA/MAP`, phải khai báo `UNLOAD` trước khi nạp skill khác cùng slot) tạo ra kỷ luật quản lý context window minh bạch, có thể audit qua log hội thoại.
+1. **Librarian Protocol (Progressive Disclosure) 3 tầng — Rules/Workflows/Skills**
+   - *Là gì:* Thay vì nạp toàn bộ kiến thức của mọi chuyên gia cùng lúc (rất chậm và tốn kém), hệ thống chia kiến thức thành 3 mức độ ưu tiên: luôn có sẵn, chỉ gọi khi cần lệnh cụ thể, và tự động nhận diện qua từ khóa — giữ cho "bộ nhớ làm việc" của trợ lý AI luôn gọn nhẹ.
+   - *Cách triển khai:* Rules (`CLAUDE.md`/`GEMINI.md`) luôn active, Workflows (`antigravity/global_workflows/*.md`) kích hoạt qua slash-command, Skills (`antigravity/skills/{core,tech,process,custom}/SKILL.md`) tự trigger theo từ khóa tra trong `registry.min.json`. Tách biệt rõ "luôn nạp" vs "nạp khi cần" giúp giữ context window nhỏ. (`CLAUDE.md:31-51`, `ARCHITECTURE.md`)
+2. **Dual-target install từ một nguồn Markdown duy nhất**
+   - *Là gì:* Framework này hỗ trợ cả hai trợ lý AI khác nhau (Claude và Gemini) mà không phải viết và bảo trì hai bộ tài liệu riêng biệt — chỉ khác nhau đúng một đường dẫn thư mục cài đặt.
+   - *Cách triển khai:* `GEMINI.md` và `CLAUDE.md` là **byte-identical** ngoại trừ chuỗi `~/.gemini` ↔ `~/.claude` (verify bằng `diff` — chỉ khác 2 dòng path). `scripts/install_manifest.py` + `install.manifest.json` copy có filter (exclude `docs/`, `scripts/`, `.git*`...) vào cả hai target, và `Makefile:81-100` backup/restore `settings.json` của user trước khi merge hook bằng `install_settings.py` để không đè config có sẵn.
+3. **5-Tier Skill Quality Gate**
+   - *Là gì:* Trước khi một "chuyên gia ảo" mới được thêm vào hệ thống, nó phải vượt qua nhiều vòng kiểm tra chất lượng tự động (giống như một quy trình duyệt bài nghiêm ngặt) để đảm bảo tài liệu hướng dẫn viết đúng chuẩn, không mơ hồ, và không xung đột với chuyên gia khác.
+   - *Cách triển khai:* Tier 1 Lint (`scripts/skill_lint.py` — kiểm YAML frontmatter, độ dài mô tả, cảnh báo body >150 dòng/lỗi >300 dòng, đồng bộ với registry), Tier 2 Trigger Precision/Recall (`scripts/trigger_test.py` — tính precision/recall theo `tests/skills/trigger_cases.json`, ngưỡng 0.9, cảnh báo trùng từ khóa trigger giữa các skill), Tier 0 Contract (`scripts/skill_contract.py`), Tier 3 Golden Eval LLM-as-judge (`scripts/golden_eval.py`, dùng Gemini function-calling với 3 tool ảo `read_file/list_files/grep`), Tier 4 Journal (`docs/reports/skill-feedback.md`). (`docs/quality-gates-summary.md`, `Makefile:23-48`)
+4. **Context Memory Engine hook-enforced, không chỉ advisory**
+   - *Là gì:* Trợ lý AI có một "bộ nhớ dài hạn" thực sự được hệ thống tự động kích hoạt (không chỉ là lời khuyên trong tài liệu), tự lưu và nhớ lại thông tin quan trọng giữa các phiên làm việc, đồng thời tự động xóa các thông tin nhạy cảm như mật khẩu trước khi lưu.
+   - *Cách triển khai:* `tools/memory_engine.py` là thư viện dùng chung cho hook `PreCompact` (`tools/memory_compact.py`) và `UserPromptSubmit` (`tools/memory_recall.py`), đăng ký qua `settings.json`. Lưu trữ ở `~/.claude/prompt_base_memory/{project}-{sha256_hash}` (global, không rác vào repo, override bằng `PB_LOCAL_MEMORY=1`), dùng sqlite-vec + fastembed (`bge-small-en-v1.5`, 384-dim) khi có, **degrade an toàn về FTS5 keyword search** khi thiếu dependency — không bao giờ raise. Có secret-scrubbing regex trước khi lưu (`memory_engine.py:48-54`, bắt OpenAI/Anthropic key, AWS key, GitHub token, PEM private key).
+5. **JIT Knowledge / Section-Level Skill Loading**
+   - *Là gì:* Ngay cả khi đã chọn đúng chuyên gia cần dùng, hệ thống vẫn cố gắng chỉ đọc đúng phần tài liệu cần thiết thay vì đọc toàn bộ, và giới hạn số lượng chuyên gia được "gọi" cùng lúc để tránh quá tải.
+   - *Cách triển khai:* `skill-loading/SKILL.md` quy định "Always-Load Floor" (chỉ đọc frontmatter + "Core Principles"), "Heading-Match Protocol" (grep heading thay vì đọc cả file), "Escalation Rule" khi section không đủ thông tin, và giới hạn cứng "never load more than 3-4 skills at once". Kết hợp với `memory_rules.md` "Slot System" (5 slot cố định `SLOT_UX/APP/OPS/QA/MAP`, phải khai báo `UNLOAD` trước khi nạp skill khác cùng slot) tạo ra kỷ luật quản lý context window minh bạch, có thể audit qua log hội thoại.
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Trigger Registry + Precision/Recall Gate cho routing prompt/skill** — What: `registry.min.json` là index tập trung (agents + skills theo category) đối chiếu với `tests/skills/trigger_cases.json`; `trigger_test.py` tính precision/recall và cảnh báo trùng từ khóa. Apply: Auto Code OS đã có `server/internal/prompts/` (Go templates) và cơ chế phân loại task cho orchestrator — thêm một registry JSON tương tự liệt kê "trigger keyword → prompt template/tool" trong `server/internal/prompts/`, và một test Go (`prompts_trigger_test.go`) tính precision/recall trên tập câu lệnh mẫu trước khi merge prompt mới. Impact: M · Effort: M · Risk: L · Est: 2-3 ngày.
@@ -44,20 +72,6 @@ Confidence: High cho cấu trúc 3 tầng và registry (đọc trực tiếp cod
 | Degrade an toàn khi thiếu sqlite-vec/fastembed thay vì bắt buộc cài | `memory_engine.py` comment "Never raises on missing optional dependencies" | Hook không phá vỡ session của user khi thiếu dep nặng | Recall kém chính xác hơn (FTS5 vs vector) khi degraded | High |
 | Tách GEMINI.md/CLAUDE.md làm 2 file thay vì 1 file + symlink | `diff GEMINI.md CLAUDE.md` chỉ khác placeholder path | Dễ đọc, không cần symlink phức tạp trên mọi OS | Rủi ro 2 file trôi dạt nếu sửa tay 1 bên (không có test đồng bộ tự động thấy được) | Medium |
 | 5-Tier quality gate cho skill thay vì review thủ công | `docs/quality-gates-summary.md`, `Makefile:23-48`, `scripts/skill_lint.py`, `scripts/trigger_test.py` | Bắt lỗi trigger keyword collision, mô tả thiếu, registry lệch, trước khi merge | Chi phí bảo trì cao hơn (phải cập nhật cả SKILL.md lẫn registry lẫn test case) | High |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[User gõ prompt hoặc /slash command] --> B{core/classifier.md<br/>phân loại request}
-    B -->|COMPLEX CODE / DESIGN| C[Kiểm tra Plan Artifact<br/>OpenSpec ưu tiên hơn PLAN-*.md]
-    C --> D[Socratic Gate: hỏi >=3 câu<br/>system_prompt.md]
-    D --> E[grep registry.min.json<br/>tìm agent + skill theo trigger keyword]
-    E --> F[Load agent .md<br/>antigravity/agents/*.md]
-    F --> G[JIT load section-level SKILL.md<br/>gán vào Slot UX/APP/OPS/QA]
-    G --> H[Thực thi task]
-    H --> I[quality-gatekeeper review]
-    I --> J[UNLOAD slot, cập nhật tasks.md]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Registry Pattern**: `registry.min.json` là single source of truth cho discovery, cả agent runtime lẫn `skill_lint.py`/`trigger_test.py` đều đọc từ đây — tránh mô tả trôi dạt giữa SKILL.md và registry (lint kiểm tra `description` khớp nhau, `scripts/skill_lint.py:66-69`).

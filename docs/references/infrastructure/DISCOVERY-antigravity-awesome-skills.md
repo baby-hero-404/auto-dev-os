@@ -1,14 +1,46 @@
 # Báo Cáo Phân Tích — Antigravity Awesome Skills
 
-## Tổng Quan
-Thư viện/registry mã nguồn mở gồm **1.965+ "agentic skills"** (`SKILL.md` playbooks) cho Claude Code, Cursor, Codex CLI, Gemini CLI, Antigravity, Kiro, OpenCode, Copilot. Stack: Node.js CLI installer (`tools/bin/install.js`) + pipeline validate/score/index bằng Python (`tools/scripts/*.py`) + web catalog app (Vite, `apps/web-app/`). Không phải agent runtime — đây là một **content registry + tooling pipeline** để curate, validate, phân loại, và phân phối skill markdown files qua npm package và Claude Code plugin marketplace. Maturity cao: version 14.6.0, CI đầy đủ (`.github/`), test suite riêng (`tools/scripts/tests/`).
+## Tổng Quan (TL;DR)
+Đây là một kho lưu trữ mã nguồn mở chứa gần 2.000 "công thức hướng dẫn" cho các trợ lý AI lập trình (như Claude Code, Cursor, Copilot...), giúp chúng biết cách làm đúng những việc chuyên biệt (ví dụ: viết test, kiểm tra bảo mật, dùng một framework cụ thể). Dự án không tự chạy AI mà đóng vai trò như một "thư viện + nhà máy đóng gói": tự động kiểm tra chất lượng, phân loại độ an toàn, sắp xếp danh mục cho hàng nghìn hướng dẫn này rồi phân phối chúng qua các kênh cài đặt khác nhau.
+
+## Thông Tin Kỹ Thuật (Technical Overview)
+- **Stack:** Node.js CLI installer (`tools/bin/install.js`) + pipeline validate/score/index bằng Python (`tools/scripts/*.py`) + web catalog app (Vite, `apps/web-app/`). Không phải agent runtime — đây là một **content registry + tooling pipeline** để curate, validate, phân loại, và phân phối skill markdown files qua npm package và Claude Code plugin marketplace.
+- **Quy mô/Độ trưởng thành:** **1.965+ "agentic skills"** (`SKILL.md` playbooks) cho Claude Code, Cursor, Codex CLI, Gemini CLI, Antigravity, Kiro, OpenCode, Copilot. Maturity cao: version 14.6.0, CI đầy đủ (`.github/`), test suite riêng (`tools/scripts/tests/`).
+
+## Luồng Chính (Main Flow)
+```mermaid
+flowchart TD
+    A[Contributor tạo PR: skills/my-skill/SKILL.md] --> B[CI: npm run validate]
+    B --> C{Frontmatter hợp lệ?<br/>required fields + When to Use section}
+    C -- No --> Z[Fail CI, báo lỗi cụ thể]
+    C -- Yes --> D[npm run security:docs<br/>security_scanner.py quét pattern nguy hiểm]
+    D --> E[npm run plugin-compat:sync<br/>xác định skill nào plugin-safe]
+    E --> F[npm run index<br/>generate_index.py: category + risk + dedupe]
+    F --> G[skills_index.json regenerate]
+    G --> H[npm run bundles:sync<br/>gán skill vào editorial bundles]
+    H --> I[npm run catalog<br/>build-catalog.js sinh CATALOG.md]
+    I --> J[Maintainer: merge:batch trên topic branch]
+    J --> K[Canonical-sync PR cập nhật generated state]
+    K --> L[release:prepare / release:publish]
+    L --> M[npm package + GitHub Release + Claude plugin marketplace]
+```
 
 ## Tính Năng Nổi Bật (Best Features)
-1. **Auto-Categorization bằng Keyword + Family-Prefix Rules**: `tools/scripts/generate_index.py` định nghĩa `CATEGORY_RULES` (danh sách category với keyword list, có `strong_keywords` ưu tiên) và `FAMILY_CATEGORY_RULES` (map tiền tố tên skill như `azure-`, `react-`, `agent-` → category) cộng với `CURATED_CATEGORY_OVERRIDES` (dict tay cho các trường hợp ngoại lệ). Cơ chế phân loại 3 tầng (curated override > family prefix > keyword scoring) giải quyết bài toán phân loại 1900+ tài liệu tự do không cần ML, kết quả xác định (deterministic) và dễ audit qua diff. (`tools/scripts/generate_index.py:22-260`)
-2. **Risk Classifier dựa trên Regex Heuristics**: `tools/scripts/risk_classifier.py` phân loại mỗi skill thành `none/safe/critical/offensive/unknown` bằng 3 nhóm pattern — `OFFENSIVE_HINTS` (pentest, exploit, jailbreak…), `CRITICAL_HINTS` (curl|bash, rm -rf, git push, SQL mutation, secret handling…), `SAFE_HINTS` (read-only commands, fenced code, diagnostic verbs). Kết quả ghi vào frontmatter `risk:` field và được validate lại bởi `security_scanner.py`. Đây là một content moderation pipeline nhẹ, không cần LLM call, chạy trong CI mỗi PR. (`tools/scripts/risk_classifier.py:1-90`)
-3. **Security Scanner với Pattern Registry có Rationale**: `tools/scripts/security_scanner.py` định nghĩa `SecurityPattern` dataclass (`code`, `regex`, `severity`, `description`, `rationale`) cho từng rule (SEC001 = `rm -rf /`, SEC002 = curl|bash RCE...). Mỗi rule có mã lỗi tra cứu được và lý do rõ ràng — giống một mini SAST engine cho markdown/pseudo-code thay vì cho real source code. (`tools/scripts/security_scanner.py:26-50`)
-4. **Skill Quality Scorer 3 chiều có trọng số**: `tools/scripts/score_skills.py` tính điểm mỗi skill trên 3 trục — metadata completeness (30%), documentation structure (40%, dò các heading chuẩn như `## Overview`, `## When to Use`, `## Limitations`), security posture (30%, tái sử dụng `security_scanner.scan_content`). Điểm số chỉ mang tính thông tin (`never blocking in CI`), publish ra `data/scores.json` theo schema `schemas/skill-score.v1.schema.json`. Tách bạch rõ ràng giữa "gate cứng" (validate) và "tín hiệu chất lượng mềm" (score). (`tools/scripts/score_skills.py:1-60`)
-5. **Pipeline Sync đa giai đoạn qua npm scripts chained**: `package.json` định nghĩa chuỗi lệnh `chain` → `validate && plugin-compat:sync && index && bundles:sync && sync:metadata`, và `sync:release-state`/`sync:repo-state` mở rộng thêm `catalog`, `sync:web-assets`, `audit:consistency`, `check:warning-budget`. Toàn bộ registry (`skills_index.json`, `CATALOG.md`, README stats, plugin marketplace JSON) là **generated artifacts** tái tạo từ nguồn `skills/*/SKILL.md`, không sửa tay — one source of truth pattern rất rõ ràng (ghi trong `AGENTS.md`: "Registry outputs... are generated artifacts"). (`package.json:6-45`, `AGENTS.md:5`)
+1. **Auto-Categorization bằng Keyword + Family-Prefix Rules**
+   - *Là gì:* Với gần 2.000 tài liệu hướng dẫn, hệ thống cần tự động xếp mỗi cái vào đúng danh mục (ví dụ "database", "security"...) mà không cần con người làm thủ công hay dùng AI tốn kém.
+   - *Cách triển khai:* `tools/scripts/generate_index.py` định nghĩa `CATEGORY_RULES` (danh sách category với keyword list, có `strong_keywords` ưu tiên) và `FAMILY_CATEGORY_RULES` (map tiền tố tên skill như `azure-`, `react-`, `agent-` → category) cộng với `CURATED_CATEGORY_OVERRIDES` (dict tay cho các trường hợp ngoại lệ). Cơ chế phân loại 3 tầng (curated override > family prefix > keyword scoring) giải quyết bài toán phân loại 1900+ tài liệu tự do không cần ML, kết quả xác định (deterministic) và dễ audit qua diff. (`tools/scripts/generate_index.py:22-260`)
+2. **Risk Classifier dựa trên Regex Heuristics**
+   - *Là gì:* Trước khi một hướng dẫn được đưa vào kho, hệ thống tự động đánh giá xem nó có nguy hiểm không (ví dụ có dạy AI chạy lệnh xóa dữ liệu, hay các thao tác tấn công) để cảnh báo người dùng.
+   - *Cách triển khai:* `tools/scripts/risk_classifier.py` phân loại mỗi skill thành `none/safe/critical/offensive/unknown` bằng 3 nhóm pattern — `OFFENSIVE_HINTS` (pentest, exploit, jailbreak…), `CRITICAL_HINTS` (curl|bash, rm -rf, git push, SQL mutation, secret handling…), `SAFE_HINTS` (read-only commands, fenced code, diagnostic verbs). Kết quả ghi vào frontmatter `risk:` field và được validate lại bởi `security_scanner.py`. Đây là một content moderation pipeline nhẹ, không cần LLM call, chạy trong CI mỗi PR. (`tools/scripts/risk_classifier.py:1-90`)
+3. **Security Scanner với Pattern Registry có Rationale**
+   - *Là gì:* Ngoài việc gắn nhãn rủi ro chung, hệ thống còn quét kỹ từng hướng dẫn để tìm các đoạn lệnh cụ thể nguy hiểm, mỗi loại nguy hiểm có mã số và lời giải thích riêng để dễ tra cứu.
+   - *Cách triển khai:* `tools/scripts/security_scanner.py` định nghĩa `SecurityPattern` dataclass (`code`, `regex`, `severity`, `description`, `rationale`) cho từng rule (SEC001 = `rm -rf /`, SEC002 = curl|bash RCE...). Mỗi rule có mã lỗi tra cứu được và lý do rõ ràng — giống một mini SAST engine cho markdown/pseudo-code thay vì cho real source code. (`tools/scripts/security_scanner.py:26-50`)
+4. **Skill Quality Scorer 3 chiều có trọng số**
+   - *Là gì:* Mỗi hướng dẫn được chấm điểm chất lượng (đầy đủ thông tin, viết tốt, an toàn) để người dùng biết cái nào đáng tin cậy hơn — nhưng điểm thấp không có nghĩa là bị cấm dùng, chỉ là gợi ý tham khảo.
+   - *Cách triển khai:* `tools/scripts/score_skills.py` tính điểm mỗi skill trên 3 trục — metadata completeness (30%), documentation structure (40%, dò các heading chuẩn như `## Overview`, `## When to Use`, `## Limitations`), security posture (30%, tái sử dụng `security_scanner.scan_content`). Điểm số chỉ mang tính thông tin (`never blocking in CI`), publish ra `data/scores.json` theo schema `schemas/skill-score.v1.schema.json`. Tách bạch rõ ràng giữa "gate cứng" (validate) và "tín hiệu chất lượng mềm" (score). (`tools/scripts/score_skills.py:1-60`)
+5. **Pipeline Sync đa giai đoạn qua npm scripts chained**
+   - *Là gì:* Mọi file danh mục/thống kê hiển thị cho người dùng không được sửa tay — chúng luôn được tự động tạo lại từ nguồn gốc, đảm bảo không bao giờ bị lệch thông tin.
+   - *Cách triển khai:* `package.json` định nghĩa chuỗi lệnh `chain` → `validate && plugin-compat:sync && index && bundles:sync && sync:metadata`, và `sync:release-state`/`sync:repo-state` mở rộng thêm `catalog`, `sync:web-assets`, `audit:consistency`, `check:warning-budget`. Toàn bộ registry (`skills_index.json`, `CATALOG.md`, README stats, plugin marketplace JSON) là **generated artifacts** tái tạo từ nguồn `skills/*/SKILL.md`, không sửa tay — one source of truth pattern rất rõ ràng (ghi trong `AGENTS.md`: "Registry outputs... are generated artifacts"). (`package.json:6-45`, `AGENTS.md:5`)
 
 ## Áp Dụng Cho Auto Code OS (Applied Takeaways — ranked)
 1. **Registry sinh tự động (generated-artifact pattern) cho Tool/Skill Catalog** — What: `skills_index.json`, `CATALOG.md` được build lại 100% từ `skills/*/SKILL.md` bằng `tools/scripts/generate_index.py`, không edit tay; enforce bởi CI ("source-only contract"). Apply: `server/internal/tool/` hiện đăng ký tool thủ công theo Go code; có thể thêm bước build sinh `tool_catalog.json` (metadata, category, risk) từ struct tags/doc-comment của mỗi tool implementation, để `server/internal/prompts/` render system prompt động từ catalog thay vì hard-code danh sách tool. Impact: M · Effort: M · Risk: L · Est: 3-4 days.
@@ -42,24 +74,6 @@ flowchart LR
 | Generated artifacts tách khỏi source-of-truth | `AGENTS.md`: "Registry outputs... are generated artifacts"; CI "source-only contract" | Tránh drift giữa các file phái sinh; PR review dễ vì diff chỉ ở `skills/` | Cần pipeline build phức tạp (`npm run chain`) chạy đúng thứ tự | High |
 | Regex heuristic thay vì LLM để classify risk/category | `risk_classifier.py`, `generate_index.py` dùng `re.compile` list, không gọi API nào | Nhanh, free, deterministic, chạy offline trong CI | Kém chính xác hơn LLM với ngữ cảnh mơ hồ; cần maintain danh sách keyword thủ công | High |
 | Node.js cho CLI/installer, Python cho audit/validate | `package.json` scripts gọi cả `node tools/scripts/run-python.js ...py` và `.js`/`.cjs` trực tiếp | Tận dụng thế mạnh: Node cho npm distribution, Python cho xử lý text/regex phức tạp | Hai runtime song song tăng chi phí bảo trì (`tools/scripts/run-python.js` là wrapper cầu nối) | Medium |
-
-## Luồng Chính (Main Flow)
-```mermaid
-flowchart TD
-    A[Contributor tạo PR: skills/my-skill/SKILL.md] --> B[CI: npm run validate]
-    B --> C{Frontmatter hợp lệ?<br/>required fields + When to Use section}
-    C -- No --> Z[Fail CI, báo lỗi cụ thể]
-    C -- Yes --> D[npm run security:docs<br/>security_scanner.py quét pattern nguy hiểm]
-    D --> E[npm run plugin-compat:sync<br/>xác định skill nào plugin-safe]
-    E --> F[npm run index<br/>generate_index.py: category + risk + dedupe]
-    F --> G[skills_index.json regenerate]
-    G --> H[npm run bundles:sync<br/>gán skill vào editorial bundles]
-    H --> I[npm run catalog<br/>build-catalog.js sinh CATALOG.md]
-    I --> J[Maintainer: merge:batch trên topic branch]
-    J --> K[Canonical-sync PR cập nhật generated state]
-    K --> L[release:prepare / release:publish]
-    L --> M[npm package + GitHub Release + Claude plugin marketplace]
-```
 
 ## Design Patterns & Chất Lượng Code
 - **Registry/Index Pattern**: `generate_index.py` đọc toàn bộ `skills/` folder, build một mảng object phẳng theo schema cố định (`schemas/skills-index.v1.schema.json`) — pattern registry điển hình cho hệ thống có nhiều plugin/extension rời rạc.

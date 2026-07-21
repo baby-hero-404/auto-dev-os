@@ -33,11 +33,13 @@ type Message struct {
 
 // Response represents the LLM's response.
 type Response struct {
-	Content      string     `json:"content"`       // generated text
-	Model        string     `json:"model"`         // model used
-	PromptTokens int        `json:"prompt_tokens"` // input tokens consumed
-	OutputTokens int        `json:"output_tokens"` // output tokens generated
-	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	Content          string     `json:"content"`                      // generated text
+	Model            string     `json:"model"`                        // model used
+	PromptTokens     int        `json:"prompt_tokens"`                // input tokens consumed
+	OutputTokens     int        `json:"output_tokens"`                // output tokens generated
+	CacheWriteTokens int        `json:"cache_write_tokens,omitempty"` // tokens written to prompt cache (billed at write rate)
+	CacheReadTokens  int        `json:"cache_read_tokens,omitempty"`  // tokens served from prompt cache (billed at discounted rate)
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // ToolDefinition defines a native LLM tool schema.

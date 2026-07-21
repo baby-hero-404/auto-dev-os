@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -17,10 +18,35 @@ type MemoryService struct {
 	memories *repository.MemoryRepo
 	edges    *repository.KnowledgeEdgeRepo
 	embedder MemoryEmbedder
+	breaker  *embedderCircuitBreaker
 }
 
 func NewMemoryService(memories *repository.MemoryRepo, edges *repository.KnowledgeEdgeRepo) *MemoryService {
-	return &MemoryService{memories: memories, edges: edges}
+	return &MemoryService{
+		memories: memories,
+		edges:    edges,
+		breaker:  newEmbedderCircuitBreaker(5, 2*time.Minute),
+	}
+}
+
+// embed generates an embedding via the configured embedder, short-circuiting
+// through the circuit breaker when the provider is degraded. Callers must
+// treat a nil/error result as "continue without vector stream" — the same
+// fallback they already use for a plain Embed() error.
+func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, error) {
+	if s.embedder == nil {
+		return nil, nil
+	}
+	if !s.breaker.Allow() {
+		return nil, fmt.Errorf("embedder circuit open: %s unavailable, falling back to BM25-only", s.embedder.Name())
+	}
+	vec, err := s.embedder.Embed(ctx, text)
+	if err != nil {
+		s.breaker.RecordFailure()
+		return nil, err
+	}
+	s.breaker.RecordSuccess()
+	return vec, nil
 }
 
 func (s *MemoryService) SetEmbedder(embedder MemoryEmbedder) {
@@ -45,7 +71,7 @@ func (s *MemoryService) RecordObservation(ctx context.Context, input models.Crea
 	hash := sha256Hash(cleaned)
 	embedding := input.Embedding
 	if len(embedding) == 0 && s.embedder != nil {
-		generated, err := s.embedder.Embed(ctx, embeddingText(cleaned, input.Summary))
+		generated, err := s.embed(ctx, embeddingText(cleaned, input.Summary))
 		if err != nil {
 			slog.Warn("memory embedding generation failed, storing memory without vector", "error", err)
 		} else {
@@ -140,6 +166,23 @@ func (s *MemoryService) ApplyDecay(ctx context.Context) error {
 	return nil
 }
 
+// StartDecayWorker runs ApplyDecay on a fixed interval until ctx is canceled.
+func (s *MemoryService) StartDecayWorker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.ApplyDecay(ctx); err != nil {
+				slog.Warn("memory decay sweep failed", "error", err)
+			}
+		}
+	}
+}
+
 // CleanupSession prunes working memories from a session and promotes key ones to episodic.
 func (s *MemoryService) CleanupSession(ctx context.Context, agentID, sessionID string) error {
 	memories, err := s.memories.ListBySession(ctx, sessionID)
@@ -209,6 +252,20 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
 	regexp.MustCompile(`ghp_[A-Za-z0-9]{36,}`),
 	regexp.MustCompile(`glpat-[A-Za-z0-9\-]{20,}`),
+	// AWS access key ID + secret access key
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+	regexp.MustCompile(`(?i)aws_secret_access_key\s*[:=]\s*\S+`),
+	// Google API key
+	regexp.MustCompile(`AIza[0-9A-Za-z\-_]{35}`),
+	// JWT (header.payload.signature, base64url segments)
+	regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`),
+	// npm access token
+	regexp.MustCompile(`npm_[A-Za-z0-9]{36}`),
+	// GitHub fine-grained / OAuth / refresh / server tokens
+	regexp.MustCompile(`gh[oprsu]_[A-Za-z0-9]{36,}`),
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`),
+	// Slack tokens
+	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`),
 }
 
 func stripSecrets(content string) string {

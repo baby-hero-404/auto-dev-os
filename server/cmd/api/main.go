@@ -294,6 +294,12 @@ func run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		memorySvc.StartDecayWorker(workerCtx, 6*time.Hour)
+	}()
+	slog.Info("memory decay worker started", "interval_hours", 6)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		orchestrator.StartAgentWatchdog(workerCtx, agentRepo, 5*time.Minute, 30*time.Minute)
 	}()
 	slog.Info("agent watchdog worker started")

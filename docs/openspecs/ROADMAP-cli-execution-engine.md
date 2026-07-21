@@ -15,10 +15,10 @@
 
 | Order | Wave | Item | Nguồn học | Impact | Effort | Vì sao ở vị trí này |
 |-------|------|------|-----------|--------|--------|---------------------|
-| **P0.1** | 0 — Quick wins | Anthropic prompt caching (`cache_control` trong `pkg/llm/anthropic.go`) | headroom, claw-compactor | HIGH | 0.5d | Tiền đề cho mọi tối ưu token khác; rẻ nhất, lợi ngay |
-| **P0.2** | 0 | Mở rộng `secretPatterns` memory redaction (AWS/JWT/Google/npm/gh tokens) | agentmemory | MED | 0.5d | Lỗ hổng rò rỉ thật, fix 1 buổi |
-| **P0.3** | 0 | Wire `ApplyDecay()` vào ticker (pattern `cache_workers.go` có sẵn) | agentmemory, zep | MED | 2d | Code đã viết nhưng chưa chạy — nợ kỹ thuật thuần |
-| **P0.4** | 0 | Circuit breaker cho `MemoryEmbedder.Embed()` → fallback BM25-only | zep | MED | 1d | Chặn lỗi lan khi embedding provider chết |
+| **P0.1** | 0 — Quick wins | Anthropic prompt caching (`cache_control` trong `pkg/llm/anthropic.go`) | headroom, claw-compactor | HIGH | 0.5d | ✅ Done — system+tools cached, cache-token usage logged |
+| **P0.2** | 0 | Mở rộng `secretPatterns` memory redaction (AWS/JWT/Google/npm/gh tokens) | agentmemory | MED | 0.5d | ✅ Done — `memory.go:secretPatterns` |
+| **P0.3** | 0 | Wire `ApplyDecay()` vào ticker (pattern `cache_workers.go` có sẵn) | agentmemory, zep | MED | 2d | ✅ Done — `MemoryService.StartDecayWorker`, 6h interval, wired trong `main.go` |
+| **P0.4** | 0 | Circuit breaker cho `MemoryEmbedder.Embed()` → fallback BM25-only | zep | MED | 1d | ✅ Done — `embedder_breaker.go`, mở sau 5 lỗi liên tiếp, cooldown 2m |
 | **P1.1** | 1 — CLI Engine ⭐ | **Pluggable execution engine** — spawner interface + generic subprocess-CLI chạy trong sandbox, UI toggle per-project/per-task → [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | Multica, ai-sdlc (`SubagentSpawner`) | HIGH | 5-7d | Hướng chiến lược user chọn; mở billing qua subscription thay vì API key |
 | **P1.2** | 1 | **CLI spec-first flow** — analyze → openspec → implement → merge request (chỉ CLI mode) → [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | OpenSpec, ai-sdlc | HIGH | 4-6d | Phụ thuộc P1.1; là flow chính khi dùng CLI engine |
 | **P2.1** | 2 — Chất lượng pipeline | Fuzzy fallback cho `search_replace.go` (whitespace-normalize → relative-indent) | Aider | HIGH | 2-3d | Giảm retry/fail thật sự đang xảy ra ở patch apply |

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -67,10 +68,22 @@ func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opt
 		"messages":   userMessages,
 	}
 	if systemPrompt != "" {
-		payload["system"] = systemPrompt
+		// System prompt is stable per job/step and often reused across the tool loop —
+		// mark it cacheable so repeated calls in the same job hit Anthropic's prompt cache.
+		payload["system"] = []map[string]any{
+			{
+				"type":          "text",
+				"text":          systemPrompt,
+				"cache_control": map[string]any{"type": "ephemeral"},
+			},
+		}
 	}
 	if len(opts.Tools) > 0 {
-		payload["tools"] = anthropicTools(opts.Tools)
+		tools := anthropicTools(opts.Tools)
+		// Tool definitions don't change within a job; mark the last one so the whole
+		// tools block (and everything before it) is cached as one prefix.
+		tools[len(tools)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
+		payload["tools"] = tools
 		if opts.ToolChoice != "" && opts.ToolChoice != "auto" {
 			payload["tool_choice"] = map[string]any{"type": opts.ToolChoice}
 		}
@@ -129,12 +142,22 @@ func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opt
 		}
 	}
 
+	if result.Usage.CacheReadInputTokens > 0 || result.Usage.CacheCreationInputTokens > 0 {
+		slog.Debug("anthropic prompt cache usage",
+			"cache_read_tokens", result.Usage.CacheReadInputTokens,
+			"cache_write_tokens", result.Usage.CacheCreationInputTokens,
+			"input_tokens", result.Usage.InputTokens,
+		)
+	}
+
 	return &Response{
-		Content:      strings.Join(contentParts, "\n"),
-		Model:        result.Model,
-		PromptTokens: result.Usage.InputTokens,
-		OutputTokens: result.Usage.OutputTokens,
-		ToolCalls:    toolCalls,
+		Content:          strings.Join(contentParts, "\n"),
+		Model:            result.Model,
+		PromptTokens:     result.Usage.InputTokens,
+		OutputTokens:     result.Usage.OutputTokens,
+		CacheWriteTokens: result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:  result.Usage.CacheReadInputTokens,
+		ToolCalls:        toolCalls,
 	}, nil
 }
 
@@ -202,7 +225,9 @@ type anthropicResponse struct {
 		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }

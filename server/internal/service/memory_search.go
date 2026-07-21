@@ -33,7 +33,7 @@ func (s *MemoryService) Search(ctx context.Context, input models.MemorySearchInp
 	// Stream 2: Vector search. Generate the query embedding when the caller did not provide one.
 	var vectorResults []models.MemorySearchResult
 	if len(input.Embedding) == 0 && input.Query != "" && s.embedder != nil {
-		generated, embedErr := s.embedder.Embed(ctx, input.Query)
+		generated, embedErr := s.embed(ctx, input.Query)
 		if embedErr != nil {
 			slog.Warn("memory query embedding generation failed, continuing without vector stream", "error", embedErr)
 		} else {

@@ -55,7 +55,7 @@
 | [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | ✅ Done — all tasks.md items complete (1.1/1.9 skipped, no corpus available) |
 | [`definition-of-ready-gate/`](./definition-of-ready-gate/proposal.md) | P2.2 | ✅ Done — round-limit/hotfix bypass added; REQ-004b + UI badge skipped (see tasks.md) |
 | [`review-verdict-split/`](./review-verdict-split/proposal.md) | P2.3 | ✅ Done — 2-verdict parse/routing/escalation/fix-instruction done; UI badges (REQ-005) skipped (see tasks.md) |
-| [`tool-output-filtering/`](./tool-output-filtering/proposal.md) | P2.4 | 📝 Authored |
+| [`tool-output-filtering/`](./tool-output-filtering/proposal.md) | P2.4 | ✅ Done — strip/dedup/error-priority pipeline wired before hard-cut; pathcompress kept as documented no-op, per-tool profiles via name registry (see tasks.md) |
 | [`cross-harness-review/`](./cross-harness-review/proposal.md) | P3.1 | 📝 Authored |
 | [`repomap-mention-boost/`](./repomap-mention-boost/proposal.md) | P3.2 | 📝 Authored |
 | [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | 📝 Authored |

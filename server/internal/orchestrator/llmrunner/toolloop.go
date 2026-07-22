@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner/outputfilter"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 )
 
@@ -232,6 +234,11 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 					if readMemoKey != "" {
 						readMemo[readMemoKey] = i + 1
 					}
+				}
+				filtered, stats := outputfilter.Run(call.Name, result, maxToolResultChars)
+				result = filtered
+				if stats.InBytes >= 1024 {
+					slog.Info("outputfilter", "tool", stats.ToolName, "in", stats.InBytes, "out", stats.OutBytes, "saved_pct", fmt.Sprintf("%.1f", stats.SavedPct))
 				}
 				result = truncateToolResult(result)
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, ToolName: call.Name, Content: result})

@@ -1,12 +1,12 @@
 # Tasks: Tool-Output Filtering
 
-- [ ] 1.1 Thu fixtures thật từ `server/.data/logs/` (build fail, test lặp, diff, ANSI) → `outputfilter/testdata/`
-- [ ] 1.2 `outputfilter/filter.go`: khung Filter/Profile/Run + Stats
-- [ ] 1.3 `strip.go` (ANSI + \r handling) + tests (REQ-003)
-- [ ] 1.4 `dedup.go` (ngưỡng 3, marker) + tests (REQ-001)
-- [ ] 1.5 `pathcompress.go` + tests
-- [ ] 1.6 `errorpriority.go` (patterns, context merge, budget) + golden tests (REQ-002)
-- [ ] 1.7 Profile registry + `OutputProfile` metadata trên tools (build/test/diff/read/default) (REQ-004)
-- [ ] 1.8 Wire vào `toolloop.go` trước hard-cut + metrics log (REQ-005, REQ-006)
-- [ ] 1.9 Property test: line-subsequence invariant (REQ-007)
-- [ ] 1.10 Chạy trên fixtures, ghi savings % vào design.md; update specs.md status
+- [ ] 1.1 Thu fixtures thật từ `server/.data/logs/` (build fail, test lặp, diff, ANSI) → `outputfilter/testdata/` — **skipped**: no corpus available under `server/.data/logs/` (same gap already noted in `search-replace-fuzzy-fallback`); synthetic fixtures were used directly in `filter_test.go` instead.
+- [x] 1.2 `outputfilter/filter.go`: khung Filter/Profile/Run + Stats — `Profile` is a flags struct (not a `[]Filter` slice) for simplicity; `Run` dispatches strip → dedup → pathcompress → errorpriority in the design.md order.
+- [x] 1.3 `strip.go` (ANSI + \r handling) + tests (REQ-003) — `stripANSI`; tests `TestStripANSI_RemovesColorCodes`, `TestStripANSI_CollapsesCarriageReturnProgress`.
+- [x] 1.4 `dedup.go` (ngưỡng 3, marker) + tests (REQ-001) — `dedupLines`; tests `TestDedupLines_ThresholdThree`, `TestDedupLines_TwoRepeatsNotCollapsed`.
+- [x] 1.5 `pathcompress.go` + tests — **deviation**: implemented as a no-op. Rewriting a repeated absolute path to relative would rewrite the bytes of a kept line, which REQ-007 explicitly forbids ("filter chỉ xóa/gộp/đánh dấu, không rewrite nội dung dòng") and which the line-subsequence property test enforces. Left wired into the `build`/`test` profile pipeline (per design.md) as a no-op so a future content-safe implementation can be dropped in without touching `Run`'s call sites.
+- [x] 1.6 `errorpriority.go` (patterns, context merge, budget) + golden tests (REQ-002) — `errorPriorityTruncate`; tests use synthetic fixtures instead of golden files (see 1.1). Also added `tailCutIfNeeded` for the `diff` profile's plain tail-cut fallback.
+- [x] 1.7 Profile registry + `OutputProfile` metadata trên tools (build/test/diff/read/default) (REQ-004) — **deviation**: implemented as a name-keyed registry (`toolProfiles` map in `filter.go`) rather than adding an `OutputProfile` field to each tool definition file. Functionally equivalent (REQ-004's scenarios pass) and avoids touching 6+ tool files for a value that's 1:1 with the tool's registered name.
+- [x] 1.8 Wire vào `toolloop.go` trước hard-cut + metrics log (REQ-005, REQ-006) — `outputfilter.Run` called immediately before the existing `truncateToolResult`; `slog.Info("outputfilter", ...)` logged when input >= 1KB.
+- [x] 1.9 Property test: line-subsequence invariant (REQ-007) — `TestRun_LineSubsequenceInvariant`.
+- [x] 1.10 Chạy trên fixtures, ghi savings % vào design.md; update specs.md status — see "Measured savings" in `docs/implementation/tool-output-filtering-notes.md` (no real corpus, so this is illustrative rather than measured against production logs); specs.md updated.

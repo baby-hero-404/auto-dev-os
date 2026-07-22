@@ -79,6 +79,23 @@ export function TaskSidebar() {
     }
   };
 
+  let codedBy: { engine?: string; provider?: string; model?: string } | null = null;
+  let reviewedBy: { provider?: string; model?: string } | null = null;
+
+  if (workflow?.checkpoints) {
+    for (const cp of workflow.checkpoints) {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const output = cp.state?.output as any;
+      if (output?.coded_by) {
+        codedBy = output.coded_by;
+      }
+      if (output?.reviewed_by) {
+        reviewedBy = output.reviewed_by;
+      }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    }
+  }
+
   return (
     <>
       <div className="bg-card border border-stroke/10 rounded-2xl p-5.5 shadow-sm hover:shadow-md transition-all duration-200">
@@ -134,6 +151,22 @@ export function TaskSidebar() {
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Status</span><span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-500/5" style={{ color: fg }}>{code}</span></div>
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Priority</span><span className="font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/25">P{task?.priority || 0}</span></div>
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Agent</span><span className="font-semibold text-foreground">{task?.agent_id ? "Agentic Autonomous" : "Auto Mode"}</span></div>
+          {codedBy && (
+            <div className="flex justify-between items-center py-1 border-b border-stroke/5">
+              <span className="text-content-muted">Coded By</span>
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                {codedBy.provider || codedBy.model || codedBy.engine || "API-native"}
+              </span>
+            </div>
+          )}
+          {reviewedBy && (
+            <div className="flex justify-between items-center py-1 border-b border-stroke/5">
+              <span className="text-content-muted">Reviewed By</span>
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                {reviewedBy.provider || reviewedBy.model || "Reviewer"}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Project ID</span><span className="font-mono text-xs text-foreground truncate max-w-[120px]" title={projectID}>{projectID}</span></div>
           <div className="flex justify-between items-center py-1"><span className="text-content-muted">Created</span><span className="font-semibold text-foreground">{task?.created_at ? new Date(task.created_at).toLocaleDateString() : "—"}</span></div>
         </div>

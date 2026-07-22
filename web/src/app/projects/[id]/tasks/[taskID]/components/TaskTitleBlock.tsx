@@ -80,6 +80,17 @@ export function TaskTitleBlock() {
           >
             Engine: {task?.execution_engine === "cli" ? "CLI" : task?.execution_engine === "api_native" ? "API-native" : "Inherited"}
           </span>
+          {task?.spec_status === "ready_with_warnings" && (
+            <span
+              className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-sm"
+              title="Definition-of-Ready gate bypassed (hotfix label or max clarification rounds exhausted)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              DoR Bypassed
+            </span>
+          )}
         </div>
         <div className="mt-4 bg-slate-500/[0.02] dark:bg-slate-900/10 rounded-2xl border border-stroke/10 p-4 shadow-sm">
           <DescriptionBody />

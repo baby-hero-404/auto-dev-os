@@ -40,6 +40,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   const [defaultModelLevel, setDefaultModelLevel] = useState(project?.default_model_level ?? "balanced");
   const [defaultAutonomy, setDefaultAutonomy] = useState(project?.default_autonomy ?? "supervised");
   const [autoReviewPolicy, setAutoReviewPolicy] = useState(project?.auto_review_policy ?? "complexity_based");
+  const [reviewHarnessPolicy, setReviewHarnessPolicy] = useState(project?.review_harness_policy ?? "different_model");
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
   const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
@@ -59,6 +60,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setDefaultModelLevel(project.default_model_level ?? "balanced");
       setDefaultAutonomy(project.default_autonomy ?? "supervised");
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
+      setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -74,6 +76,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
     (project?.default_model_level ?? "balanced") !== defaultModelLevel ||
     (project?.default_autonomy ?? "supervised") !== defaultAutonomy ||
     (project?.auto_review_policy ?? "complexity_based") !== autoReviewPolicy ||
+    (project?.review_harness_policy ?? "different_model") !== reviewHarnessPolicy ||
     (project?.max_retries ?? 3) !== maxRetries ||
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
     (project?.default_branch ?? "main") !== defaultBranch ||
@@ -87,6 +90,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setDefaultModelLevel(project.default_model_level ?? "balanced");
       setDefaultAutonomy(project.default_autonomy ?? "supervised");
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
+      setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -112,6 +116,7 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
         default_model_level: defaultModelLevel,
         default_autonomy: defaultAutonomy,
         auto_review_policy: autoReviewPolicy,
+        review_harness_policy: reviewHarnessPolicy,
         max_retries: maxRetries,
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
@@ -209,6 +214,19 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
                 <option value="complexity_based">Complexity Based</option>
                 <option value="always_review">Always Review</option>
                 <option value="auto_merge">Auto Merge (No Review)</option>
+              </Select>
+            </Field>
+            <Field label="Review Harness Policy" htmlFor="profile-harness-policy" hint="Model/provider exclusion for automated code review">
+              <Select
+                id="profile-harness-policy"
+                value={reviewHarnessPolicy}
+                onChange={(e) => setReviewHarnessPolicy(e.target.value)}
+                disabled={isUpdating}
+              >
+                <option value="different_model">Different Model (Default)</option>
+                <option value="different_provider">Different Provider</option>
+                <option value="same">Same Model / Provider</option>
+                <option value="cross_harness">Cross Harness (API vs CLI)</option>
               </Select>
             </Field>
             <Field label="Max Retries" htmlFor="profile-retries">

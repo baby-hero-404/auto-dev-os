@@ -10,6 +10,6 @@
 - [x] 1.4 Metadata `coded_by`/`reviewed_by` vào step state + PR description footer (REQ-002)
 - [x] 1.5 `cross_review` step cho cli_spec_first (diff + spec input, 2-verdict, re-dispatch loop via `ErrCrossReviewFixLoop`) (REQ-003)
 - [x] 1.6 DAG: node optional theo policy (`CLISpecFirstWorkflow(runners, includeCrossReview)`) + `worker.go` call site updated + tests
-- [ ] 1.7 UI: project setting select + task detail hiển thị coded_by/reviewed_by — **deferred**, not implemented in this pass (backend/API surface complete; no UI screens touched)
+- [x] 1.7 UI: project setting select + task detail hiển thị coded_by/reviewed_by — added Review Harness Policy select field to `project-profile.tsx` and `coded_by`/`reviewed_by` metadata badges in `TaskSidebar.tsx`.
 - [ ] 1.8 Integration: CLI task với policy different_provider chạy đủ vòng review-fail-fix — **deferred**; covered instead by unit tests on `CrossReviewStep` (pass/fail/cycle-limit) and the DAG-shape test, not a full engine-driven end-to-end run
 - [x] 1.9 Update specs.md status

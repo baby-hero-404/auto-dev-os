@@ -39,12 +39,39 @@ export type Project = {
   default_branch?: string;
   execution_engine?: ExecutionEngine;
   cli_engine_config?: CLIEngineConfig;
+  review_harness_policy?: string;
   repositories_count?: number;
   agents_count?: number;
   tasks_done_count?: number;
   tasks_total_count?: number;
   created_at: string;
   updated_at: string;
+};
+
+export type SpecViolation = {
+  requirement: string;
+  explanation: string;
+  file?: string;
+  line?: number;
+};
+
+export type ReviewFinding = {
+  severity?: "critical" | "warning" | "info" | string;
+  file?: string;
+  line?: number;
+  message?: string;
+  recommendation?: string;
+};
+
+export type ReviewVerdict = {
+  spec_compliance?: {
+    verdict: "pass" | "fail" | string;
+    violations?: SpecViolation[];
+  };
+  code_quality?: {
+    verdict: "pass" | "fail" | string;
+    findings?: ReviewFinding[];
+  };
 };
 
 export type Repository = {

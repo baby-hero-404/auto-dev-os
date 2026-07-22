@@ -2,6 +2,8 @@
  
 import { useTaskDetail } from "./TaskDetailContext";
 import { AlertTriangle, Bot, Milestone, Calendar, Info } from "lucide-react";
+import { ReviewVerdictCard } from "./ReviewVerdictCard";
+import type { ReviewVerdict } from "@/lib/types";
 
 const STEP_LABELS: Record<string, string> = {
   cli_analyze: "Analyze (CLI)",
@@ -105,7 +107,10 @@ export function CheckpointsPanel() {
               }
  
               const formattedTime = new Date(cp.created_at).toLocaleString();
- 
+              /* eslint-disable @typescript-eslint/no-explicit-any */
+              const reviewVerdict = (cp.state?.output as any)?.review_verdict as ReviewVerdict | undefined;
+              /* eslint-enable @typescript-eslint/no-explicit-any */
+
               return (
                 <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-slate-500/5 transition-colors duration-150">
                   <div className="flex items-center justify-between gap-3">
@@ -118,6 +123,7 @@ export function CheckpointsPanel() {
                     <Calendar size={11} />
                     <span>{formattedTime}</span>
                   </div>
+                  {reviewVerdict && <ReviewVerdictCard verdict={reviewVerdict} />}
                   {error && (
                     <p className="text-[10px] font-mono bg-rose-500/5 text-rose-500 rounded-lg p-2.5 mt-1.5 border border-rose-500/10 max-h-[100px] overflow-y-auto custom-scrollbar">
                       {error}

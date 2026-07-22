@@ -48,15 +48,15 @@
 
 | Set | Phase | Trạng thái |
 |-----|-------|-----------|
-| [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | 📝 Authored |
-| [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | 📝 Authored |
+| [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | ✅ Done — system+tools cached in anthropic.go |
+| [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | 📝 Authored (P0.2–P0.4 Done in code, P3.4 MMR pending) |
 | [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | ✅ Done |
 | [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | ✅ Done — all tasks.md sections (1-6) complete |
 | [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | ✅ Done — all tasks.md items complete (1.1/1.9 skipped, no corpus available) |
-| [`definition-of-ready-gate/`](./definition-of-ready-gate/proposal.md) | P2.2 | ✅ Done — round-limit/hotfix bypass added; REQ-004b + UI badge skipped (see tasks.md) |
-| [`review-verdict-split/`](./review-verdict-split/proposal.md) | P2.3 | ✅ Done — 2-verdict parse/routing/escalation/fix-instruction done; UI badges (REQ-005) skipped (see tasks.md) |
+| [`definition-of-ready-gate/`](./definition-of-ready-gate/proposal.md) | P2.2 | ✅ Done — round-limit/hotfix bypass + UI badge (DoR Bypassed) complete |
+| [`review-verdict-split/`](./review-verdict-split/proposal.md) | P2.3 | ✅ Done — 2-verdict parse/routing/escalation + UI dual badges & expandable lists complete |
 | [`tool-output-filtering/`](./tool-output-filtering/proposal.md) | P2.4 | ✅ Done — strip/dedup/error-priority pipeline wired before hard-cut; pathcompress kept as documented no-op, per-tool profiles via name registry (see tasks.md) |
-| [`cross-harness-review/`](./cross-harness-review/proposal.md) | P3.1 | ✅ Done — REQ-001/001b/001c/002/003/M01 complete; REQ-004 (UI) deferred, see tasks.md |
+| [`cross-harness-review/`](./cross-harness-review/proposal.md) | P3.1 | ✅ Done — REQ-001–004 complete (backend, policy selector UI & coded_by/reviewed_by metadata badges done) |
 | [`repomap-mention-boost/`](./repomap-mention-boost/proposal.md) | P3.2 | 📝 Authored |
 | [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | 📝 Authored |
 | [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | 📝 Authored |

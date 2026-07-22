@@ -3,7 +3,7 @@
 ## Added Requirements
 
 ### REQ-001: Gate pass khi task ready
-> ❌ Status: Not Started
+> ✅ Status: Done (đã có sẵn qua `policy.ShouldAutoApproveSpec`)
 
 **Scenario:**
 - WHEN task có acceptance criteria, file scope từ analysis, và 0 clarification open
@@ -11,7 +11,7 @@
 - AND `task.SpecStatus` → `ready`
 
 ### REQ-002: Gate chặn khi thiếu thông tin
-> ❌ Status: Not Started
+> ✅ Status: Done (đã có sẵn qua `AnalyzeStep`'s clarification_questions + `TaskSpecStatusClarificationRequired` pause)
 
 **Scenario:**
 - WHEN task thiếu acceptance criteria hoặc còn clarification open
@@ -19,7 +19,7 @@
 - AND job pause trạng thái `awaiting_clarification`, không step nào sau đó chạy
 
 ### REQ-003: Resume sau khi trả lời
-> ❌ Status: Not Started
+> ✅ Status: Done — round limit mới: `policy.MaxClarificationRounds`/`IsDefinitionOfReadyBypassed`
 
 **Scenario:**
 - WHEN mọi clarification chuyển `answered`
@@ -27,14 +27,14 @@
 - AND nếu vẫn thiếu → sinh câu hỏi vòng 2, tối đa 2 vòng rồi pass với warning (tránh loop vô hạn)
 
 ### REQ-004: Bypass
-> ❌ Status: Not Started
+> ✅ Status: Done — `policy.IsDefinitionOfReadyBypassed` (hotfix label)
 
 **Scenario:**
 - WHEN task có label `hotfix` hoặc project autonomy = `autonomous`
 - THEN gate log warning liệt kê tiêu chí thiếu nhưng vẫn pass
 
 ### REQ-004b: Fallback khi không có API-native LLM (CLI mode)
-> ❌ Status: Not Started
+> ❌ Status: Not Started — skipped, xem tasks.md 1.5b (CLI flow hiện không có cơ chế clarification nào để cần fallback)
 
 **Scenario:**
 - WHEN task engine=cli, readiness thiếu tiêu chí, và server KHÔNG có API-native LLM khả dụng (không key)
@@ -42,7 +42,7 @@
 - AND WHEN LLM khả dụng THEN hành vi sinh câu hỏi như REQ-002
 
 ### REQ-005: UI clarifications
-> ❌ Status: Not Started
+> ✅ Status: Done (đã có sẵn từ trước — clarifications answer flow); `ready_with_warnings` badge riêng chưa thêm, xem tasks.md 1.8
 
 **Scenario:**
 - WHEN task ở `awaiting_clarification`
@@ -51,7 +51,7 @@
 ## Modified Requirements
 
 ### REQ-M01: DAG shape
-> ❌ Status: Not Started
+> ✅ Status: Done — không cần thay đổi DAG, xem tasks.md 1.6
 
 **Scenario:**
 - WHEN BuildWorkflow cho api_native flow

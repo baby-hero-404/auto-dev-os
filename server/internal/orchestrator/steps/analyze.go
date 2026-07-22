@@ -657,6 +657,19 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 		affectedFilesStrings[i] = f.File
 	}
 
+	hasClarifications := len(analysis.ClarificationQuestions) > 0
+	var priorRounds []models.ClarificationRound
+	if len(s.rt.Task.Clarifications) > 0 {
+		_ = json.Unmarshal(s.rt.Task.Clarifications, &priorRounds)
+	}
+	dorBypassed := hasClarifications && policy.IsDefinitionOfReadyBypassed(s.rt.Task.Labels, len(priorRounds))
+	if dorBypassed {
+		hasClarifications = false
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf(
+			"definition-of-ready gate bypassed (hotfix label or %d clarification rounds already exhausted); missing: %s",
+			len(priorRounds), strings.Join(analysis.ClarificationQuestions, "; ")))
+	}
+
 	specStatus, status := policy.ShouldAutoApproveSpec(
 		analysis.Complexity,
 		affectedFilesStrings,
@@ -664,8 +677,14 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 		s.rt.Agent.AutonomyLevel,
 		projectAutonomy,
 		projectReviewPolicy,
-		len(analysis.ClarificationQuestions) > 0,
+		hasClarifications,
 	)
+	if dorBypassed && specStatus == models.TaskSpecStatusAutoApproved {
+		// Only relabel the auto-approved path: a task that would otherwise
+		// have paused for pending_review (e.g. high-risk files) must still
+		// pause for that reason regardless of the DoR bypass.
+		specStatus = models.TaskSpecStatusReadyWithWarnings
+	}
 
 	pauseReason := "workflow paused for human spec review"
 	if fallbackUsed {

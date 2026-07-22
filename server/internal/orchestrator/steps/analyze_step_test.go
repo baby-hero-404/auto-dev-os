@@ -593,3 +593,77 @@ func TestAutoWidenBoundaries(t *testing.T) {
 		}
 	})
 }
+
+// TestAnalyzeStep_DefinitionOfReadyBypass_HotfixLabel verifies that a task
+// labeled "hotfix" bypasses the clarification-required pause (definition-of-
+// ready-gate REQ-004): even though the analyzer still asks a clarification
+// question, the step must not pause — it should proceed and mark
+// spec_status as ready_with_warnings instead of blocking in spec_review.
+func TestAnalyzeStep_DefinitionOfReadyBypass_HotfixLabel(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "analyze-step-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:         "task-hotfix",
+		ProjectID:  "proj-123",
+		Complexity: "easy",
+		Status:     models.TaskStatusTodo,
+		Labels:     []string{"hotfix"},
+	}
+
+	llmResponse := `
+{
+  "complexity": "easy",
+  "primary_category": "backend",
+  "scope": "Patch prod bug",
+  "affected_files": [{"file": "math.go", "confidence": 1.0, "reason": "edit"}],
+  "risks": [],
+  "risk_domains": [],
+  "execution_phases": [{"phase": "Phase 1: Setup", "tasks": ["write code"]}],
+  "clarification_questions": ["what edge case triggers the bug?"],
+  "required_skills": [],
+  "required_skills_map": {},
+  "execution_units": [],
+  "execution_irs": [{"node_id": "n1", "intent": {"capability": "x", "operation": "y"}, "budget": {"discovery": 1, "implementation": 1, "validation": 1}}],
+  "proposal_md": "## Proposal",
+  "specs_md": "## ADDED Requirements",
+  "design_md": "## Design",
+  "tasks_md": "## Tasks",
+  "execution_boundaries": {"allowed": ["."]},
+  "acceptance_criteria": [{"id": "AC-1", "expected": "ok"}]
+}`
+
+	chatter := &mockLLMChatter{resp: &llm.Response{Content: llmResponse, Model: "test-model"}}
+	taskUpdate := &mockTaskReader{task: task}
+	statusMock := &mockStatusUpdater{}
+
+	step := NewAnalyzeStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1", AutonomyLevel: "high"}, JobID: "j1"},
+		tmpDir,
+		taskUpdate,
+		nil,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: "high"}},
+		chatter,
+		&mockPromptAssembler{},
+		&mockSandboxRunner{},
+		&mockArtifactSaver{},
+		statusMock,
+		&mockTraceRecorder{},
+		&mockLogger{},
+		nil,
+		nil,
+		8.0,
+		tools.DefaultRegistry(nil, nil),
+	)
+
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("expected hotfix label to bypass the DoR gate without pausing, got error: %v", err)
+	}
+	if result["spec_status"] != models.TaskSpecStatusReadyWithWarnings {
+		t.Errorf("expected spec_status ready_with_warnings, got: %v", result["spec_status"])
+	}
+}

@@ -145,3 +145,29 @@ func TestShouldAutoApproveSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestIsDefinitionOfReadyBypassed(t *testing.T) {
+	tests := []struct {
+		name       string
+		labels     []string
+		priorRound int
+		want       bool
+	}{
+		{name: "no labels, no rounds", labels: nil, priorRound: 0, want: false},
+		{name: "one round is within limit", labels: nil, priorRound: 1, want: false},
+		{name: "round limit reached bypasses", labels: nil, priorRound: 2, want: true},
+		{name: "round limit exceeded bypasses", labels: nil, priorRound: 5, want: true},
+		{name: "hotfix label bypasses regardless of rounds", labels: []string{"hotfix"}, priorRound: 0, want: true},
+		{name: "hotfix label case-insensitive", labels: []string{"Hotfix"}, priorRound: 0, want: true},
+		{name: "unrelated label does not bypass", labels: []string{"bug"}, priorRound: 0, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsDefinitionOfReadyBypassed(tt.labels, tt.priorRound)
+			if got != tt.want {
+				t.Errorf("IsDefinitionOfReadyBypassed(%v, %d) = %v, want %v", tt.labels, tt.priorRound, got, tt.want)
+			}
+		})
+	}
+}

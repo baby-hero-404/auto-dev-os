@@ -100,6 +100,16 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		affectedFilesStrings[i] = f.File
 	}
 
+	hasClarifications := len(analysis.ClarificationQuestions) > 0
+	var priorRounds []models.ClarificationRound
+	if len(task.Clarifications) > 0 {
+		_ = json.Unmarshal(task.Clarifications, &priorRounds)
+	}
+	dorBypassed := hasClarifications && policy.IsDefinitionOfReadyBypassed(task.Labels, len(priorRounds))
+	if dorBypassed {
+		hasClarifications = false
+	}
+
 	specStatus, status := policy.ShouldAutoApproveSpec(
 		analysis.Complexity,
 		affectedFilesStrings,
@@ -107,8 +117,11 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		"", // no agent autonomy in this path
 		project.DefaultAutonomy,
 		project.AutoReviewPolicy,
-		len(analysis.ClarificationQuestions) > 0,
+		hasClarifications,
 	)
+	if dorBypassed && specStatus == models.TaskSpecStatusAutoApproved {
+		specStatus = models.TaskSpecStatusReadyWithWarnings
+	}
 	if task.Status != models.TaskStatusTodo &&
 		task.Status != models.TaskStatusAnalyzing &&
 		task.Status != models.TaskStatusSpecReview &&

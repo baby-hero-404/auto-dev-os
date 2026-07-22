@@ -55,6 +55,7 @@ const (
 	TaskSpecStatusClarificationRequired = "clarification_required"
 	TaskSpecStatusApproved              = "approved"
 	TaskSpecStatusAutoApproved          = "auto_approved"
+	TaskSpecStatusReadyWithWarnings     = "ready_with_warnings"
 )
 
 // Task represents a unit of work for an agent.

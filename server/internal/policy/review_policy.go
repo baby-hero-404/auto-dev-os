@@ -41,8 +41,36 @@ func HasHighRiskDomains(affectedFiles []string, riskDomains []string) bool {
 	return false
 }
 
+// MaxClarificationRounds caps how many times the clarification-required gate
+// can pause a task on the same unanswered questions before it gives up and
+// lets the pipeline proceed anyway — a task whose author won't (or can't)
+// answer clarifications must not deadlock in spec_review forever.
+const MaxClarificationRounds = 2
+
+// IsDefinitionOfReadyBypassed reports whether the definition-of-ready gate's
+// clarification-required block should be skipped for this task: either the
+// task is flagged as a hotfix (governance intentionally trusts hotfixes to
+// skip friction), or the task has already cycled through
+// MaxClarificationRounds of unanswered/still-insufficient clarifications and
+// blocking further would just deadlock the pipeline.
+func IsDefinitionOfReadyBypassed(labels []string, priorClarificationRounds int) bool {
+	if priorClarificationRounds >= MaxClarificationRounds {
+		return true
+	}
+	for _, l := range labels {
+		if strings.EqualFold(strings.TrimSpace(l), "hotfix") {
+			return true
+		}
+	}
+	return false
+}
+
 // ShouldAutoApproveSpec determines whether a spec can be auto-approved.
-// Returns (specStatus, taskStatus).
+// Returns (specStatus, taskStatus). When hasClarifications is true but the
+// caller has determined via IsDefinitionOfReadyBypassed that the gate should
+// be bypassed (hotfix label, or clarification round limit reached), the
+// caller should pass hasClarifications=false and instead surface the bypass
+// to the user via TaskSpecStatusReadyWithWarnings + a logged warning.
 func ShouldAutoApproveSpec(
 	complexity string,
 	affectedFiles []string,

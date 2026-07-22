@@ -58,6 +58,8 @@ func (g *PRGenerator) GenerateSummary(
 	riskDomains []string,
 	reviewLimitExceeded bool,
 	selfReviewFallback bool,
+	codedBy string,
+	reviewedBy string,
 ) *models.PRSummary {
 	title := fmt.Sprintf("AutoCodeOS: %s", task.Title)
 
@@ -121,6 +123,17 @@ func (g *PRGenerator) GenerateSummary(
 		body.WriteString("- ⚠️ **Self-Review Warning:** No alternative model was available, so this PR was reviewed by the same model that wrote the code (Harness Independence fallback). Please review carefully.\n")
 	}
 	body.WriteString("\n")
+
+	if codedBy != "" || reviewedBy != "" {
+		body.WriteString("### Review Harness\n")
+		if codedBy != "" {
+			body.WriteString(fmt.Sprintf("- **Coded by:** %s\n", codedBy))
+		}
+		if reviewedBy != "" {
+			body.WriteString(fmt.Sprintf("- **Reviewed by:** %s\n", reviewedBy))
+		}
+		body.WriteString("\n")
+	}
 
 	// Test Results
 	body.WriteString("### Test Results\n")

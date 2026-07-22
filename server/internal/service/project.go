@@ -28,6 +28,11 @@ func (s *ProjectService) Create(ctx context.Context, orgID string, input models.
 	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
 		return nil, err
 	}
+	if input.ReviewHarnessPolicy != nil {
+		if err := models.ValidateReviewHarnessPolicy(*input.ReviewHarnessPolicy); err != nil {
+			return nil, ErrValidation(err.Error())
+		}
+	}
 	project, err := s.repo.Create(ctx, orgID, input)
 	if err != nil {
 		return nil, err
@@ -77,6 +82,11 @@ func (s *ProjectService) Update(ctx context.Context, id string, input models.Upd
 	}
 	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
 		return nil, err
+	}
+	if input.ReviewHarnessPolicy != nil {
+		if err := models.ValidateReviewHarnessPolicy(*input.ReviewHarnessPolicy); err != nil {
+			return nil, ErrValidation(err.Error())
+		}
 	}
 	if engine == models.ExecutionEngineCLI && input.CLIEngineConfig == nil {
 		// engine flipping to cli without a config payload in this PATCH: verify an existing config has a command.

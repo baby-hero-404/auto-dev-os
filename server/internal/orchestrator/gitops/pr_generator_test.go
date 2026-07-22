@@ -18,7 +18,7 @@ func TestPRGenerator_GenerateSummary(t *testing.T) {
 	}
 	files := []string{"server/internal/service/auth.go", "server/internal/handler/auth.go"}
 
-	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
 
 	if summary.Title != "AutoCodeOS: Add user validation" {
 		t.Errorf("unexpected title: %s", summary.Title)
@@ -43,7 +43,7 @@ func TestPRGenerator_RiskAssessment_Migration(t *testing.T) {
 	}
 	files := []string{"server/migration/000007_audit_logs.up.sql", "server/pkg/models/phase5.go"}
 
-	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
 
 	if summary.RiskLevel != models.PRRiskHigh {
 		t.Errorf("expected high risk for migration files, got: %s", summary.RiskLevel)
@@ -59,7 +59,7 @@ func TestPRGenerator_RiskAssessment_HardWithMigration(t *testing.T) {
 	}
 	files := []string{"server/migration/000008_refactor.up.sql"}
 
-	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
 
 	if summary.RiskLevel != models.PRRiskCritical {
 		t.Errorf("expected critical risk for hard task with migration, got: %s", summary.RiskLevel)
@@ -75,7 +75,7 @@ func TestPRGenerator_RiskAssessment_Config(t *testing.T) {
 	}
 	files := []string{"docker-compose.yml", "server/pkg/config/config.go"}
 
-	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
 
 	if summary.RiskLevel != models.PRRiskMedium {
 		t.Errorf("expected medium risk for config files, got: %s", summary.RiskLevel)
@@ -94,7 +94,7 @@ func TestPRGenerator_RiskAssessment_ManyFiles(t *testing.T) {
 		files[i] = "file" + string(rune('a'+i)) + ".go"
 	}
 
-	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
 
 	if summary.RiskLevel != models.PRRiskHigh {
 		t.Errorf("expected high risk for hard task with many files, got: %s", summary.RiskLevel)
@@ -132,7 +132,7 @@ index 12345..67890 100644
 		"exit_code": float64(0),
 	}
 
-	summary := gen.GenerateSummary(context.Background(), task, agent, []string{"auth.go"}, diffText, testResult, nil, false, false)
+	summary := gen.GenerateSummary(context.Background(), task, agent, []string{"auth.go"}, diffText, testResult, nil, false, false, "", "")
 
 	if !strings.Contains(summary.Body, "## AutoCodeOS: Fix logic error") {
 		t.Errorf("expected header in body, got: %s", summary.Body)
@@ -145,5 +145,44 @@ index 12345..67890 100644
 	}
 	if !strings.Contains(summary.Body, "- ✅ Full test suite: passed") {
 		t.Errorf("expected test results in body, got: %s", summary.Body)
+	}
+}
+
+func TestPRGenerator_CodedByReviewedByFooter(t *testing.T) {
+	gen := NewPRGenerator()
+	task := &models.Task{
+		ID:         "test-task-harness",
+		Title:      "Cross-harness review footer",
+		Complexity: models.TaskComplexityEasy,
+	}
+	files := []string{"server/internal/service/auth.go"}
+
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false,
+		"api_native:anthropic/claude-sonnet-5", "openai/gpt-5")
+
+	if !strings.Contains(summary.Body, "### Review Harness") {
+		t.Errorf("expected review harness section in body, got: %s", summary.Body)
+	}
+	if !strings.Contains(summary.Body, "**Coded by:** api_native:anthropic/claude-sonnet-5") {
+		t.Errorf("expected coded_by line in body, got: %s", summary.Body)
+	}
+	if !strings.Contains(summary.Body, "**Reviewed by:** openai/gpt-5") {
+		t.Errorf("expected reviewed_by line in body, got: %s", summary.Body)
+	}
+}
+
+func TestPRGenerator_NoHarnessFooterWhenEmpty(t *testing.T) {
+	gen := NewPRGenerator()
+	task := &models.Task{
+		ID:         "test-task-no-harness",
+		Title:      "No footer",
+		Complexity: models.TaskComplexityEasy,
+	}
+	files := []string{"server/internal/service/auth.go"}
+
+	summary := gen.GenerateSummary(context.Background(), task, nil, files, "", nil, nil, false, false, "", "")
+
+	if strings.Contains(summary.Body, "### Review Harness") {
+		t.Errorf("did not expect review harness section in body, got: %s", summary.Body)
 	}
 }

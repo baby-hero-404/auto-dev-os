@@ -236,12 +236,13 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		}
 		reviewLimitExceeded := rejectionCount >= maxReviewFixCycles-1
 		selfReviewFallback := reviewSelfReviewFallback(checkpoints)
+		codedBy, reviewedBy := codedByReviewedBy(checkpoints)
 
 		// Extract risk domains from task analysis
 		riskDomains := extractRiskDomains(s.rt.Task)
 
 		prGen := gitops.NewPRGenerator()
-		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded, selfReviewFallback)
+		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded, selfReviewFallback, codedBy, reviewedBy)
 
 		prURL, err := s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
 		if err != nil {
@@ -345,6 +346,49 @@ func reviewSelfReviewFallback(checkpoints []models.WorkflowCheckpoint) bool {
 		}
 	}
 	return false
+}
+
+// codedByReviewedBy scans checkpoints for the most recent review step's
+// coded_by/reviewed_by metadata (REQ-002, cross-harness-review) and formats
+// it for the PR description footer, e.g. "api_native:anthropic/claude-x" /
+// "openai/gpt-x".
+func codedByReviewedBy(checkpoints []models.WorkflowCheckpoint) (codedBy, reviewedBy string) {
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		cp := checkpoints[i]
+		if cp.Step != workflow.StepReview {
+			continue
+		}
+		var state map[string]any
+		if json.Unmarshal(cp.State, &state) != nil {
+			continue
+		}
+		output, ok := state["output"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if cb, ok := output["coded_by"].(map[string]any); ok {
+			engine, _ := cb["engine"].(string)
+			provider, _ := cb["provider"].(string)
+			model, _ := cb["model"].(string)
+			if provider != "" || model != "" {
+				if engine == "" {
+					engine = string(models.ExecutionEngineAPINative)
+				}
+				codedBy = fmt.Sprintf("%s:%s/%s", engine, provider, model)
+			}
+		}
+		if rb, ok := output["reviewed_by"].(map[string]any); ok {
+			provider, _ := rb["provider"].(string)
+			model, _ := rb["model"].(string)
+			if provider != "" || model != "" {
+				reviewedBy = fmt.Sprintf("%s/%s", provider, model)
+			}
+		}
+		if codedBy != "" || reviewedBy != "" {
+			return codedBy, reviewedBy
+		}
+	}
+	return "", ""
 }
 
 // saveArtifactWithCycleDedup saves payload as a WorkflowArtifact under step, suffixing

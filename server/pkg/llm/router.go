@@ -163,8 +163,12 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 	for _, provider := range chain.Providers {
 		meta := metadataForProvider(provider)
 
-		// Harness Independence isolation check
+		// Harness Independence isolation check (model-level and provider-level)
 		if opts.ExcludeModelID != "" && meta.Model == opts.ExcludeModelID {
+			excludedProvider = provider
+			continue
+		}
+		if opts.ExcludeProviderID != "" && meta.Provider == opts.ExcludeProviderID {
 			excludedProvider = provider
 			continue
 		}
@@ -177,6 +181,9 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 		}
 		if resp.Model == "" {
 			resp.Model = meta.Model
+		}
+		if resp.Provider == "" {
+			resp.Provider = meta.Provider
 		}
 		cost := estimateCost(resp.PromptTokens, resp.OutputTokens, meta)
 		if err := g.checkActualUsage(resp, cost, opts); err != nil {
@@ -198,6 +205,9 @@ func (g *Gateway) ChatWithOptions(ctx context.Context, messages []Message, chatO
 		} else {
 			if resp.Model == "" {
 				resp.Model = meta.Model
+			}
+			if resp.Provider == "" {
+				resp.Provider = meta.Provider
 			}
 			cost := estimateCost(resp.PromptTokens, resp.OutputTokens, meta)
 			if err := g.checkActualUsage(resp, cost, opts); err != nil {

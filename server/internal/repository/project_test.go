@@ -88,8 +88,8 @@ func TestProjectRepo_CreatePersistsMaxReviewFixCycles(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "projects" ("org_id","name","description","default_model_level","default_autonomy","auto_review_policy","max_retries","max_review_fix_cycles","default_branch","execution_engine","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING "id","cli_engine_config"`)).
-		WithArgs(orgID, input.Name, input.Description, *input.DefaultModelLevel, *input.DefaultAutonomy, *input.AutoReviewPolicy, *input.MaxRetries, *input.MaxReviewFixCycles, *input.DefaultBranch, "api_native", sqlmock.AnyArg(), sqlmock.AnyArg()).
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "projects" ("org_id","name","description","default_model_level","default_autonomy","auto_review_policy","max_retries","max_review_fix_cycles","default_branch","execution_engine","review_harness_policy","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING "id","cli_engine_config"`)).
+		WithArgs(orgID, input.Name, input.Description, *input.DefaultModelLevel, *input.DefaultAutonomy, *input.AutoReviewPolicy, *input.MaxRetries, *input.MaxReviewFixCycles, *input.DefaultBranch, "api_native", "different_model", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(projectID))
 	mock.ExpectCommit()
 

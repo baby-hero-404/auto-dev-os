@@ -13,6 +13,7 @@ type contextKey string
 
 const routeOptionsKey contextKey = "llm_route_options"
 const excludeModelIDKey contextKey = "llm_exclude_model_id"
+const excludeProviderIDKey contextKey = "llm_exclude_provider_id"
 
 // Model level groups used by the gateway router.
 const (
@@ -35,6 +36,7 @@ type Message struct {
 type Response struct {
 	Content          string     `json:"content"`                      // generated text
 	Model            string     `json:"model"`                        // model used
+	Provider         string     `json:"provider,omitempty"`           // provider used (set by Gateway when routing through it)
 	PromptTokens     int        `json:"prompt_tokens"`                // input tokens consumed
 	OutputTokens     int        `json:"output_tokens"`                // output tokens generated
 	CacheWriteTokens int        `json:"cache_write_tokens,omitempty"` // tokens written to prompt cache (billed at write rate)
@@ -87,11 +89,12 @@ type RouteOptions struct {
 	AgentID    string `json:"agent_id,omitempty"`
 	TaskID     string `json:"task_id,omitempty"`
 
-	RouteName       string  `json:"route_name,omitempty"`
-	MaxInputTokens  int     `json:"max_input_tokens,omitempty"`
-	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`
-	MaxCostUSD      float64 `json:"max_cost_usd,omitempty"`
-	ExcludeModelID  string  `json:"exclude_model_id,omitempty"`
+	RouteName         string  `json:"route_name,omitempty"`
+	MaxInputTokens    int     `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens   int     `json:"max_output_tokens,omitempty"`
+	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
+	ExcludeModelID    string  `json:"exclude_model_id,omitempty"`
+	ExcludeProviderID string  `json:"exclude_provider_id,omitempty"`
 }
 
 // WithRouteOptions annotates a request for gateway routing.
@@ -114,6 +117,20 @@ func WithExcludeModelID(ctx context.Context, excludeID string) context.Context {
 // ExcludeModelIDFromContext retrieves the excluded model ID from context.
 func ExcludeModelIDFromContext(ctx context.Context) string {
 	if val, ok := ctx.Value(excludeModelIDKey).(string); ok {
+		return val
+	}
+	return ""
+}
+
+// WithExcludeProviderID sets the excluded provider ID in context for
+// provider-level cross-harness review (review_harness_policy=different_provider).
+func WithExcludeProviderID(ctx context.Context, excludeID string) context.Context {
+	return context.WithValue(ctx, excludeProviderIDKey, excludeID)
+}
+
+// ExcludeProviderIDFromContext retrieves the excluded provider ID from context.
+func ExcludeProviderIDFromContext(ctx context.Context) string {
+	if val, ok := ctx.Value(excludeProviderIDKey).(string); ok {
 		return val
 	}
 	return ""

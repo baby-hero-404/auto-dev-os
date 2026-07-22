@@ -43,6 +43,9 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 			p.CLIEngineConfig = raw
 		}
 	}
+	if input.ReviewHarnessPolicy != nil {
+		p.ReviewHarnessPolicy = *input.ReviewHarnessPolicy
+	}
 	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
@@ -128,6 +131,9 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 		if raw, err := json.Marshal(merged); err == nil {
 			updates["cli_engine_config"] = raw
 		}
+	}
+	if input.ReviewHarnessPolicy != nil {
+		updates["review_harness_policy"] = *input.ReviewHarnessPolicy
 	}
 	if err := r.db.WithContext(ctx).Model(p).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update project: %w", err)

@@ -608,3 +608,119 @@ func TestReviewStep_SpecFailEscalation_PausesOnRepeatViolation(t *testing.T) {
 		t.Errorf("expected escalation to route task to human_review, got: %s", statusMock.lastStatus)
 	}
 }
+
+func TestReviewStep_PolicySame_NoExclusionAndAdversarialDirective(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	llmMock := &mockLLMRunner{result: newStructuredVerdictOut("pass", "pass")}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1", ReviewHarnessPolicy: models.ReviewHarnessSame}},
+		llmMock,
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{},
+		statusMock,
+		&mockLogger{},
+	)
+	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "Adversarial audit mode") {
+		t.Errorf("expected policy=same to always inject the adversarial audit directive, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+func TestReviewStep_DifferentModelPolicy_NoDirectiveByDefault(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	llmMock := &mockLLMRunner{result: newStructuredVerdictOut("pass", "pass")}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1", ReviewHarnessPolicy: models.ReviewHarnessDifferentModel}},
+		llmMock,
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{},
+		statusMock,
+		&mockLogger{},
+	)
+	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(llmMock.lastInstruction, "Adversarial audit mode") {
+		t.Errorf("expected no adversarial directive when a genuinely different model was used, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+func TestReviewStep_PriorSelfReviewFallback_InjectsAdversarialDirectiveNextCycle(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	llmMock := &mockLLMRunner{result: newStructuredVerdictOut("pass", "pass")}
+	prevState := map[string]any{"status": workflow.StepStatusSuccess, "output": map[string]any{"self_review_fallback": true}}
+	prevStateJSON, _ := json.Marshal(prevState)
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1", ReviewHarnessPolicy: models.ReviewHarnessDifferentModel}},
+		llmMock,
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 1},
+		&mockCheckpointLister{cps: []models.WorkflowCheckpoint{
+			{Step: workflow.StepReview, State: prevStateJSON},
+		}},
+		statusMock,
+		&mockLogger{},
+	)
+	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "Adversarial audit mode") {
+		t.Errorf("expected adversarial directive after a prior self-review fallback, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+func TestReviewStep_CodedByAndReviewedByMetadata(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	out := newStructuredVerdictOut("pass", "pass")
+	out["model"] = "gpt-5"
+	out["provider"] = "openai"
+	codeState := map[string]any{"status": workflow.StepStatusSuccess, "output": map[string]any{"model": "claude-x", "provider": "anthropic"}}
+	codeStateJSON, _ := json.Marshal(codeState)
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1", ReviewHarnessPolicy: models.ReviewHarnessDifferentModel}},
+		&mockLLMRunner{result: out},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{cps: []models.WorkflowCheckpoint{
+			{Step: workflow.StepCodeBackend, State: codeStateJSON},
+		}},
+		statusMock,
+		&mockLogger{},
+	)
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	codedBy, ok := result["coded_by"].(map[string]any)
+	if !ok || codedBy["model"] != "claude-x" || codedBy["provider"] != "anthropic" {
+		t.Errorf("expected coded_by metadata from the code step, got: %v", result["coded_by"])
+	}
+	reviewedBy, ok := result["reviewed_by"].(map[string]any)
+	if !ok || reviewedBy["model"] != "gpt-5" || reviewedBy["provider"] != "openai" {
+		t.Errorf("expected reviewed_by metadata from the review LLM response, got: %v", result["reviewed_by"])
+	}
+}

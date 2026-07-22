@@ -5,6 +5,55 @@ import (
 	"strings"
 )
 
+// tierNames maps a fuzzy-fallback tier index (as returned by findMatch) to a
+// human-readable name for error messages and telemetry logs.
+var tierNames = []string{"exact", "trailing-whitespace", "relative-indent", "line-trim"}
+
+// trailingWSMatch finds a window in content whose lines match search's lines
+// after stripping only TRAILING whitespace from each line (leading
+// indentation must match exactly). This is tier 1 of the fuzzy fallback
+// pipeline: it tolerates LLM output that drops trailing spaces/tabs a
+// formatter would otherwise strip, without being as permissive as a full
+// per-line trim (which would also mask indentation drift).
+func trailingWSMatch(content, search string) (start, end int, deltas []int, indentChar byte, ok bool, matchCount int) {
+	searchLines := splitLinesKeepEnds(search)
+	if len(searchLines) == 0 {
+		return 0, 0, nil, 0, false, 0
+	}
+	trimmedSearch := make([]string, len(searchLines))
+	for i, l := range searchLines {
+		trimmedSearch[i] = strings.TrimRight(stripLineEnding(l), " \t")
+	}
+
+	contentLines := splitLinesKeepEnds(content)
+
+	var matches [][2]int
+	for i := 0; i+len(searchLines) <= len(contentLines); i++ {
+		match := true
+		for j, ts := range trimmedSearch {
+			if strings.TrimRight(stripLineEnding(contentLines[i+j]), " \t") != ts {
+				match = false
+				break
+			}
+		}
+		if match {
+			matches = append(matches, [2]int{i, i + len(searchLines)})
+		}
+	}
+
+	if len(matches) != 1 {
+		return 0, 0, nil, 0, false, len(matches)
+	}
+
+	m := matches[0]
+	start = lineOffset(contentLines, m[0])
+	end = lineOffset(contentLines, m[1])
+	window := contentLines[m[0]:m[1]]
+	deltas = indentDeltas(searchLines, window)
+	indentChar = detectIndentChar(window)
+	return start, end, deltas, indentChar, true, 1
+}
+
 // trimmedLineMatch finds a window in content whose lines match search's lines
 // after per-line whitespace trimming. This tolerates LLM-generated SEARCH
 // blocks that differ from the file only by leading/trailing whitespace.
@@ -12,10 +61,10 @@ import (
 // per-line indent delta (file indent length minus search indent length) so
 // the caller can reindent the REPLACE text to the file's own indentation
 // rather than pasting the LLM's search-block indentation verbatim.
-func trimmedLineMatch(content, search string) (start, end int, deltas []int, indentChar byte, ok bool, ambiguous bool) {
+func trimmedLineMatch(content, search string) (start, end int, deltas []int, indentChar byte, ok bool, matchCount int) {
 	searchLines := splitLinesKeepEnds(search)
 	if len(searchLines) == 0 {
-		return 0, 0, nil, 0, false, false
+		return 0, 0, nil, 0, false, 0
 	}
 	trimmedSearch := make([]string, len(searchLines))
 	for i, l := range searchLines {
@@ -38,11 +87,8 @@ func trimmedLineMatch(content, search string) (start, end int, deltas []int, ind
 		}
 	}
 
-	if len(matches) == 0 {
-		return 0, 0, nil, 0, false, false
-	}
-	if len(matches) > 1 {
-		return 0, 0, nil, 0, false, true
+	if len(matches) != 1 {
+		return 0, 0, nil, 0, false, len(matches)
 	}
 
 	m := matches[0]
@@ -51,7 +97,7 @@ func trimmedLineMatch(content, search string) (start, end int, deltas []int, ind
 	window := contentLines[m[0]:m[1]]
 	deltas = indentDeltas(searchLines, window)
 	indentChar = detectIndentChar(window)
-	return start, end, deltas, indentChar, true, false
+	return start, end, deltas, indentChar, true, 1
 }
 
 // relativeIndentMatch compares the search block and candidate file windows
@@ -63,10 +109,10 @@ func trimmedLineMatch(content, search string) (start, end int, deltas []int, ind
 // relative-indent match) and the file's indent character, so the caller can
 // reindent REPLACE to match the file's own indentation rather than pasting
 // the LLM's search-block indentation.
-func relativeIndentMatch(content, search string) (start, end int, deltas []int, indentChar byte, ok bool, ambiguous bool) {
+func relativeIndentMatch(content, search string) (start, end int, deltas []int, indentChar byte, ok bool, matchCount int) {
 	searchLines := splitLinesKeepEnds(search)
 	if len(searchLines) == 0 {
-		return 0, 0, nil, 0, false, false
+		return 0, 0, nil, 0, false, 0
 	}
 	searchBody := make([]string, len(searchLines))
 	for i, l := range searchLines {
@@ -88,11 +134,8 @@ func relativeIndentMatch(content, search string) (start, end int, deltas []int, 
 		}
 	}
 
-	if len(matches) == 0 {
-		return 0, 0, nil, 0, false, false
-	}
-	if len(matches) > 1 {
-		return 0, 0, nil, 0, false, true
+	if len(matches) != 1 {
+		return 0, 0, nil, 0, false, len(matches)
 	}
 
 	m := matches[0]
@@ -101,7 +144,7 @@ func relativeIndentMatch(content, search string) (start, end int, deltas []int, 
 	window := contentLines[m[0]:m[1]]
 	deltas = indentDeltas(searchLines, window)
 	indentChar = detectIndentChar(window)
-	return start, end, deltas, indentChar, true, false
+	return start, end, deltas, indentChar, true, 1
 }
 
 // indentDeltas returns, for each paired line, the difference in leading

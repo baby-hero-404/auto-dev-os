@@ -2,6 +2,7 @@ package patch
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,20 +144,37 @@ func ApplySearchReplace(blocks []EditBlock, basePath string) error {
 					return fmt.Errorf("ambiguous match in %s (found %d times)", relPath, count)
 				}
 
-				// Exact match failed (count == 0) — try fallback strategies before giving up.
-				start, end, deltas, indentChar, ok, ambiguous := trimmedLineMatch(content, search)
-				if ambiguous {
-					return fmt.Errorf("ambiguous match in %s (trimmed-whitespace fallback found multiple candidates)", relPath)
-				}
-				if !ok {
-					start, end, deltas, indentChar, ok, ambiguous = relativeIndentMatch(content, search)
-					if ambiguous {
-						return fmt.Errorf("ambiguous match in %s (relative-indent fallback found multiple candidates)", relPath)
-					}
+				// Exact match failed (count == 0) — try the tiered fuzzy
+				// fallback pipeline before giving up. Tiers are tried in
+				// increasing order of permissiveness, stopping at the first
+				// tier that produces a unique match; any tier that matches
+				// 2+ locations fails fast rather than falling through to a
+				// fuzzier tier (a fuzzier tier is even more likely to also
+				// be ambiguous, and multi-match at any tier is itself a
+				// signal the patch is unsafe to guess at).
+				matchers := []struct {
+					tier int
+					fn   func(string, string) (int, int, []int, byte, bool, int)
+				}{
+					{1, trailingWSMatch},
+					{2, relativeIndentMatch},
+					{3, trimmedLineMatch},
 				}
 
-				if ok {
-					content = content[:start] + reindentReplace(replace, deltas, indentChar) + content[end:]
+				matched := false
+				for _, m := range matchers {
+					start, end, deltas, indentChar, ok, matchCount := m.fn(content, search)
+					if matchCount > 1 {
+						return fmt.Errorf("ambiguous match in %s (%s fallback found %d candidates)", relPath, tierNames[m.tier], matchCount)
+					}
+					if ok {
+						content = content[:start] + reindentReplace(replace, deltas, indentChar) + content[end:]
+						log.Printf("search_replace tier=%d (%s) file=%s", m.tier, tierNames[m.tier], relPath)
+						matched = true
+						break
+					}
+				}
+				if matched {
 					continue
 				}
 

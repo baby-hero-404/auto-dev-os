@@ -212,6 +212,31 @@ func TestApplySearchReplace(t *testing.T) {
 	}
 }
 
+func TestApplySearchReplace_AmbiguousFuzzyFallbackNamesTier(t *testing.T) {
+	dir := t.TempDir()
+	filePath := "test.go"
+	fullPath := filepath.Join(dir, filePath)
+
+	// Two lines that only differ from the search block by trailing
+	// whitespace, so tier 1 (trailing-whitespace) finds both and must
+	// fail fast rather than falling through to a fuzzier tier.
+	content := "foo()   \nfoo()  \n"
+	err := os.WriteFile(fullPath, []byte(content), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocks := []EditBlock{{Filepath: filePath, Search: "foo()\n", Replace: "bar()\n"}}
+
+	err = ApplySearchReplace(blocks, dir)
+	if err == nil {
+		t.Fatalf("expected an ambiguous-match error, got nil")
+	}
+	if !strings.Contains(err.Error(), "trailing-whitespace") {
+		t.Errorf("expected error to name the tier that found the ambiguity, got: %v", err)
+	}
+}
+
 func TestApplySearchReplace_NewlineNormalization(t *testing.T) {
 	dir := t.TempDir()
 	filePath := "test.txt"

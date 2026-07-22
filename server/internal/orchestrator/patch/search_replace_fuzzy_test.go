@@ -7,13 +7,69 @@ import (
 	"testing"
 )
 
+func TestTrailingWSMatch(t *testing.T) {
+	t.Run("single match with trailing-space-only diff, leading indent must match exactly", func(t *testing.T) {
+		content := "func main() {\n\tfmt.Println(\"hi\")   \n}\n"
+		search := "func main() {\n\tfmt.Println(\"hi\")\n}\n"
+
+		start, end, deltas, indentChar, ok, matchCount := trailingWSMatch(content, search)
+		if matchCount > 1 {
+			t.Fatalf("expected unambiguous match")
+		}
+		if !ok {
+			t.Fatalf("expected match, got none")
+		}
+		if content[start:end] != content {
+			t.Errorf("matched window = %q", content[start:end])
+		}
+		if len(deltas) != 3 {
+			t.Errorf("expected 3 deltas, got %d: %v", len(deltas), deltas)
+		}
+		if indentChar != '\t' {
+			t.Errorf("expected detected indent char '\\t', got %q", indentChar)
+		}
+	})
+
+	t.Run("does not match when leading indentation differs (unlike full-trim tier)", func(t *testing.T) {
+		content := "\tfmt.Println(\"hi\")\n"
+		search := "fmt.Println(\"hi\")\n"
+
+		_, _, _, _, ok, matchCount := trailingWSMatch(content, search)
+		if ok || matchCount > 1 {
+			t.Errorf("expected no match on differing leading indentation; got ok=%v matchCount=%v", ok, matchCount)
+		}
+	})
+
+	t.Run("ambiguous when two identical trailing-trimmed candidates exist", func(t *testing.T) {
+		content := "x  \ny\nx\ny\n"
+		search := "x\ny\n"
+
+		_, _, _, _, ok, matchCount := trailingWSMatch(content, search)
+		if ok {
+			t.Errorf("expected no confirmed match on ambiguous input")
+		}
+		if matchCount != 2 {
+			t.Errorf("expected matchCount=2, got %d", matchCount)
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		content := "foo\nbar\n"
+		search := "baz\n"
+		_, _, _, _, ok, matchCount := trailingWSMatch(content, search)
+		if ok || matchCount > 1 {
+			t.Errorf("expected no match, no ambiguity; got ok=%v matchCount=%v", ok, matchCount)
+		}
+	})
+}
+
 func TestTrimmedLineMatch(t *testing.T) {
 	t.Run("single match with trailing-space-only diff", func(t *testing.T) {
 		content := "func main() {\n\tfmt.Println(\"hi\")   \n}\n"
 		search := "func main() {\n\tfmt.Println(\"hi\")\n}\n"
 
-		start, end, deltas, indentChar, ok, ambiguous := trimmedLineMatch(content, search)
-		if ambiguous {
+		start, end, deltas, indentChar, ok, matchCount := trimmedLineMatch(content, search)
+		if matchCount > 1 {
 			t.Fatalf("expected unambiguous match")
 		}
 		if !ok {
@@ -34,21 +90,21 @@ func TestTrimmedLineMatch(t *testing.T) {
 		content := "  x\ny\n  x\ny\n"
 		search := "x\ny\n"
 
-		_, _, _, _, ok, ambiguous := trimmedLineMatch(content, search)
+		_, _, _, _, ok, matchCount := trimmedLineMatch(content, search)
 		if ok {
 			t.Errorf("expected no confirmed match on ambiguous input")
 		}
-		if !ambiguous {
-			t.Errorf("expected ambiguous=true")
+		if matchCount != 2 {
+			t.Errorf("expected matchCount=2, got %d", matchCount)
 		}
 	})
 
 	t.Run("no match", func(t *testing.T) {
 		content := "foo\nbar\n"
 		search := "baz\n"
-		_, _, _, _, ok, ambiguous := trimmedLineMatch(content, search)
-		if ok || ambiguous {
-			t.Errorf("expected no match, no ambiguity; got ok=%v ambiguous=%v", ok, ambiguous)
+		_, _, _, _, ok, matchCount := trimmedLineMatch(content, search)
+		if ok || matchCount > 1 {
+			t.Errorf("expected no match, no ambiguity; got ok=%v matchCount=%v", ok, matchCount)
 		}
 	})
 }
@@ -61,8 +117,8 @@ func TestRelativeIndentMatch(t *testing.T) {
 		content := "func f() {\n\tif true {\n\t\tdoStuff()\n\t}\n}\n"
 		search := "if true {\n\tdoStuff()\n}\n"
 
-		start, end, deltas, indentChar, ok, ambiguous := relativeIndentMatch(content, search)
-		if ambiguous {
+		start, end, deltas, indentChar, ok, matchCount := relativeIndentMatch(content, search)
+		if matchCount > 1 {
 			t.Fatalf("expected unambiguous match")
 		}
 		if !ok {
@@ -88,12 +144,12 @@ func TestRelativeIndentMatch(t *testing.T) {
 		content := "  a\n    b\n  a\n    b\n"
 		search := "a\n  b\n"
 
-		_, _, _, _, ok, ambiguous := relativeIndentMatch(content, search)
+		_, _, _, _, ok, matchCount := relativeIndentMatch(content, search)
 		if ok {
 			t.Errorf("expected no confirmed match on ambiguous input")
 		}
-		if !ambiguous {
-			t.Errorf("expected ambiguous=true")
+		if matchCount != 2 {
+			t.Errorf("expected matchCount=2, got %d", matchCount)
 		}
 	})
 }

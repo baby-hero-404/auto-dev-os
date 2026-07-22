@@ -52,7 +52,7 @@
 | [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | 📝 Authored |
 | [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | ✅ Done |
 | [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | ✅ Done — all tasks.md sections (1-6) complete |
-| [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | 📝 Authored |
+| [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | ✅ Done — all tasks.md items complete (1.1/1.9 skipped, no corpus available) |
 | [`definition-of-ready-gate/`](./definition-of-ready-gate/proposal.md) | P2.2 | 📝 Authored |
 | [`review-verdict-split/`](./review-verdict-split/proposal.md) | P2.3 | 📝 Authored |
 | [`tool-output-filtering/`](./tool-output-filtering/proposal.md) | P2.4 | 📝 Authored |

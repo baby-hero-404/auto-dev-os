@@ -3,14 +3,14 @@
 ## Added Requirements
 
 ### REQ-001: Tier 0 giữ nguyên hành vi exact
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN search block match exact duy nhất
 - THEN kết quả apply byte-identical với implementation hiện tại (toàn bộ test cũ pass không sửa)
 
 ### REQ-002: Tier 1 — trailing whitespace
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN search block khác content chỉ ở trailing spaces/tabs cuối dòng
@@ -18,28 +18,28 @@
 - AND các dòng không thuộc match giữ nguyên từng byte
 
 ### REQ-003: Tier 2 — relative indent
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN search block đúng nội dung nhưng toàn khối lệch indent đều (vd LLM bỏ 4 spaces đầu)
 - THEN match được tìm theo relative indent và replace block được re-indent theo indent thực tế của content
 
 ### REQ-004: Tier 3 — line-trim
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN từng dòng của search match content sau TrimSpace, cùng số dòng, duy nhất 1 vị trí
 - THEN apply thành công, giữ indentation của content cho phần không đổi giữa search/replace
 
 ### REQ-005: Unique-match enforcement mọi tier
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN một tier tìm thấy ≥2 vị trí match
 - THEN fail ngay với message chứa tier name + số vị trí (không thử tier tiếp theo — nhiều match mờ là tín hiệu patch nguy hiểm)
 
 ### REQ-006: Tier telemetry
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN apply thành công ở tier > 0
@@ -48,7 +48,7 @@
 ## Modified Requirements
 
 ### REQ-M01: Error message khi mọi tier fail
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN không tier nào match

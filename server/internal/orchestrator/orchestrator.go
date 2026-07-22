@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,10 +14,12 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/checkpoint"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -491,6 +495,98 @@ func (o *Orchestrator) CheckReviewLoopLimit(ctx context.Context, taskID string) 
 		_, _ = o.updateTaskStatus(ctx, taskID, models.TaskStatusFailed)
 		o.log(ctx, taskID, nil, "error", fmt.Sprintf("review loop limit exceeded (limit: %d). task marked as failed.", maxReviewFixCycles))
 		return fmt.Errorf("review loop limit of %d exceeded. task has failed", maxReviewFixCycles)
+	}
+	return nil
+}
+
+// GetTaskSpec reads the 4 CLI-flow OpenSpec docs off the task's host
+// worktree (docs/openspecs/<slug>/) and returns their content plus
+// tasks.md checkbox progress. Returns an error if the spec dir is absent
+// (cli_spec has not run yet).
+func (o *Orchestrator) GetTaskSpec(ctx context.Context, taskID string) (*models.TaskSpec, error) {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if o.repoutil == nil {
+		return nil, fmt.Errorf("spec unavailable: no repository configured")
+	}
+	repoPath, err := o.repoutil.GetTaskRepoHostPath(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	root := o.repoutil.HostWorktreePath(task, repoPath, "")
+	slug := steps.TaskSpecSlug(task)
+	specDir := filepath.Join(root, "docs", "openspecs", slug)
+
+	if _, err := os.Stat(specDir); err != nil {
+		return nil, fmt.Errorf("spec not found: cli_spec has not run yet for this task")
+	}
+
+	read := func(name string) string {
+		content, err := os.ReadFile(filepath.Join(specDir, name))
+		if err != nil {
+			return ""
+		}
+		return string(content)
+	}
+
+	tasksMD := read("tasks.md")
+	done, total := workflow.ParseCheckboxes(tasksMD)
+
+	return &models.TaskSpec{
+		Proposal: read("proposal.md"),
+		Specs:    read("specs.md"),
+		Design:   read("design.md"),
+		Tasks:    tasksMD,
+		Progress: models.TaskSpecProgress{Done: done, Total: total},
+	}, nil
+}
+
+// SaveSpecReviewCycle records a cli_spec "request changes" cycle so
+// CheckSpecReviewLoopLimit can enforce MaxReviewFixCycles.
+func (o *Orchestrator) SaveSpecReviewCycle(ctx context.Context, taskID string, comment string) error {
+	stateBytes, err := json.Marshal(map[string]any{"comment": comment})
+	if err != nil {
+		return err
+	}
+	return o.workflows.CreateCheckpoint(ctx, models.WorkflowCheckpoint{
+		TaskID: taskID,
+		Step:   "cli_spec_review_cycle",
+		State:  stateBytes,
+	})
+}
+
+// CheckSpecReviewLoopLimit fails the task once request_changes cycles on
+// cli_spec reach the project's MaxReviewFixCycles limit.
+func (o *Orchestrator) CheckSpecReviewLoopLimit(ctx context.Context, taskID string) error {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	maxReviewFixCycles := 3
+	if o.projects != nil {
+		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil && p.MaxReviewFixCycles > 0 {
+			maxReviewFixCycles = p.MaxReviewFixCycles
+		}
+	}
+
+	checkpoints, err := o.workflows.ListCheckpoints(ctx, taskID)
+	if err != nil {
+		return err
+	}
+
+	cycleCount := 0
+	for _, cp := range checkpoints {
+		if cp.Step == "cli_spec_review_cycle" {
+			cycleCount++
+		}
+	}
+
+	if cycleCount >= maxReviewFixCycles {
+		_, _ = o.updateTaskStatus(ctx, taskID, models.TaskStatusFailed)
+		o.log(ctx, taskID, nil, "error", fmt.Sprintf("spec review loop limit exceeded (limit: %d). task marked as failed.", maxReviewFixCycles))
+		return fmt.Errorf("spec review loop limit of %d exceeded. task has failed", maxReviewFixCycles)
 	}
 	return nil
 }

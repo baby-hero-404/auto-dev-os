@@ -3,7 +3,7 @@
 ## Added Requirements
 
 ### REQ-001: Workflow selection theo engine
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task được dispatch với engine resolve = `cli`
@@ -11,7 +11,7 @@
 - AND WHEN engine = `api_native` THEN DAG hiện tại được build, không khác biệt so với trước feature này
 
 ### REQ-002: cli_analyze
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN step cli_analyze chạy
@@ -19,7 +19,7 @@
 - AND server đọc file đó, lưu nội dung parse được vào `task.Analysis`, fail step nếu file không tồn tại sau khi CLI exit 0
 
 ### REQ-003: cli_spec — OpenSpec authoring
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN step cli_spec chạy
@@ -28,7 +28,7 @@
 - AND `tasks.md` phải chứa ít nhất 1 checkbox, parse bằng regex khoan dung `(?im)^\s*[-*]\s*\[([ xX])\]` (LLM hay viết `- [X]`, `* [x]`, thừa space — exact match `- [ ]` sẽ đếm sai)
 
 ### REQ-004: Spec approval gate
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN project autonomy = `supervised` và cli_spec hoàn thành
@@ -41,7 +41,7 @@
 - THEN gate được bỏ qua, cli_implement chạy ngay
 
 ### REQ-005: cli_implement
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN cli_implement chạy
@@ -51,7 +51,7 @@
 - AND checkpoint được tạo qua `CreateGitCheckpoint` như code steps hiện tại
 
 ### REQ-006: cli_mr
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN cli_implement thành công
@@ -59,7 +59,7 @@
 - AND PR description dẫn lại nội dung `proposal.md` (Why/What Changes)
 
 ### REQ-007: Spec panel trong task detail
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task chạy CLI flow đã qua cli_spec
@@ -69,7 +69,7 @@
 ## Modified Requirements
 
 ### REQ-M01: BuildWorkflow signature
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN `BuildWorkflow` được gọi

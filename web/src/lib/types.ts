@@ -15,6 +15,17 @@ export type AuthResponse = {
   };
 };
 
+export type ExecutionEngine = "api_native" | "cli";
+
+export type CLIEngineConfig = {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  timeout_minutes: number;
+  auth_check_command?: string;
+  allow_noop?: boolean;
+};
+
 export type Project = {
   id: string;
   org_id: string;
@@ -26,6 +37,8 @@ export type Project = {
   max_retries?: number;
   max_review_fix_cycles?: number;
   default_branch?: string;
+  execution_engine?: ExecutionEngine;
+  cli_engine_config?: CLIEngineConfig;
   repositories_count?: number;
   agents_count?: number;
   tasks_done_count?: number;
@@ -80,8 +93,17 @@ export type Task = {
   analysis?: TaskAnalysis;
   spec_status: string;
   clarifications?: ClarificationRound[];
+  execution_engine?: ExecutionEngine | null;
   created_at: string;
   updated_at: string;
+};
+
+export type TaskSpec = {
+  proposal: string;
+  specs: string;
+  design: string;
+  tasks: string;
+  progress: { done: number; total: number };
 };
 
 export type ClarificationRound = {

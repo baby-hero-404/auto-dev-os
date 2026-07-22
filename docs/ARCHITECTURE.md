@@ -148,9 +148,9 @@ auto_code_os/
 | Model       | Description                                        | Key Fields                                          |
 | :---------- | :------------------------------------------------- | :-------------------------------------------------- |
 | **Organization** | Top-level tenant                              | `id`, `name`, `created_at`                          |
-| **Project** | Groups repos, rules, agents                        | `id`, `org_id`, `name`, `description`               |
+| **Project** | Groups repos, rules, agents                        | `id`, `org_id`, `name`, `description`, `execution_engine`, `cli_engine_config` |
 | **Repository** | Git repository linked to a project             | `id`, `project_id`, `url`, `provider`, `token`, `git_account_id` |
-| **Task**    | Unit of work for an agent (supports sub-tasks)     | `id`, `project_id`, `title`, `status`, `complexity`, `analysis`, `spec_status` |
+| **Task**    | Unit of work for an agent (supports sub-tasks)     | `id`, `project_id`, `title`, `status`, `complexity`, `analysis`, `spec_status`, `execution_engine` |
 | **User**    | Developer / reviewer account                       | `id`, `email`, `password_hash`, `org_id`, `role`    |
 | **Agent**   | AI worker (supports self-improving loop & subagents)| `id`, `org_id`, `name`, `role`, `goal`, `model_route`, `autonomy_level`, `context_config` |
 | **Rule**    | Behavioral constraints & Sandbox directives          | `id`, `scope` (global/project), `content`, `enforcement` |
@@ -224,6 +224,23 @@ auto_code_os/
 | `APPROVED` | Spec finalized, ready to execute |
 | `AUTO_APPROVED` | Easy + low-risk task — auto-validated by agent |
 
+## 4.2 CLI Spec-First Flow (engine = `cli`)
+
+> Full spec: `docs/openspecs/cli-spec-first-flow/`. Backend core (sections 1-3, 6.1) implemented; approval gate, spec-read API, and frontend UI are a follow-up pass.
+
+When a task/project resolves execution engine to `cli` (via `engine.ResolveEngine`), `worker.go` builds `workflow.CLISpecFirstWorkflow` instead of the `api_native` complexity-based DAG:
+
+```
+cli_analyze → cli_spec → cli_implement → cli_mr
+```
+
+- **cli_analyze**: spawns the CLI agent to analyze the repo/task, requires it to write `.autocode/analysis.md`. Since the CLI engine deletes `.autocode/` right after the subprocess exits, this file is captured via `engine.CodeStepRequest.CaptureFiles` (base64-encoded to stdout behind sentinel markers before cleanup runs) rather than read from disk afterward.
+- **cli_spec**: spawns the CLI agent to author the 4 OpenSpec files (`proposal.md`, `specs.md`, `design.md`, `tasks.md`) under `docs/openspecs/<task-slug>/` in the real worktree — these survive the run (unlike `.autocode/`), so the step reads them straight off the host filesystem via `WorktreeHostPathResolver`.
+- **cli_implement**: spawns the CLI agent to implement against the spec set; validated by git diff (changes outside `docs/openspecs/` required, unless the task carries the `docs-only` label or `proposal.md` declares `type: documentation` in YAML frontmatter).
+- **cli_mr**: a thin wrapper (`CLIMRStep{ *PRStep }`) reusing the existing PR step's push/merge-request logic verbatim.
+
+Prompt templates for these 3 steps live in `server/internal/prompts/steps/cli_*.md` and are loaded via the lightweight `PromptBuilder.LoadStepPrompt` (not the full multi-turn `Assemble`/`AssembleForAgent` machinery, since each CLI step builds one standalone instruction string per spawn).
+
 ## 5. Rule Engine Architecture (Strict Layered Context)
 
 ```
@@ -262,7 +279,9 @@ auto_code_os/
 | `server/internal/handler`      | `server/internal/service`                             |
 | `server/internal/service`      | `server/internal/repository`, `server/pkg/llm`        |
 | `server/internal/repository`   | `server/pkg/models`, PostgreSQL                       |
-| `server/internal/orchestrator` | `server/internal/service`, `server/internal/sandbox`  |
+| `server/internal/orchestrator` | `server/internal/service`, `server/internal/sandbox`, `server/internal/orchestrator/engine`, `server/internal/orchestrator/steps` |
+| `server/internal/orchestrator/engine` | `server/pkg/models`, `server/internal/sandbox`  |
+| `server/internal/orchestrator/steps` | `server/internal/workflow`, `server/pkg/models`, `server/pkg/paths` |
 | `server/internal/workflow`     | `server/internal/orchestrator`, `server/internal/gitops` |
 | `server/internal/gitops`       | `server/pkg/config` (for Git tokens), GitHub API      |
 | `server/pkg/llm`               | `server/pkg/config` (for API keys)                    |
@@ -305,6 +324,7 @@ auto_code_os/
 | `000011` | Phase 4 | provider_credentials, model_routes, credential_usage_logs | `000011_unified_ai_gateway.up.sql` |
 | `000012` | Phase 3a | agents (role, autonomy, context) | `000012_role_based_agents.up.sql` |
 | `000013` | Phase 3a | org_global_rules | `000013_org_global_rules.up.sql` |
+| `000013` | Phase 1 | projects, tasks (execution_engine, cli_engine_config) | `000013_add_execution_engine.up.sql` |
 
 ## 8. Reference Projects
 

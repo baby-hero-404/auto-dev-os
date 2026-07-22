@@ -144,6 +144,14 @@ const (
 	minRepoMapTokens = 256
 )
 
+// LoadStepPrompt exposes step prompt file loading (with the existing
+// base-name fallback) to callers outside the tool-loop assembler pipeline —
+// e.g. the CLI spec-first steps, which build one standalone instruction
+// string per spawn rather than assembling multi-section tool-loop prompts.
+func (a *PromptAssembler) LoadStepPrompt(stepID string) (string, error) {
+	return a.loadStepPromptWithFallback(stepID)
+}
+
 // loadStepPromptWithFallback implements fallback-based step prompt loading (REQ-004).
 func (a *PromptAssembler) loadStepPromptWithFallback(stepID string) (string, error) {
 	if a.promptPaths == nil || a.fs == nil {

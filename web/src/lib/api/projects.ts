@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis } from "../types";
+import type { CLIEngineConfig, ExecutionEngine, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -26,6 +26,8 @@ export function update(projectID: string, token: string, input: {
   max_retries?: number;
   max_review_fix_cycles?: number;
   default_branch?: string;
+  execution_engine?: ExecutionEngine;
+  cli_engine_config?: CLIEngineConfig;
 }) {
   return request<Project>(`/projects/${projectID}`, {
     method: "PATCH",
@@ -106,7 +108,7 @@ export const tasks = {
   create(
     projectID: string,
     token: string,
-    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string },
+    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string; execution_engine?: ExecutionEngine },
   ) {
     return request<Task>(`/projects/${projectID}/tasks`, {
       method: "POST",
@@ -139,6 +141,16 @@ export const tasks = {
       method: "POST",
       token,
       body: JSON.stringify({ context }),
+    });
+  },
+  getSpec(taskID: string, token: string) {
+    return request<TaskSpec>(`/tasks/${taskID}/spec`, { token });
+  },
+  specReview(taskID: string, token: string, action: "approve" | "request_changes", comment?: string) {
+    return request<Task>(`/tasks/${taskID}/spec-review`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ action, comment: comment ?? "" }),
     });
   },
   clarify(taskID: string, token: string, context: string) {

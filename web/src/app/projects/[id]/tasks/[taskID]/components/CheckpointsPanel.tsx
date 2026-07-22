@@ -2,7 +2,18 @@
  
 import { useTaskDetail } from "./TaskDetailContext";
 import { AlertTriangle, Bot, Milestone, Calendar, Info } from "lucide-react";
- 
+
+const STEP_LABELS: Record<string, string> = {
+  cli_analyze: "Analyze (CLI)",
+  cli_spec: "Author Spec (CLI)",
+  cli_implement: "Implement (CLI)",
+  cli_mr: "Merge Request (CLI)",
+};
+
+function friendlyStepName(step: string): string {
+  return STEP_LABELS[step] ?? step;
+}
+
 export function CheckpointsPanel() {
   const { task, workflow } = useTaskDetail();
  
@@ -98,7 +109,7 @@ export function CheckpointsPanel() {
               return (
                 <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-slate-500/5 transition-colors duration-150">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono font-bold text-foreground truncate">{cp.step}</span>
+                    <span className="font-mono font-bold text-foreground truncate">{friendlyStepName(cp.step)}</span>
                     <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge}`}>
                       {status}
                     </span>

@@ -206,6 +206,21 @@ func DeriveBranchName(taskID string, title string) string {
 	return "feature/" + slug + "-" + shortID
 }
 
+// DeriveTaskSlug generates the same slug-<short_task_id> identifier used by
+// DeriveBranchName but without the "feature/" branch prefix, for use as a
+// directory name (e.g. docs/openspecs/<task-slug>/).
+func DeriveTaskSlug(taskID string, title string) string {
+	slug := Slugify(title)
+	shortID := taskID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	if slug == "" {
+		return shortID
+	}
+	return slug + "-" + shortID
+}
+
 // DeriveRoleBranchName generates a clean, URL/branch-safe branch name with a role suffix.
 func DeriveRoleBranchName(taskID string, title string, roleSuffix string) string {
 	branch := DeriveBranchName(taskID, title)

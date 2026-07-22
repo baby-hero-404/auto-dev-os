@@ -19,6 +19,12 @@ const (
 	StepFix          = "fix"
 	StepTest         = "test"
 	StepPR           = "pr"
+
+	// CLI spec-first pipeline (engine=cli): cli_analyze -> cli_spec -> cli_implement -> cli_mr.
+	StepCLIAnalyze   = "cli_analyze"
+	StepCLISpec      = "cli_spec"
+	StepCLIImplement = "cli_implement"
+	StepCLIMR        = "cli_mr"
 )
 
 // Step status constants used across the engine and API.
@@ -247,6 +253,26 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 	return Definition{Name: "auto-code-os-dynamic-dag-workflow", Steps: steps}
 }
 
+// CLISpecFirstWorkflow builds the 4-step pipeline used when a task resolves
+// to engine "cli": the black-box CLI agent owns its own tool-loop, context
+// loading, and planning, so the server's job is reduced to spec-first
+// gating (analyze -> author spec -> implement against it -> open the MR)
+// rather than the API-native DAG's per-tool-call orchestration.
+func CLISpecFirstWorkflow(runners map[string]StepFunc) Definition {
+	statusSchema := Schema{Fields: map[string]FieldSchema{
+		"status": {Type: FieldString, Required: false},
+	}}
+
+	steps := []StepDefinition{
+		{ID: StepCLIAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepCLIAnalyze]},
+		{ID: StepCLISpec, Name: "Author Spec", DependsOn: []string{StepCLIAnalyze}, OutputSchema: statusSchema, Run: runners[StepCLISpec]},
+		{ID: StepCLIImplement, Name: "Implement", DependsOn: []string{StepCLISpec}, OutputSchema: statusSchema, Run: runners[StepCLIImplement]},
+		{ID: StepCLIMR, Name: "Merge Request", DependsOn: []string{StepCLIImplement}, OutputSchema: statusSchema, Run: runners[StepCLIMR]},
+	}
+
+	return Definition{Name: "auto-code-os-cli-spec-first-workflow", Steps: steps}
+}
+
 func HardWorkflow(runners map[string]StepFunc, subtasks map[string][]string) Definition {
 	def := MediumWorkflow(runners, subtasks)
 	def.Name = "auto-code-os-hard-workflow"
@@ -266,6 +292,10 @@ func DescribeStep(name string) string {
 		"fix":           "Fix review feedback",
 		"test":          "Run test suite",
 		"pr":            "Create pull request",
+		"cli_analyze":   "Analyze repo & task with the CLI agent",
+		"cli_spec":      "Author OpenSpec set with the CLI agent",
+		"cli_implement": "Implement against the approved spec",
+		"cli_mr":        "Create merge request",
 	}
 	if d, ok := desc[name]; ok {
 		return d

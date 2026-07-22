@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { SpecPanel } from "./SpecPanel";
+import { CLISpecPanel } from "./CLISpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { CheckpointsPanel } from "./CheckpointsPanel";
 
@@ -140,6 +141,7 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
           }
         >
           <SpecPanel isExpanded={true} onToggle={() => {}} />
+          <CLISpecPanel />
         </AccordionItem>
       )}
 

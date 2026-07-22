@@ -233,6 +233,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Patch("/tasks/{taskID}/analysis", taskH.UpdateAnalysis)
 			r.Post("/tasks/{taskID}/analysis/approve", taskH.ApproveAnalysis)
 			r.Post("/tasks/{taskID}/analysis/request-changes", taskH.RequestAnalysisChanges)
+			r.Post("/tasks/{taskID}/spec-review", taskH.SpecReview)
+			r.Get("/tasks/{taskID}/spec", taskH.GetSpec)
 			r.Get("/tasks/{taskID}/subtasks", taskH.ListSubTasks)
 			r.Post("/tasks/{taskID}/subtasks", taskH.CreateSubTask)
 			r.Post("/tasks/{taskID}/execute", workflowH.Execute)

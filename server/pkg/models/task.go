@@ -59,55 +59,58 @@ const (
 
 // Task represents a unit of work for an agent.
 type Task struct {
-	ID             string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	ProjectID      string          `json:"project_id" gorm:"type:uuid;not null"`
-	AgentID        *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
-	ParentTaskID   *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
-	RepositoryID   *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
-	Title          string          `json:"title" gorm:"not null"`
-	Description    string          `json:"description" gorm:"default:''"`
-	Status         string          `json:"status" gorm:"default:'todo'"`
-	Complexity     string          `json:"complexity" gorm:"default:'easy'"`
-	Priority       int             `json:"priority" gorm:"default:0"`
-	Labels         pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
-	Analysis       json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
-	SpecStatus     string          `json:"spec_status" gorm:"default:'none'"`
-	Clarifications json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
-	PRURLs         pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
-	PRMetadata     json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
-	SubTasks       []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID              string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	ProjectID       string          `json:"project_id" gorm:"type:uuid;not null"`
+	AgentID         *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
+	ParentTaskID    *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
+	RepositoryID    *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
+	Title           string          `json:"title" gorm:"not null"`
+	Description     string          `json:"description" gorm:"default:''"`
+	Status          string          `json:"status" gorm:"default:'todo'"`
+	Complexity      string          `json:"complexity" gorm:"default:'easy'"`
+	Priority        int             `json:"priority" gorm:"default:0"`
+	Labels          pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
+	Analysis        json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
+	SpecStatus      string          `json:"spec_status" gorm:"default:'none'"`
+	Clarifications  json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
+	PRURLs          pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
+	PRMetadata      json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
+	ExecutionEngine *string         `json:"execution_engine,omitempty" gorm:"column:execution_engine"` // nil = inherit from project
+	SubTasks        []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // CreateTaskInput is the payload to create a task.
 type CreateTaskInput struct {
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
-	Complexity   string   `json:"complexity"`
-	Priority     int      `json:"priority"`
-	Labels       []string `json:"labels"`
-	ParentTaskID *string  `json:"parent_task_id,omitempty"`
-	AgentID      *string  `json:"agent_id,omitempty"`
-	RepositoryID *string  `json:"repository_id,omitempty"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Complexity      string   `json:"complexity"`
+	Priority        int      `json:"priority"`
+	Labels          []string `json:"labels"`
+	ParentTaskID    *string  `json:"parent_task_id,omitempty"`
+	AgentID         *string  `json:"agent_id,omitempty"`
+	RepositoryID    *string  `json:"repository_id,omitempty"`
+	ExecutionEngine *string  `json:"execution_engine,omitempty"`
 }
 
 // UpdateTaskInput is the payload to partially update a task.
 type UpdateTaskInput struct {
-	Title          *string         `json:"title,omitempty"`
-	Description    *string         `json:"description,omitempty"`
-	Status         *string         `json:"status,omitempty"`
-	Complexity     *string         `json:"complexity,omitempty"`
-	Priority       *int            `json:"priority,omitempty"`
-	Labels         []string        `json:"labels,omitempty"`
-	AgentID        *string         `json:"agent_id,omitempty"`
-	RepositoryID   *string         `json:"repository_id,omitempty"`
-	Analysis       json.RawMessage `json:"analysis,omitempty"`
-	SpecStatus     *string         `json:"spec_status,omitempty"`
-	Clarifications json.RawMessage `json:"clarifications,omitempty"`
-	PRURLs         *pq.StringArray `json:"pr_urls,omitempty"`
-	PRMetadata     json.RawMessage `json:"pr_metadata,omitempty"`
-	ParentTaskID   *string         `json:"parent_task_id,omitempty"`
+	Title           *string         `json:"title,omitempty"`
+	Description     *string         `json:"description,omitempty"`
+	Status          *string         `json:"status,omitempty"`
+	Complexity      *string         `json:"complexity,omitempty"`
+	Priority        *int            `json:"priority,omitempty"`
+	Labels          []string        `json:"labels,omitempty"`
+	AgentID         *string         `json:"agent_id,omitempty"`
+	RepositoryID    *string         `json:"repository_id,omitempty"`
+	Analysis        json.RawMessage `json:"analysis,omitempty"`
+	SpecStatus      *string         `json:"spec_status,omitempty"`
+	Clarifications  json.RawMessage `json:"clarifications,omitempty"`
+	PRURLs          *pq.StringArray `json:"pr_urls,omitempty"`
+	PRMetadata      json.RawMessage `json:"pr_metadata,omitempty"`
+	ParentTaskID    *string         `json:"parent_task_id,omitempty"`
+	ExecutionEngine *string         `json:"execution_engine,omitempty"`
 }
 
 type ComplexityDetails struct {
@@ -241,6 +244,21 @@ type FrozenContext struct {
 	ExecutionPhases     []ExecutionPhase    `json:"execution_phases"`
 	Risks               []string            `json:"risks"`
 	RiskDomains         []string            `json:"risk_domains"`
+}
+
+type TaskSpecProgress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+
+// TaskSpec is the 4-file OpenSpec bundle authored by the CLI spec-first
+// flow's cli_spec step, read live from the task's worktree.
+type TaskSpec struct {
+	Proposal string           `json:"proposal"`
+	Specs    string           `json:"specs"`
+	Design   string           `json:"design"`
+	Tasks    string           `json:"tasks"`
+	Progress TaskSpecProgress `json:"progress"`
 }
 
 type ClarifyTaskInput struct {

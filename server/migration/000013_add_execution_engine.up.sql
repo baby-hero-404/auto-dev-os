@@ -1,0 +1,3 @@
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS execution_engine TEXT NOT NULL DEFAULT 'api_native';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS cli_engine_config JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_engine TEXT;

@@ -13,6 +13,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
+	cliengine "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
@@ -296,7 +297,18 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 	runners := o.stepRunners(task, agent, job.ID, job.Step)
 	var def workflow.Definition
-	if len(task.Analysis) > 0 {
+
+	var projectEngine string
+	if o.projects != nil {
+		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil {
+			projectEngine = p.ExecutionEngine
+		}
+	}
+	if cliengine.ResolveEngine(task.ExecutionEngine, projectEngine) == models.ExecutionEngineCLI {
+		def = workflow.CLISpecFirstWorkflow(runners)
+	}
+
+	if def.Name == "" && len(task.Analysis) > 0 {
 		var analysis models.TaskAnalysis
 		if json.Unmarshal(task.Analysis, &analysis) == nil && len(analysis.ExecutionUnits) > 0 {
 			def = workflow.DynamicDAGWorkflow(runners, analysis.ExecutionUnits)

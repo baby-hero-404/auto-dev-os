@@ -74,6 +74,12 @@ export function TaskTitleBlock() {
           <span className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shadow-sm">
             P{task?.priority || 0}
           </span>
+          <span
+            className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-slate-500/5 text-content-muted border border-stroke/15 shadow-sm"
+            title={task?.execution_engine ? `Engine override: ${task.execution_engine}` : "Inherits the project's default execution engine"}
+          >
+            Engine: {task?.execution_engine === "cli" ? "CLI" : task?.execution_engine === "api_native" ? "API-native" : "Inherited"}
+          </span>
         </div>
         <div className="mt-4 bg-slate-500/[0.02] dark:bg-slate-900/10 rounded-2xl border border-stroke/10 p-4 shadow-sm">
           <DescriptionBody />

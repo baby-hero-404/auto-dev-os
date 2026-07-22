@@ -30,6 +30,11 @@ type PromptBuilder interface {
 	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error)
 	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
 	ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error)
+	// LoadStepPrompt loads a step's standalone instruction template — used
+	// by the CLI spec-first steps (cli_analyze/cli_spec/cli_implement),
+	// which build one full instruction per spawn rather than assembling a
+	// multi-section tool-loop prompt.
+	LoadStepPrompt(stepID string) (string, error)
 }
 
 // GitOpsClient handles git operations (clone, branch, push, PR).

@@ -90,3 +90,29 @@ func TestComplexityWorkflowDefinitions(t *testing.T) {
 		t.Fatalf("expected merge to depend on both code steps, got %#v", hard.Steps[5].DependsOn)
 	}
 }
+
+func TestCLISpecFirstWorkflow(t *testing.T) {
+	runners := map[string]StepFunc{}
+	def := CLISpecFirstWorkflow(runners)
+	if len(def.Steps) != 4 {
+		t.Fatalf("expected 4 steps, got %d", len(def.Steps))
+	}
+	wantOrder := []string{StepCLIAnalyze, StepCLISpec, StepCLIImplement, StepCLIMR}
+	for i, s := range def.Steps {
+		if s.ID != wantOrder[i] {
+			t.Errorf("step %d: got %q, want %q", i, s.ID, wantOrder[i])
+		}
+		if i == 0 {
+			if len(s.DependsOn) != 0 {
+				t.Errorf("expected first step to have no dependencies, got %#v", s.DependsOn)
+			}
+			continue
+		}
+		if len(s.DependsOn) != 1 || s.DependsOn[0] != wantOrder[i-1] {
+			t.Errorf("step %q: expected dependency on %q, got %#v", s.ID, wantOrder[i-1], s.DependsOn)
+		}
+	}
+	if _, err := ValidateDAG(def); err != nil {
+		t.Fatalf("expected valid DAG, got %v", err)
+	}
+}

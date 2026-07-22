@@ -9,10 +9,11 @@ import { TaskHeroCards } from "./TaskHeroCards";
 import { TaskSubtasks } from "./TaskSubtasks";
 import { TaskSidebar } from "./TaskSidebar";
 import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
+import { CLISpecReviewControls } from "./CLISpecReviewControls";
 import { SupportingAccordion } from "./SupportingAccordion";
 
 export function TaskDetailLayout() {
-  const { task, workflow, updateTask, execute, setError, isTaskLoading, workflowError } = useTaskDetail();
+  const { task, taskID, token, workflow, updateTask, execute, mutateWorkflow, setError, isTaskLoading, workflowError } = useTaskDetail();
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     specification: false,
@@ -91,13 +92,24 @@ export function TaskDetailLayout() {
                 {workflow.job.last_error}
               </p>
               <div className="z-10">
-                <BoundaryResolutionControls
-                  errorMsg={workflow.job.last_error}
-                  task={task}
-                  updateTask={updateTask}
-                  execute={execute}
-                  setError={setError}
-                />
+                {workflow.job.last_error === "workflow paused for human spec review" && task?.execution_engine === "cli" ? (
+                  <CLISpecReviewControls
+                    taskID={taskID}
+                    token={token}
+                    onReviewed={async () => {
+                      await mutateWorkflow();
+                    }}
+                    setError={setError}
+                  />
+                ) : (
+                  <BoundaryResolutionControls
+                    errorMsg={workflow.job.last_error}
+                    task={task}
+                    updateTask={updateTask}
+                    execute={execute}
+                    setError={setError}
+                  />
+                )}
               </div>
             </div>
           )}

@@ -104,6 +104,80 @@ func (h *TaskHandler) RequestAnalysisChanges(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, t)
 }
 
+// GetSpec reads the CLI spec-first flow's 4 OpenSpec docs live off the
+// task's worktree, for the frontend Spec panel.
+func (h *TaskHandler) GetSpec(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	if h.orch == nil {
+		writeError(w, http.StatusNotFound, "spec not found")
+		return
+	}
+	spec, err := h.orch.GetTaskSpec(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, spec)
+}
+
+type specReviewRequest struct {
+	Action  string `json:"action"`
+	Comment string `json:"comment"`
+}
+
+// SpecReview handles the CLI spec-first flow's approval gate: approve
+// dispatches cli_implement, request_changes re-dispatches cli_spec with the
+// reviewer's comment, subject to the project's MaxReviewFixCycles limit.
+func (h *TaskHandler) SpecReview(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	var input specReviewRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	switch input.Action {
+	case "approve":
+		t, err := h.svc.ApproveAnalysis(r.Context(), id)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		if h.orch != nil {
+			if _, err := h.orch.Execute(r.Context(), id); err != nil {
+				writeServiceError(w, err)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, t)
+	case "request_changes":
+		if h.orch != nil {
+			if err := h.orch.CheckSpecReviewLoopLimit(r.Context(), id); err != nil {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+		}
+		t, err := h.svc.RequestAnalysisChanges(r.Context(), id, models.ClarifyTaskInput{Context: input.Comment})
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		if h.orch != nil {
+			if err := h.orch.SaveSpecReviewCycle(r.Context(), id, input.Comment); err != nil {
+				writeServiceError(w, err)
+				return
+			}
+			if _, err := h.orch.Execute(r.Context(), id); err != nil {
+				writeServiceError(w, err)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, t)
+	default:
+		writeError(w, http.StatusBadRequest, "action must be 'approve' or 'request_changes'")
+	}
+}
+
 func (h *TaskHandler) UpdateAnalysis(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	var raw json.RawMessage

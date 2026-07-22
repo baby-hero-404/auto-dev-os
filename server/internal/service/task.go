@@ -36,6 +36,11 @@ func (s *TaskService) Create(ctx context.Context, projectID string, input models
 			return nil, ErrValidation("repository does not belong to the project")
 		}
 	}
+	if input.ExecutionEngine != nil && *input.ExecutionEngine != "" {
+		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
+			return nil, ErrValidation(err.Error())
+		}
+	}
 	task, err := s.repo.Create(ctx, projectID, input)
 	if err != nil {
 		return nil, err
@@ -59,6 +64,11 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 			return nil, err
 		}
 		if err := workflow.ValidateTaskTransition(task.Status, *input.Status); err != nil {
+			return nil, ErrValidation(err.Error())
+		}
+	}
+	if input.ExecutionEngine != nil && *input.ExecutionEngine != "" {
+		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
 			return nil, ErrValidation(err.Error())
 		}
 	}

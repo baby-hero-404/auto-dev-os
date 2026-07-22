@@ -292,3 +292,40 @@ func isFrontendFile(file string) bool {
 type AffectedFileReader interface {
 	ReadAffectedFileContent(ctx context.Context, task *models.Task, file string) (string, bool)
 }
+
+// CLIStepOutput is the result of dispatching one step through the pluggable
+// CLI engine. Used by: cli_analyze, cli_spec, cli_implement.
+type CLIStepOutput struct {
+	Output string
+	// Files holds the content of any paths requested via captureFiles that
+	// the CLI agent produced (e.g. ".autocode/analysis.md"), keyed by that
+	// relative path. Missing/unrequested files are simply absent.
+	Files map[string]string
+	// ChangedFiles lists repo-relative paths changed in the worktree by this
+	// run, used to validate that a step produced real code changes.
+	ChangedFiles []string
+}
+
+// CLIStepRunner dispatches a single spec-first CLI step (spawn the
+// configured CLI subprocess with the given instruction) and reports its
+// outcome. Distinct from LLMRunner: cli_analyze/cli_spec/cli_implement have
+// no patch-retry-loop or "zero changes = failure" semantics of their own —
+// each step decides pass/fail from its own file-based contract instead.
+// Used by: cli_analyze, cli_spec, cli_implement.
+type CLIStepRunner interface {
+	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string) (CLIStepOutput, error)
+}
+
+// WorktreeHostPathResolver resolves the host filesystem path of a task's
+// worktree root, for reading files a CLI step committed to the repo (as
+// opposed to ephemeral .autocode/ output, which goes through CLIStepRunner's
+// captureFiles instead). Used by: cli_spec, cli_implement.
+type WorktreeHostPathResolver interface {
+	ResolveHostWorktreeRoot(ctx context.Context, task *models.Task) (string, error)
+}
+
+// StepPromptLoader loads a step's standalone instruction template from disk.
+// Used by: cli_analyze, cli_spec, cli_implement.
+type StepPromptLoader interface {
+	LoadStepPrompt(stepID string) (string, error)
+}

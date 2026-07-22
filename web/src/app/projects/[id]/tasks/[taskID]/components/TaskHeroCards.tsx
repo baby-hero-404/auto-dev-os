@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { SpecPanel } from "./SpecPanel";
+import { CLISpecPanel } from "./CLISpecPanel";
 import {
   Clock,
   Sparkles,
@@ -144,6 +145,7 @@ export function TaskHeroCards() {
             </div>
           </div>
           <SpecPanel isExpanded={true} />
+          <CLISpecPanel />
         </div>
       )}
 

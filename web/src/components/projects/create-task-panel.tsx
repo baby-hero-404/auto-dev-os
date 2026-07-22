@@ -1,7 +1,7 @@
 "use client";
 import { FormEvent, useState, useEffect, useRef } from "react";
 import { Loader2, Plus, X, GitBranch, ChevronDown, Sparkles, AlertCircle, Maximize2 } from "lucide-react";
-import type { Agent, Repository } from "@/lib/types";
+import type { Agent, ExecutionEngine, Repository } from "@/lib/types";
 import { TaskMarkdownEditor } from "./TaskMarkdownEditor";
 import { AgentSelection } from "./AgentSelection";
 import { Field } from "./Field";
@@ -16,6 +16,7 @@ export type CreateTaskPayload = {
   labels: string[];
   agent_id?: string;
   repository_id?: string;
+  execution_engine?: ExecutionEngine;
 };
 
 export function CreateTaskPanel({
@@ -42,6 +43,7 @@ export function CreateTaskPanel({
   const [labels, setLabels] = useState<string[]>([]);
   const [agentID, setAgentID] = useState("");
   const [repositoryID, setRepositoryID] = useState("");
+  const [executionEngine, setExecutionEngine] = useState<"" | ExecutionEngine>("");
   const [isDescExpanded, setIsDescExpanded] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -103,6 +105,7 @@ export function CreateTaskPanel({
       labels,
       agent_id: agentID || undefined,
       repository_id: repositoryID || undefined,
+      execution_engine: executionEngine || undefined,
     });
     if (!created) return;
 
@@ -113,6 +116,7 @@ export function CreateTaskPanel({
     setLabels([]);
     setAgentID("");
     setRepositoryID("");
+    setExecutionEngine("");
   }
 
   if (!isOpen) return null;
@@ -241,6 +245,19 @@ export function CreateTaskPanel({
 
           <Field label="Assign Agent">
             <AgentSelection agents={agents} agentID={agentID} setAgentID={setAgentID} isSubmitting={isSubmitting} />
+          </Field>
+
+          <Field label="Execution Engine">
+            <select
+              value={executionEngine}
+              onChange={(e) => setExecutionEngine(e.target.value as "" | ExecutionEngine)}
+              className="w-full rounded-lg border border-stroke bg-surface px-4 py-2.5 text-sm text-foreground focus:border-brand-primary focus:ring-2 focus:ring-brand-primary-muted focus:outline-none transition-all duration-150 appearance-none cursor-pointer font-medium"
+              disabled={isSubmitting}
+            >
+              <option value="">Inherit from project</option>
+              <option value="api_native">API-native</option>
+              <option value="cli">CLI</option>
+            </select>
           </Field>
 
           {error && (

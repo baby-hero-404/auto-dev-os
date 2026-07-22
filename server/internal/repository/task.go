@@ -21,6 +21,7 @@ func (r *TaskRepo) Create(ctx context.Context, projectID string, input models.Cr
 		Complexity: input.Complexity, Priority: input.Priority,
 		Labels: pq.StringArray(input.Labels), ParentTaskID: input.ParentTaskID,
 		AgentID: input.AgentID, RepositoryID: input.RepositoryID, SpecStatus: models.TaskSpecStatusNone,
+		ExecutionEngine: input.ExecutionEngine,
 	}
 	if err := r.db.WithContext(ctx).Create(t).Error; err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
@@ -99,6 +100,14 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 	}
 	if input.PRMetadata != nil {
 		updates["pr_metadata"] = input.PRMetadata
+	}
+	if input.ExecutionEngine != nil {
+		// Empty string clears the override, reverting to project default (inherit).
+		if *input.ExecutionEngine == "" {
+			updates["execution_engine"] = nil
+		} else {
+			updates["execution_engine"] = *input.ExecutionEngine
+		}
 	}
 	if err := r.db.WithContext(ctx).Model(t).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update task: %w", err)

@@ -19,7 +19,7 @@
 | **P0.2** | 0 | Mở rộng `secretPatterns` memory redaction (AWS/JWT/Google/npm/gh tokens) | agentmemory | MED | 0.5d | ✅ Done — `memory.go:secretPatterns` |
 | **P0.3** | 0 | Wire `ApplyDecay()` vào ticker (pattern `cache_workers.go` có sẵn) | agentmemory, zep | MED | 2d | ✅ Done — `MemoryService.StartDecayWorker`, 6h interval, wired trong `main.go` |
 | **P0.4** | 0 | Circuit breaker cho `MemoryEmbedder.Embed()` → fallback BM25-only | zep | MED | 1d | ✅ Done — `embedder_breaker.go`, mở sau 5 lỗi liên tiếp, cooldown 2m |
-| **P1.1** | 1 — CLI Engine ⭐ | **Pluggable execution engine** — spawner interface + generic subprocess-CLI chạy trong sandbox, UI toggle per-project/per-task → [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | Multica, ai-sdlc (`SubagentSpawner`) | HIGH | 5-7d | Hướng chiến lược user chọn; mở billing qua subscription thay vì API key |
+| **P1.1** | 1 — CLI Engine ⭐ | **Pluggable execution engine** — spawner interface + generic subprocess-CLI chạy trong sandbox, UI toggle per-project/per-task → [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | Multica, ai-sdlc (`SubagentSpawner`) | HIGH | 5-7d | ✅ Done — Engine interface, CLI spawner, preflight, loop-kill, web UI settings & task badges |
 | **P1.2** | 1 | **CLI spec-first flow** — analyze → openspec → implement → merge request (chỉ CLI mode) → [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | OpenSpec, ai-sdlc | HIGH | 4-6d | Phụ thuộc P1.1; là flow chính khi dùng CLI engine |
 | **P2.1** | 2 — Chất lượng pipeline | Fuzzy fallback cho `search_replace.go` (whitespace-normalize → relative-indent) | Aider | HIGH | 2-3d | Giảm retry/fail thật sự đang xảy ra ở patch apply |
 | **P2.2** | 2 | Definition-of-Ready gate (`dor_check` trước coding) | ai-sdlc | HIGH | 1-2d | Chặn lãng phí token cho task chưa đủ spec |
@@ -50,8 +50,8 @@
 |-----|-------|-----------|
 | [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | 📝 Authored |
 | [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | 📝 Authored |
-| [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | 📝 Authored |
-| [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | 📝 Authored |
+| [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | ✅ Done |
+| [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | ✅ Done — all tasks.md sections (1-6) complete |
 | [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | 📝 Authored |
 | [`definition-of-ready-gate/`](./definition-of-ready-gate/proposal.md) | P2.2 | 📝 Authored |
 | [`review-verdict-split/`](./review-verdict-split/proposal.md) | P2.3 | 📝 Authored |

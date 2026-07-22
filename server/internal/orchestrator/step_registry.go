@@ -16,6 +16,34 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 
 	rt := steps.StepRuntime{Task: task, Agent: agent, JobID: jobID}
 
+	// Coding steps (backend/frontend/fix) dispatch through the pluggable
+	// execution engine: when the task/project resolves to engine "cli",
+	// their LLMRunner is swapped for one backed by the CLI engine instead
+	// of the API-native tool loop. Other steps (analyze, plan, review, ...)
+	// always use the API-native path — they aren't "coding" steps in the
+	// sense the CLI engine is designed for.
+	var codeStepLLM steps.LLMRunner = llmRunnerAdapter{run: o.runLLMStep}
+	if cliRunner := o.resolveCLIEngineRunner(context.Background(), task); cliRunner != nil {
+		codeStepLLM = cliRunner
+	}
+
+	prStep := steps.NewPRStep(
+		rt,
+		o.tasks, // TaskRepository
+		statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
+		o.repoutil,   // WorktreeManager
+		o.wkspace,    // WorkspaceLoader
+		o.sandboxGit, // SandboxGitClient
+		o.repoutil,   // DiffCapturer
+		o.artifacts,  // ArtifactRepository
+		o.projects,   // ProjectReader
+		o.workflows,  // CheckpointLister
+		o.gitOps,     // GitOpsClient
+		o.containerPathForHostPath,
+		loggerAdapter{log: o.log}, // Logger
+	)
+	cliSpecRunner := newCLIStepRunner(o)
+
 	allSteps := []steps.Step{
 		steps.NewContextLoadStep(
 			rt,
@@ -61,13 +89,13 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		),
 		steps.NewCodeBackendStep(
 			rt,
-			o.tasks,                             // TaskReader
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.agents,                            // BackendAgentAssigner
-			o.repoutil,                          // WorktreeManager
-			o.repoutil,                          // DiffCapturer
-			o.repoutil,                          // PatchApplier
-			o.wkspace,                           // WorkspaceLoader
+			o.tasks,     // TaskReader
+			codeStepLLM, // LLMRunner
+			o.agents,    // BackendAgentAssigner
+			o.repoutil,  // WorktreeManager
+			o.repoutil,  // DiffCapturer
+			o.repoutil,  // PatchApplier
+			o.wkspace,   // WorkspaceLoader
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
 			o.workflows,               // CheckpointLister
@@ -76,13 +104,13 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		),
 		steps.NewCodeFrontendStep(
 			rt,
-			o.tasks,                             // TaskReader
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.agents,                            // FrontendAgentAssigner
-			o.repoutil,                          // WorktreeManager
-			o.repoutil,                          // DiffCapturer
-			o.repoutil,                          // PatchApplier
-			o.wkspace,                           // WorkspaceLoader
+			o.tasks,     // TaskReader
+			codeStepLLM, // LLMRunner
+			o.agents,    // FrontendAgentAssigner
+			o.repoutil,  // WorktreeManager
+			o.repoutil,  // DiffCapturer
+			o.repoutil,  // PatchApplier
+			o.wkspace,   // WorkspaceLoader
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
 			o.workflows,               // CheckpointLister
@@ -115,10 +143,10 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		),
 		steps.NewFixStep(
 			rt,
-			o.tasks,                             // TaskReader
-			o.workflows,                         // CheckpointLister
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.repoutil,                          // DiffCapturer
+			o.tasks,     // TaskReader
+			o.workflows, // CheckpointLister
+			codeStepLLM, // LLMRunner
+			o.repoutil,  // DiffCapturer
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			o.repoutil, // PatchApplier
 			testerRunnerAdapter{run: o.runTargetedTests},               // TestRunner
@@ -137,21 +165,32 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			loggerAdapter{log: o.log},                              // Logger
 		),
-		steps.NewPRStep(
+		prStep,
+		steps.NewCLIAnalyzeStep(
 			rt,
-			o.tasks, // TaskRepository
-			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
-			o.repoutil,   // WorktreeManager
-			o.wkspace,    // WorkspaceLoader
-			o.sandboxGit, // SandboxGitClient
-			o.repoutil,   // DiffCapturer
-			o.artifacts,  // ArtifactRepository
-			o.projects,   // ProjectReader
-			o.workflows,  // CheckpointLister
-			o.gitOps,     // GitOpsClient
-			o.containerPathForHostPath,
+			o.tasks,                   // TaskUpdater
+			cliSpecRunner,             // CLIStepRunner
+			o.prompts,                 // StepPromptLoader
 			loggerAdapter{log: o.log}, // Logger
 		),
+		steps.NewCLISpecStep(
+			rt,
+			cliSpecRunner,             // WorktreeHostPathResolver
+			cliSpecRunner,             // CLIStepRunner
+			o.prompts,                 // StepPromptLoader
+			loggerAdapter{log: o.log}, // Logger
+			o.tasks,                   // TaskUpdater
+			o.projects,                // ProjectReader
+		),
+		steps.NewCLIImplementStep(
+			rt,
+			cliSpecRunner,             // WorktreeHostPathResolver
+			o.repoutil,                // WorktreeManager (git checkpoint)
+			cliSpecRunner,             // CLIStepRunner
+			o.prompts,                 // StepPromptLoader
+			loggerAdapter{log: o.log}, // Logger
+		),
+		steps.NewCLIMRStep(prStep),
 	}
 
 	runners := make(map[string]workflow.StepFunc)

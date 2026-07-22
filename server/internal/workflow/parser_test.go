@@ -84,6 +84,35 @@ func TestParseTasksMD_VietnameseHeaders(t *testing.T) {
 	}
 }
 
+func TestParseCheckboxes_FormatVariants(t *testing.T) {
+	md := "- [ ] item one\n* [x] item two\n-   [X]  item three\n"
+	done, total := ParseCheckboxes(md)
+	if total != 3 {
+		t.Fatalf("expected 3 checkboxes, got %d", total)
+	}
+	if done != 2 {
+		t.Fatalf("expected 2 done, got %d", done)
+	}
+}
+
+func TestParseCheckboxes_IgnoresFencedCodeBlocks(t *testing.T) {
+	md := "- [x] real task\n\n```markdown\n- [ ] example in a fence\n- [x] another example\n```\n- [ ] another real task\n"
+	done, total := ParseCheckboxes(md)
+	if total != 2 {
+		t.Fatalf("expected 2 checkboxes (fenced ones excluded), got %d", total)
+	}
+	if done != 1 {
+		t.Fatalf("expected 1 done, got %d", done)
+	}
+}
+
+func TestParseCheckboxes_Empty(t *testing.T) {
+	done, total := ParseCheckboxes("")
+	if done != 0 || total != 0 {
+		t.Fatalf("expected 0/0 for empty input, got %d/%d", done, total)
+	}
+}
+
 func TestParseTasksMD_DefaultClassification(t *testing.T) {
 	md := `## 1. Testing & Quality
 - [ ] Write unit tests

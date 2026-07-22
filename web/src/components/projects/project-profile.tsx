@@ -1,13 +1,20 @@
 import { FormEvent, useState } from "react";
-import { Save, Settings, Bot, RefreshCw } from "lucide-react";
+import { Save, Settings, Bot, RefreshCw, Terminal } from "lucide-react";
 import { ApiError } from "@/lib/api";
-import type { Project } from "@/lib/types";
+import type { ExecutionEngine, Project } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import {
+  CLIEngineConfigForm,
+  cliConfigToFormValue,
+  formValueToCLIConfig,
+  formValuesEqual,
+  type CLIEngineConfigFormValue,
+} from "./cli-engine-config-form";
 import { toast } from "sonner";
 
 interface ProjectProfileProps {
@@ -21,6 +28,8 @@ interface ProjectProfileProps {
     max_retries?: number;
     max_review_fix_cycles?: number;
     default_branch?: string;
+    execution_engine?: ExecutionEngine;
+    cli_engine_config?: ReturnType<typeof formValueToCLIConfig>;
   }) => Promise<void>;
 }
 
@@ -34,6 +43,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
   const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
+  const [executionEngine, setExecutionEngine] = useState<ExecutionEngine>(project?.execution_engine ?? "api_native");
+  const [cliConfig, setCliConfig] = useState<CLIEngineConfigFormValue>(cliConfigToFormValue(project?.cli_engine_config));
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -51,6 +62,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
+      setExecutionEngine(project.execution_engine ?? "api_native");
+      setCliConfig(cliConfigToFormValue(project.cli_engine_config));
     }
   }
 
@@ -63,7 +76,9 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
     (project?.auto_review_policy ?? "complexity_based") !== autoReviewPolicy ||
     (project?.max_retries ?? 3) !== maxRetries ||
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
-    (project?.default_branch ?? "main") !== defaultBranch;
+    (project?.default_branch ?? "main") !== defaultBranch ||
+    (project?.execution_engine ?? "api_native") !== executionEngine ||
+    !formValuesEqual(cliConfigToFormValue(project?.cli_engine_config), cliConfig);
 
   function handleReset() {
     if (project) {
@@ -75,6 +90,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
+      setExecutionEngine(project.execution_engine ?? "api_native");
+      setCliConfig(cliConfigToFormValue(project.cli_engine_config));
       setUpdateError("");
       toast.info("Project settings reverted.");
     }
@@ -83,6 +100,10 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   async function handleUpdateProject(e: FormEvent) {
     e.preventDefault();
     setUpdateError("");
+    if (executionEngine === "cli" && !cliConfig.command.trim()) {
+      setUpdateError("A command is required when Execution Engine is set to CLI.");
+      return;
+    }
     setIsUpdating(true);
     try {
       await onUpdateProject({
@@ -94,6 +115,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
         max_retries: maxRetries,
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
+        execution_engine: executionEngine,
+        cli_engine_config: formValueToCLIConfig(cliConfig),
       });
       toast.success("Project settings updated successfully.");
     } catch (err) {
@@ -212,6 +235,30 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
                 disabled={isUpdating}
               />
             </Field>
+          </CardContent>
+        </Card>
+
+        {/* Execution Engine */}
+        <Card>
+          <CardHeader
+            title="Execution Engine"
+            icon={<Terminal size={18} className="text-brand-primary" />}
+          />
+          <CardContent className="space-y-4">
+            <Field label="Engine" htmlFor="profile-engine" hint="Tasks inherit this unless they override it individually.">
+              <Select
+                id="profile-engine"
+                value={executionEngine}
+                onChange={(e) => setExecutionEngine(e.target.value as ExecutionEngine)}
+                disabled={isUpdating}
+              >
+                <option value="api_native">API-native (built-in tool loop)</option>
+                <option value="cli">CLI (spawn a subprocess CLI in the sandbox)</option>
+              </Select>
+            </Field>
+            {executionEngine === "cli" && (
+              <CLIEngineConfigForm value={cliConfig} onChange={setCliConfig} disabled={isUpdating} />
+            )}
           </CardContent>
         </Card>
 

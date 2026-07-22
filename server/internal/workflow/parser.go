@@ -1,8 +1,31 @@
 package workflow
 
 import (
+	"regexp"
 	"strings"
 )
+
+var (
+	fencedCodeBlockPattern = regexp.MustCompile("(?s)```.*?```")
+	tolerantCheckboxLine   = regexp.MustCompile(`(?im)^\s*[-*]\s*\[([ xX])\]`)
+)
+
+// ParseCheckboxes counts checkbox items in a tasks.md-style markdown
+// document. It's tolerant of the formatting variance LLM-authored markdown
+// tends to produce (`- [X]`, `* [x]`, extra internal spacing), unlike an
+// exact `- [ ] ` match. Fenced code blocks are stripped before counting:
+// LLMs frequently include example checkboxes inside ``` ``` fences when
+// explaining the convention, which would otherwise inflate total.
+func ParseCheckboxes(md string) (done, total int) {
+	stripped := fencedCodeBlockPattern.ReplaceAllString(md, "")
+	for _, m := range tolerantCheckboxLine.FindAllStringSubmatch(stripped, -1) {
+		total++
+		if strings.ToLower(m[1]) == "x" {
+			done++
+		}
+	}
+	return done, total
+}
 
 var frontendSignals = []string{"frontend", "ui", "component", "page", "view", "style", "css", "layout", "giao diện", "giao dien"}
 var backendSignals = []string{"backend", "server", "api", "database", "db", "migration", "model", "service", "handler", "cơ sở dữ liệu", "co so du lieu"}

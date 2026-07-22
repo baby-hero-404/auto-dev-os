@@ -200,6 +200,39 @@ type ReviewFinding struct {
 	RequiresFix bool `json:"requires_fix,omitempty"`
 }
 
+// SpecViolation is a single spec-compliance finding from the structured 2-verdict
+// review output (spec_compliance axis).
+type SpecViolation struct {
+	Requirement string `json:"requirement"`
+	Observed    string `json:"observed"`
+	Severity    string `json:"severity,omitempty"`
+}
+
+// QualityIssue is a single code-quality finding from the structured 2-verdict
+// review output (code_quality axis).
+type QualityIssue struct {
+	File       string `json:"file,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Issue      string `json:"issue"`
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
+// ReviewVerdict is the structured 2-verdict review output: spec compliance is
+// judged separately from code quality so the two axes can route differently
+// (spec failures are more severe and can trigger escalation; quality failures
+// go through the ordinary fix cycle).
+type ReviewVerdict struct {
+	SpecCompliance struct {
+		Verdict    string          `json:"verdict"`
+		Violations []SpecViolation `json:"violations,omitempty"`
+	} `json:"spec_compliance"`
+	CodeQuality struct {
+		Verdict string         `json:"verdict"`
+		Issues  []QualityIssue `json:"issues,omitempty"`
+	} `json:"code_quality"`
+	Summary string `json:"summary,omitempty"`
+}
+
 type TaskAnalysis struct {
 	Complexity             string              `json:"complexity"`
 	PrimaryCategory        string              `json:"primary_category,omitempty"`

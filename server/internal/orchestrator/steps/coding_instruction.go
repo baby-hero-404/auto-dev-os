@@ -186,6 +186,53 @@ func buildCodingInstruction(ctx context.Context, stepCtx workflow.StepContext, p
 	return instruction, physicalRoot, ctx
 }
 
+// buildVerdictFixInstruction assembles the fix instruction from a structured
+// 2-verdict review output (see models.ReviewVerdict / review.go's
+// ParseReviewVerdict), putting spec violations ahead of quality issues so the
+// coding agent fixes the more severe class of problem first (REQ-002).
+func buildVerdictFixInstruction(verdictRaw map[string]any) string {
+	var sb strings.Builder
+
+	if spec, ok := verdictRaw["spec_compliance"].(map[string]any); ok {
+		if violations, ok := spec["violations"].([]any); ok && len(violations) > 0 {
+			sb.WriteString("## Spec violations (MUST fix first)\n")
+			for i, item := range violations {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				requirement, _ := m["requirement"].(string)
+				observed, _ := m["observed"].(string)
+				sb.WriteString(fmt.Sprintf("%d. %s — observed: %s\n", i+1, requirement, observed))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	if qual, ok := verdictRaw["code_quality"].(map[string]any); ok {
+		if issues, ok := qual["issues"].([]any); ok && len(issues) > 0 {
+			sb.WriteString("## Quality issues\n")
+			for i, item := range issues {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				file, _ := m["file"].(string)
+				issue, _ := m["issue"].(string)
+				suggestion, _ := m["suggestion"].(string)
+				if file != "" {
+					sb.WriteString(fmt.Sprintf("%d. %s: %s — suggestion: %s\n", i+1, file, issue, suggestion))
+				} else {
+					sb.WriteString(fmt.Sprintf("%d. %s — suggestion: %s\n", i+1, issue, suggestion))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
 func buildPreHydratedContext(ctx context.Context, task *models.Task, fileReader AffectedFileReader, frozenCtx *models.FrozenContext) string {
 	if frozenCtx == nil || fileReader == nil {
 		return ""

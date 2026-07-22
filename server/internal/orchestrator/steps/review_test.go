@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -34,6 +35,52 @@ func TestParseReviewFindings_FieldMapping(t *testing.T) {
 	if f.Repo != "tool_zentao" || f.File != "cmd/sync/main.go" || f.Line != 12 ||
 		f.Severity != "high" || f.Recommendation != "fix it" || !f.RequiresFix {
 		t.Errorf("unexpected finding: %+v", f)
+	}
+}
+
+func TestParseReviewVerdict_StructuredSchema(t *testing.T) {
+	parsed := map[string]any{
+		"spec_compliance": map[string]any{
+			"verdict": "fail",
+			"violations": []any{
+				map[string]any{"requirement": "must validate input", "observed": "no validation found", "severity": "high"},
+			},
+		},
+		"code_quality": map[string]any{
+			"verdict": "pass",
+		},
+		"summary": "spec violation found",
+	}
+	v, ok := ParseReviewVerdict(parsed)
+	if !ok {
+		t.Fatalf("expected structured verdict to parse")
+	}
+	if v.SpecCompliance.Verdict != "fail" || v.CodeQuality.Verdict != "pass" || v.Summary != "spec violation found" {
+		t.Errorf("unexpected verdict: %+v", v)
+	}
+	if len(v.SpecCompliance.Violations) != 1 || v.SpecCompliance.Violations[0].Requirement != "must validate input" {
+		t.Errorf("unexpected violations: %+v", v.SpecCompliance.Violations)
+	}
+}
+
+func TestParseReviewVerdict_FallbackWhenAbsent(t *testing.T) {
+	parsed := map[string]any{"findings": []any{map[string]any{"file": "main.go", "severity": "high"}}}
+	_, ok := ParseReviewVerdict(parsed)
+	if ok {
+		t.Fatalf("expected ok=false for legacy single-verdict payload")
+	}
+}
+
+func TestHasRepeatViolation(t *testing.T) {
+	prevV := []models.SpecViolation{{Requirement: "must validate all user input fields"}}
+	curSame := []models.SpecViolation{{Requirement: "must validate user input fields"}}
+	curDifferent := []models.SpecViolation{{Requirement: "must add rate limiting to the login endpoint"}}
+
+	if !hasRepeatViolation(prevV, curSame) {
+		t.Errorf("expected fuzzy match (token overlap) to detect repeat violation")
+	}
+	if hasRepeatViolation(prevV, curDifferent) {
+		t.Errorf("expected unrelated violation to not match")
 	}
 }
 
@@ -408,5 +455,156 @@ func TestReviewStep_ObjectiveInjection_UnitsWithoutObjectives(t *testing.T) {
 
 	if strings.Contains(llmMock.lastInstruction, "EXECUTION OBJECTIVES") {
 		t.Errorf("expected no EXECUTION OBJECTIVES block when no unit has a non-empty objective, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+func newStructuredVerdictOut(specVerdict, qualityVerdict string) StepResult {
+	parsed := map[string]any{
+		"spec_compliance": map[string]any{"verdict": specVerdict},
+		"code_quality":     map[string]any{"verdict": qualityVerdict},
+		"summary":          "test",
+	}
+	return StepResult{"parsed": parsed}
+}
+
+func TestReviewStep_StructuredVerdict_BothPass_RoutesToTesting(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		&mockLLMRunner{result: newStructuredVerdictOut("pass", "pass")},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{},
+		statusMock,
+		&mockLogger{},
+	)
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusMock.lastStatus != models.TaskStatusTesting {
+		t.Errorf("expected both-pass verdict to route to testing, got: %s", statusMock.lastStatus)
+	}
+	if result["review_verdict"] == nil {
+		t.Errorf("expected review_verdict to be stored on the result for downstream fix instruction assembly")
+	}
+}
+
+func TestReviewStep_StructuredVerdict_QualityOnlyFail_RoutesToFixing(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		&mockLLMRunner{result: newStructuredVerdictOut("pass", "fail")},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{},
+		statusMock,
+		&mockLogger{},
+	)
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusMock.lastStatus != models.TaskStatusFixing {
+		t.Errorf("expected quality-only fail to route to fixing, got: %s", statusMock.lastStatus)
+	}
+}
+
+func TestReviewStep_StructuredVerdict_SpecFail_FirstCycleRoutesToFixing(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	parsed := map[string]any{
+		"spec_compliance": map[string]any{
+			"verdict": "fail",
+			"violations": []any{
+				map[string]any{"requirement": "must validate all user input fields", "observed": "no validation"},
+			},
+		},
+		"code_quality": map[string]any{"verdict": "pass"},
+	}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		&mockLLMRunner{result: StepResult{"parsed": parsed}},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{}, // no prior review checkpoints -> no escalation on first cycle
+		statusMock,
+		&mockLogger{},
+	)
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error (should not escalate on first cycle): %v", err)
+	}
+	if statusMock.lastStatus != models.TaskStatusFixing {
+		t.Errorf("expected first-cycle spec fail to route to fixing, got: %s", statusMock.lastStatus)
+	}
+}
+
+func TestReviewStep_SpecFailEscalation_PausesOnRepeatViolation(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+
+	prevOutput := map[string]any{
+		"review_verdict": map[string]any{
+			"spec_compliance": map[string]any{
+				"verdict": "fail",
+				"violations": []any{
+					map[string]any{"requirement": "must validate all user input fields", "observed": "no validation"},
+				},
+			},
+		},
+	}
+	prevState := map[string]any{"status": workflow.StepStatusSuccess, "output": prevOutput}
+	prevStateJSON, _ := json.Marshal(prevState)
+
+	parsed := map[string]any{
+		"spec_compliance": map[string]any{
+			"verdict": "fail",
+			"violations": []any{
+				map[string]any{"requirement": "must validate user input fields", "observed": "still no validation"},
+			},
+		},
+		"code_quality": map[string]any{"verdict": "pass"},
+	}
+
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{ID: "p1"}},
+		&mockLLMRunner{result: StepResult{"parsed": parsed}},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 1},
+		&mockCheckpointLister{cps: []models.WorkflowCheckpoint{
+			{Step: workflow.StepReview, State: prevStateJSON},
+		}},
+		statusMock,
+		&mockLogger{},
+	)
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected PauseError for repeated spec violation, got: %v", err)
+	}
+	if !strings.Contains(pauseErr.Reason, "awaiting_review_escalation") {
+		t.Errorf("expected pause reason to name the escalation state, got: %q", pauseErr.Reason)
+	}
+	if statusMock.lastStatus != models.TaskStatusHumanReview {
+		t.Errorf("expected escalation to route task to human_review, got: %s", statusMock.lastStatus)
 	}
 }

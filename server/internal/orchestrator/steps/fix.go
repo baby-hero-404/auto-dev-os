@@ -183,26 +183,35 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 			}
 		}
 
-		var findingsJSON string
+		var verdictInstruction string
 		if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
-			if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
-				rawFindings, err := ParseReviewFindings(parsed)
-				if err == nil && len(rawFindings) > 0 {
-					var canonicalized []models.ReviewFinding
-					for _, f := range rawFindings {
-						canonicalPath, ok := paths.CanonicalizeRepoRelative(f.File, repoName, "main")
-						if !ok {
-							if s.log != nil {
-								s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("dropping unresolvable review finding path: %q (repo: %s)", f.File, repoName))
+			if verdictRaw, ok := reviewOut["review_verdict"].(map[string]any); ok {
+				verdictInstruction = buildVerdictFixInstruction(verdictRaw)
+			}
+		}
+
+		var findingsJSON string
+		if verdictInstruction == "" {
+			if reviewOut, ok := stepCtx.Inputs[workflow.StepReview]; ok {
+				if parsed, ok := reviewOut["parsed"].(map[string]any); ok {
+					rawFindings, err := ParseReviewFindings(parsed)
+					if err == nil && len(rawFindings) > 0 {
+						var canonicalized []models.ReviewFinding
+						for _, f := range rawFindings {
+							canonicalPath, ok := paths.CanonicalizeRepoRelative(f.File, repoName, "main")
+							if !ok {
+								if s.log != nil {
+									s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("dropping unresolvable review finding path: %q (repo: %s)", f.File, repoName))
+								}
+								continue
 							}
-							continue
+							f.File = canonicalPath
+							canonicalized = append(canonicalized, f)
 						}
-						f.File = canonicalPath
-						canonicalized = append(canonicalized, f)
-					}
-					if len(canonicalized) > 0 {
-						if findingsBytes, err := json.MarshalIndent(canonicalized, "", "  "); err == nil {
-							findingsJSON = string(findingsBytes)
+						if len(canonicalized) > 0 {
+							if findingsBytes, err := json.MarshalIndent(canonicalized, "", "  "); err == nil {
+								findingsJSON = string(findingsBytes)
+							}
 						}
 					}
 				}
@@ -211,6 +220,8 @@ func (s *FixStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (St
 
 		if prFeedback != "" {
 			instruction += fmt.Sprintf("Fix review findings and address the following PR rejection feedback:\n\n%s\n\n", prFeedback)
+		} else if verdictInstruction != "" {
+			instruction += verdictInstruction
 		} else if findingsJSON != "" {
 			instruction += fmt.Sprintf("Address the following review findings:\n\n%s\n\n", findingsJSON)
 		}

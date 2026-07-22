@@ -128,6 +128,62 @@ func TestFixStep_AppliesFixAndTriggersLoop(t *testing.T) {
 	}
 }
 
+func TestFixStep_StructuredVerdict_ViolationsFirstInstruction(t *testing.T) {
+	task := &models.Task{ID: "t1", Complexity: models.TaskComplexityMedium}
+	llmMock := &mockLLMRunner{result: StepResult{"parsed": map[string]any{"summary": "fixed"}}}
+	step := NewFixStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockCheckpointLister{},
+		llmMock,
+		&mockDiffCapturer{diffVal: "some diff", hostPath: "/host/repo", changed: []string{"main.go"}},
+		&mockArtifactSaver{},
+		&mockPatchApplier{},
+		&mockTestRunner{},
+		&mockStatusUpdater{},
+		&mockLogger{},
+		&mockWorktreeManager{},
+		&mockAffectedFileReader{},
+	)
+	sc := workflow.StepContext{
+		Inputs: map[string]StepResult{
+			workflow.StepReview: {
+				"review_verdict": map[string]any{
+					"spec_compliance": map[string]any{
+						"verdict": "fail",
+						"violations": []any{
+							map[string]any{"requirement": "must validate input", "observed": "no validation"},
+						},
+					},
+					"code_quality": map[string]any{
+						"verdict": "fail",
+						"issues": []any{
+							map[string]any{"file": "main.go", "issue": "unused var", "suggestion": "remove it"},
+						},
+					},
+				},
+				// Legacy "parsed" findings should be ignored once a structured verdict is present.
+				"parsed": map[string]any{
+					"findings": []any{map[string]any{"file": "other.go", "severity": "high"}},
+				},
+			},
+		},
+	}
+	_, _ = step.Execute(context.Background(), sc)
+	if !strings.Contains(llmMock.lastInstruction, "## Spec violations (MUST fix first)") {
+		t.Errorf("expected violations-first section in instruction, got:\n%s", llmMock.lastInstruction)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "must validate input") {
+		t.Errorf("expected spec violation requirement text in instruction, got:\n%s", llmMock.lastInstruction)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "## Quality issues") {
+		t.Errorf("expected quality issues section in instruction, got:\n%s", llmMock.lastInstruction)
+	}
+	if strings.Contains(llmMock.lastInstruction, "other.go") {
+		t.Errorf("expected legacy findings to be ignored when structured verdict is present, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
 func TestFixStep_PRDiffFallbackUsesFrontendWorktreeSuffix(t *testing.T) {
 	task := &models.Task{ID: "t1", Complexity: models.TaskComplexityMedium}
 	diffMock := &mockDiffCapturer{}

@@ -299,13 +299,15 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	var def workflow.Definition
 
 	var projectEngine string
+	includeCrossReview := false
 	if o.projects != nil {
 		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil {
 			projectEngine = p.ExecutionEngine
+			includeCrossReview = p.ReviewHarnessPolicy != models.ReviewHarnessSame
 		}
 	}
 	if cliengine.ResolveEngine(task.ExecutionEngine, projectEngine) == models.ExecutionEngineCLI {
-		def = workflow.CLISpecFirstWorkflow(runners)
+		def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
 	}
 
 	if def.Name == "" && len(task.Analysis) > 0 {
@@ -353,6 +355,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 				if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 					if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
+						continue
+					}
+					if job.Step == workflow.StepCLIImplement && (cp.Step == workflow.StepCLIImplement || cp.Step == workflow.StepCrossReview) {
 						continue
 					}
 					output, _ := state["output"].(map[string]any)
@@ -489,6 +494,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 						if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
+						continue
+					}
+					if job.Step == workflow.StepCLIImplement && (cp.Step == workflow.StepCLIImplement || cp.Step == workflow.StepCrossReview) {
 							continue
 						}
 						output, _ := state["output"].(map[string]any)
@@ -527,6 +535,15 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
 				"status":     models.WorkflowJobStatusQueued,
 				"step":       workflow.StepReview,
+				"last_error": "",
+			})
+			return
+		}
+		if errors.Is(err, workflow.ErrCrossReviewFixLoop) {
+			o.log(ctx, task.ID, &job.ID, "info", "Cross-review findings detected. Re-dispatching cli_implement with reviewer feedback.")
+			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
+				"status":     models.WorkflowJobStatusQueued,
+				"step":       workflow.StepCLIImplement,
 				"last_error": "",
 			})
 			return

@@ -3,7 +3,7 @@
 ## Added Requirements
 
 ### REQ-001: Policy resolution
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN policy = `different_provider` và code step dùng provider A, tồn tại provider B cấu hình sẵn
@@ -12,7 +12,7 @@
 - AND WHEN cũng chỉ có 1 model → chạy same + warning, pipeline không bị chặn
 
 ### REQ-001b: Underlying-model awareness cho CLI
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task coded bởi CLI có khai báo `underlying_provider` (vd cli:claude → anthropic) trong `cli_engine_config`
@@ -20,7 +20,7 @@
 - AND `underlying_provider` không khai báo → giữ hành vi cũ (cli ≠ mọi API provider) + log note khuyến nghị khai báo
 
 ### REQ-001c: Adversarial directive khi buộc same-provider
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN degrade chain kết thúc ở same provider/model với bên đã code (kể cả qua underlying_provider)
@@ -28,7 +28,7 @@
 - AND directive KHÔNG được inject khi provider đã thực sự khác (tránh nhiễu)
 
 ### REQ-002: Metadata coded_by/reviewed_by
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN code step và review step hoàn thành
@@ -36,7 +36,7 @@
 - AND PR description chứa 2 dòng metadata này
 
 ### REQ-003: CLI-mode cross_review step
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task engine=cli và policy ≠ `same`
@@ -45,7 +45,7 @@
 - AND policy = `same` → cli_spec_first không có node cross_review (như Wave 1)
 
 ### REQ-004: Policy setting UI
-> ❌ Status: Not Started
+> ❌ Status: Not Started (deferred — see tasks.md 1.7)
 
 **Scenario:**
 - WHEN user mở project settings
@@ -54,7 +54,7 @@
 ## Modified Requirements
 
 ### REQ-M01: Review step model override
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN review step chạy với policy `same`

@@ -189,6 +189,20 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			cliSpecRunner,             // CLIStepRunner
 			o.prompts,                 // StepPromptLoader
 			loggerAdapter{log: o.log}, // Logger
+			o.workflows,               // CheckpointLister
+		),
+		steps.NewCrossReviewStep(
+			rt,
+			o.tasks,                             // TaskReader
+			o.projects,                          // ProjectReader
+			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
+			o.repoutil,                          // DiffCapturer
+			cliSpecRunner,                       // WorktreeHostPathResolver
+			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
+			o.checkpoints, // CheckpointReader
+			o.workflows,   // CheckpointLister
+			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
+			loggerAdapter{log: o.log},                        // Logger
 		),
 		steps.NewCLIMRStep(prStep),
 	}

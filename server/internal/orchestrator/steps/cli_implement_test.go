@@ -70,6 +70,7 @@ func TestCLIImplementStep_HappyPath(t *testing.T) {
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: []string{"server/main.go"}}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	res, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -93,6 +94,7 @@ func TestCLIImplementStep_NoChangedFiles(t *testing.T) {
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: nil}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -114,6 +116,7 @@ func TestCLIImplementStep_OnlySpecDiff_NotDocsOnly(t *testing.T) {
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: []string{"docs/openspecs/" + slug + "/proposal.md"}}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -136,6 +139,7 @@ func TestCLIImplementStep_DocsOnlyViaFrontmatter_AllowsSpecOnlyDiff(t *testing.T
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: []string{"docs/openspecs/" + slug + "/proposal.md"}}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	res, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -161,6 +165,7 @@ func TestCLIImplementStep_DocsOnlyViaLabel_AllowsSpecOnlyDiff(t *testing.T) {
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: []string{"docs/openspecs/" + slug + "/proposal.md"}}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -178,6 +183,7 @@ func TestCLIImplementStep_RunnerError(t *testing.T) {
 		&mockCLIStepRunner{err: errors.New("cli crashed")},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})

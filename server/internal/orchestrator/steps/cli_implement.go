@@ -19,16 +19,17 @@ const cliDocsOnlyLabel = "docs-only"
 // result via git diff (mirroring the "evaluate by diff" philosophy the
 // pluggable execution engine already uses for code_backend/code_frontend).
 type CLIImplementStep struct {
-	rt       StepRuntime
-	worktree WorktreeHostPathResolver
-	git      WorktreeManager
-	runner   CLIStepRunner
-	prompts  StepPromptLoader
-	log      Logger
+	rt          StepRuntime
+	worktree    WorktreeHostPathResolver
+	git         WorktreeManager
+	runner      CLIStepRunner
+	prompts     StepPromptLoader
+	log         Logger
+	checkpoints CheckpointLister
 }
 
-func NewCLIImplementStep(rt StepRuntime, worktree WorktreeHostPathResolver, git WorktreeManager, runner CLIStepRunner, prompts StepPromptLoader, log Logger) *CLIImplementStep {
-	return &CLIImplementStep{rt: rt, worktree: worktree, git: git, runner: runner, prompts: prompts, log: log}
+func NewCLIImplementStep(rt StepRuntime, worktree WorktreeHostPathResolver, git WorktreeManager, runner CLIStepRunner, prompts StepPromptLoader, log Logger, checkpoints CheckpointLister) *CLIImplementStep {
+	return &CLIImplementStep{rt: rt, worktree: worktree, git: git, runner: runner, prompts: prompts, log: log, checkpoints: checkpoints}
 }
 
 func (s *CLIImplementStep) ID() string { return workflow.StepCLIImplement }
@@ -47,6 +48,9 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		"%s\n\n## Task\n\n### %s\n\n%s\n\n## Spec set location\n\n%s/\n",
 		base, s.rt.Task.Title, s.rt.Task.Description, specDir,
 	)
+	if feedback := crossReviewFeedback(ctx, s.checkpoints, s.rt.Task.ID); feedback != "" {
+		instruction += "\n\n## Reviewer feedback\n\n" + feedback
+	}
 
 	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil)
 	if err != nil {

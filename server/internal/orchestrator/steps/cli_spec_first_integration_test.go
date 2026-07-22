@@ -116,7 +116,7 @@ func TestCLISpecFirstWorkflow_Integration(t *testing.T) {
 
 	analyze := NewCLIAnalyzeStep(rt, &mockCLITaskUpdater{}, fakeRunner, &mockStepPromptLoader{prompt: "analyze base"}, &mockCLILogger{})
 	spec := NewCLISpecStep(rt, resolver, fakeRunner, &mockStepPromptLoader{prompt: "spec base"}, &mockCLILogger{}, &mockCLITaskUpdater{}, &mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}})
-	implement := NewCLIImplementStep(rt, resolver, noopWorktreeManager{}, fakeRunner, &mockStepPromptLoader{prompt: "implement base"}, &mockCLILogger{})
+	implement := NewCLIImplementStep(rt, resolver, noopWorktreeManager{}, fakeRunner, &mockStepPromptLoader{prompt: "implement base"}, &mockCLILogger{}, nil)
 
 	runners := map[string]workflow.StepFunc{
 		workflow.StepCLIAnalyze: func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
@@ -137,7 +137,7 @@ func TestCLISpecFirstWorkflow_Integration(t *testing.T) {
 		},
 	}
 
-	def := workflow.CLISpecFirstWorkflow(runners)
+	def := workflow.CLISpecFirstWorkflow(runners, false)
 
 	engine := &workflow.Engine{MaxParallel: 1}
 	result, err := engine.Run(context.Background(), def, nil)

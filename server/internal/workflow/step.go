@@ -20,10 +20,11 @@ const (
 	StepTest         = "test"
 	StepPR           = "pr"
 
-	// CLI spec-first pipeline (engine=cli): cli_analyze -> cli_spec -> cli_implement -> cli_mr.
+	// CLI spec-first pipeline (engine=cli): cli_analyze -> cli_spec -> cli_implement -> [cross_review] -> cli_mr.
 	StepCLIAnalyze   = "cli_analyze"
 	StepCLISpec      = "cli_spec"
 	StepCLIImplement = "cli_implement"
+	StepCrossReview  = "cross_review"
 	StepCLIMR        = "cli_mr"
 )
 
@@ -258,7 +259,11 @@ func DynamicDAGWorkflow(runners map[string]StepFunc, units []models.ExecutionUni
 // loading, and planning, so the server's job is reduced to spec-first
 // gating (analyze -> author spec -> implement against it -> open the MR)
 // rather than the API-native DAG's per-tool-call orchestration.
-func CLISpecFirstWorkflow(runners map[string]StepFunc) Definition {
+// includeCrossReview inserts an optional cross_review node between
+// cli_implement and cli_mr — used when the project's review_harness_policy
+// is not "same", so CLI-coded work still gets an independent AI review pass
+// before the MR is opened (cross-harness-review REQ-M02).
+func CLISpecFirstWorkflow(runners map[string]StepFunc, includeCrossReview bool) Definition {
 	statusSchema := Schema{Fields: map[string]FieldSchema{
 		"status": {Type: FieldString, Required: false},
 	}}
@@ -267,8 +272,14 @@ func CLISpecFirstWorkflow(runners map[string]StepFunc) Definition {
 		{ID: StepCLIAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepCLIAnalyze]},
 		{ID: StepCLISpec, Name: "Author Spec", DependsOn: []string{StepCLIAnalyze}, OutputSchema: statusSchema, Run: runners[StepCLISpec]},
 		{ID: StepCLIImplement, Name: "Implement", DependsOn: []string{StepCLISpec}, OutputSchema: statusSchema, Run: runners[StepCLIImplement]},
-		{ID: StepCLIMR, Name: "Merge Request", DependsOn: []string{StepCLIImplement}, OutputSchema: statusSchema, Run: runners[StepCLIMR]},
 	}
+
+	lastStep := StepCLIImplement
+	if includeCrossReview {
+		steps = append(steps, StepDefinition{ID: StepCrossReview, Name: "Cross-Harness Review", DependsOn: []string{StepCLIImplement}, OutputSchema: statusSchema, Run: runners[StepCrossReview]})
+		lastStep = StepCrossReview
+	}
+	steps = append(steps, StepDefinition{ID: StepCLIMR, Name: "Merge Request", DependsOn: []string{lastStep}, OutputSchema: statusSchema, Run: runners[StepCLIMR]})
 
 	return Definition{Name: "auto-code-os-cli-spec-first-workflow", Steps: steps}
 }
@@ -295,6 +306,7 @@ func DescribeStep(name string) string {
 		"cli_analyze":   "Analyze repo & task with the CLI agent",
 		"cli_spec":      "Author OpenSpec set with the CLI agent",
 		"cli_implement": "Implement against the approved spec",
+		"cross_review":  "Independent cross-harness AI review of CLI-coded changes",
 		"cli_mr":        "Create merge request",
 	}
 	if d, ok := desc[name]; ok {

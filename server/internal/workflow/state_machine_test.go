@@ -93,7 +93,7 @@ func TestComplexityWorkflowDefinitions(t *testing.T) {
 
 func TestCLISpecFirstWorkflow(t *testing.T) {
 	runners := map[string]StepFunc{}
-	def := CLISpecFirstWorkflow(runners)
+	def := CLISpecFirstWorkflow(runners, false)
 	if len(def.Steps) != 4 {
 		t.Fatalf("expected 4 steps, got %d", len(def.Steps))
 	}
@@ -111,6 +111,29 @@ func TestCLISpecFirstWorkflow(t *testing.T) {
 		if len(s.DependsOn) != 1 || s.DependsOn[0] != wantOrder[i-1] {
 			t.Errorf("step %q: expected dependency on %q, got %#v", s.ID, wantOrder[i-1], s.DependsOn)
 		}
+	}
+	if _, err := ValidateDAG(def); err != nil {
+		t.Fatalf("expected valid DAG, got %v", err)
+	}
+}
+
+func TestCLISpecFirstWorkflow_WithCrossReview(t *testing.T) {
+	runners := map[string]StepFunc{}
+	def := CLISpecFirstWorkflow(runners, true)
+	if len(def.Steps) != 5 {
+		t.Fatalf("expected 5 steps, got %d", len(def.Steps))
+	}
+	wantOrder := []string{StepCLIAnalyze, StepCLISpec, StepCLIImplement, StepCrossReview, StepCLIMR}
+	for i, s := range def.Steps {
+		if s.ID != wantOrder[i] {
+			t.Errorf("step %d: got %q, want %q", i, s.ID, wantOrder[i])
+		}
+	}
+	if def.Steps[3].DependsOn[0] != StepCLIImplement {
+		t.Errorf("expected cross_review to depend on cli_implement, got %#v", def.Steps[3].DependsOn)
+	}
+	if def.Steps[4].DependsOn[0] != StepCrossReview {
+		t.Errorf("expected cli_mr to depend on cross_review, got %#v", def.Steps[4].DependsOn)
 	}
 	if _, err := ValidateDAG(def); err != nil {
 		t.Fatalf("expected valid DAG, got %v", err)

@@ -169,6 +169,117 @@ func (le *LearningEngine) SuggestSkillFromTask(ctx context.Context, task *models
 	}
 }
 
+// ExtractLearnedSkills proposes up to 2 reusable LearnedSkill records (REQ-001)
+// when a task merges, distinct from SuggestSkillFromTask above: that method
+// only ever creates a generic HITL suggestion for a human to later turn into
+// something; this creates directly loadable learned_skills rows (draft under
+// supervised autonomy, active under autonomous), reusing the same
+// tool-call/step-sequence summary data so DetectPatterns's own suggestion
+// pipeline is unaffected (REQ-M01). Dedup: a candidate whose title shares any
+// trigger-keyword token with an existing skill for the project is treated as
+// reinforcing evidence (usage_count bump) rather than a new row.
+func (le *LearningEngine) ExtractLearnedSkills(ctx context.Context, task *models.Task, autonomous bool) {
+	if le.memorySvc == nil || le.learnedSkills == nil || task == nil {
+		return
+	}
+
+	memories, err := le.memorySvc.ListByAgent(ctx, safeAgentID(task.AgentID), models.MemoryTierWorking, 200, 0)
+	if err != nil {
+		slog.Warn("learning: failed to list memories for skill extraction", "error", err)
+		return
+	}
+
+	stepSequence, toolCalls := taskToolCallSummary(task.ID, memories)
+	if len(toolCalls) < 3 {
+		return // not a non-trivial multi-tool-call task
+	}
+
+	existing, err := le.learnedSkills.ListByProjectID(ctx, task.ProjectID)
+	if err != nil {
+		slog.Warn("learning: failed to list existing learned skills for dedup", "error", err)
+		existing = nil
+	}
+
+	status := models.LearnedSkillStatusDraft
+	if autonomous {
+		status = models.LearnedSkillStatusActive
+	}
+
+	// Design caps extraction at max 2 candidates per task; a single tool-call
+	// summary only ever yields one natural candidate title (the step
+	// sequence), so this loop is a single iteration today but left as a
+	// bounded loop to make the "max 2" ceiling explicit if a future pass
+	// splits the summary into multiple candidates.
+	candidates := []struct {
+		title    string
+		keywords []string
+		content  string
+	}{
+		{
+			title:    fmt.Sprintf("%s workflow", strings.Join(stepSequence, " -> ")),
+			keywords: append(append([]string{}, stepSequence...), task.Labels...),
+			content:  fmt.Sprintf("Step sequence: %s\nTool calls: %s", strings.Join(stepSequence, " -> "), strings.Join(toolCalls, ", ")),
+		},
+	}
+	if len(candidates) > 2 {
+		candidates = candidates[:2]
+	}
+
+	taskID := task.ID
+	for _, cand := range candidates {
+		if dup := findDuplicateSkill(existing, cand.title, cand.keywords); dup != nil {
+			if err := le.learnedSkills.IncrementUsage(ctx, []string{dup.ID}, true); err != nil {
+				slog.Warn("learning: failed to reinforce duplicate skill", "error", err)
+			}
+			continue
+		}
+		input := models.CreateLearnedSkillInput{
+			ProjectID:       task.ProjectID,
+			Title:           cand.title,
+			TriggerKeywords: cand.keywords,
+			Content:         cand.content,
+			Status:          status,
+			SourceTaskID:    &taskID,
+		}
+		if _, err := le.learnedSkills.Create(ctx, input); err != nil {
+			slog.Warn("learning: failed to create learned skill", "error", err)
+		}
+	}
+}
+
+// findDuplicateSkill returns the first existing skill sharing at least one
+// trigger-keyword token (case-insensitive) with the candidate, or nil.
+func findDuplicateSkill(existing []models.LearnedSkill, title string, keywords []string) *models.LearnedSkill {
+	candidateTokens := make(map[string]bool)
+	for _, k := range keywords {
+		candidateTokens[strings.ToLower(k)] = true
+	}
+	for _, tok := range strings.Fields(strings.ToLower(title)) {
+		candidateTokens[tok] = true
+	}
+
+	for i := range existing {
+		for _, k := range existing[i].TriggerKeywords {
+			if candidateTokens[strings.ToLower(k)] {
+				return &existing[i]
+			}
+		}
+	}
+	return nil
+}
+
+// RecordSkillOutcome updates usage/success counters (REQ-003) for the given
+// learned-skill IDs when the task that loaded them reaches a terminal state.
+// Best-effort: errors are logged, never propagated to the task lifecycle.
+func (le *LearningEngine) RecordSkillOutcome(ctx context.Context, skillIDs []string, success bool) {
+	if le.learnedSkills == nil || len(skillIDs) == 0 {
+		return
+	}
+	if err := le.learnedSkills.IncrementUsage(ctx, skillIDs, success); err != nil {
+		slog.Warn("learning: failed to record skill outcome", "error", err)
+	}
+}
+
 // taskToolCallSummary extracts, from a task's step-observation memories, the
 // ordered distinct workflow steps the task went through and the distinct
 // tool-call proxies made along the way. Coding steps (CodeBackendStep et al)

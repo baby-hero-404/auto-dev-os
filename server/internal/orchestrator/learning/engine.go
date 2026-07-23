@@ -17,13 +17,15 @@ type LearningEngine struct {
 	memorySvc     *service.MemoryService
 	suggestionSvc *service.LearningService
 	taskRepo      *repository.TaskRepo
+	learnedSkills *repository.LearnedSkillRepo
 }
 
-func NewLearningEngine(memorySvc *service.MemoryService, suggestionSvc *service.LearningService, taskRepo *repository.TaskRepo) *LearningEngine {
+func NewLearningEngine(memorySvc *service.MemoryService, suggestionSvc *service.LearningService, taskRepo *repository.TaskRepo, learnedSkills *repository.LearnedSkillRepo) *LearningEngine {
 	return &LearningEngine{
 		memorySvc:     memorySvc,
 		suggestionSvc: suggestionSvc,
 		taskRepo:      taskRepo,
+		learnedSkills: learnedSkills,
 	}
 }
 

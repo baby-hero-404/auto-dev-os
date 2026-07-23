@@ -29,10 +29,10 @@
 | **P3.2** | 3 | RepoMap mention-boost (×10 identifier nhắc trong task description) | Aider | MED | 2-3d | ✅ Done — ident ×10 (pre-existing) + path ×50 (this pass), see tasks.md |
 | **P3.3** | 3 | Smart LLM router theo complexity (task dễ → model rẻ) + `token_usage` tracking | 9Router | MED | 3-4d | ✅ Done — step-routing matrix + complexity/retry rules + `smart_routing` toggle + cache-token persistence; usage API/UI was pre-existing, see tasks.md |
 | **P3.4** | 3 | MMR/diversity dedup sau RRF merge trong memory search | agentmemory | LOW-MED | 1d | ✅ Done — `mmrSelect`/`cosineSimilarity` wired after rrfMerge in `memory_search.go` |
-| **P4.1** | 4 — Nền tảng dài hạn | Reusable skills system (trích pattern từ task `merged` → skill record, load lại ở context_loading) | Multica, Hermes, Superpowers | HIGH | 5-8d | Giá trị lũy kế lớn nhưng cần pipeline ổn định trước |
+| **P4.1** | 4 — Nền tảng dài hạn | Reusable skills system (trích pattern từ task `merged` → skill record, load lại ở context_loading) | Multica, Hermes, Superpowers | HIGH | 5-8d | ✅ Done — `learned_skills` table (renamed to avoid collision with existing `skills` catalog) + heuristic extraction on merge + FTS loading in context_load + usage tracking via checkpoints; UI page deferred, see tasks.md |
 | **P4.2** | 4 | Declarative governance schemas (DAG/quality-gate cấu hình bằng JSON schema per-project) | ai-sdlc | MED | 5-7d | Tổng quát hóa những gì P1/P2 đã hard-code |
 | **P4.3** | 4 | Attestation & audit trail (DSSE metadata trên PR: agent, model, prompt hash, review chain) | ai-sdlc | MED | 3-4d | Enterprise; càng có ý nghĩa khi đã có 2 engine + cross-review |
-| **P4.4** | 4 | Per-N-turn learning nudge (DetectPatterns giữa task, không chỉ end-of-task) | Hermes | MED | 2-3d | Cần P4.1 skills system để tận dụng |
+| **P4.4** | 4 | Per-N-turn learning nudge (DetectPatterns giữa task, không chỉ end-of-task) | Hermes | MED | 2-3d | ✅ Done — mid-tool-loop nudge in `toolloop.go` (interval + repeat-fail naming), independent of skills table |
 
 **Đã có sẵn — không làm lại** (verified 2026-07-20): 4-tier memory + RRF hybrid search, worktree-per-task isolation, token counting bằng tiktoken trong repomap, exit-code tách khỏi output text.
 
@@ -59,7 +59,7 @@
 | [`cross-harness-review/`](./cross-harness-review/proposal.md) | P3.1 | ✅ Done — REQ-001–004 complete (backend, policy selector UI & coded_by/reviewed_by metadata badges done) |
 | [`repomap-mention-boost/`](./repomap-mention-boost/proposal.md) | P3.2 | ✅ Done — REQ-001–004 + M01 complete, see tasks.md |
 | [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | ✅ Done |
-| [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | 📝 Authored |
+| [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | ✅ Done |
 | [`declarative-governance-schemas/`](./declarative-governance-schemas/proposal.md) | P4.2 | 📝 Authored |
 | [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | 📝 Authored |
 | [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | 📝 Authored |

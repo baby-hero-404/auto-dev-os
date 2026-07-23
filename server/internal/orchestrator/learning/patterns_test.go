@@ -7,6 +7,33 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
+func TestFindDuplicateSkill_MatchesOnSharedKeyword(t *testing.T) {
+	existing := []models.LearnedSkill{
+		{ID: "s1", TriggerKeywords: []string{"analyze", "plan"}},
+		{ID: "s2", TriggerKeywords: []string{"code_backend"}},
+	}
+	dup := findDuplicateSkill(existing, "analyze -> plan workflow", []string{"analyze", "plan"})
+	if dup == nil || dup.ID != "s1" {
+		t.Fatalf("expected duplicate s1, got %v", dup)
+	}
+}
+
+func TestFindDuplicateSkill_NoMatchReturnsNil(t *testing.T) {
+	existing := []models.LearnedSkill{
+		{ID: "s1", TriggerKeywords: []string{"analyze", "plan"}},
+	}
+	dup := findDuplicateSkill(existing, "code_backend -> test workflow", []string{"code_backend", "test"})
+	if dup != nil {
+		t.Fatalf("expected no duplicate, got %v", dup)
+	}
+}
+
+func TestFindDuplicateSkill_EmptyExistingReturnsNil(t *testing.T) {
+	if dup := findDuplicateSkill(nil, "anything", []string{"anything"}); dup != nil {
+		t.Fatalf("expected no duplicate against empty existing set, got %v", dup)
+	}
+}
+
 func TestExtractChangedFiles(t *testing.T) {
 	t.Run("parses a files_changed line", func(t *testing.T) {
 		content := "status: success\nfiles_changed: [main.go utils.go]\nduration: 1.2s"

@@ -47,6 +47,35 @@ func (o *Orchestrator) log(ctx context.Context, taskID string, jobID *string, le
 	}
 }
 
+// recordLearnedSkillOutcome updates usage/success counters (REQ-003) for
+// whichever learned skills context_load recorded as loaded (checkpoint
+// step "context_load", state key "skills_loaded") for this task. Best-effort:
+// checkpoint lookup/parse failures are logged, never propagated.
+func (o *Orchestrator) recordLearnedSkillOutcome(ctx context.Context, task *models.Task, success bool) {
+	checkpoints, err := o.workflows.ListCheckpoints(ctx, task.ID)
+	if err != nil {
+		slog.Warn("learned-skill outcome: failed to list checkpoints", "task_id", task.ID, "error", err)
+		return
+	}
+	var skillIDs []string
+	for _, cp := range checkpoints {
+		if cp.Step != "context_load" {
+			continue
+		}
+		var state struct {
+			SkillsLoaded []string `json:"skills_loaded"`
+		}
+		if err := json.Unmarshal(cp.State, &state); err != nil {
+			continue
+		}
+		skillIDs = state.SkillsLoaded
+	}
+	if len(skillIDs) == 0 {
+		return
+	}
+	o.learnEngine.RecordSkillOutcome(context.WithoutCancel(ctx), skillIDs, success)
+}
+
 func (o *Orchestrator) updateTaskStatus(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
 	task, err := o.tasks.GetByID(ctx, taskID)
 	if err != nil {
@@ -58,6 +87,20 @@ func (o *Orchestrator) updateTaskStatus(ctx context.Context, taskID string, newS
 	updated, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{Status: &newStatus})
 	if err != nil {
 		return nil, err
+	}
+
+	if o.learnEngine != nil && (newStatus == models.TaskStatusMerged || newStatus == models.TaskStatusFailed) {
+		o.recordLearnedSkillOutcome(ctx, updated, newStatus == models.TaskStatusMerged)
+	}
+	if o.learnEngine != nil && newStatus == models.TaskStatusMerged {
+		autonomous := false
+		if o.projects != nil {
+			if proj, pErr := o.projects.GetByID(ctx, updated.ProjectID); pErr == nil && proj != nil {
+				autonomous = proj.DefaultAutonomy == "autonomous"
+			}
+		}
+		leCtx := context.WithoutCancel(ctx)
+		go o.learnEngine.ExtractLearnedSkills(leCtx, updated, autonomous)
 	}
 
 	if o.wkspace != nil {

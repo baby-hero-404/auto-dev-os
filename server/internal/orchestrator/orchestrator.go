@@ -63,6 +63,7 @@ type Orchestrator struct {
 	registry            *tool.Registry
 	capManager          *tool.CapabilityManager
 	gitConfig           config.GitConfig
+	learnedSkills       LearnedSkillReader
 }
 
 func (o *Orchestrator) wake() {
@@ -108,6 +109,12 @@ func WithLearningEngine(engine LearningRecorder) Option {
 func WithGitOpsClient(client GitOpsClient) Option {
 	return func(o *Orchestrator) {
 		o.gitOps = client
+	}
+}
+
+func WithLearnedSkills(repo LearnedSkillReader) Option {
+	return func(o *Orchestrator) {
+		o.learnedSkills = repo
 	}
 }
 

@@ -66,6 +66,8 @@ type LearningRecorder interface {
 	SuggestRuleFromErrors(ctx context.Context, agentID string)
 	SuggestPromptPatch(ctx context.Context, task *models.Task, job *models.WorkflowJob)
 	SuggestSkillFromTask(ctx context.Context, task *models.Task, job *models.WorkflowJob)
+	ExtractLearnedSkills(ctx context.Context, task *models.Task, autonomous bool)
+	RecordSkillOutcome(ctx context.Context, skillIDs []string, success bool)
 }
 
 // ArtifactRepository persists workflow step artifacts.
@@ -85,6 +87,12 @@ type RepositoryRepository interface {
 // ProjectRepository retrieves project configuration.
 type ProjectRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Project, error)
+}
+
+// LearnedSkillReader looks up active learned skills matching a query, for
+// context_load to inject into a task's context (REQ-002).
+type LearnedSkillReader interface {
+	SearchActiveByText(ctx context.Context, projectID, query string, limit int) ([]models.LearnedSkill, error)
 }
 
 // TaskRepository provides task CRUD operations.

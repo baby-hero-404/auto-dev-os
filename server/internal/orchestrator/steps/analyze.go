@@ -913,6 +913,11 @@ func formatRepoContext(contextOut map[string]any) string {
 		sb.WriteString("\n")
 	}
 
+	// 7b. Learned skills from past merged tasks in this project (REQ-002)
+	if learnedSkills, ok := contextOut["learned_skills"].(string); ok && learnedSkills != "" {
+		sb.WriteString(learnedSkills)
+	}
+
 	// 8. Context Cache directory tree (if any)
 	if cacheJSON, ok := contextOut["context_cache"].(string); ok && cacheJSON != "" {
 		var cache struct {

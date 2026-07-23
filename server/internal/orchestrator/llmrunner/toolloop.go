@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -135,6 +136,12 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 	var failedCalls []string
 
 	for i := 0; i < maxIterations; i++ {
+		if i > 0 && i%progressNudgeInterval == 0 {
+			if nudge := buildProgressNudge(i, failureCounts); nudge != "" {
+				messages = append(messages, llm.Message{Role: "user", Content: nudge})
+			}
+		}
+
 		start := time.Now()
 		resp, err := cfg.Chat(ctx, messages, llm.ChatOptions{Tools: cfg.Tools, ToolChoice: "auto"})
 		latency := time.Since(start)
@@ -295,6 +302,65 @@ func RunToolLoop(ctx context.Context, cfg ToolLoopConfig) (map[string]any, []llm
 }
 
 // extractCallKey returns a discriminator for the circuit breaker's per-call key.
+// progressNudgeInterval is how often (in tool-loop iterations) a mid-task
+// progress nudge is injected (REQ-004), independent of any single call's
+// repeat-fail count.
+const progressNudgeInterval = 15
+
+// progressNudgeRepeatFailThreshold is the per-(tool+args) failure count above
+// which the nudge calls that specific call out by name and suggests changing
+// approach, rather than just summarizing aggregate fail counts.
+const progressNudgeRepeatFailThreshold = 3
+
+// buildProgressNudge summarizes tool-call failures so far into a short
+// user-role message (REQ-004), or returns "" if nothing has failed yet.
+// failureCounts is keyed "toolName:discriminator"; this aggregates by
+// toolName for the summary line and separately flags any single key that has
+// failed progressNudgeRepeatFailThreshold+ times.
+func buildProgressNudge(iteration int, failureCounts map[string]int) string {
+	if len(failureCounts) == 0 {
+		return ""
+	}
+
+	byTool := make(map[string]int)
+	var repeatFails []string
+	for key, count := range failureCounts {
+		if count <= 0 {
+			continue
+		}
+		name := key
+		if idx := strings.IndexByte(key, ':'); idx >= 0 {
+			name = key[:idx]
+		}
+		byTool[name] += count
+		if count >= progressNudgeRepeatFailThreshold {
+			repeatFails = append(repeatFails, fmt.Sprintf("%s(%s) ×%d", name, key[len(name)+1:], count))
+		}
+	}
+	if len(byTool) == 0 {
+		return ""
+	}
+
+	toolNames := make([]string, 0, len(byTool))
+	for name := range byTool {
+		toolNames = append(toolNames, name)
+	}
+	sort.Strings(toolNames)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[system note] Progress check: iterations=%d. Failed calls:", iteration))
+	for _, name := range toolNames {
+		sb.WriteString(fmt.Sprintf(" %s ×%d,", name, byTool[name]))
+	}
+	msg := strings.TrimSuffix(sb.String(), ",")
+
+	if len(repeatFails) > 0 {
+		sort.Strings(repeatFails)
+		msg += fmt.Sprintf("\nSame call repeated failing: %s — change approach instead of retrying.", strings.Join(repeatFails, ", "))
+	}
+	return msg
+}
+
 // Prefers "path" (read_file, search_replace, create_file, run_lint); falls back to
 // "command" for tools with no path concept (run_tests, run_build); returns "" if
 // neither is present, which still throttles repeat no-argument calls to the same tool.

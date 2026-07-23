@@ -17,6 +17,12 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
+// LearnedSkillReader looks up active learned skills matching a query, for
+// context_load to inject into a task's context (REQ-002).
+type LearnedSkillReader interface {
+	SearchActiveByText(ctx context.Context, projectID, query string, limit int) ([]models.LearnedSkill, error)
+}
+
 // ContextLoadStep implements Step for context loading.
 type ContextLoadStep struct {
 	rt            StepRuntime
@@ -30,6 +36,7 @@ type ContextLoadStep struct {
 	repos         RepositoryLister
 	log           Logger
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
+	learnedSkills LearnedSkillReader
 }
 
 func NewContextLoadStep(
@@ -44,6 +51,7 @@ func NewContextLoadStep(
 	repos RepositoryLister,
 	log Logger,
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
+	learnedSkills LearnedSkillReader,
 ) *ContextLoadStep {
 	return &ContextLoadStep{
 		rt:            rt,
@@ -57,6 +65,7 @@ func NewContextLoadStep(
 		repos:         repos,
 		log:           log,
 		containerPath: containerPath,
+		learnedSkills: learnedSkills,
 	}
 }
 
@@ -192,6 +201,30 @@ func (s *ContextLoadStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	cacheJSON, _ := json.Marshal(cache)
 	result["context_cache"] = string(cacheJSON)
+
+	if s.learnedSkills != nil {
+		// ~2k-token budget (REQ-002), approximated at 4 chars/token since we
+		// don't have a tokenizer handy in this step.
+		const learnedSkillsCharBudget = 8000
+		taskQuery := s.rt.Task.Title + "\n" + s.rt.Task.Description
+		if skills, err := s.learnedSkills.SearchActiveByText(ctx, s.rt.Task.ProjectID, taskQuery, 3); err == nil && len(skills) > 0 {
+			var sb strings.Builder
+			sb.WriteString("## Learned skills (from past tasks in this project)\n")
+			ids := make([]string, 0, len(skills))
+			for _, sk := range skills {
+				section := fmt.Sprintf("### %s\n%s\n\n", sk.Title, sk.Content)
+				if sb.Len()+len(section) > learnedSkillsCharBudget {
+					break
+				}
+				sb.WriteString(section)
+				ids = append(ids, sk.ID)
+			}
+			result["learned_skills"] = sb.String()
+			result["skills_loaded"] = ids
+		} else if err != nil && s.log != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("learned skills search failed: %v", err))
+		}
+	}
 
 	if s.artifacts != nil {
 		_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, workflow.StepContextLoad, "context", result)

@@ -134,6 +134,7 @@ func TestStepContextLoad_Execute(t *testing.T) {
 			func(task *models.Task, hostPath string, worktreeSuffix string) string {
 				return hostPath
 			},
+		nil,
 		)
 	}
 
@@ -210,6 +211,7 @@ func TestStepContextLoad_Execute_PropagatesWorkspaceRootToRepoMapAndRetrieveCont
 		func(task *models.Task, hostPath string, worktreeSuffix string) string {
 			return hostPath
 		},
+		nil,
 	)
 
 	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
@@ -335,6 +337,7 @@ func TestStepContextLoad_Execute_CacheMissAndBuild(t *testing.T) {
 		func(task *models.Task, hostPath string, worktreeSuffix string) string {
 			return hostPath
 		},
+		nil,
 	)
 
 	_, err = step.Execute(context.Background(), workflow.StepContext{})

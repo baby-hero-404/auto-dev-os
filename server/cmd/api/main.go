@@ -193,9 +193,10 @@ func run() error {
 	learningSvc.SetSkillService(skillSvc)
 	learningSvc.SetPromptRoot(filepath.Clean(promptsRoot))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
-	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo)
+	learnedSkillRepo := repository.NewLearnedSkillRepo(db)
+	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo, learnedSkillRepo)
 
-	opts = append(opts, orchestrator.WithMemoryHooks(memoryHooks), orchestrator.WithLearningEngine(learningEngine))
+	opts = append(opts, orchestrator.WithMemoryHooks(memoryHooks), orchestrator.WithLearningEngine(learningEngine), orchestrator.WithLearnedSkills(learnedSkillRepo))
 	opts = append(opts, orchestrator.WithMaxPhaseCost(cfg.Worker.MaxPhaseCost))
 	opts = append(opts, orchestrator.WithStateMachineEnabled(cfg.Execution.StateMachineEnabled))
 	opts = append(opts, orchestrator.WithMaxToolResultChars(cfg.Execution.MaxToolResultChars))
@@ -215,6 +216,7 @@ func run() error {
 		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo),
 		RuleSvc:            service.NewRuleService(ruleRepo),
 		SkillSvc:           skillSvc,
+		LearnedSkillSvc:    learnedSkillRepo,
 		AnalyticsSvc:       service.NewAnalyticsService(analyticsRepo),
 		DashboardSvc:       service.NewAnalyticsDashboardService(dashboardRepo),
 		AuditSvc:           auditSvc,

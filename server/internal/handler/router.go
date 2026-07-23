@@ -27,6 +27,7 @@ type Deps struct {
 	TaskSvc         TaskService
 	RuleSvc         RuleService
 	SkillSvc        SkillService
+	LearnedSkillSvc LearnedSkillService
 	AnalyticsSvc    AnalyticsService
 	DashboardSvc    AnalyticsDashboardService
 	AuditSvc        AuditService
@@ -89,6 +90,7 @@ func NewRouter(d Deps) http.Handler {
 	taskH := NewTaskHandler(d.TaskSvc, d.Orch)
 	ruleH := NewRuleHandler(d.RuleSvc)
 	skillH := NewSkillHandler(d.SkillSvc)
+	learnedSkillH := NewLearnedSkillHandler(d.LearnedSkillSvc)
 	analyticsH := NewAnalyticsHandler(d.AnalyticsSvc)
 	dashboardH := NewAnalyticsDashboardHandler(d.DashboardSvc)
 	auditH := NewAuditHandler(d.AuditSvc)
@@ -291,6 +293,15 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/sources/{sourceID}/file-content", skillH.GetFileContent)
 				r.Get("/{skillID}", skillH.GetByID)
 				r.Post("/{skillID}/test", skillH.Test)
+			})
+
+			// Learned skills (reusable-skills-system): project-scoped, distinct
+			// from the tool/plugin catalog above.
+			r.Get("/projects/{projectID}/learned-skills", learnedSkillH.ListLearnedSkills)
+			r.Route("/learned-skills", func(r chi.Router) {
+				r.Get("/{skillID}", learnedSkillH.GetLearnedSkill)
+				r.Patch("/{skillID}", learnedSkillH.UpdateLearnedSkill)
+				r.Delete("/{skillID}", learnedSkillH.DeleteLearnedSkill)
 			})
 		})
 	})

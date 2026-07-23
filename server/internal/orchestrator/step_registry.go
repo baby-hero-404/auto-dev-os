@@ -57,6 +57,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.repositories,            // RepositoryLister
 			loggerAdapter{log: o.log}, // Logger
 			o.containerPathForHostPath,
+			o.learnedSkills, // LearnedSkillReader
 		),
 		steps.NewAnalyzeStep(
 			rt,

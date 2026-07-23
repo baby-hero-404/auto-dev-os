@@ -1,5 +1,7 @@
 package repomap
 
+import "strings"
+
 // mentionBoostFactor multiplies edge weight flowing into a node that defines
 // an identifier mentioned in the task description, mirroring Aider's
 // mentioned_idents boost in its RepoMap PageRank personalization.
@@ -21,14 +23,25 @@ func (g *DependencyGraph) CalculatePageRank(activeFiles []string, taskDescriptio
 		return map[string]float64{}
 	}
 
-	// 1. Initialize personalization vector (Boost active files)
+	// 1a. A path mentioned in the task description is treated exactly like an
+	// active file (REQ-003) — merge both sets before seeding personalization,
+	// keeping the mechanism symmetric between the two boost sources.
+	fileBoostIDs := make(map[int64]bool)
+	for _, f := range activeFiles {
+		if n, exists := g.nodes[f]; exists {
+			fileBoostIDs[n.ID()] = true
+		}
+	}
+	for id := range g.mentionedFileNodeIDs(taskDescription) {
+		fileBoostIDs[id] = true
+	}
+
+	// 1. Initialize personalization vector (Boost active + mentioned files)
 	pers := make(map[int64]float64)
-	if len(activeFiles) > 0 {
-		boost := 1.0 / float64(len(activeFiles))
-		for _, f := range activeFiles {
-			if n, exists := g.nodes[f]; exists {
-				pers[n.ID()] = boost
-			}
+	if len(fileBoostIDs) > 0 {
+		boost := 1.0 / float64(len(fileBoostIDs))
+		for id := range fileBoostIDs {
+			pers[id] = boost
 		}
 	}
 
@@ -43,13 +56,18 @@ func (g *DependencyGraph) CalculatePageRank(activeFiles []string, taskDescriptio
 	// 1b. Determine which node IDs define a mentioned identifier.
 	mentionedNodeIDs := g.mentionedNodeIDs(taskDescription)
 
-	// boostedWeight returns the edge weight u->v, multiplied by
-	// mentionBoostFactor when v defines a mentioned identifier. Used
-	// consistently in both the out-weight-sum precomputation and the
-	// inbound-flow computation so the two stay in agreement.
+	// boostedWeight returns the edge weight u->v, multiplied by 50x when v is
+	// an active/mentioned-path file, or by mentionBoostFactor when v defines
+	// a mentioned identifier. The two are mutually exclusive (file boost
+	// wins) so boosts never stack. Used consistently in both the
+	// out-weight-sum precomputation and the inbound-flow computation so the
+	// two stay in agreement.
 	boostedWeight := func(u, v int64) float64 {
 		weight, _ := g.Graph.Weight(u, v)
-		if mentionedNodeIDs[v] {
+		switch {
+		case fileBoostIDs[v]:
+			weight *= 50.0
+		case mentionedNodeIDs[v]:
 			weight *= mentionBoostFactor
 		}
 		return weight
@@ -119,10 +137,12 @@ func (g *DependencyGraph) CalculatePageRank(activeFiles []string, taskDescriptio
 		result[filepath] = rank
 	}
 
-	// 6. Apply massive multiplier (50x) for active files to prioritize them
-	for _, f := range activeFiles {
-		if _, exists := result[f]; exists {
-			result[f] *= 50.0
+	// 6. Apply massive multiplier (50x) for active + mentioned files to prioritize them
+	for id := range fileBoostIDs {
+		if f, ok := g.idToFn[id]; ok {
+			if _, exists := result[f]; exists {
+				result[f] *= 50.0
+			}
 		}
 	}
 
@@ -148,6 +168,33 @@ func (g *DependencyGraph) mentionedNodeIDs(taskDescription string) map[int64]boo
 				if n, exists := g.nodes[filepath]; exists {
 					ids[n.ID()] = true
 				}
+				break
+			}
+		}
+	}
+	return ids
+}
+
+// mentionedFileNodeIDs returns the set of node IDs whose file path is
+// referenced in taskDescription (REQ-003). A mentioned path matches a graph
+// file if it equals it exactly or matches a path/filename suffix, since task
+// text often mentions a bare filename ("policy_engine.go") rather than the
+// full repo-relative path. Returns an empty (non-nil) set when
+// taskDescription is empty, so callers stay byte-identical to pre-boost
+// behavior.
+func (g *DependencyGraph) mentionedFileNodeIDs(taskDescription string) map[int64]bool {
+	ids := make(map[int64]bool)
+	if taskDescription == "" {
+		return ids
+	}
+	mentionedPaths := ExtractMentionedPaths(taskDescription)
+	if len(mentionedPaths) == 0 {
+		return ids
+	}
+	for filepath, n := range g.nodes {
+		for mp := range mentionedPaths {
+			if filepath == mp || strings.HasSuffix(filepath, "/"+mp) {
+				ids[n.ID()] = true
 				break
 			}
 		}

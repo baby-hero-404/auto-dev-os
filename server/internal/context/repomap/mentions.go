@@ -1,6 +1,31 @@
 package repomap
 
-import "unicode"
+import (
+	"regexp"
+	"unicode"
+)
+
+// pathLikePattern matches file-path-shaped tokens in free text: bare
+// filenames with an extension ("policy_engine.go") or slash-separated
+// paths ("server/internal/policy_engine.go").
+var pathLikePattern = regexp.MustCompile(`[A-Za-z0-9_\-./]*[A-Za-z0-9_\-]+\.[A-Za-z0-9]+`)
+
+// ExtractMentionedPaths pulls path-like tokens out of free text (e.g. a task
+// title/description), per Aider's rule that a directly-mentioned file path
+// carries the same intent signal as an actively-open file (REQ-003).
+// Filtering against files that actually exist in the repo happens at the
+// ranking layer (mentionedFileNodeIDs), mirroring how ExtractMentionedIdents
+// is filtered against known definitions there.
+func ExtractMentionedPaths(text string) map[string]bool {
+	paths := make(map[string]bool)
+	if text == "" {
+		return paths
+	}
+	for _, m := range pathLikePattern.FindAllString(text, -1) {
+		paths[m] = true
+	}
+	return paths
+}
 
 // ExtractMentionedIdents tokenizes free text (e.g. a task title/description)
 // into identifier candidates using the same heuristic Aider applies to

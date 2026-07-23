@@ -3,7 +3,7 @@
 ## Added Requirements
 
 ### REQ-001: Identifier extraction
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task description chứa `` `CreateGitCheckpoint` ``, `policy_engine.go`, và từ thường "checkpoint"
@@ -11,21 +11,21 @@
 - AND từ thường không phải identifier trong graph KHÔNG được trả về (lọc theo definitions tồn tại)
 
 ### REQ-002: Symbol mention boost ×10
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN `CreateGitCheckpoint` được mention và tồn tại trong graph
 - THEN edges tới definition đó nhân ×10, file chứa nó xếp hạng cao hơn baseline không-mention (assert bằng rank comparison test)
 
 ### REQ-003: Path mention = active file
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task mention path khớp file trong repo
 - THEN file đó nhận boost ×50 như active files hiện có
 
 ### REQ-004: Không mention → không đổi
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN task không chứa identifier nào khớp graph
@@ -34,7 +34,7 @@
 ## Modified Requirements
 
 ### REQ-M01: BuildRepoMap signature
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN caller không truyền task text (call-sites khác context_load nếu có)

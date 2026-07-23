@@ -53,3 +53,36 @@ func TestExtractMentionedIdents(t *testing.T) {
 		}
 	})
 }
+
+func TestExtractMentionedPaths(t *testing.T) {
+	t.Run("extracts bare filename and slash path", func(t *testing.T) {
+		got := ExtractMentionedPaths("please fix `policy_engine.go` and server/internal/policy/loader.go")
+		if !got["policy_engine.go"] {
+			t.Errorf("expected policy_engine.go to be extracted, got %v", got)
+		}
+		if !got["server/internal/policy/loader.go"] {
+			t.Errorf("expected server/internal/policy/loader.go to be extracted, got %v", got)
+		}
+	})
+
+	t.Run("empty text returns empty map", func(t *testing.T) {
+		got := ExtractMentionedPaths("")
+		if len(got) != 0 {
+			t.Errorf("expected empty map, got %v", got)
+		}
+	})
+
+	t.Run("bilingual (Vietnamese) task text still extracts path", func(t *testing.T) {
+		got := ExtractMentionedPaths("sửa lỗi trong ranking.go giúp mình với")
+		if !got["ranking.go"] {
+			t.Errorf("expected ranking.go to be extracted from Vietnamese text, got %v", got)
+		}
+	})
+
+	t.Run("plain prose without path-shaped tokens returns empty map", func(t *testing.T) {
+		got := ExtractMentionedPaths("please fix the login flow soon")
+		if len(got) != 0 {
+			t.Errorf("expected empty map, got %v", got)
+		}
+	})
+}

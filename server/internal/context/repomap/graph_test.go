@@ -120,6 +120,37 @@ func TestCalculatePageRankMentionBoost(t *testing.T) {
 	}
 }
 
+func TestCalculatePageRankPathMentionBoostsLikeActiveFile(t *testing.T) {
+	// main.go -> billing.go (defines ChargeCustomer), main.go -> auth.go (unrelated).
+	tags := []source.Tag{
+		{Name: "ChargeCustomer", Kind: "def", Filepath: "server/billing.go"},
+		{Name: "ChargeCustomer", Kind: "ref", Filepath: "main.go"},
+		{Name: "AuthenticateUser", Kind: "def", Filepath: "auth.go"},
+		{Name: "AuthenticateUser", Kind: "ref", Filepath: "main.go"},
+	}
+
+	g := NewDependencyGraph()
+	g.BuildGraph(tags)
+
+	baseline := g.CalculatePageRank([]string{}, "")
+	pathMentioned := g.CalculatePageRank([]string{}, "please fix server/billing.go")
+	identMentioned := g.CalculatePageRank([]string{}, "please fix ChargeCustomer")
+
+	if pathMentioned["billing.go"] != 0 {
+		t.Fatalf("test setup sanity check failed: unexpected key billing.go present")
+	}
+	if pathMentioned["server/billing.go"] <= baseline["server/billing.go"] {
+		t.Errorf("expected path mention to raise rank above baseline: baseline=%f mentioned=%f",
+			baseline["server/billing.go"], pathMentioned["server/billing.go"])
+	}
+	// REQ-003: a mentioned path is treated like an active file (50x), which
+	// is a stronger boost than a mentioned identifier (10x).
+	if pathMentioned["server/billing.go"] <= identMentioned["server/billing.go"] {
+		t.Errorf("expected path-mention boost (50x) to exceed ident-mention boost (10x): path=%f ident=%f",
+			pathMentioned["server/billing.go"], identMentioned["server/billing.go"])
+	}
+}
+
 func TestCalculatePageRankEmptyTaskDescriptionIsNoOp(t *testing.T) {
 	tags := []source.Tag{
 		{Name: "User", Kind: "def", Filepath: "models.go"},

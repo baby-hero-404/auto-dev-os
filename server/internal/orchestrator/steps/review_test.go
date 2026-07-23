@@ -100,6 +100,42 @@ func TestReviewStep_SkipsEasyTask(t *testing.T) {
 	}
 }
 
+func TestReviewStep_SkipsViaPipelineConfigSkipWhenLabel(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Labels: []string{"hotfix"}}
+	project := &models.Project{ID: "p1", PipelineConfig: []byte(`{"version":1,"pipeline":{"extends":"api_native","steps":[{"id":"review","skip_when":{"label":"hotfix"}}]}}`)}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: project},
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["status"] != "skipped" {
+		t.Errorf("expected skipped status via pipeline_config skip_when, got: %v", result["status"])
+	}
+}
+
+func TestReviewStep_DoesNotSkipWhenLabelDoesNotMatch(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusFixing, Labels: []string{"backend"}}
+	project := &models.Project{ID: "p1", PipelineConfig: []byte(`{"version":1,"pipeline":{"extends":"api_native","steps":[{"id":"review","skip_when":{"label":"hotfix"}}]}}`)}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: project},
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["status"] != "bypassed_via_human_review" {
+		t.Errorf("expected normal bypassed_via_human_review path (no skip), got: %v", result["status"])
+	}
+}
+
 func TestReviewStep_BypassedViaHumanReview(t *testing.T) {
 	task := &models.Task{ID: "t1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusFixing}
 	step := NewReviewStep(
@@ -227,6 +263,36 @@ func TestReviewStep_ExceedsCycleLimit(t *testing.T) {
 	}
 	if result["cycle_limit_reached"] != true {
 		t.Error("expected cycle_limit_reached to be true in output")
+	}
+}
+
+func TestReviewStep_PipelineConfigCycleLimitOverrideWins(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	findings := map[string]any{"findings": []any{map[string]any{"file": "main.go", "severity": "high"}}}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{
+			ID:                 "p1",
+			MaxReviewFixCycles: 5,
+			PipelineConfig:     []byte(`{"version":1,"policies":{"max_review_fix_cycles":1}}`),
+		}},
+		&mockLLMRunner{result: StepResult{"parsed": findings}},
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 1}, // Already ran 1 cycle; override limit is 1
+		nil,
+		statusMock,
+		&mockLogger{},
+	)
+	result, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["cycle_limit_reached"] != true {
+		t.Error("expected pipeline_config max_review_fix_cycles override (1) to be enforced over project column (5)")
 	}
 }
 
@@ -631,6 +697,35 @@ func TestReviewStep_PolicySame_NoExclusionAndAdversarialDirective(t *testing.T) 
 	}
 	if !strings.Contains(llmMock.lastInstruction, "Adversarial audit mode") {
 		t.Errorf("expected policy=same to always inject the adversarial audit directive, got:\n%s", llmMock.lastInstruction)
+	}
+}
+
+func TestReviewStep_PipelineConfigReviewHarnessOverrideWins(t *testing.T) {
+	task := &models.Task{ID: "t1", ProjectID: "p1", Complexity: models.TaskComplexityMedium, Status: models.TaskStatusReviewing}
+	statusMock := &mockStatusUpdater{}
+	llmMock := &mockLLMRunner{result: newStructuredVerdictOut("pass", "pass")}
+	step := NewReviewStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockTaskReader{task: task},
+		&mockProjectReader{project: &models.Project{
+			ID:                  "p1",
+			ReviewHarnessPolicy: models.ReviewHarnessDifferentModel,
+			PipelineConfig:      []byte(`{"version":1,"policies":{"review_harness":"same"}}`),
+		}},
+		llmMock,
+		&mockDiffCapturer{diffVal: "some diff"},
+		&mockArtifactSaver{},
+		nil,
+		&mockCheckpointReader{count: 0},
+		&mockCheckpointLister{},
+		statusMock,
+		&mockLogger{},
+	)
+	if _, err := step.Execute(context.Background(), workflow.StepContext{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(llmMock.lastInstruction, "Adversarial audit mode") {
+		t.Errorf("expected pipeline_config review_harness override 'same' to win over project column 'different_model', got:\n%s", llmMock.lastInstruction)
 	}
 }
 

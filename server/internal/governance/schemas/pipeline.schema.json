@@ -1,0 +1,33 @@
+{
+  "$id": "https://auto-code-os/schemas/pipeline.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pipeline config",
+  "type": "object",
+  "properties": {
+    "extends": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "enabled": { "type": "boolean" },
+          "skip_when": {
+            "type": "object",
+            "properties": {
+              "label": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

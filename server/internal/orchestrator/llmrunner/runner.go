@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
+	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -546,6 +547,7 @@ func (r Runner) initialMessages(ctx context.Context, task *models.Task, agent *m
 func (r Runner) routeName(ctx context.Context, task *models.Task, agent *models.Agent, stepID string) string {
 	routeName := agent.ModelLevelGroup
 	smartRouting := true
+	var pipelineCfg *governance.Config
 	if r.Projects != nil {
 		if p, err := r.Projects.GetByID(ctx, task.ProjectID); err == nil {
 			if agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
@@ -554,7 +556,13 @@ func (r Runner) routeName(ctx context.Context, task *models.Task, agent *models.
 				routeName = p.DefaultModelLevel
 			}
 			smartRouting = p.SmartRouting
+			if len(p.PipelineConfig) > 0 {
+				pipelineCfg, _, _ = governance.ValidateConfig(p.PipelineConfig)
+			}
 		}
+	}
+	if override, ok := pipelineCfg.RoutingOverride(stepID); ok {
+		return override
 	}
 	return ResolveStepModelLevel(stepID, routeName, task.Complexity, prompts.IsRetry(ctx), smartRouting)
 }

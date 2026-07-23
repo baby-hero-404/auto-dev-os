@@ -88,6 +88,7 @@ type Project struct {
 	CLIEngineConfig     json.RawMessage `json:"cli_engine_config" gorm:"column:cli_engine_config;type:jsonb;default:'{}'"`
 	ReviewHarnessPolicy string          `json:"review_harness_policy" gorm:"column:review_harness_policy;default:'different_model';not null"`
 	SmartRouting        bool            `json:"smart_routing" gorm:"column:smart_routing;default:true;not null"`
+	PipelineConfig      json.RawMessage `json:"pipeline_config,omitempty" gorm:"column:pipeline_config;type:jsonb"`
 	RepositoriesCount   int             `json:"repositories_count,omitempty" gorm:"->"`
 	AgentsCount         int             `json:"agents_count,omitempty" gorm:"->"`
 	TasksDoneCount      int             `json:"tasks_done_count,omitempty" gorm:"->"`
@@ -110,6 +111,7 @@ type CreateProjectInput struct {
 	CLIEngineConfig     *CLIEngineConfig `json:"cli_engine_config,omitempty"`
 	ReviewHarnessPolicy *string          `json:"review_harness_policy,omitempty"`
 	SmartRouting        *bool            `json:"smart_routing,omitempty"`
+	PipelineConfig      json.RawMessage  `json:"pipeline_config,omitempty"`
 }
 
 // UpdateProjectInput is the payload to partially update a project.
@@ -126,6 +128,7 @@ type UpdateProjectInput struct {
 	CLIEngineConfig     *CLIEngineConfig `json:"cli_engine_config,omitempty"`
 	ReviewHarnessPolicy *string          `json:"review_harness_policy,omitempty"`
 	SmartRouting        *bool            `json:"smart_routing,omitempty"`
+	PipelineConfig      json.RawMessage  `json:"pipeline_config,omitempty"`
 }
 
 // ValidateExecutionEngine returns an error if engine is set but not a recognized value.

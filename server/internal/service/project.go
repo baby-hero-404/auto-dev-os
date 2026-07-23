@@ -6,10 +6,34 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+// validatePipelineConfig runs governance.ValidateConfig (schema + DAG
+// checks, REQ-001/REQ-001b) and turns any failures into a single
+// ErrValidation with all violations joined, since ErrValidation only
+// carries a message string. A nil/empty raw is a no-op (REQ-002).
+func validatePipelineConfig(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	_, errs, err := governance.ValidateConfig(raw)
+	if err != nil {
+		return ErrValidation(fmt.Sprintf("pipeline_config: %v", err))
+	}
+	if len(errs) > 0 {
+		msgs := make([]string, len(errs))
+		for i, e := range errs {
+			msgs[i] = fmt.Sprintf("%s: %s", e.Path, e.Message)
+		}
+		return ErrValidation("pipeline_config: " + strings.Join(msgs, "; "))
+	}
+	return nil
+}
 
 type ProjectService struct {
 	repo     *repository.ProjectRepo
@@ -32,6 +56,9 @@ func (s *ProjectService) Create(ctx context.Context, orgID string, input models.
 		if err := models.ValidateReviewHarnessPolicy(*input.ReviewHarnessPolicy); err != nil {
 			return nil, ErrValidation(err.Error())
 		}
+	}
+	if err := validatePipelineConfig(input.PipelineConfig); err != nil {
+		return nil, err
 	}
 	project, err := s.repo.Create(ctx, orgID, input)
 	if err != nil {
@@ -99,6 +126,9 @@ func (s *ProjectService) Update(ctx context.Context, id string, input models.Upd
 		if err := models.ValidateCLIEngineConfig(engine, &cfg); err != nil {
 			return nil, ErrValidation(err.Error())
 		}
+	}
+	if err := validatePipelineConfig(input.PipelineConfig); err != nil {
+		return nil, err
 	}
 	project, err := s.repo.Update(ctx, id, input)
 	if err != nil {

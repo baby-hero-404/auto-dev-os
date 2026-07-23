@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
+	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/patch"
 	"github.com/auto-code-os/auto-code-os/server/internal/policy"
@@ -173,6 +174,7 @@ const AnalyzeMaxIterations = 12
 func (s *AnalyzeStep) buildAnalyzeRouteOptions(ctx context.Context) llm.RouteOptions {
 	routeName := s.rt.Agent.ModelLevelGroup
 	smartRouting := true
+	var pipelineCfg *governance.Config
 	if s.projects != nil {
 		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
 			if s.rt.Agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
@@ -181,9 +183,16 @@ func (s *AnalyzeStep) buildAnalyzeRouteOptions(ctx context.Context) llm.RouteOpt
 				routeName = p.DefaultModelLevel
 			}
 			smartRouting = p.SmartRouting
+			if len(p.PipelineConfig) > 0 {
+				pipelineCfg, _, _ = governance.ValidateConfig(p.PipelineConfig)
+			}
 		}
 	}
-	routeName = llmrunner.ResolveStepModelLevel(workflow.StepAnalyze, routeName, s.rt.Task.Complexity, prompts.IsRetry(ctx), smartRouting)
+	if override, ok := pipelineCfg.RoutingOverride(workflow.StepAnalyze); ok {
+		routeName = override
+	} else {
+		routeName = llmrunner.ResolveStepModelLevel(workflow.StepAnalyze, routeName, s.rt.Task.Complexity, prompts.IsRetry(ctx), smartRouting)
+	}
 	return llm.RouteOptions{
 		Complexity: s.rt.Task.Complexity,
 		OrgID:      s.rt.Agent.OrgID,
@@ -648,10 +657,14 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 
 	var projectAutonomy string
 	var projectReviewPolicy string
+	var pipelineCfg *governance.Config
 	if s.projects != nil {
 		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
 			projectAutonomy = p.DefaultAutonomy
 			projectReviewPolicy = p.AutoReviewPolicy
+			if len(p.PipelineConfig) > 0 {
+				pipelineCfg, _, _ = governance.ValidateConfig(p.PipelineConfig)
+			}
 		}
 	}
 
@@ -665,7 +678,7 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 	if len(s.rt.Task.Clarifications) > 0 {
 		_ = json.Unmarshal(s.rt.Task.Clarifications, &priorRounds)
 	}
-	dorBypassed := hasClarifications && policy.IsDefinitionOfReadyBypassed(s.rt.Task.Labels, len(priorRounds))
+	dorBypassed := hasClarifications && (policy.IsDefinitionOfReadyBypassed(s.rt.Task.Labels, len(priorRounds)) || pipelineCfg.IsDorDisabled())
 	if dorBypassed {
 		hasClarifications = false
 		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf(

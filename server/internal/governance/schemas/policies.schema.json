@@ -1,0 +1,30 @@
+{
+  "$id": "https://auto-code-os/schemas/policies.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Policies config",
+  "type": "object",
+  "properties": {
+    "routing": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "enum": ["fast", "balanced", "powerful"] }
+    },
+    "review_harness": {
+      "type": "string",
+      "enum": ["same", "different_model", "different_provider"]
+    },
+    "max_review_fix_cycles": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "dor": {
+      "type": "object",
+      "properties": {
+        "disabled": { "type": "boolean" },
+        "require_acceptance_criteria": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

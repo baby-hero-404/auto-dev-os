@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -399,6 +400,13 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 	if err == nil && t.Complexity == models.TaskComplexityEasy {
 		return StepResult{"status": "skipped", "info": "skipped review step for easy task"}, nil
 	}
+	if s.projects != nil {
+		if p, perr := s.projects.GetByID(ctx, s.rt.Task.ProjectID); perr == nil && len(p.PipelineConfig) > 0 {
+			if cfg, _, _ := governance.ValidateConfig(p.PipelineConfig); cfg.ShouldSkipStepForLabels(workflow.StepReview, s.rt.Task.Labels) {
+				return StepResult{"status": "skipped", "info": "skipped review step via pipeline_config skip_when"}, nil
+			}
+		}
+	}
 	if s.rt.Task.Status == models.TaskStatusFixing || s.rt.Task.Status == models.TaskStatusTesting {
 		return StepResult{"status": "bypassed_via_human_review"}, nil
 	}
@@ -442,6 +450,13 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
 			if p.MaxReviewFixCycles > 0 {
 				maxCycles = p.MaxReviewFixCycles
+			}
+			if p.PipelineConfig != nil {
+				if cfg, _, _ := governance.ValidateConfig(p.PipelineConfig); cfg != nil {
+					if override, ok := cfg.MaxReviewFixCyclesOverride(); ok {
+						maxCycles = override
+					}
+				}
 			}
 			if p.AutoReviewPolicy == "human_only" {
 				if s.rt.Task.Status != models.TaskStatusHumanReview {
@@ -517,8 +532,17 @@ func (s *ReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) 
 		// coding step per the project's review_harness_policy (REQ-001, REQ-M01).
 		policy := models.ReviewHarnessDifferentModel
 		if s.projects != nil {
-			if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil && p.ReviewHarnessPolicy != "" {
-				policy = p.ReviewHarnessPolicy
+			if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
+				if p.ReviewHarnessPolicy != "" {
+					policy = p.ReviewHarnessPolicy
+				}
+				if p.PipelineConfig != nil {
+					if cfg, _, _ := governance.ValidateConfig(p.PipelineConfig); cfg != nil {
+						if override, ok := cfg.ReviewHarnessOverride(); ok {
+							policy = override
+						}
+					}
+				}
 			}
 		}
 		coderModel := getCoderModel(ctx, s.checkpointLister, s.rt.Task.ID)

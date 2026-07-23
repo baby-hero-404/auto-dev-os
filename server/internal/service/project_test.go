@@ -20,6 +20,29 @@ func TestProjectService_Create_EmptyName(t *testing.T) {
 	}
 }
 
+func TestProjectService_Create_InvalidPipelineConfig(t *testing.T) {
+	svc := NewProjectService(nil, &SeederService{}, "")
+
+	_, err := svc.Create(context.Background(), "org-123", models.CreateProjectInput{
+		Name:           "Test",
+		PipelineConfig: []byte(`{"version": 2}`),
+	})
+	if !isValidationErr(err) {
+		t.Errorf("expected validation error for wrong config version, got: %v", err)
+	}
+}
+
+func TestProjectService_Update_InvalidPipelineConfig(t *testing.T) {
+	svc := NewProjectService(nil, &SeederService{}, "")
+
+	_, err := svc.Update(context.Background(), "proj-123", models.UpdateProjectInput{
+		PipelineConfig: []byte(`{"policies": {"routing": {"analyze": "ultra"}}}`),
+	})
+	if !isValidationErr(err) {
+		t.Errorf("expected validation error for invalid routing level, got: %v", err)
+	}
+}
+
 func TestProjectService_Constructor(t *testing.T) {
 	seeder := &SeederService{}
 	svc := NewProjectService(nil, seeder, "/tmp")

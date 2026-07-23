@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -152,6 +153,13 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 			if p.MaxReviewFixCycles > 0 {
 				maxCycles = p.MaxReviewFixCycles
 			}
+			if p.PipelineConfig != nil {
+				if cfg, _, _ := governance.ValidateConfig(p.PipelineConfig); cfg != nil {
+					if override, ok := cfg.MaxReviewFixCyclesOverride(); ok {
+						maxCycles = override
+					}
+				}
+			}
 		}
 	}
 	reviewCycleCount := 0
@@ -192,6 +200,13 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 	policy := models.ReviewHarnessDifferentModel
 	if project != nil && project.ReviewHarnessPolicy != "" {
 		policy = project.ReviewHarnessPolicy
+	}
+	if project != nil && project.PipelineConfig != nil {
+		if cfg, _, _ := governance.ValidateConfig(project.PipelineConfig); cfg != nil {
+			if override, ok := cfg.ReviewHarnessOverride(); ok {
+				policy = override
+			}
+		}
 	}
 	coderEngine, coderProvider := effectiveCLIHarness(project)
 

@@ -49,6 +49,9 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 	if input.SmartRouting != nil {
 		p.SmartRouting = *input.SmartRouting
 	}
+	if len(input.PipelineConfig) > 0 {
+		p.PipelineConfig = input.PipelineConfig
+	}
 	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
@@ -140,6 +143,9 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	}
 	if input.SmartRouting != nil {
 		updates["smart_routing"] = *input.SmartRouting
+	}
+	if len(input.PipelineConfig) > 0 {
+		updates["pipeline_config"] = input.PipelineConfig
 	}
 	if err := r.db.WithContext(ctx).Model(p).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update project: %w", err)

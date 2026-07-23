@@ -28,7 +28,7 @@
 | **P3.1** | 3 — Thông minh hơn | Cross-harness review (provider khác review code của provider đã code; với CLI mode: API-native review CLI output) | ai-sdlc | HIGH | 2-3d | ✅ Done — `review_harness_policy`, `cross_review` CLI step + fix-loop, PR footer metadata; UI (1.7) + full integration test (1.8) deferred, see tasks.md |
 | **P3.2** | 3 | RepoMap mention-boost (×10 identifier nhắc trong task description) | Aider | MED | 2-3d | ✅ Done — ident ×10 (pre-existing) + path ×50 (this pass), see tasks.md |
 | **P3.3** | 3 | Smart LLM router theo complexity (task dễ → model rẻ) + `token_usage` tracking | 9Router | MED | 3-4d | ✅ Done — step-routing matrix + complexity/retry rules + `smart_routing` toggle + cache-token persistence; usage API/UI was pre-existing, see tasks.md |
-| **P3.4** | 3 | MMR/diversity dedup sau RRF merge trong memory search | agentmemory | LOW-MED | 1d | Tinh chỉnh, không chặn gì |
+| **P3.4** | 3 | MMR/diversity dedup sau RRF merge trong memory search | agentmemory | LOW-MED | 1d | ✅ Done — `mmrSelect`/`cosineSimilarity` wired after rrfMerge in `memory_search.go` |
 | **P4.1** | 4 — Nền tảng dài hạn | Reusable skills system (trích pattern từ task `merged` → skill record, load lại ở context_loading) | Multica, Hermes, Superpowers | HIGH | 5-8d | Giá trị lũy kế lớn nhưng cần pipeline ổn định trước |
 | **P4.2** | 4 | Declarative governance schemas (DAG/quality-gate cấu hình bằng JSON schema per-project) | ai-sdlc | MED | 5-7d | Tổng quát hóa những gì P1/P2 đã hard-code |
 | **P4.3** | 4 | Attestation & audit trail (DSSE metadata trên PR: agent, model, prompt hash, review chain) | ai-sdlc | MED | 3-4d | Enterprise; càng có ý nghĩa khi đã có 2 engine + cross-review |
@@ -49,7 +49,7 @@
 | Set | Phase | Trạng thái |
 |-----|-------|-----------|
 | [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | ✅ Done — system+tools cached in anthropic.go |
-| [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | 📝 Authored (P0.2–P0.4 Done in code, P3.4 MMR pending) |
+| [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | ✅ Done — all REQ-001–004 + M01, see tasks.md for pre-existing-vs-new breakdown and deviations |
 | [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | ✅ Done |
 | [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | ✅ Done — all tasks.md sections (1-6) complete |
 | [`search-replace-fuzzy-fallback/`](./search-replace-fuzzy-fallback/proposal.md) | P2.1 | ✅ Done — all tasks.md items complete (1.1/1.9 skipped, no corpus available) |

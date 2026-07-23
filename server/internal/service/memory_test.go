@@ -115,6 +115,56 @@ func TestRRFMerge(t *testing.T) {
 	}
 }
 
+func TestMMRSelect_NearDuplicateExcluded(t *testing.T) {
+	candidates := []models.MemorySearchResult{
+		{Memory: models.EpisodicMemory{ID: "m1", Embedding: []float32{1, 0, 0}}, FinalScore: 1.0},
+		{Memory: models.EpisodicMemory{ID: "m2", Embedding: []float32{0.999, 0.001, 0}}, FinalScore: 0.9}, // near-dup of m1
+		{Memory: models.EpisodicMemory{ID: "m3", Embedding: []float32{0, 1, 0}}, FinalScore: 0.8},
+	}
+
+	selected := mmrSelect(candidates, 2, mmrLambda)
+	if len(selected) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(selected))
+	}
+	if selected[0].Memory.ID != "m1" {
+		t.Errorf("expected top result to remain m1, got %s", selected[0].Memory.ID)
+	}
+	if selected[1].Memory.ID != "m3" {
+		t.Errorf("expected diverse pick m3 over near-dup m2, got %s", selected[1].Memory.ID)
+	}
+}
+
+func TestMMRSelect_TopResultRankUnchanged(t *testing.T) {
+	candidates := []models.MemorySearchResult{
+		{Memory: models.EpisodicMemory{ID: "top", Embedding: []float32{1, 0, 0}}, FinalScore: 1.0},
+		{Memory: models.EpisodicMemory{ID: "a", Embedding: []float32{0, 1, 0}}, FinalScore: 0.7},
+		{Memory: models.EpisodicMemory{ID: "b", Embedding: []float32{0, 0, 1}}, FinalScore: 0.6},
+	}
+
+	selected := mmrSelect(candidates, 2, mmrLambda)
+	if selected[0].Memory.ID != "top" {
+		t.Errorf("expected most-relevant result to stay first, got %s", selected[0].Memory.ID)
+	}
+}
+
+func TestMMRSelect_ReturnsAllWhenFewerThanN(t *testing.T) {
+	candidates := []models.MemorySearchResult{
+		{Memory: models.EpisodicMemory{ID: "m1", Embedding: []float32{1, 0}}, FinalScore: 1.0},
+		{Memory: models.EpisodicMemory{ID: "m2", Embedding: []float32{0, 1}}, FinalScore: 0.5},
+	}
+
+	selected := mmrSelect(candidates, 5, mmrLambda)
+	if len(selected) != 2 {
+		t.Fatalf("expected all 2 candidates returned when fewer than N, got %d", len(selected))
+	}
+}
+
+func TestCosineSimilarity_EmptyVectorIsZero(t *testing.T) {
+	if sim := cosineSimilarity(nil, []float32{1, 0, 0}); sim != 0 {
+		t.Errorf("expected 0 similarity for nil embedding, got %f", sim)
+	}
+}
+
 func TestMemoryService_RecordObservation_Validation(t *testing.T) {
 	svc := NewMemoryService(nil, nil)
 

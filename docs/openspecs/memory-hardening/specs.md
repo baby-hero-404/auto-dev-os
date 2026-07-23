@@ -3,7 +3,7 @@
 ## Added Requirements
 
 ### REQ-001: Decay sweep chạy định kỳ
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN server chạy quá interval cấu hình (default 6h)
@@ -12,7 +12,7 @@
 - AND sweep lỗi không làm crash worker (log error, chờ tick sau)
 
 ### REQ-002: Secret redaction mở rộng
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN tool output chứa `AKIA...`, `AIza...`, JWT 3-segment, `npm_...`, `ghs_/ghu_/github_pat_...`, hoặc `Bearer <token>`
@@ -20,7 +20,7 @@
 - AND corpus test ≥1 mẫu thật (đã vô hiệu) cho mỗi loại pass
 
 ### REQ-003: Embedder circuit breaker
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN `Embed()` fail N lần liên tiếp (default 5)
@@ -33,7 +33,7 @@
 - THEN breaker đóng lại, vector stream hoạt động bình thường
 
 ### REQ-004: MMR diversity dedup
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN search trả top-N sau rrfMerge và tồn tại 2 kết quả cosine similarity > 0.95
@@ -43,7 +43,7 @@
 ## Modified Requirements
 
 ### REQ-M01: Search degradation không đổi contract
-> ❌ Status: Not Started
+> ✅ Status: Done
 
 **Scenario:**
 - WHEN vector stream bị bỏ (breaker open)

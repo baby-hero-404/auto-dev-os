@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 
@@ -60,11 +61,79 @@ func (s *MemoryService) Search(ctx context.Context, input models.MemorySearchInp
 	// Merge via RRF
 	merged := rrfMerge(bm25Results, vectorResults, graphResults)
 
-	// Apply limit
-	if len(merged) > input.Limit {
-		merged = merged[:input.Limit]
+	// Diversify near-duplicates via MMR over the top-2N candidates, then apply limit.
+	candidateCount := input.Limit * 2
+	if candidateCount > len(merged) {
+		candidateCount = len(merged)
 	}
+	merged = mmrSelect(merged[:candidateCount], input.Limit, mmrLambda)
 	return merged, nil
+}
+
+const mmrLambda = 0.7
+
+// mmrDuplicateThreshold is the cosine-similarity threshold above which two
+// results are considered near-duplicates for diversity purposes (REQ-004).
+const mmrDuplicateThreshold = 0.95
+
+// mmrSelect re-ranks candidates (already sorted by relevance, most relevant
+// first) using Maximal Marginal Relevance so that near-duplicate results
+// (cosine similarity > mmrDuplicateThreshold) don't both make the final N,
+// unless there aren't enough distinct candidates to fill it. The first
+// (most relevant) result's rank never changes.
+func mmrSelect(candidates []models.MemorySearchResult, n int, lambda float64) []models.MemorySearchResult {
+	if n <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) <= n {
+		return candidates
+	}
+
+	selected := make([]models.MemorySearchResult, 0, n)
+	selected = append(selected, candidates[0])
+	remaining := candidates[1:]
+
+	for len(selected) < n && len(remaining) > 0 {
+		bestIdx := -1
+		bestScore := 0.0
+		for i, cand := range remaining {
+			maxSim := 0.0
+			for _, sel := range selected {
+				sim := cosineSimilarity(cand.Memory.Embedding, sel.Memory.Embedding)
+				if sim > maxSim {
+					maxSim = sim
+				}
+			}
+			mmrScore := lambda*cand.FinalScore - (1-lambda)*maxSim
+			if bestIdx == -1 || mmrScore > bestScore {
+				bestIdx = i
+				bestScore = mmrScore
+			}
+		}
+		selected = append(selected, remaining[bestIdx])
+		remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
+	}
+	return selected
+}
+
+// cosineSimilarity returns the cosine similarity of two embedding vectors.
+// A missing/empty or mismatched-length vector (e.g. a memory awaiting
+// embedding backfill while the circuit breaker is open) is treated as
+// similarity 0 — never a forced duplicate.
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func embeddingText(content, summary string) string {

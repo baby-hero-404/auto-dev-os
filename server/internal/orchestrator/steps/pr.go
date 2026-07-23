@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -40,6 +41,7 @@ type PRStep struct {
 	gitops        GitOpsClient
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string
 	log           Logger
+	attestations  AttestationSigner
 }
 
 func NewPRStep(
@@ -56,6 +58,7 @@ func NewPRStep(
 	gitops GitOpsClient,
 	containerPath func(task *models.Task, hostPath string, worktreeSuffix string) string,
 	log Logger,
+	attestations AttestationSigner,
 ) *PRStep {
 	return &PRStep{
 		rt:            rt,
@@ -71,6 +74,7 @@ func NewPRStep(
 		gitops:        gitops,
 		containerPath: containerPath,
 		log:           log,
+		attestations:  attestations,
 	}
 }
 
@@ -258,6 +262,33 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		createdBranches = append(createdBranches, branchName)
 		summary.PRURL = prURL
 		createdPRSummaries = append(createdPRSummaries, *summary)
+
+		// Attestation (P4.3, REQ-001): sign the squashed commit that was just
+		// pushed. Fail-soft — a signing/persistence error is logged and never
+		// blocks PR delivery.
+		if s.attestations != nil {
+			commitHash, hashErr := s.git.GetHeadCommitHash(ctx, s.rt.Task, s.rt.Agent, containerLocalPath)
+			if hashErr != nil || strings.TrimSpace(commitHash) == "" {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("attestation skipped for %s: could not resolve HEAD commit hash: %v", repo.URL, hashErr))
+			} else {
+				signIn := structuredCodedByReviewedBy(checkpoints)
+				signIn.RepoName = repo.URL
+				signIn.CommitHash = commitHash
+				signIn.TaskID = s.rt.Task.ID
+				signIn.JobID = s.rt.JobID
+				signIn.PromptHash = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(repoDiffText)))
+				signIn.FixCyclesUsed = rejectionCount
+				if s.projects != nil {
+					if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
+						signIn.Autonomy = p.DefaultAutonomy
+						signIn.ReviewHarness = p.ReviewHarnessPolicy
+					}
+				}
+				if err := s.attestations.SignCommit(ctx, signIn); err != nil {
+					s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("attestation failed for %s commit %s: %v", repo.URL, commitHash, err))
+				}
+			}
+		}
 	}
 
 	if s.diff != nil {
@@ -346,6 +377,47 @@ func reviewSelfReviewFallback(checkpoints []models.WorkflowCheckpoint) bool {
 		}
 	}
 	return false
+}
+
+// structuredCodedByReviewedBy is codedByReviewedBy's structured counterpart
+// for attestation building (P4.3): it returns the raw engine/provider/model
+// fields instead of pre-formatted display strings.
+func structuredCodedByReviewedBy(checkpoints []models.WorkflowCheckpoint) (in AttestationSignInput) {
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		cp := checkpoints[i]
+		if cp.Step != workflow.StepReview {
+			continue
+		}
+		var state map[string]any
+		if json.Unmarshal(cp.State, &state) != nil {
+			continue
+		}
+		output, ok := state["output"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if cb, ok := output["coded_by"].(map[string]any); ok {
+			in.CodedByEngine, _ = cb["engine"].(string)
+			in.CodedByProvider, _ = cb["provider"].(string)
+			in.CodedByModel, _ = cb["model"].(string)
+			if in.CodedByEngine == "" {
+				in.CodedByEngine = string(models.ExecutionEngineAPINative)
+			}
+		}
+		if rb, ok := output["reviewed_by"].(map[string]any); ok {
+			provider, _ := rb["provider"].(string)
+			model, _ := rb["model"].(string)
+			if provider != "" || model != "" {
+				in.HasReviewedBy = true
+				in.ReviewedByProvider = provider
+				in.ReviewedByModel = model
+			}
+		}
+		if in.CodedByProvider != "" || in.HasReviewedBy {
+			return in
+		}
+	}
+	return in
 }
 
 // codedByReviewedBy scans checkpoints for the most recent review step's

@@ -21,6 +21,7 @@ type SandboxGitClient interface {
 	GetChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) ([]string, error)
 	GetWorkspaceDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, worktreeSuffix string) (string, error)
 	GetWorkspaceChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, worktreeSuffix string) ([]string, error)
+	GetHeadCommitHash(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error)
 }
 
 type DefaultSandboxGitClient struct {
@@ -145,6 +146,17 @@ func (c *DefaultSandboxGitClient) GetChangedFiles(ctx context.Context, task *mod
 		}
 	}
 	return repoChangedFiles, nil
+}
+
+func (c *DefaultSandboxGitClient) GetHeadCommitHash(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
+	cmd := fmt.Sprintf("git -C %s rev-parse HEAD", paths.QuoteShellArg(containerPath))
+	out, err := c.RunSandboxStep(ctx, task, agent, "git_rev_parse_head", cmd)
+	if out != nil {
+		if stdout, ok := out["stdout"].(string); ok {
+			return strings.TrimSpace(stdout), err
+		}
+	}
+	return "", err
 }
 
 func (c *DefaultSandboxGitClient) GetWorkspaceDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, worktreeSuffix string) (string, error) {

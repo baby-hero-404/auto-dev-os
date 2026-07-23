@@ -64,6 +64,7 @@ type Orchestrator struct {
 	capManager          *tool.CapabilityManager
 	gitConfig           config.GitConfig
 	learnedSkills       LearnedSkillReader
+	attestations        steps.AttestationSigner
 }
 
 func (o *Orchestrator) wake() {
@@ -115,6 +116,12 @@ func WithGitOpsClient(client GitOpsClient) Option {
 func WithLearnedSkills(repo LearnedSkillReader) Option {
 	return func(o *Orchestrator) {
 		o.learnedSkills = repo
+	}
+}
+
+func WithAttestationSigner(signer steps.AttestationSigner) Option {
+	return func(o *Orchestrator) {
+		o.attestations = signer
 	}
 }
 

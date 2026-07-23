@@ -38,6 +38,7 @@ type Deps struct {
 	ProviderCredSvc ProviderCredentialService
 
 	ProviderModelSvc   ProviderModelService
+	AttestationSvc     AttestationService
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
@@ -93,6 +94,7 @@ func NewRouter(d Deps) http.Handler {
 	learnedSkillH := NewLearnedSkillHandler(d.LearnedSkillSvc)
 	analyticsH := NewAnalyticsHandler(d.AnalyticsSvc)
 	dashboardH := NewAnalyticsDashboardHandler(d.DashboardSvc)
+	attestationH := NewAttestationHandler(d.AttestationSvc)
 	auditH := NewAuditHandler(d.AuditSvc)
 	prH := NewPRHandler(d.TaskSvc, d.AuditSvc, d.Orch)
 	authH := NewAuthHandler(d.AuthSvc)
@@ -250,6 +252,10 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/tasks/{taskID}/cancel", workflowH.Cancel)
 			r.Post("/tasks/{taskID}/close", workflowH.Cancel)
 			r.Get("/workflows/{jobID}/artifacts", workflowH.Artifacts)
+			r.Get("/tasks/{taskID}/attestations", attestationH.ListByTask)
+
+			r.Get("/attestations/keys", attestationH.Keys)
+			r.Get("/attestations/{commit}", attestationH.GetByCommit)
 
 			r.Get("/rules/{ruleID}", ruleH.GetByID)
 			r.Patch("/rules/{ruleID}", ruleH.Update)

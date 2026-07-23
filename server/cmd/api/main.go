@@ -202,6 +202,11 @@ func run() error {
 	opts = append(opts, orchestrator.WithMaxToolResultChars(cfg.Execution.MaxToolResultChars))
 	opts = append(opts, orchestrator.WithMaxToolIterations(cfg.Execution.MaxToolIterations))
 
+	attestationRepo := repository.NewAttestationRepo(db)
+	attestationKeyRepo := repository.NewAttestationKeyRepo(db)
+	attestationSvc := service.NewAttestationService(attestationRepo, attestationKeyRepo, secretCipher)
+	opts = append(opts, orchestrator.WithAttestationSigner(service.NewAttestationSignerAdapter(attestationSvc)))
+
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
 	repoSvc := service.NewRepositoryService(repoRepo, secretCipher)
@@ -226,6 +231,7 @@ func run() error {
 		GitAccountSvc:      service.NewGitAccountService(gitAccountRepo, secretCipher),
 		ProviderCredSvc:    credentialPoolSvc,
 		ProviderModelSvc:   providerModelSvc,
+		AttestationSvc:     attestationSvc,
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,

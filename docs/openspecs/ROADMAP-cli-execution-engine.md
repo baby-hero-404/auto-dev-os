@@ -31,7 +31,7 @@
 | **P3.4** | 3 | MMR/diversity dedup sau RRF merge trong memory search | agentmemory | LOW-MED | 1d | ✅ Done — `mmrSelect`/`cosineSimilarity` wired after rrfMerge in `memory_search.go` |
 | **P4.1** | 4 — Nền tảng dài hạn | Reusable skills system (trích pattern từ task `merged` → skill record, load lại ở context_loading) | Multica, Hermes, Superpowers | HIGH | 5-8d | ✅ Done — `learned_skills` table (renamed to avoid collision with existing `skills` catalog) + heuristic extraction on merge + FTS loading in context_load + usage tracking via checkpoints; UI page deferred, see tasks.md |
 | **P4.2** | 4 | Declarative governance schemas (DAG/quality-gate cấu hình bằng JSON schema per-project) | ai-sdlc | MED | 5-7d | ✅ Done — `internal/governance` package (schema+DAG validation, presets) + `pipeline_config` jsonb column wired into 5 existing decision points (DoR bypass, review skip, cycle-limit/harness-policy override, router override); data-driven builder rewrite, UI, and per-job config snapshot (REQ-M01) deferred, see tasks.md |
-| **P4.3** | 4 | Attestation & audit trail (DSSE metadata trên PR: agent, model, prompt hash, review chain) | ai-sdlc | MED | 3-4d | Enterprise; càng có ý nghĩa khi đã có 2 engine + cross-review |
+| **P4.3** | 4 | Attestation & audit trail (DSSE metadata trên PR: agent, model, prompt hash, review chain) | ai-sdlc | MED | 3-4d | ✅ Done (scope-reduced) — DSSE sign/verify (`pkg/attest`), keyset+rotation, sign+persist wired fail-soft into PR step, verify/list/JWKS endpoints; PR-comment posting (REQ-003) and Audit panel UI (REQ-005) deferred, see tasks.md |
 | **P4.4** | 4 | Per-N-turn learning nudge (DetectPatterns giữa task, không chỉ end-of-task) | Hermes | MED | 2-3d | ✅ Done — mid-tool-loop nudge in `toolloop.go` (interval + repeat-fail naming), independent of skills table |
 
 **Đã có sẵn — không làm lại** (verified 2026-07-20): 4-tier memory + RRF hybrid search, worktree-per-task isolation, token counting bằng tiktoken trong repomap, exit-code tách khỏi output text.
@@ -61,7 +61,7 @@
 | [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | ✅ Done |
 | [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | ✅ Done |
 | [`declarative-governance-schemas/`](./declarative-governance-schemas/proposal.md) | P4.2 | ✅ Done (scope-reduced — see tasks.md) |
-| [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | 📝 Authored |
+| [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | ✅ Done (scope-reduced; see specs.md/tasks.md for REQ-003/REQ-005 deferral) |
 | [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | 📝 Authored |
 
 Ghi chú phối hợp giữa các set:

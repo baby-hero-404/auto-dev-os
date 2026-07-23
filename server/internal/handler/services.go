@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
+	"github.com/auto-code-os/auto-code-os/server/pkg/attest"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -153,4 +154,14 @@ type ProviderModelService interface {
 	ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error)
 	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderModelInput) (*models.ProviderModel, error)
 	Delete(ctx context.Context, orgID string, id string) error
+}
+
+// AttestationService serves the read/verify endpoints for signed per-commit
+// attestations (P4.3, REQ-004/REQ-005/REQ-006). Signing itself happens
+// inside the PR step via steps.AttestationSigner — this interface is
+// read-only from the API's perspective.
+type AttestationService interface {
+	VerifyByCommitHash(ctx context.Context, commitHash string) (*service.VerifyResult, error)
+	ListByTaskID(ctx context.Context, taskID string) ([]models.Attestation, error)
+	JWKS(ctx context.Context) (*attest.JWKSet, error)
 }

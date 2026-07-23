@@ -112,6 +112,7 @@ type SandboxGitClient interface {
 	CommitChanges(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, message string) error
 	GetChangedFiles(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) ([]string, error)
 	GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error)
+	GetHeadCommitHash(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error)
 }
 
 // WorkspaceLoader loads/saves workspace metadata. Used by: context_load, plan, code, merge, test, pr.
@@ -328,4 +329,33 @@ type WorktreeHostPathResolver interface {
 // Used by: cli_analyze, cli_spec, cli_implement.
 type StepPromptLoader interface {
 	LoadStepPrompt(stepID string) (string, error)
+}
+
+// AttestationSignInput carries everything PRStep knows about one commit,
+// for signing a DSSE attestation without steps importing internal/service
+// directly (see internal/service.AttestationService, adapted in the
+// orchestrator wiring layer). Used by: pr.
+type AttestationSignInput struct {
+	RepoName           string
+	CommitHash         string
+	TaskID             string
+	JobID              string
+	CodedByEngine      string
+	CodedByProvider    string
+	CodedByModel       string
+	HasReviewedBy      bool
+	ReviewedByProvider string
+	ReviewedByModel    string
+	PromptHash         string
+	Autonomy           string
+	ReviewHarness      string
+	FixCyclesUsed      int
+}
+
+// AttestationSigner builds, signs, and persists a per-commit attestation
+// (P4.3, REQ-001). Fail-soft by design: PRStep logs and continues when
+// SignCommit errors, since a signing failure must never block PR delivery.
+// Used by: pr.
+type AttestationSigner interface {
+	SignCommit(ctx context.Context, in AttestationSignInput) error
 }

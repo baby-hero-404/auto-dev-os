@@ -46,6 +46,7 @@ type mockSandboxGit struct {
 	mergeFeErr  error
 	mergeFeStat string
 	commitErr   error
+	headCommit  string
 }
 
 func (m *mockSandboxGit) CheckoutBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) error {
@@ -83,6 +84,9 @@ func (m *mockSandboxGit) GetChangedFiles(ctx context.Context, task *models.Task,
 }
 func (m *mockSandboxGit) GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, baseBranch string) (string, error) {
 	return "", nil
+}
+func (m *mockSandboxGit) GetHeadCommitHash(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string) (string, error) {
+	return m.headCommit, nil
 }
 
 func TestMergeStep_ExecutesSuccessfully(t *testing.T) {

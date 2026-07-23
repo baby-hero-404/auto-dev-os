@@ -41,6 +41,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		o.gitOps,     // GitOpsClient
 		o.containerPathForHostPath,
 		loggerAdapter{log: o.log}, // Logger
+		o.attestations,            // AttestationSigner
 	)
 	cliSpecRunner := newCLIStepRunner(o)
 

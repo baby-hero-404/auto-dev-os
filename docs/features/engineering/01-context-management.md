@@ -1,6 +1,12 @@
 ---
 sources:
   - "server/**"
+  - "server/internal/service/memory.go"
+  - "server/internal/service/memory_search.go"
+  - "server/pkg/llm/embedding.go"
+  - "server/internal/context/repomap/ranking.go"
+  - "server/internal/context/repomap/mentions.go"
+verified: 2026-07-23
 ---
 
 # 01. Context Management Engine (Repository Map)
@@ -39,6 +45,7 @@ Tính năng này được chia thành 5 module cốt lõi hoạt động theo ch
 - Khởi tạo đồ thị có hướng (Directed Graph) nối các file với nhau dựa trên dữ liệu `def` và `ref` thu được.
 - Trọng số cạnh (Edge weight) = $\sqrt{\text{số lần gọi}}$.
 - **Personalized PageRank:** Kích hoạt thuật toán PageRank để chấm điểm các file. Các file đang mở (Active workspace) hoặc được nhắc tên trong User Prompt (câu lệnh yêu cầu của người dùng) sẽ được cấp điểm khởi tạo cao (buff), từ đó lan truyền độ quan trọng ra các file phụ trợ xung quanh.
+- **Mentioned-Identifier Boost (`mentions.go`):** Ngoài active-file buff (×50), hệ thống trích xuất identifier ứng viên từ title + description của task (token trong backtick, CamelCase/snake_case, path-like string) rồi lọc lại với danh sách definitions thực có trong repomap graph. Edge trỏ tới definition của identifier được mention nhân trọng số **×10**; file được mention trực tiếp theo path được coi như active file (×50). Đây là tín hiệu ý định trực tiếp nhất từ user — ví dụ task nói "sửa `CreateGitCheckpoint`" sẽ tự kéo file chứa hàm đó lên hạng ngay cả khi file ít được tham chiếu chéo.
 
 ### 2.4. Token Pruning (Cắt tỉa Token)
 - Sắp xếp các thẻ (Tags) theo điểm PageRank giảm dần.
@@ -86,3 +93,12 @@ internal/
 - `github.com/mattn/go-sqlite3` (Lưu trữ Cache cục bộ)
 - `gonum.org/v1/gonum/graph` (Xử lý Đồ thị và PageRank)
 - `github.com/pkoukk/tiktoken-go` (Đếm Token chuẩn OpenAI)
+
+## 6. Memory Hardening (4-Tier Memory + RRF Hybrid Search)
+
+Hệ memory 4-tier + RRF hybrid search (`server/internal/service/memory.go`, `memory_search.go`) đã tồn tại từ trước; 4 gap cụ thể sau đã được vá:
+
+- **Decay sweep tự động:** `MemoryService.ApplyDecay()` trước đây không có caller nào gọi tới. Nay có ticker định kỳ (mặc định 6h, configurable — cùng pattern với `orchestrator/cache_workers.go`) gọi decay + TTL sweep (xoá/archive memory có `decay_score` dưới ngưỡng), ngoài phép nhân suy giảm `*= 0.95` gốc.
+- **Secret redaction mở rộng:** `secretPatterns` (`memory.go`) bổ sung regex cho AWS access key (`AKIA`), Google API key (`AIza`), JWT (3-segment base64url), npm token (`npm_`), GitHub token họ mới (`ghs_`/`ghu_`/`github_pat_`), và generic `Bearer` header — kèm test corpus, vì memory ghi raw tool output nên đây là leak surface thật.
+- **Embedder circuit breaker:** `MemoryEmbedder.Embed()` (`pkg/llm/embedding.go`) được bọc circuit breaker (threshold N lỗi liên tiếp → open trong M phút). Khi open: `RecordObservation` lưu observation không kèm vector (backfill sau), `Search` chạy BM25+graph, bỏ nhánh vector — degrade an toàn thay vì fail toàn phần.
+- **MMR diversity dedup:** Sau `rrfMerge` (`memory_search.go`), một bước MMR (λ≈0.7) chạy trên top-2N để chọn N kết quả đa dạng theo cosine similarity của embeddings đã có, tránh top-N là các near-duplicate lãng phí context token.

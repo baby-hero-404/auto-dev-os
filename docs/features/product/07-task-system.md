@@ -1,6 +1,7 @@
 ---
 sources:
   - "server/**"
+verified: 2026-07-23
 ---
 
 # 07. Task System
@@ -76,6 +77,14 @@ todo → context_loading → analyzing → spec_review → coding ⟷ reviewing 
 
 > PR ≠ Task hoàn thành. Task chỉ chuyển `merged` khi con người explicitly approve PR và merge thành công.
 > Task ở trạng thái `failed` có thể được con người reset về `todo` để chạy lại.
+
+## Definition-of-Ready Gate
+
+Trước khi task rời khỏi `analyzing`, step `dor_check` xác nhận task đủ thông tin để dispatch: acceptance criteria không rỗng, file scope đã ước lượng, không còn `task.Clarifications` nào ở trạng thái `open`. Thiếu thông tin → hệ thống tự sinh câu hỏi làm rõ, task chuyển `awaiting_clarification` chờ con người trả lời trong task detail; trả lời xong → gate re-validate và tiếp tục. Label `hotfix` hoặc autonomy `autonomous` bỏ qua gate này (chỉ log warning). Xem chi tiết tại §08 Workflow Engine — "Definition-of-Ready Gate".
+
+## Execution Engine per Task
+
+Mỗi task có thể override `execution_engine` (`api_native` | `cli`, mặc định kế thừa từ project). Khi `cli`, task chạy qua pipeline `cli_analyze → cli_spec → cli_implement → cli_mr` thay vì DAG API-native — CLI coding agent (Claude Code, Codex CLI…) tự phân tích, tự authoring OpenSpec set vào `docs/openspecs/<task-slug>/` trong worktree, rồi implement bám theo spec đó. Task detail hiển thị badge engine đã dùng và một tab "Spec" render `proposal.md`/`tasks.md` khi engine là `cli`. Xem đầy đủ tại §14 Execution Engine.
 
 ## Thiết kế OpenSpec (Proposed Task Specification)
 

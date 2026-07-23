@@ -110,7 +110,7 @@ export function TaskSidebar() {
               }}>{ph.icon}</span>
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex justify-between items-center w-full">
-                  <span className="text-[13px] font-semibold leading-snug" style={{ color: ph.color }}>{ph.label}</span>
+                  <span className="text-[13px] font-semibold leading-snug truncate" style={{ color: ph.color }}>{ph.label}</span>
                   <div className="flex items-center ml-2 shrink-0 gap-1.5">
                     {ph.sub && <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ color: ph.subC, background: `${ph.subC}15` }}>{ph.sub}</span>}
                     {ph.dur && <span className="text-[10px] text-content-muted font-medium bg-slate-500/5 px-1 py-0.5 rounded">{ph.dur}</span>}

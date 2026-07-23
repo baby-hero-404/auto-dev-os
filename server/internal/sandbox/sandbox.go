@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type CommandResult struct {
 
 type Runtime interface {
 	Run(ctx context.Context, req CommandRequest) (*CommandResult, error)
+	RunInteractive(ctx context.Context, req CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error
 	Prewarm(ctx context.Context) error
 }
 
@@ -42,6 +44,10 @@ type StubRuntime struct{}
 
 func NewStubRuntime() *StubRuntime {
 	return &StubRuntime{}
+}
+
+func (r *StubRuntime) RunInteractive(ctx context.Context, req CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
 }
 
 func (r *StubRuntime) Prewarm(ctx context.Context) error {

@@ -27,8 +27,8 @@
 
 ## 5. UI (REQ-005)
 
-- [x] 5.1 Trang Skills: list + edit + activate/deactivate + approve draft — Deferred: backend CRUD API fully implemented (`LearnedSkillHandler`); no frontend page built this pass, consistent with the UI deferral precedent set by `cross-harness-review` and `smart-llm-router`.
-- [x] 5.2 Link source task; hiển thị usage/success — Deferred alongside 5.1; `LearnedSkill` model already carries `SourceTaskID`, `UsageCount`, `SuccessRate` fields ready for a future UI to consume.
+- [x] 5.1 Trang Skills: list + edit + activate/deactivate + approve draft — Done: Implemented `LearnedSkillsPanel.tsx` and integrated into Project Settings.
+- [x] 5.2 Link source task; hiển thị usage/success — Done: Links and stats are rendered in the panel.
 
 ## 6. Wrap-up
 
@@ -37,4 +37,4 @@
 
 ## Docs sync
 
-- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md
+- [x] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md — done 2026-07-23: product/03, product/04

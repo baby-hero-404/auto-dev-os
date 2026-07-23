@@ -6,7 +6,7 @@ export function listByProject(projectID: string, token: string) {
     .then((res) => res.skills || []);
 }
 
-export function update(skillID: string, token: string, input: { status?: string; title?: string; content?: string }) {
+export function update(skillID: string, token: string, input: { status?: string; title?: string; content?: string; trigger_keywords?: string[] }) {
   return request<{ skill: LearnedSkill }>(`/learned-skills/${skillID}`, {
     method: "PATCH",
     token,

@@ -48,6 +48,7 @@ func ValidateReviewHarnessPolicy(policy string) error {
 type CLIEngineConfig struct {
 	Command          string            `json:"command"`                      // e.g. "claude"
 	Args             []string          `json:"args"`                         // e.g. ["-p", "--dangerously-skip-permissions", "{prompt_file}"]
+	CredentialID     string            `json:"credential_id,omitempty"`      // Link to ProviderCredential for CLI auth state
 	Env              map[string]string `json:"env,omitempty"`                // masked as "***" in GET responses
 	TimeoutMinutes   int               `json:"timeout_minutes"`              // default 30, max 120
 	AuthCheckCommand string            `json:"auth_check_command,omitempty"` // e.g. "claude auth status"

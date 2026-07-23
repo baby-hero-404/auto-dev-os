@@ -1,6 +1,9 @@
 ---
 sources:
   - "server/**"
+  - "server/internal/orchestrator/llmrunner/outputfilter/**"
+  - "server/internal/orchestrator/llmrunner/toolloop.go"
+verified: 2026-07-23
 ---
 
 # 02. Context Pruning & Harness Independence
@@ -48,7 +51,23 @@ Khi một LLM (ví dụ: `claude-3-5-sonnet`) vừa viết code, sau đó lại 
 
 ---
 
-## 3. Lộ trình Triển khai (Implementation Phasing)
+## 3. Feature 3: Tool-Output Filtering Pipeline
+
+### 3.1 Vấn đề
+Giới hạn duy nhất trước đây cho tool result là hard-cut 8000 ký tự (`maxToolResultChars`, `toolloop.go`) — không có lớp lọc nội dung nào. Build log 50KB bị cắt mù ở 8000 ký tự có thể mất chính dòng error; log lặp hàng nghìn dòng giống nhau chiếm chỗ context vô ích.
+
+### 3.2 Thiết kế Cơ chế
+Package `llmrunner/outputfilter/` — chuỗi filter thuần Go (không LLM), chạy **trước** hard-cut (hard-cut vẫn giữ làm safety net cuối):
+1. **Dedup dòng lặp:** N dòng identical liên tiếp → 1 dòng + `[repeated N times]`.
+2. **Error-priority truncation:** khi phải cắt, giữ ưu tiên dòng match error pattern (error/fail/panic/FAIL/✗/warning) + K dòng context quanh chúng + đầu/cuối output; cắt phần "im lặng" ở giữa trước.
+3. **Path prefix compression:** đường dẫn tuyệt đối lặp lại nhiều lần → rút về relative sau lần đầu.
+4. **ANSI/control strip:** mã màu terminal, carriage-return progress bar.
+
+Mỗi tool khai báo **profile** riêng (metadata trong `tool/tools/*.go`, không đổi logic tool): `build/test` → error-priority mạnh; `git diff` → không dedup (mỗi dòng có nghĩa); `read file` → không filter (đã có bound riêng). Tool không khai báo dùng profile mặc định (strip ANSI + dedup). Mỗi lần filter chạy, log metric `outputfilter: in=X out=Y saved=Z%` để đo hiệu quả nén thực tế.
+
+---
+
+## 4. Lộ trình Triển khai (Implementation Phasing)
 - **Phase 1:** Tích hợp logic PageRank Buffing vào AST Graph dựa trên `FileDependencies` của Task.
 - **Phase 2:** Cài đặt vòng lặp Binary Search Pruning trong `ContextEngine` trước khi trả kết quả cho `PromptAssembler`.
 - **Phase 3:** Cập nhật AI Gateway để hỗ trợ fallback logic khi chuyển đổi trạng thái từ `Coding` sang `Reviewing` (Harness Independence check).

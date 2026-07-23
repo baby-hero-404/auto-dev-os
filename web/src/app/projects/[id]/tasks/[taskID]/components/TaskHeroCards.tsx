@@ -76,7 +76,7 @@ export function TaskHeroCards() {
   return (
     <>
       {heroTodo && (
-        <div className="bg-gradient-to-br from-slate-500/5 via-slate-500/[0.02] to-slate-500/10 border border-stroke/10 rounded-2xl p-5.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md hover:shadow-lg transition-all duration-200">
+        <div className="bg-linear-to-br from-slate-500/5 via-slate-500/[0.02] to-slate-500/10 border border-stroke/10 rounded-2xl p-5.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md hover:shadow-lg transition-all duration-200 animate-fade-in">
           <div className="flex items-center gap-3.5">
             <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-slate-500/10 text-slate-600 dark:text-slate-300 border border-stroke/15 shrink-0 shadow-inner">
               <Clock className="h-5.5 w-5.5" />
@@ -88,11 +88,11 @@ export function TaskHeroCards() {
           </div>
           <div className="self-end sm:self-center">
             {!isExecutionReady ? (
-              <button onClick={analyze} className="px-5 py-2.5 rounded-xl border-none bg-gradient-to-r from-brand-primary/80 to-brand-primary hover:from-brand-primary hover:to-brand-primary text-slate-950 text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-brand-primary/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
+              <button onClick={analyze} className="px-5 py-2.5 rounded-xl border-none bg-linear-to-r from-brand-primary/80 to-brand-primary hover:from-brand-primary hover:to-brand-primary text-slate-950 text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-brand-primary/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
                 <Sparkles className="h-4 w-4" /> Start Analysis
               </button>
             ) : (
-              <button onClick={execute} className="px-5 py-2.5 rounded-xl border-none bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
+              <button onClick={execute} className="px-5 py-2.5 rounded-xl border-none bg-linear-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
                 <Check className="h-4 w-4" /> Start Execution
               </button>
             )}
@@ -101,7 +101,7 @@ export function TaskHeroCards() {
       )}
 
       {heroLoad && (
-        <div className="bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden">
+        <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
           <div className="absolute -top-10 -right-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
           <div className="flex items-center gap-3 mb-4 z-10">
             <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
@@ -124,7 +124,7 @@ export function TaskHeroCards() {
 
       {heroSpec && (
         <div className="flex flex-col gap-4">
-          <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border border-amber-500/25 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-md relative overflow-hidden">
+          <div className="bg-linear-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border border-amber-500/25 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-md relative overflow-hidden animate-fade-in">
             <div className="absolute -top-10 -right-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
             <div className="flex items-center gap-3.5 z-10">
               <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20 shrink-0">
@@ -139,7 +139,7 @@ export function TaskHeroCards() {
               <button onClick={requestSpecChanges} className="px-4 py-2 rounded-xl border border-stroke bg-background/50 text-content text-xs font-semibold hover:bg-slate-500/10 transition-all duration-150 cursor-pointer">
                 Request Changes
               </button>
-              <button onClick={approveSpec} className="px-4.5 py-2 rounded-xl border-none bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
+              <button onClick={approveSpec} className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
                 <Check className="h-3.5 w-3.5" /> Approve Spec
               </button>
             </div>
@@ -165,7 +165,7 @@ export function TaskHeroCards() {
       )}
 
       {heroReview && (
-        <div className="bg-gradient-to-br from-indigo-500/10 via-indigo-500/5 to-slate-500/5 border border-indigo-500/25 rounded-2xl p-5 flex items-center gap-3.5 shadow-sm relative overflow-hidden">
+        <div className="bg-linear-to-br from-indigo-500/10 via-indigo-500/5 to-slate-500/5 border border-indigo-500/25 rounded-2xl p-5 flex items-center gap-3.5 shadow-sm relative overflow-hidden animate-fade-in">
           <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
           <span className="relative flex h-3.5 w-3.5 shrink-0 z-10">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500 opacity-75" />
@@ -176,10 +176,10 @@ export function TaskHeroCards() {
       )}
 
       {heroPr && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 animate-fade-in">
           <div className="bg-card border border-stroke/10 rounded-2xl shadow-md overflow-hidden" style={{ borderColor: st === 'human_review' ? '#f59e0b' : '#10b981' }}>
             {st === 'human_review' && (
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-4.5 bg-gradient-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border-b border-stroke/10">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-4.5 bg-linear-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border-b border-stroke/10">
                 <div className="flex items-center gap-3">
                   <span className="w-10 h-10 flex items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-500 shrink-0">
                     <Pause className="h-5 w-5" />
@@ -200,7 +200,7 @@ export function TaskHeroCards() {
                   <button
                     onClick={approvePR}
                     disabled={submittingPR}
-                    className="px-4.5 py-2 rounded-xl border-none bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 transition-all duration-150 cursor-pointer flex items-center gap-1.5"
+                    className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 transition-all duration-150 cursor-pointer flex items-center gap-1.5"
                   >
                     <Check className="h-3.5 w-3.5" /> Approve Merge
                   </button>
@@ -209,7 +209,7 @@ export function TaskHeroCards() {
             )}
             
             {st === 'pr_ready' && (
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-4.5 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.02] to-teal-500/5 border-b border-stroke/10">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-4.5 bg-linear-to-br from-emerald-500/10 via-emerald-500/[0.02] to-teal-500/5 border-b border-stroke/10">
                 <div className="flex items-center gap-3">
                   <span className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-500 shrink-0">
                     <Sparkles className="h-5 w-5" />
@@ -237,7 +237,7 @@ export function TaskHeroCards() {
                   <button
                     onClick={approvePR}
                     disabled={submittingPR}
-                    className="px-4.5 py-2 rounded-xl border-none bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 transition-all duration-150 cursor-pointer flex items-center gap-1.5"
+                    className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 transition-all duration-150 cursor-pointer flex items-center gap-1.5"
                   >
                     <Check className="h-3.5 w-3.5" /> Merge Pull Request
                   </button>
@@ -271,7 +271,7 @@ export function TaskHeroCards() {
                   <button
                     onClick={handleConfirmRejection}
                     disabled={submittingPR || !feedback.trim()}
-                    className="px-4.5 py-2 rounded-xl border-none bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-rose-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5"
+                    className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-rose-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5"
                   >
                     {submittingPR ? (
                       <span className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
@@ -413,8 +413,8 @@ export function TaskHeroCards() {
       )}
 
       {heroFailed && (
-        <div className="rounded-2xl border border-rose-500/25 bg-slate-950 shadow-lg overflow-hidden flex flex-col transition-all duration-300">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-5 bg-gradient-to-br from-rose-500/10 via-rose-500/[0.02] to-red-500/5 border-b border-stroke/10">
+        <div className="rounded-2xl border border-rose-500/25 bg-slate-950 shadow-lg overflow-hidden flex flex-col transition-all duration-300 animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-5 bg-linear-to-br from-rose-500/10 via-rose-500/[0.02] to-red-500/5 border-b border-stroke/10">
             <div className="flex gap-3.5 items-start">
               <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-rose-500 text-white shrink-0 shadow-md shadow-rose-500/20">
                 <X className="h-5 w-5" />
@@ -426,7 +426,7 @@ export function TaskHeroCards() {
                 </div>
               </div>
             </div>
-            <button onClick={retry} className="px-4.5 py-2.5 rounded-xl border-none bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-rose-500/20 active:scale-95 cursor-pointer whitespace-nowrap flex items-center gap-1.5 self-end md:self-center">
+            <button onClick={retry} className="px-4.5 py-2.5 rounded-xl border-none bg-linear-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-rose-500/20 active:scale-95 cursor-pointer whitespace-nowrap flex items-center gap-1.5 self-end md:self-center">
               <RotateCcw className="h-3.5 w-3.5" /> Restart Task
             </button>
           </div>
@@ -437,8 +437,8 @@ export function TaskHeroCards() {
       )}
 
       {heroMerged && (
-        <div className="flex flex-col gap-4">
-          <div className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.02] to-teal-500/5 border border-emerald-500/25 rounded-2xl p-5.5 flex gap-3.5 items-start shadow-md relative overflow-hidden">
+        <div className="flex flex-col gap-4 animate-fade-in">
+          <div className="bg-linear-to-br from-emerald-500/10 via-emerald-500/[0.02] to-teal-500/5 border border-emerald-500/25 rounded-2xl p-5.5 flex gap-3.5 items-start shadow-md relative overflow-hidden">
             <div className="absolute -top-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
             <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500 text-white shrink-0 shadow-md shadow-emerald-500/20 z-10">
               <Check className="h-5 w-5" />

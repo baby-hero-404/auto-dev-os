@@ -1,6 +1,7 @@
 ---
 sources:
   - "server/**"
+verified: 2026-07-23
 ---
 
 # 10. Dashboard & Analytics
@@ -69,7 +70,11 @@ Mỗi sự kiện trong hệ thống được ghi lại đầy đủ:
 | `entity_id` | `task-456`, `agent-backend-01` |
 | `details` | `{"old_status": "coding", "new_status": "testing"}` |
 
-## F. Mở Rộng Planned
+## F. Token Usage Card (Implemented)
+
+Mỗi LLM call được ghi vào bảng `token_usage` (`task_id, job_id, step_id, provider, model, input/output/cache tokens, cost_estimate`, xem §01 "Smart LLM Router & Token Usage Tracking"). API `GET /projects/{id}/usage?days=30` aggregate theo task/model/step; project page hiển thị card "Token Usage" với tổng cost, breakdown theo model, và savings ước tính từ prompt caching.
+
+## G. Mở Rộng Planned
 
 | Feature | Mô tả |
 |:--------|:------|

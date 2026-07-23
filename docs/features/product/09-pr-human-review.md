@@ -2,6 +2,7 @@
 sources:
   - "server/**"
   - "web/src/app/projects/[id]/tasks/[taskID]/components/AuditPanel.tsx"
+  - "server/pkg/attest/**"
 verified: 2026-07-23
 ---
 
@@ -74,7 +75,11 @@ Mỗi PR được tạo tự động theo template chuẩn:
 - ✅ Build verification: passed
 ```
 
-## C. Review Policy theo Complexity
+## C. Cross-Harness Review
+
+Model tự review code chính nó viết có blind spot hệ thống. Project cấu hình `review_harness_policy` (`same` | `different_model` | `different_provider`, §01/§06) — review step resolve model/provider khác với model/provider đã code theo policy này; không có lựa chọn thứ 2 khả dụng → fallback về cùng model + warning (không chặn pipeline). Với CLI mode (§14), diff của CLI agent luôn được coi là "khác harness" và có thể review bằng model API-native — đây là lớp kiểm soát duy nhất server có với CLI (black-box). Metadata `coded_by`/`reviewed_by` được ghi vào task record, hiển thị ở task detail và đưa vào PR description, làm nền cho Attestation Audit Trail (mục F).
+
+## D. Review Policy theo Complexity
 
 **Baseline:** Duyệt/từ chối PR thủ công qua UI.
 
@@ -86,13 +91,13 @@ Mỗi PR được tạo tự động theo template chuẩn:
 | Medium | Standard | 1 | Không (merge thủ công) |
 | Hard | Deep Review | 2 (cross-review) | Không |
 
-## D. AI PR Assistant (Planned)
+## E. AI PR Assistant (Planned)
 
 *   **On-demand explanation:** Reviewer hỏi AI về bất kỳ đoạn code nào → AI giải thích dựa trên task spec và code context.
 *   **Risk highlighting:** AI tự động đánh dấu thay đổi có risk cao (sửa logic thanh toán, thay đổi DB schema, xóa file).
 *   **Suggestion mode:** AI đề xuất cải thiện code nhưng không tự áp dụng — quyết định thuộc về reviewer.
 
-## E. Merge Policy (Planned)
+## F. Merge Policy (Planned)
 
 Điều kiện để được merge:
 *   Tất cả test pass (targeted + full suite + lint + build).
@@ -103,12 +108,14 @@ Mỗi PR được tạo tự động theo template chuẩn:
 
 > **PR ≠ Task hoàn thành.** Task ở trạng thái `pr_ready` cho đến khi reviewer approve. Chỉ sau merge thành công, task mới chuyển sang `merged` (hoàn thành). Xem đầy đủ vòng đời tại §07 Task System — "Vòng Đời Task" (nguồn canonical).
 
-## F. Attestation Audit Panel (Implemented)
+## G. Attestation Audit Panel (Implemented)
 
 Tính minh bạch và bảo mật mã nguồn do AI tạo ra được củng cố bằng chữ ký điện tử (DSSE - Dead Simple Signing Envelope) thông qua **Attestation Audit Panel** trên giao diện chi tiết tác vụ (Task Detail UI):
 * **Hiển thị Audit Trail:** Danh sách các chữ ký đi kèm theo từng commit (bao gồm mã hash commit rút gọn, AI thực hiện, AI review, Key ID, và Timestamp).
 * **Kiểm tra trực tiếp (Lazy Verification):** Cấp badge xác thực khi chữ ký hợp lệ thông qua lazy load.
 * **Chi Tiết Envelope:** Cho phép người dùng nhấn "View envelope" để xem chuỗi JSON chuẩn DSSE Pretty-printed chứng minh nguồn gốc đoạn mã đó được mã hoá bởi Agent và có track chuỗi review chéo an toàn.
+
+**Cơ chế ký (backend):** Mỗi commit trong PR sinh 1 record trong bảng `attestations` (`task_id, job_id, commit_hash, coded_by, reviewed_by, prompt_hash` — SHA-256 của system+instruction, `policy_snapshot` — engine, harness policy, autonomy, cycles used). Record được serialize thành in-toto Statement JSON, bọc DSSE envelope, ký **Ed25519** bằng key per-deployment (sinh lúc setup, lưu như secret hiện có — `pkg/attest/`). Envelope được đính vào PR (comment) và lưu DB; endpoint `GET /attestations/{commit}` trả envelope kèm kết quả verify chữ ký.
 
 ---
 

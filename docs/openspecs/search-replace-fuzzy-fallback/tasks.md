@@ -13,4 +13,4 @@
 
 ## Docs sync
 
-- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md
+- [x] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md — done 2026-07-23: product/13-patch-engine-abstraction.md

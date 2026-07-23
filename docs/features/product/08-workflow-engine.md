@@ -1,6 +1,9 @@
 ---
 sources:
   - "server/**"
+  - "docs/schemas/pipeline.schema.json"
+  - "docs/schemas/policies.schema.json"
+verified: 2026-07-23
 ---
 
 # 08. Workflow Engine
@@ -37,6 +40,15 @@ Step 1: Phân tích + Spec + Complexity (Analyze)
    Spec bao gồm: scope, affected files, risks, test strategy, execution plan.
    → Output: spec document + complexity label (Easy/Medium/Hard) + risk assessment.
 
+Step 1.5: Definition-of-Ready Gate (dor_check)
+   Trước khi vào Plan/Code, step `dor_check` kiểm tra task đã đủ "ready" chưa:
+   acceptance criteria non-empty, file scope đã ước lượng, không còn clarification
+   nào ở trạng thái `open`. Đủ → pass-through (không gọi LLM). Thiếu → sinh danh
+   sách câu hỏi làm rõ (1 LLM call nhỏ), ghi vào `task.Clarifications`, job dừng ở
+   trạng thái `awaiting_clarification` cho tới khi con người trả lời — sau đó
+   resume lại từ `dor_check` để re-validate. Task gắn label `hotfix` hoặc autonomy
+   `autonomous` → gate chỉ log warning, không chặn.
+
 Step 2: Human Gate (có điều kiện)
    • Easy + Low-risk → auto-approve spec, tiếp tục workflow.
    • Easy + High-risk → DỪNG workflow → chờ con người review.
@@ -63,11 +75,15 @@ Step 5: Merge / Integrate
 
 Step 6: Agent Review (Cross-review)
    Agent Reviewer (khác Agent viết code) kiểm tra chất lượng → liệt kê findings.
-   Review checklist: code quality, adherence to spec, test coverage, security.
+   Review output tách 2 verdict độc lập: `spec_compliance` (code có đúng spec
+   không) và `code_quality` (code có sạch/đủ test không) — xem "Review Verdict
+   Split" bên dưới.
 
 Step 7: Sửa lỗi (Fix)
-   Agent sửa các findings từ review. Nếu không có findings → skip bước này.
-   → Sau fix, chạy lại targeted tests trên các files đã sửa.
+   Agent sửa các findings từ review — ưu tiên `spec_compliance` violations trước
+   (nhận spec gốc làm instruction chính) nếu có, sau đó mới `code_quality` issues.
+   Nếu không có findings → skip bước này. → Sau fix, chạy lại targeted tests trên
+   các files đã sửa.
 
 Step 8: Re-review (có điều kiện)
    Nếu fix ở Step 7 thay đổi đáng kể (>N lines hoặc >M files) → quay lại Step 6.
@@ -96,6 +112,38 @@ Step 12: Merge & Complete
    Merge PR vào target branch.
    Task status → merged. Task hoàn thành.
 ```
+
+---
+
+## Engine Selection (API-native vs CLI)
+
+`BuildWorkflow` chọn DAG theo `execution_engine` đã resolve của task (§14 Execution Engine):
+- `api_native` (mặc định) → DAG 10 bước mô tả ở trên, không đổi.
+- `cli` → workflow definition thứ hai, `cli_spec_first`: `cli_analyze → cli_spec → cli_implement → cli_mr`. Vì CLI coding agent (Claude Code, Codex CLI…) đã tự có tool-loop/planning/self-review, server chỉ cần đảm bảo agent hiểu đúng project, có bản OpenSpec được duyệt làm hợp đồng, implement bám spec, và ra PR. Xem chi tiết tại §14.
+
+## Review Verdict Split
+
+Thay vì 1 verdict duy nhất, output của bước Review (`server/internal/prompts/steps/review.md`) là structured JSON 2 trục:
+
+```json
+{
+  "spec_compliance": {"verdict": "pass|fail", "violations": []},
+  "code_quality": {"verdict": "pass|fail", "issues": []},
+  "summary": "..."
+}
+```
+
+- **`spec_compliance=fail`**: nghiêm trọng hơn — fix step nhận violations + spec gốc làm instruction chính. Nếu fail lần 2 liên tiếp vì cùng violation → escalate (pause chờ user) thay vì đốt hết `max_review_fix_cycles`.
+- **`code_quality=fail`** (spec_compliance pass): fix step xử lý như findings thông thường.
+- Cả hai pass → sang testing/PR như cũ. Output không parse được (legacy single-verdict) → fallback coi như 1 verdict duy nhất (backward-compat).
+
+## Declarative Pipeline & Policy Config (Governance Schemas)
+
+Pipeline/policy của project không còn hoàn toàn hard-code. Hai JSON Schema versioned định nghĩa cấu trúc hợp lệ:
+- `docs/schemas/pipeline.schema.json` — steps, `dependsOn`, điều kiện bật/tắt node (vd skip `dor_check` cho hotfix), engine bindings.
+- `docs/schemas/policies.schema.json` — DoR criteria, review harness policy (§01/§09), routing matrix override (§01 Smart LLM Router), retry/cycle limits.
+
+Cột `projects.pipeline_config` (jsonb, nullable) lưu override per-project — `null` nghĩa là dùng built-in defaults (đúng hành vi hard-code mô tả ở tài liệu này). `BuildWorkflow` đọc config này để dựng DAG data-driven thay vì switch cứng; 2 definitions hiện có (`api_native`, `cli_spec_first`) trở thành 2 preset ship sẵn (`presets/api_native.json`, `presets/cli_spec_first.json`). Khi save config mới: validate schema + kiểm tra DAG hợp lệ (acyclic, steps tồn tại trong registry, `dependsOn` resolve được). UI: Project Settings có editor chọn preset hoặc sửa JSON trực tiếp (validate lỗi inline; chưa có visual DAG editor).
 
 ---
 

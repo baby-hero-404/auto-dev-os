@@ -3,6 +3,9 @@ sources:
   - "server/**"
   - "web/src/components/projects/project-profile.tsx"
   - "web/src/components/projects/GovernanceConfigEditor.tsx"
+  - "web/src/components/projects/cli-engine-config-form.tsx"
+  - "docs/schemas/pipeline.schema.json"
+  - "docs/schemas/policies.schema.json"
 verified: 2026-07-23
 ---
 
@@ -59,7 +62,10 @@ Cấu hình mặc định cho tất cả task trong project (task có thể over
 | `max_review_fix_cycles` | `3` | Số vòng lặp Review → Fix → Re-review tối đa. Khi vượt quá → skip fix, đẩy sang testing + cảnh báo (§08) |
 | `default_branch` | `main` | Branch mặc định để tạo PR target |
 | `smart_routing` | `true` | Smart LLM Router Toggle: Tự động điều hướng task đến LLM provider phù hợp với độ phức tạp để tối ưu chi phí |
-| `pipeline_config` | `null` | Cấu hình Governance Pipeline Editor: Tùy chỉnh rules & constraints (bypass, skip, cycles) thông qua declarative schema (UI JSON Editor) |
+| `pipeline_config` | `null` | Cấu hình Governance Pipeline Editor: Tùy chỉnh rules & constraints (bypass, skip, cycles) thông qua declarative schema (UI JSON Editor). `null` = dùng preset built-in (§08 "Declarative Pipeline & Policy Config") |
+| `execution_engine` | `api_native` | `api_native` \| `cli` — chọn cơ chế thực thi mặc định cho task của project (§14 Execution Engine); task có thể override riêng |
+| `cli_engine_config` | `null` | Khi `execution_engine=cli`: `{command, args, env, timeout_minutes}` cho CLI coding agent (Claude Code, Codex CLI, aider…), cấu hình qua form riêng trong Project Settings |
+| `review_harness_policy` | `same` | `same` \| `different_model` \| `different_provider` — chọn model/provider review khác với model/provider đã code (§01/§09 Cross-Harness Review); fallback về `same` + warning nếu không có lựa chọn thứ 2 |
 
 ## D. Knowledge Base (Partially Implemented)
 

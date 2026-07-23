@@ -47,6 +47,7 @@ export default function AIProvidersPage() {
   const [deleteConfirmID, setDeleteConfirmID] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addModalMode, setAddModalMode] = useState<"api" | "cli">("api");
   const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
@@ -264,24 +265,48 @@ export default function AIProvidersPage() {
             Manage encrypted provider credential pools used by the Unified AI Gateway.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={!token || !orgID}
-          onClick={() => {
-            setFormError("");
-            setSaveState("idle");
-            setDraftTestState("idle");
-            setForm((prev) => ({
-              ...prev,
-              label: prev.label.trim() || generatedCredentialLabel(prev.provider),
-            }));
-            setIsAddOpen(true);
-          }}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Plus size={16} />
-          Add Credential
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={!token || !orgID}
+            onClick={() => {
+              setFormError("");
+              setSaveState("idle");
+              setDraftTestState("idle");
+              setForm((prev) => ({
+                ...prev,
+                provider: "openai",
+                label: generatedCredentialLabel("openai"),
+              }));
+              setAddModalMode("api");
+              setIsAddOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={16} />
+            Add API Key
+          </button>
+          <button
+            type="button"
+            disabled={!token || !orgID}
+            onClick={() => {
+              setFormError("");
+              setSaveState("idle");
+              setDraftTestState("idle");
+              setForm((prev) => ({
+                ...prev,
+                provider: "cli:claude",
+                label: generatedCredentialLabel("cli:claude"),
+              }));
+              setAddModalMode("cli");
+              setIsAddOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2.5 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={16} />
+            Add CLI Profile
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-6">
@@ -306,23 +331,46 @@ export default function AIProvidersPage() {
               <p className="mt-2 max-w-sm text-sm text-content-muted font-normal leading-relaxed">
                 Add an API key for OpenAI, Anthropic, Gemini, or a custom router to enable LLM access for your agents.
               </p>
-              <button
-                onClick={() => {
-                  setFormError("");
-                  setSaveState("idle");
-                  setDraftTestState("idle");
-                  setForm((prev) => ({
-                    ...prev,
-                    label: prev.label.trim() || generatedCredentialLabel(prev.provider),
-                  }));
-                  setIsAddOpen(true);
-                }}
-                className="mt-5 flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.15)]"
-                type="button"
-              >
-                <Plus size={16} />
-                Add Credential
-              </button>
+              <div className="mt-5 flex gap-3 justify-center">
+                <button
+                  onClick={() => {
+                    setFormError("");
+                    setSaveState("idle");
+                    setDraftTestState("idle");
+                    setForm((prev) => ({
+                      ...prev,
+                      provider: "openai",
+                      label: generatedCredentialLabel("openai"),
+                    }));
+                    setAddModalMode("api");
+                    setIsAddOpen(true);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.15)]"
+                  type="button"
+                >
+                  <Plus size={16} />
+                  Add API Key
+                </button>
+                <button
+                  onClick={() => {
+                    setFormError("");
+                    setSaveState("idle");
+                    setDraftTestState("idle");
+                    setForm((prev) => ({
+                      ...prev,
+                      provider: "cli:claude",
+                      label: generatedCredentialLabel("cli:claude"),
+                    }));
+                    setAddModalMode("cli");
+                    setIsAddOpen(true);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-md border border-brand-primary bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 cursor-pointer"
+                  type="button"
+                >
+                  <Plus size={16} />
+                  Add CLI Profile
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -372,15 +420,12 @@ export default function AIProvidersPage() {
           showApiKey={showApiKey}
           token={token}
           orgID={orgID}
-          onClose={() => {
-            if (!isSubmitting) {
-              setIsAddOpen(false);
-            }
-          }}
+          mode={addModalMode}
+          onClose={() => setIsAddOpen(false)}
           onSubmit={handleAddCredential}
           onSetForm={handleSetForm}
           onTestKey={testDraftCredential}
-          onToggleApiKey={() => setShowApiKey((value) => !value)}
+          onToggleApiKey={() => setShowApiKey(!showApiKey)}
         />
       )}
 

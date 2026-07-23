@@ -1,6 +1,7 @@
 ---
 sources:
   - "server/**"
+verified: 2026-07-23
 ---
 
 # 13. Patch Engine Abstraction
@@ -53,7 +54,12 @@ Engine hỗ trợ linh hoạt nhiều chiến lược dựa trên định dạng
    - Tách làm 3 lớp rõ rệt:
      - **Parser:** State machine đọc luồng văn bản từ LLM, trích xuất cấu trúc và tạo ra danh sách `EditBlock` (có hỗ trợ mở rộng metadata như File: hay Action:).
      - **Validator:** Kiểm tra tính hợp lệ độc lập (file đích tồn tại, đoạn SEARCH xuất hiện chính xác 1 lần duy nhất trong file, không chồng chéo các khối sửa đổi).
-     - **Applier:** Thực hiện strings.Replace và ghi dữ liệu an toàn xuống đĩa.
+     - **Applier:** Thực hiện strings.Replace và ghi dữ liệu an toàn xuống đĩa. Khi exact match thất bại, `ApplySearchReplace` chạy qua chuỗi **tiered fuzzy fallback** (mô hình Aider), dừng ở tier đầu tiên match duy nhất:
+       - **Tier 0 — Exact** (hành vi gốc).
+       - **Tier 1 — Trailing-whitespace-normalize:** bỏ trailing space mỗi dòng trước khi so khớp.
+       - **Tier 2 — Relative-indent:** bỏ common leading indent của SEARCH block, so nội dung, giữ lại indent thực tế khi replace.
+       - **Tier 3 — Line-trim match:** so từng dòng đã `TrimSpace`, chỉ nhận khi match duy nhất và số dòng bằng nhau.
+       - Match ở nhiều vị trí tại bất kỳ tier nào → fail kèm message nêu số vị trí + tier (không tự đoán). Tier dùng cho mỗi lần apply thành công được ghi vào log để đo hiệu quả từng tier.
 3. **AST Editing (Định hướng tương lai — Đã đưa vào Backlog):**
    - Xem chi tiết tại `docs/backlog/ast-editing-backlog.md`.
 

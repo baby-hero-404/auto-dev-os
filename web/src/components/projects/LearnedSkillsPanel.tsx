@@ -3,7 +3,7 @@
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import Link from "next/link";
-import { GraduationCap, CheckCircle, Ban, Trash2, ExternalLink, Loader2, Sparkles } from "lucide-react";
+import { GraduationCap, CheckCircle, Ban, Trash2, ExternalLink, Loader2, Sparkles, Edit3, X } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { learnedSkills as learnedSkillsApi } from "@/lib/api";
@@ -18,6 +18,12 @@ interface LearnedSkillsPanelProps {
 export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps) {
   const [filterStatus, setFilterStatus] = useState<"all" | "draft" | "active" | "disabled">("all");
   const [actionID, setActionID] = useState<string | null>(null);
+
+  const [editingSkill, setEditingSkill] = useState<LearnedSkill | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editTriggers, setEditTriggers] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const swrKey = projectID && token ? [`/projects/${projectID}/learned-skills`, token] : null;
   const { data: skills, isLoading } = useSWR<LearnedSkill[]>(swrKey, () =>
@@ -68,6 +74,34 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
       toast.error("Failed to delete skill: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setActionID(null);
+    }
+  }
+
+  function openEditModal(skill: LearnedSkill) {
+    setEditingSkill(skill);
+    setEditTitle(skill.title || "");
+    setEditTriggers((skill.trigger_keywords || []).join(", "));
+    setEditContent(skill.content || "");
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingSkill) return;
+    setIsSaving(true);
+    try {
+      const triggerArr = editTriggers.split(",").map(s => s.trim()).filter(Boolean);
+      await learnedSkillsApi.update(editingSkill.id, token, {
+        title: editTitle.trim(),
+        trigger_keywords: triggerArr,
+        content: editContent.trim(),
+      });
+      toast.success("Learned skill updated.");
+      mutate(swrKey);
+      setEditingSkill(null);
+    } catch (err) {
+      toast.error("Failed to update skill: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -155,6 +189,16 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
                       type="button"
                       variant="ghost"
                       size="sm"
+                      onClick={() => openEditModal(skill)}
+                      disabled={actionID === skill.id}
+                      className="h-7 px-2 text-[11px] text-brand-primary hover:bg-brand-primary/10"
+                    >
+                      <Edit3 size={12} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => handleDelete(skill.id)}
                       disabled={actionID === skill.id}
                       className="h-7 px-2 text-[11px] text-danger hover:bg-danger/10"
@@ -206,6 +250,70 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
           </div>
         )}
       </CardContent>
+      {/* Edit Modal */}
+      {editingSkill && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border border-stroke/20 rounded-2xl max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden animate-fade-in">
+            <div className="p-4 border-b border-stroke/10 flex items-center justify-between bg-slate-500/5">
+              <div className="flex items-center gap-2">
+                <Edit3 className="text-brand-primary" size={18} />
+                <h3 className="font-heading text-sm font-bold text-foreground">
+                  Edit Learned Skill
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingSkill(null)}
+                className="p-1 rounded-lg hover:bg-slate-500/10 text-content-muted hover:text-foreground transition cursor-pointer"
+                disabled={isSaving}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="p-5 flex flex-col gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Title</label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  className="w-full text-sm p-2 rounded-lg border border-stroke/20 bg-background focus:border-brand-primary focus:outline-none"
+                  disabled={isSaving}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Trigger Keywords (comma separated)</label>
+                <input
+                  type="text"
+                  value={editTriggers}
+                  onChange={e => setEditTriggers(e.target.value)}
+                  className="w-full text-sm font-mono p-2 rounded-lg border border-stroke/20 bg-background focus:border-brand-primary focus:outline-none"
+                  disabled={isSaving}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-foreground">Content</label>
+                <textarea
+                  required
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  className="w-full text-xs font-mono p-2.5 rounded-lg border border-stroke/20 bg-background h-40 resize-none focus:border-brand-primary focus:outline-none custom-scrollbar"
+                  disabled={isSaving}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-stroke/10 mt-2">
+                <Button type="button" variant="ghost" onClick={() => setEditingSkill(null)} disabled={isSaving}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isSaving} isLoading={isSaving}>
+                  Save Changes
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

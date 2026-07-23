@@ -243,6 +243,111 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	return &CommandResult{ExitCode: int(statusCode), Stdout: stdout, Stderr: stderr}, nil
 }
 
+func (r *DockerRuntime) RunInteractive(ctx context.Context, req CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	ctx, span := otel.Tracer("auto-code-os/sandbox").Start(ctx, "sandbox.docker.runInteractive")
+	defer span.End()
+	if err := validateCommand(req.Command); err != nil {
+		return err
+	}
+	resolvedNetworkMode := r.resolveNetworkMode(req.NetworkMode)
+	if err := validateExecutionPolicy(req, resolvedNetworkMode); err != nil {
+		return err
+	}
+	if len(req.Command) == 0 {
+		return fmt.Errorf("docker command is required")
+	}
+
+	workspace := req.Workspace
+	if workspace == "" {
+		workspace = WorkspacePath(r.config.WorkspaceRoot, req.TaskID)
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		return fmt.Errorf("create sandbox workspace: %w", err)
+	}
+
+	envMap := mergedEnv(req)
+	mounts := []mount.Mount{
+		{
+			Type:   mount.TypeBind,
+			Source: workspace,
+			Target: "/workspace",
+		},
+	}
+	env := make([]string, 0, len(envMap))
+	for key, value := range envMap {
+		env = append(env, key+"="+value)
+	}
+	networkMode := container.NetworkMode(resolvedNetworkMode)
+
+	createResp, err := r.client.ContainerCreate(ctx, &container.Config{
+		Image:        r.config.Image,
+		Cmd:          req.Command,
+		Env:          env,
+		WorkingDir:   "/workspace",
+		Tty:          true,
+		OpenStdin:    true,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+	}, &container.HostConfig{
+		NetworkMode: networkMode,
+		Resources: container.Resources{
+			Memory:   r.config.MemoryBytes,
+			NanoCPUs: r.config.NanoCPUs,
+		},
+		Mounts: mounts,
+	}, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("create interactive docker container: %w", err)
+	}
+	containerID := createResp.ID
+	defer func() {
+		timeout := 5
+		_ = r.client.ContainerStop(context.Background(), containerID, container.StopOptions{Timeout: &timeout})
+		_ = r.client.ContainerRemove(context.Background(), containerID, container.RemoveOptions{Force: true})
+	}()
+
+	attachResp, err := r.client.ContainerAttach(ctx, containerID, container.AttachOptions{
+		Stream: true,
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return fmt.Errorf("attach to docker container: %w", err)
+	}
+	defer attachResp.Close()
+
+	// Connect streams
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(attachResp.Conn, stdin)
+		errCh <- err
+	}()
+	go func() {
+		// Tty=true merges stdout and stderr, but we can copy it to both just in case
+		_, err := io.Copy(stdout, attachResp.Reader)
+		errCh <- err
+	}()
+
+	if err := r.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("start docker container: %w", err)
+	}
+
+	waitCh, waitErrCh := r.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-waitErrCh:
+		if err != nil {
+			return fmt.Errorf("wait for docker container: %w", err)
+		}
+	case <-waitCh:
+		// Completed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
 func splitDockerLogs(reader io.Reader) (string, string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

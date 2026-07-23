@@ -63,12 +63,23 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func AuthMiddleware(authSvc AuthService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var tokenString string
 			authHeader := r.Header.Get("Authorization")
-			if !strings.HasPrefix(authHeader, "Bearer ") {
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			} 
+			
+			if tokenString == "" {
+				// Fallback to query param for WebSocket connections
+				tokenString = r.URL.Query().Get("token")
+			}
+
+			if tokenString == "" {
 				writeError(w, http.StatusUnauthorized, "missing bearer token")
 				return
 			}
-			claims, err := authSvc.VerifyToken(strings.TrimPrefix(authHeader, "Bearer "), "access")
+
+			claims, err := authSvc.VerifyToken(tokenString, "access")
 			if err != nil {
 				writeError(w, http.StatusUnauthorized, err.Error())
 				return

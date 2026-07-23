@@ -40,6 +40,7 @@ Each doc states its own status once in its header (`**Status:**` line) — this 
 | 11 | [Multi-Channel Interaction (Remote Coding Sessions)](product/11-multi-channel-interaction.md) | ⚪ Deferred |
 | 12 | [Repository Profile Cache](product/12-repository-profile-cache.md) | 🔵 Proposed |
 | 13 | [Patch Engine Abstraction](product/13-patch-engine-abstraction.md) | 🟢 Implemented |
+| 14 | [Execution Engine (Pluggable API-Native / CLI)](product/14-execution-engine.md) | 🟢 Implemented |
 
 **Canonical sources** (avoid restating these elsewhere — cross-reference instead):
 - Task lifecycle (12 states) + "PR ≠ Task hoàn thành" completion policy → **product/07** Task System.
@@ -85,8 +86,8 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 <!-- freshness:begin -->
 | Document | Last-verified | Status |
 |----------|---------------|--------|
-| [engineering/01-context-management.md](./engineering/01-context-management.md) | 2026-07-12 | ✅ Fresh |
-| [engineering/02-context-pruning-and-harness-independence.md](./engineering/02-context-pruning-and-harness-independence.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/01-context-management.md](./engineering/01-context-management.md) | 2026-07-23 | ✅ Fresh |
+| [engineering/02-context-pruning-and-harness-independence.md](./engineering/02-context-pruning-and-harness-independence.md) | 2026-07-23 | ✅ Fresh |
 | [engineering/03-global-path-manager.md](./engineering/03-global-path-manager.md) | 2026-07-12 | ✅ Fresh |
 | [engineering/04-semantic-boundaries.md](./engineering/04-semantic-boundaries.md) | 2026-07-12 | ✅ Fresh |
 | [engineering/05-execution-unit-dag.md](./engineering/05-execution-unit-dag.md) | 2026-07-12 | ✅ Fresh |
@@ -94,14 +95,15 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 | [product/01-unified-ai-gateway.md](./product/01-unified-ai-gateway.md) | 2026-07-23 | ✅ Fresh |
 | [product/02-rule-system.md](./product/02-rule-system.md) | 2026-07-12 | ✅ Fresh |
 | [product/03-skill-system.md](./product/03-skill-system.md) | 2026-07-23 | ✅ Fresh |
-| [product/04-agent-system.md](./product/04-agent-system.md) | 2026-07-12 | ✅ Fresh |
-| [product/05-git-integration.md](./product/05-git-integration.md) | 2026-07-12 | ✅ Fresh |
+| [product/04-agent-system.md](./product/04-agent-system.md) | 2026-07-23 | ✅ Fresh |
+| [product/05-git-integration.md](./product/05-git-integration.md) | 2026-07-23 | ✅ Fresh |
 | [product/06-project-system.md](./product/06-project-system.md) | 2026-07-23 | ✅ Fresh |
-| [product/07-task-system.md](./product/07-task-system.md) | 2026-07-12 | ✅ Fresh |
-| [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-12 | ✅ Fresh |
+| [product/07-task-system.md](./product/07-task-system.md) | 2026-07-23 | ✅ Fresh |
+| [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-23 | ✅ Fresh |
 | [product/09-pr-human-review.md](./product/09-pr-human-review.md) | 2026-07-23 | ✅ Fresh |
-| [product/10-dashboard-analytics.md](./product/10-dashboard-analytics.md) | 2026-07-12 | ✅ Fresh |
+| [product/10-dashboard-analytics.md](./product/10-dashboard-analytics.md) | 2026-07-23 | ✅ Fresh |
 | [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-12 | ✅ Fresh |
 | [product/12-repository-profile-cache.md](./product/12-repository-profile-cache.md) | 2026-07-12 | ✅ Fresh |
-| [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-12 | ✅ Fresh |
+| [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-23 | ✅ Fresh |
+| [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-07-23 | ✅ Fresh |
 <!-- freshness:end -->

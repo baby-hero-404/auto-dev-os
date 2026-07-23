@@ -1,12 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import useSWR from "swr";
+import { ShieldCheck, Loader2 } from "lucide-react";
+import { attestations as attestationsApi } from "@/lib/api";
 import { useTaskDetail } from "./TaskDetailContext";
 import { DescriptionBody } from "./DescriptionBody";
 
 export function TaskTitleBlock() {
-  const { task, workflow, isPaused } = useTaskDetail();
+  const { task, workflow, isPaused, token } = useTaskDetail();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const { data: attestations, isLoading: isLoadingAttestations } = useSWR(
+    task?.status === "merged" && task?.id && token ? [`/tasks/${task.id}/attestations`, token] : null,
+    () => attestationsApi.listByTask(task!.id, token)
+  );
+
+  const hasAttestations = attestations && attestations.length > 0;
 
   useEffect(() => {
     if (!workflow?.checkpoints || workflow.checkpoints.length === 0) {
@@ -90,6 +100,20 @@ export function TaskTitleBlock() {
               </svg>
               DoR Bypassed
             </span>
+          )}
+          {task?.status === "merged" && (
+            isLoadingAttestations ? (
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/10 text-content-muted border border-stroke/20 shadow-sm">
+                <Loader2 size={12} className="animate-spin" /> Verifying
+              </span>
+            ) : hasAttestations ? (
+              <span
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-sm"
+                title="Code cryptographically attested"
+              >
+                <ShieldCheck size={12} /> Verified
+              </span>
+            ) : null
           )}
         </div>
         <div className="mt-4 bg-slate-500/[0.02] dark:bg-slate-900/10 rounded-2xl border border-stroke/10 p-4 shadow-sm">

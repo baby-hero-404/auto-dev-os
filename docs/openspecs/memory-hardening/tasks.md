@@ -35,4 +35,4 @@
 
 ## Docs sync
 
-- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md
+- [x] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md — done 2026-07-23: engineering/01-context-management.md (§6 Memory Hardening)

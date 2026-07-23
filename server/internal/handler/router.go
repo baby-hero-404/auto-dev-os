@@ -8,6 +8,7 @@ import (
 	mw "github.com/auto-code-os/auto-code-os/server/internal/middleware"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
+	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -42,6 +43,7 @@ type Deps struct {
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
+	SandboxRuntime     sandbox.Runtime
 }
 
 // NewRouter creates the chi router with all API v1 routes.
@@ -107,6 +109,7 @@ func NewRouter(d Deps) http.Handler {
 
 	providerModelH := NewProviderModelHandler(d.ProviderModelSvc)
 	govH := NewGovernanceHandler()
+	cliAuthH := NewCLIAuthHandler(d.SandboxRuntime)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -141,6 +144,9 @@ func NewRouter(d Deps) http.Handler {
 						r.Post("/", projH.Create)
 						r.Get("/", projH.List)
 					})
+
+					r.Get("/cli-auth/terminal", cliAuthH.Terminal)
+					r.Post("/cli-auth/ws-ticket", cliAuthH.MintWSTicket)
 
 					r.Route("/rules", func(r chi.Router) {
 						r.Get("/", ruleH.ListGlobal)

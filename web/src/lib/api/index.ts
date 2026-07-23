@@ -112,6 +112,7 @@ export const api = {
   createProviderModel: gateway.providerModels.create,
   updateProviderModel: gateway.providerModels.update,
   deleteProviderModel: gateway.providerModels.remove,
+  mintCliAuthWSTicket: gateway.cliAuth.mintWSTicket,
 
   listMemories: memories.list,
   searchMemories: memories.search,

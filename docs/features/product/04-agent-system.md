@@ -1,6 +1,8 @@
 ---
 sources:
   - "server/**"
+  - "server/pkg/models/learned_skill.go"
+verified: 2026-07-23
 ---
 
 # 04. Agent System (Role-Based Capability Agents)
@@ -63,17 +65,17 @@ Việc pattern nào (Sequential/Fan-out) được chọn cho từng task phụ t
     *   **Auto-Join:** Agent tự động tham gia tất cả project trong Organization.
     *   **Manual Add:** Agent chỉ tham gia project khi được chỉ định.
 
-## D. Self-Improving Learning Loop
+## D. Self-Improving Learning Loop (Reusable Skills System)
 
-> **Audit note (2026-07-12):** Đây là *Planned Target*, không phải hành vi hiện tại. `server/pkg/models/skill.go` chưa có status field, và không có `DRAFT`/`ACTIVE` constant nào trong codebase — cơ chế Skill Extraction → Human Gate → Promote mô tả dưới đây chưa tồn tại. Cái đã có (`server/internal/orchestrator/learning/`) là confidence scoring + rule/prompt-patch suggestions, khác với "trích xuất skill mới" như mô tả.
+> **Audit note (2026-07-23):** Cập nhật so với ghi chú 2026-07-12 — cơ chế mô tả dưới đây **đã được triển khai** dưới dạng bảng `learned_skills` (`server/pkg/models/learned_skill.go`: `trigger_keywords[]`, `usage_count`, `success_rate`, `source_task_id`, `status`), không còn là Planned Target.
 
-Agent có khả năng tự cải thiện qua vòng lặp học tập (Planned Target):
+Agent tự cải thiện qua vòng lặp học tập (Implemented):
 
-1.  **Task thành công** → hệ thống verify success criteria (test pass, review approved).
-2.  **Skill Extraction** → Trích xuất các bước thực hiện thành Skill mới ở trạng thái `DRAFT`.
-3.  **Human Gate** → Con người hoặc Reviewer Agent promote skill sang `ACTIVE`.
-4.  **Future Retrieval** → Ở task sau, Agent dùng Vector Search để pull relevant skill vào context — giảm token, latency, và error rate.
-5.  **Autonomy Tracking** → Ghi nhận kết quả để đánh giá độ tin cậy Agent theo thời gian.
+1.  **Task đạt `merged`** → job history (steps, fixes, review feedback) được đưa qua 1 LLM call trích xuất (mở rộng từ `learning.DetectPatterns`).
+2.  **Skill Extraction** → Đề xuất 0-2 `learned_skill` record ("cách chạy test ở repo X", "pattern sửa lỗi Y"). Autonomy `supervised` → skill ở trạng thái `draft` chờ approve trong `LearnedSkillsPanel` (§03); `autonomous` → active ngay.
+3.  **Context Loading** → `context_load` tìm skill theo `trigger_keywords`/title match với task description (BM25, tái dùng memory search infra), nạp top-3 vào context với budget riêng (~2k tokens).
+4.  **Usage Tracking** → Task merged/failed cập nhật `usage_count`/`success_rate` của skill đã được nạp.
+5.  **Mid-Task Anti-Loop Nudge:** Trong tool-loop, mỗi 15 iterations, hệ thống chèn 1 system nudge (thuần Go, không LLM) tổng kết "những gì đã thử & thất bại" dựa trên tool-call history — cùng cùng tool + cùng args fail ≥3 lần → nudge cảnh báo cụ thể, chống lặp vòng vô ích.
 
 ## E. Quy Tắc Bắt Buộc
 

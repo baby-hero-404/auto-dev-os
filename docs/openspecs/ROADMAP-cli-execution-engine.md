@@ -15,7 +15,7 @@
 
 | Order | Wave | Item | Nguồn học | Impact | Effort | Vì sao ở vị trí này |
 |-------|------|------|-----------|--------|--------|---------------------|
-| **P0.1** | 0 — Quick wins | Anthropic prompt caching (`cache_control` trong `pkg/llm/anthropic.go`) | headroom, claw-compactor | HIGH | 0.5d | ✅ Done — system+tools cached, cache-token usage logged |
+| **P0.1** | 0 — Quick wins | Anthropic prompt caching (`cache_control` trong `pkg/llm/anthropic.go`) | headroom, claw-compactor | HIGH | 0.5d | ✅ Done — system+tools cached, cache-token usage logged; unit/integration tests (1.5/1.6) not written, see tasks.md |
 | **P0.2** | 0 | Mở rộng `secretPatterns` memory redaction (AWS/JWT/Google/npm/gh tokens) | agentmemory | MED | 0.5d | ✅ Done — `memory.go:secretPatterns` |
 | **P0.3** | 0 | Wire `ApplyDecay()` vào ticker (pattern `cache_workers.go` có sẵn) | agentmemory, zep | MED | 2d | ✅ Done — `MemoryService.StartDecayWorker`, 6h interval, wired trong `main.go` |
 | **P0.4** | 0 | Circuit breaker cho `MemoryEmbedder.Embed()` → fallback BM25-only | zep | MED | 1d | ✅ Done — `embedder_breaker.go`, mở sau 5 lỗi liên tiếp, cooldown 2m |
@@ -48,7 +48,7 @@
 
 | Set | Phase | Trạng thái |
 |-----|-------|-----------|
-| [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | ✅ Done — system+tools cached in anthropic.go |
+| [`llm-prompt-caching/`](./llm-prompt-caching/proposal.md) | P0.1 | ✅ Done — system+tools cached in anthropic.go, prefix stability audited, metrics parsed/logged; tests (1.5/1.6) not written, see tasks.md |
 | [`memory-hardening/`](./memory-hardening/proposal.md) | P0.2–P0.4 + P3.4 (gộp — cùng memory service) | ✅ Done — all REQ-001–004 + M01, see tasks.md for pre-existing-vs-new breakdown and deviations |
 | [`pluggable-execution-engine/`](./pluggable-execution-engine/proposal.md) | P1.1 | ✅ Done |
 | [`cli-spec-first-flow/`](./cli-spec-first-flow/proposal.md) | P1.2 | ✅ Done — all tasks.md sections (1-6) complete |
@@ -62,7 +62,7 @@
 | [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | ✅ Done |
 | [`declarative-governance-schemas/`](./declarative-governance-schemas/proposal.md) | P4.2 | ✅ Done (scope-reduced — see tasks.md) |
 | [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | ✅ Done (scope-reduced; see specs.md/tasks.md for REQ-003/REQ-005 deferral) |
-| [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | ✅ Done |
+| [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | ✅ Done (scope-reduced) — frontmatter `sources:`/`verified:` trên 20 docs xong thủ công; convention "Docs sync" đã ghi trong `features/README.md` và áp dụng ở 41/41 spec sets' tasks.md; chỉ bỏ guard script tự động (`docs_freshness.py` + CI hook, §1), xem tasks.md |
 | [`roadmap-ui-surfacing/`](./roadmap-ui-surfacing/proposal.md) | Post-Wave 4 — surface 4 UI items đã deferred (attestation audit panel, governance editor, learned skills, smart-routing toggle) | ✅ Done |
 
 Ghi chú phối hợp giữa các set:

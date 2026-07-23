@@ -20,6 +20,7 @@ export type ExecutionEngine = "api_native" | "cli";
 export type CLIEngineConfig = {
   command: string;
   args: string[];
+  credential_id?: string;
   env?: Record<string, string>;
   timeout_minutes: number;
   auth_check_command?: string;

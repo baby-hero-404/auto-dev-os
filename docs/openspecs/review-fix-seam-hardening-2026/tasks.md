@@ -160,4 +160,4 @@ The review raised whether hardcoding `"main"` in `fix.go`'s two `paths.Canonical
 
 ## Docs sync
 
-- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md
+- [x] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md — N/A: this spec set is not in feature-docs-sync/design.md's 14-set mapping table, no docs/features/ target specified

@@ -111,4 +111,4 @@ After all phases are complete, re-run the same task type (4-subtask Go backend) 
 
 ## Docs sync
 
-- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md
+- [x] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md — N/A: this spec set is not in feature-docs-sync/design.md's 14-set mapping table, no docs/features/ target specified

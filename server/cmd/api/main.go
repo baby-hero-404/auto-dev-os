@@ -235,6 +235,7 @@ func run() error {
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,
+		SandboxRuntime:     sandboxRuntime,
 	}
 
 	router := handler.NewRouter(deps)

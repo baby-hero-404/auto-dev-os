@@ -48,6 +48,16 @@ export const providerCredentials = {
   },
 };
 
+export const cliAuth = {
+  mintWSTicket(orgID: string, token: string, provider: string) {
+    return request<{ ticket: string; expires_in: number }>(`/organizations/${orgID}/cli-auth/ws-ticket`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ provider }),
+    });
+  },
+};
+
 
 export const providerModels = {
   list(orgID: string, token: string) {

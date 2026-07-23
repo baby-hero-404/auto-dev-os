@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useTaskDetail } from "./TaskDetailContext";
 import { TaskHeader } from "./TaskHeader";
 import { TaskTitleBlock } from "./TaskTitleBlock";
@@ -43,10 +44,40 @@ export function TaskDetailLayout() {
 
   if (isTaskLoading) {
     return (
-      <main className="min-h-screen bg-background p-6 flex flex-col justify-center items-center gap-4">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-primary" />
-        <p className="text-sm font-mono text-content-muted animate-pulse">Loading task workspace...</p>
-      </main>
+      <div className="min-h-screen bg-background text-content font-sans">
+        {/* Header Skeleton */}
+        <div className="flex items-center justify-between gap-4 px-8 py-3.5 bg-card border-b border-stroke">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-28 rounded-lg" />
+        </div>
+
+        <div className="max-w-295 mx-auto px-8 pt-7 pb-12 animate-fade-in">
+          {/* Title Block Skeleton */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-5 border-b border-stroke/10">
+            <div className="flex-1 space-y-4 w-full">
+              <Skeleton className="h-9 w-full max-w-md" />
+              <div className="flex gap-2">
+                <Skeleton className="h-6 w-20 rounded-full" />
+                <Skeleton className="h-6 w-24 rounded-full" />
+                <Skeleton className="h-6 w-16 rounded-full" />
+              </div>
+              <Skeleton className="h-28 w-full rounded-2xl" />
+            </div>
+            <Skeleton className="h-16 w-32 shrink-0 rounded-xl hidden md:block" />
+          </div>
+
+          {/* Main Grid Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start">
+            <div className="flex flex-col gap-4">
+              <Skeleton className="h-48 w-full rounded-2xl" />
+              <Skeleton className="h-64 w-full rounded-2xl" />
+            </div>
+            <div className="flex flex-col gap-4">
+              <Skeleton className="h-96 w-full rounded-2xl" />
+            </div>
+          </div>
+        </div>
+      </div>
     );
   }
 

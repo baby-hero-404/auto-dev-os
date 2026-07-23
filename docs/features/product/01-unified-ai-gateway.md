@@ -2,6 +2,8 @@
 sources:
   - "server/**"
   - "web/src/components/projects/project-profile.tsx"
+  - "server/pkg/llm/anthropic.go"
+  - "server/internal/orchestrator/llmrunner/outputfilter/**"
 verified: 2026-07-23
 ---
 
@@ -81,12 +83,31 @@ Khi Agent được cấu hình với một level (ví dụ: "Balanced"):
 6. Ghi usage logs (provider, model, tokens, cost, latency)
 ```
 
-## E. Mở Rộng Planned
+## E. Prompt Caching (Anthropic)
+
+Mọi lời gọi Anthropic qua `pkg/llm` (`anthropic.go`, `ChatWithOptions`) đính `cache_control: {type: "ephemeral"}` vào block cuối cùng của system prompt và block cuối cùng của mảng tools — 2 phần này giữ nguyên nội dung qua mọi vòng tool-loop (không chèn timestamp/task-id động vào phần được cache). Cached input rẻ hơn ~10x so với input thường. Response usage (`cache_creation_input_tokens`, `cache_read_input_tokens`) được đọc và ghi vào token usage tracking (mục G) để đo hit/miss thực tế.
+
+## F. Smart LLM Router & Token Usage Tracking
+
+Ngoài Smart LLM Routing Toggle (mục C), hệ thống ghi nhận chi tiết token usage của **từng LLM call** vào bảng `token_usage` (`task_id, job_id, step_id, provider, model, input/output/cache tokens, cost_estimate`) — dữ liệu này phục vụ trực tiếp Dashboard Cost Card (§10). Ma trận routing theo step-complexity mặc định:
+
+| Step | Model level mặc định |
+|:-----|:----------------------|
+| `context_load`, `analyze`, `dor_check` (sinh câu hỏi) | `fast` |
+| `plan`, `review` | `balanced` |
+| `code_*`, `fix` | theo `default_model_level` của project (thường `powerful`) |
+| Task `complexity=easy` | hạ mỗi step 1 bậc (floor `fast`) |
+
+## G. Cross-Harness Review & Tool-Output Filtering
+
+- **Cross-Harness Review:** Project cấu hình `review_harness_policy` (`same` | `different_model` | `different_provider`, §06). Review step resolve model/provider khác với model/provider đã code theo policy này; nếu không có lựa chọn thứ 2 được cấu hình → fallback về cùng model + log warning (không chặn pipeline). Metadata `coded_by`/`reviewed_by` (engine + provider + model) được ghi vào step state + task record và hiển thị trong PR description (nền cho Attestation, §09).
+- **Tool-Output Filtering:** Trước khi tool result đi vào context (và trước hard-cut 8000 ký tự trong `llmrunner/toolloop.go`), một pipeline filter thuần Go (`llmrunner/outputfilter/`) chạy: dedup dòng lặp liên tiếp (`[repeated N times]`), error-priority truncation (giữ dòng match error/fail/panic + context quanh, cắt phần "im lặng" trước), path-prefix compression, và strip ANSI/control chars. Mỗi tool khai báo profile riêng (build/test → error-priority mạnh; git diff → không dedup; read file → không filter). Metrics `outputfilter: in=X out=Y saved=Z%` được log mỗi lần chạy.
+
+## H. Mở Rộng Planned
 
 | Feature | Mô tả |
 |:--------|:------|
 | **Format Translation** | Tự động dịch định dạng giữa các provider (OpenAI ↔ Claude ↔ Gemini) |
-| **Token Saver** | Nén nội dung dài (git diff, build logs) để tiết kiệm 20-40% input token |
 | **Advanced Fallback Scoring** | Chấm điểm theo health/latency/quota để chọn provider + model tốt nhất thay vì chỉ theo priority baseline |
 | **Configurable Rotation Strategy** | Lưu và expose lựa chọn `fill-first` / `round-robin` qua API + UI |
 

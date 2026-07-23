@@ -1,6 +1,8 @@
 "use client";
 
 import { useTaskDetail } from "./TaskDetailContext";
+import { ListTodo } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export function TaskSubtasks() {
   const { task, implementationItems } = useTaskDetail();
@@ -13,12 +15,11 @@ export function TaskSubtasks() {
   if (!implementationItems || implementationItems.length === 0) {
     if (st === 'coding' || st === 'testing' || st === 'reviewing' || st === 'fixing') {
       return (
-        <div className="bg-card border border-stroke rounded-xl p-5">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-sm font-semibold">Subtasks</span>
-          </div>
-          <div className="text-xs text-content-muted italic">Waiting for implementation items to be generated...</div>
-        </div>
+        <EmptyState
+          icon={ListTodo}
+          title="No subtasks yet"
+          description="Waiting for the agent to generate implementation items..."
+        />
       );
     }
     return null;

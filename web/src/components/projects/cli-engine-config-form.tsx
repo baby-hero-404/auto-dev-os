@@ -4,6 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import useSWR from "swr";
+import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 export type CLIEngineConfigFormValue = {
   command: string;
@@ -12,6 +15,7 @@ export type CLIEngineConfigFormValue = {
   timeoutMinutes: number;
   authCheckCommand: string;
   allowNoop: boolean;
+  credentialID: string;
 };
 
 export function cliConfigToFormValue(cfg: CLIEngineConfig | undefined): CLIEngineConfigFormValue {
@@ -22,6 +26,7 @@ export function cliConfigToFormValue(cfg: CLIEngineConfig | undefined): CLIEngin
     timeoutMinutes: cfg?.timeout_minutes ?? 30,
     authCheckCommand: cfg?.auth_check_command ?? "",
     allowNoop: cfg?.allow_noop ?? false,
+    credentialID: cfg?.credential_id ?? "",
   };
 }
 
@@ -37,6 +42,7 @@ export function formValueToCLIConfig(v: CLIEngineConfigFormValue): CLIEngineConf
     timeout_minutes: v.timeoutMinutes,
     auth_check_command: v.authCheckCommand.trim() || undefined,
     allow_noop: v.allowNoop,
+    credential_id: v.credentialID || undefined,
   };
 }
 
@@ -53,6 +59,17 @@ export function CLIEngineConfigForm({
   onChange: (next: CLIEngineConfigFormValue) => void;
   disabled?: boolean;
 }) {
+  const session = useSession();
+  const token = session?.token ?? "";
+  const orgID = session?.user.org_id ?? "";
+
+  const { data: credentials = [] } = useSWR(
+    orgID && token ? ["provider-credentials", orgID] : null,
+    () => api.listProviderCredentials(orgID, token),
+  );
+
+  const cliCredentials = credentials.filter((c) => c.provider.startsWith("cli:"));
+
   function updateEnvRow(index: number, patch: Partial<{ key: string; value: string }>) {
     const env = value.env.map((row, i) => (i === index ? { ...row, ...patch } : row));
     onChange({ ...value, env });
@@ -85,6 +102,24 @@ export function CLIEngineConfigForm({
           Fill Claude Code Preset
         </Button>
       </div>
+
+      <Field label="CLI Authentication Profile" htmlFor="cli-credential">
+        <select
+          id="cli-credential"
+          value={value.credentialID}
+          onChange={(e) => onChange({ ...value, credentialID: e.target.value })}
+          disabled={disabled}
+          className="w-full appearance-none rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+        >
+          <option value="">No centralized credential (use env vars)</option>
+          {cliCredentials.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label} ({c.provider})
+            </option>
+          ))}
+        </select>
+        <p className="text-[10px] text-content-muted mt-1">Select a CLI config saved in AI Providers to sync its OAuth session across runs.</p>
+      </Field>
 
       <Field label="Command *" htmlFor="cli-command" hint='e.g. "claude"'>
         <Input

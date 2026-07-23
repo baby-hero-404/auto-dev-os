@@ -1,6 +1,8 @@
 ---
 sources:
   - "server/**"
+  - "server/pkg/attest/**"
+verified: 2026-07-23
 ---
 
 # 05. Git Integration
@@ -44,6 +46,8 @@ sources:
 
 7. Tạo Pull Request
    ├── Tiêu đề: "AutoCodeOS: {task.title}"
+   ├── Mỗi commit trong PR được ký DSSE (Ed25519) và lưu thành attestation record
+   │   (coded_by/reviewed_by, prompt_hash, policy_snapshot) — xem §09 "Attestation Audit Panel"
    ├── PR URL được lưu → Task chuyển sang pr_ready (chưa hoàn thành)
    └── Task chỉ hoàn thành sau khi human approve + merge (§08)
 ```

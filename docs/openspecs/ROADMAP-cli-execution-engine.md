@@ -27,7 +27,7 @@
 | **P2.4** | 2 | Tool-output filtering pipeline (dedup log, keep-error-lines) trước hard-cut 8000 chars | rtk, claw-compactor | HIGH | 4-5d | Gap token-compression lớn nhất đã verify |
 | **P3.1** | 3 — Thông minh hơn | Cross-harness review (provider khác review code của provider đã code; với CLI mode: API-native review CLI output) | ai-sdlc | HIGH | 2-3d | ✅ Done — `review_harness_policy`, `cross_review` CLI step + fix-loop, PR footer metadata; UI (1.7) + full integration test (1.8) deferred, see tasks.md |
 | **P3.2** | 3 | RepoMap mention-boost (×10 identifier nhắc trong task description) | Aider | MED | 2-3d | ✅ Done — ident ×10 (pre-existing) + path ×50 (this pass), see tasks.md |
-| **P3.3** | 3 | Smart LLM router theo complexity (task dễ → model rẻ) + `token_usage` tracking | 9Router | MED | 3-4d | Sau khi có caching (P0.1) số liệu mới có nghĩa |
+| **P3.3** | 3 | Smart LLM router theo complexity (task dễ → model rẻ) + `token_usage` tracking | 9Router | MED | 3-4d | ✅ Done — step-routing matrix + complexity/retry rules + `smart_routing` toggle + cache-token persistence; usage API/UI was pre-existing, see tasks.md |
 | **P3.4** | 3 | MMR/diversity dedup sau RRF merge trong memory search | agentmemory | LOW-MED | 1d | Tinh chỉnh, không chặn gì |
 | **P4.1** | 4 — Nền tảng dài hạn | Reusable skills system (trích pattern từ task `merged` → skill record, load lại ở context_loading) | Multica, Hermes, Superpowers | HIGH | 5-8d | Giá trị lũy kế lớn nhưng cần pipeline ổn định trước |
 | **P4.2** | 4 | Declarative governance schemas (DAG/quality-gate cấu hình bằng JSON schema per-project) | ai-sdlc | MED | 5-7d | Tổng quát hóa những gì P1/P2 đã hard-code |
@@ -58,7 +58,7 @@
 | [`tool-output-filtering/`](./tool-output-filtering/proposal.md) | P2.4 | ✅ Done — strip/dedup/error-priority pipeline wired before hard-cut; pathcompress kept as documented no-op, per-tool profiles via name registry (see tasks.md) |
 | [`cross-harness-review/`](./cross-harness-review/proposal.md) | P3.1 | ✅ Done — REQ-001–004 complete (backend, policy selector UI & coded_by/reviewed_by metadata badges done) |
 | [`repomap-mention-boost/`](./repomap-mention-boost/proposal.md) | P3.2 | ✅ Done — REQ-001–004 + M01 complete, see tasks.md |
-| [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | 📝 Authored |
+| [`smart-llm-router/`](./smart-llm-router/proposal.md) | P3.3 | ✅ Done |
 | [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | 📝 Authored |
 | [`declarative-governance-schemas/`](./declarative-governance-schemas/proposal.md) | P4.2 | 📝 Authored |
 | [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | 📝 Authored |

@@ -3,22 +3,24 @@ package models
 import "time"
 
 type TokenUsage struct {
-	ID           string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	OrgID        *string   `json:"org_id,omitempty" gorm:"type:uuid"`
-	CredentialID *string   `json:"credential_id,omitempty" gorm:"type:uuid"`
-	ProjectID    *string   `json:"project_id,omitempty" gorm:"type:uuid"`
-	AgentID      *string   `json:"agent_id,omitempty" gorm:"type:uuid"`
-	TaskID       *string   `json:"task_id,omitempty" gorm:"type:uuid"`
-	Provider     string    `json:"provider"`
-	Model        string    `json:"model"`
-	LevelGroup   string    `json:"level_group"`
-	PromptTokens int       `json:"prompt_tokens"`
-	OutputTokens int       `json:"output_tokens"`
-	CostUSD      float64   `json:"cost_usd"`
-	LatencyMS    int64     `json:"latency_ms"`
-	Status       string    `json:"status"`
-	Error        string    `json:"error"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID               string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	OrgID            *string   `json:"org_id,omitempty" gorm:"type:uuid"`
+	CredentialID     *string   `json:"credential_id,omitempty" gorm:"type:uuid"`
+	ProjectID        *string   `json:"project_id,omitempty" gorm:"type:uuid"`
+	AgentID          *string   `json:"agent_id,omitempty" gorm:"type:uuid"`
+	TaskID           *string   `json:"task_id,omitempty" gorm:"type:uuid"`
+	Provider         string    `json:"provider"`
+	Model            string    `json:"model"`
+	LevelGroup       string    `json:"level_group"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	OutputTokens     int       `json:"output_tokens"`
+	CacheReadTokens  int       `json:"cache_read_tokens"`
+	CacheWriteTokens int       `json:"cache_write_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+	LatencyMS        int64     `json:"latency_ms"`
+	Status           string    `json:"status"`
+	Error            string    `json:"error"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 func (TokenUsage) TableName() string {

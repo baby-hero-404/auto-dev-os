@@ -46,6 +46,9 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 	if input.ReviewHarnessPolicy != nil {
 		p.ReviewHarnessPolicy = *input.ReviewHarnessPolicy
 	}
+	if input.SmartRouting != nil {
+		p.SmartRouting = *input.SmartRouting
+	}
 	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
@@ -134,6 +137,9 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	}
 	if input.ReviewHarnessPolicy != nil {
 		updates["review_harness_policy"] = *input.ReviewHarnessPolicy
+	}
+	if input.SmartRouting != nil {
+		updates["smart_routing"] = *input.SmartRouting
 	}
 	if err := r.db.WithContext(ctx).Model(p).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update project: %w", err)

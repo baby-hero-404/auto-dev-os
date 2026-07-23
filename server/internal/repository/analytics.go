@@ -18,15 +18,17 @@ func NewAnalyticsRepo(db *gorm.DB) *AnalyticsRepo {
 
 func (r *AnalyticsRepo) RecordLLMUsage(ctx context.Context, usage llm.UsageRecord) error {
 	record := models.TokenUsage{
-		Provider:     usage.Provider,
-		Model:        usage.Model,
-		LevelGroup:   usage.LevelGroup,
-		PromptTokens: usage.PromptTokens,
-		OutputTokens: usage.OutputTokens,
-		CostUSD:      usage.CostUSD,
-		LatencyMS:    usage.LatencyMS,
-		Status:       usage.Status,
-		Error:        usage.Error,
+		Provider:         usage.Provider,
+		Model:            usage.Model,
+		LevelGroup:       usage.LevelGroup,
+		PromptTokens:     usage.PromptTokens,
+		OutputTokens:     usage.OutputTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
+		CacheWriteTokens: usage.CacheWriteTokens,
+		CostUSD:          usage.CostUSD,
+		LatencyMS:        usage.LatencyMS,
+		Status:           usage.Status,
+		Error:            usage.Error,
 	}
 	if usage.OrgID != "" {
 		record.OrgID = &usage.OrgID

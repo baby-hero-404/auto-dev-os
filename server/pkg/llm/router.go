@@ -16,20 +16,22 @@ import (
 var ErrCircuitOpen = errors.New("llm gateway circuit breaker open")
 
 type UsageRecord struct {
-	ProjectID    string
-	AgentID      string
-	TaskID       string
-	OrgID        string
-	CredentialID string
-	Provider     string
-	Model        string
-	LevelGroup   string
-	PromptTokens int
-	OutputTokens int
-	CostUSD      float64
-	LatencyMS    int64
-	Status       string
-	Error        string
+	ProjectID        string
+	AgentID          string
+	TaskID           string
+	OrgID            string
+	CredentialID     string
+	Provider         string
+	Model            string
+	LevelGroup       string
+	PromptTokens     int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	CostUSD          float64
+	LatencyMS        int64
+	Status           string
+	Error            string
 }
 
 type UsageRecorder interface {
@@ -323,6 +325,8 @@ func (g *Gateway) record(ctx context.Context, opts RouteOptions, meta ProviderMe
 	if resp != nil {
 		usage.PromptTokens = resp.PromptTokens
 		usage.OutputTokens = resp.OutputTokens
+		usage.CacheReadTokens = resp.CacheReadTokens
+		usage.CacheWriteTokens = resp.CacheWriteTokens
 		usage.CostUSD = estimateCost(resp.PromptTokens, resp.OutputTokens, meta)
 	}
 	_ = g.recorder.RecordLLMUsage(ctx, usage)

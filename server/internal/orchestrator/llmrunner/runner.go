@@ -217,7 +217,7 @@ func (r Runner) Run(ctx context.Context, task *models.Task, agent *models.Agent,
 		ProjectID:         task.ProjectID,
 		AgentID:           agent.ID,
 		TaskID:            task.ID,
-		RouteName:         r.routeName(ctx, task, agent),
+		RouteName:         r.routeName(ctx, task, agent, stepID),
 		ExcludeModelID:    llm.ExcludeModelIDFromContext(ctx),
 		ExcludeProviderID: llm.ExcludeProviderIDFromContext(ctx),
 	})
@@ -543,8 +543,9 @@ func (r Runner) initialMessages(ctx context.Context, task *models.Task, agent *m
 	return []llm.Message{{Role: "user", Content: task.Title + "\n\n" + task.Description}}, nil
 }
 
-func (r Runner) routeName(ctx context.Context, task *models.Task, agent *models.Agent) string {
+func (r Runner) routeName(ctx context.Context, task *models.Task, agent *models.Agent, stepID string) string {
 	routeName := agent.ModelLevelGroup
+	smartRouting := true
 	if r.Projects != nil {
 		if p, err := r.Projects.GetByID(ctx, task.ProjectID); err == nil {
 			if agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
@@ -552,9 +553,10 @@ func (r Runner) routeName(ctx context.Context, task *models.Task, agent *models.
 			} else if (routeName == "" || routeName == "default") && p.DefaultModelLevel != "" {
 				routeName = p.DefaultModelLevel
 			}
+			smartRouting = p.SmartRouting
 		}
 	}
-	return routeName
+	return ResolveStepModelLevel(stepID, routeName, task.Complexity, prompts.IsRetry(ctx), smartRouting)
 }
 
 func (r Runner) save(ctx context.Context, jobID, taskID, stepID, artType string, payload any) {

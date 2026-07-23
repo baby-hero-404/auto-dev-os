@@ -172,6 +172,7 @@ const AnalyzeMaxIterations = 12
 // intentional behavior the migration needs to preserve.
 func (s *AnalyzeStep) buildAnalyzeRouteOptions(ctx context.Context) llm.RouteOptions {
 	routeName := s.rt.Agent.ModelLevelGroup
+	smartRouting := true
 	if s.projects != nil {
 		if p, err := s.projects.GetByID(ctx, s.rt.Task.ProjectID); err == nil {
 			if s.rt.Agent.Role == models.AgentRolePlanner && p.DefaultModelLevel != "" {
@@ -179,8 +180,10 @@ func (s *AnalyzeStep) buildAnalyzeRouteOptions(ctx context.Context) llm.RouteOpt
 			} else if (routeName == "" || routeName == "default") && p.DefaultModelLevel != "" {
 				routeName = p.DefaultModelLevel
 			}
+			smartRouting = p.SmartRouting
 		}
 	}
+	routeName = llmrunner.ResolveStepModelLevel(workflow.StepAnalyze, routeName, s.rt.Task.Complexity, prompts.IsRetry(ctx), smartRouting)
 	return llm.RouteOptions{
 		Complexity: s.rt.Task.Complexity,
 		OrgID:      s.rt.Agent.OrgID,

@@ -15,16 +15,23 @@ import {
   formValuesEqual,
   type CLIEngineConfigFormValue,
 } from "./cli-engine-config-form";
+import { Switch } from "@/components/ui/switch";
+import { GovernanceConfigEditor } from "./GovernanceConfigEditor";
+import { LearnedSkillsPanel } from "./LearnedSkillsPanel";
 import { toast } from "sonner";
 
 interface ProjectProfileProps {
   project: Project | undefined;
+  token?: string;
   onUpdateProject: (input: {
     name?: string;
     description?: string;
     default_model_level?: string;
     default_autonomy?: string;
     auto_review_policy?: string;
+    review_harness_policy?: string;
+    smart_routing?: boolean;
+    pipeline_config?: unknown;
     max_retries?: number;
     max_review_fix_cycles?: number;
     default_branch?: string;
@@ -33,7 +40,7 @@ interface ProjectProfileProps {
   }) => Promise<void>;
 }
 
-export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps) {
+export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfileProps) {
   const [name, setName] = useState(project?.name ?? "");
   const [description, setDescription] = useState(project?.description ?? "");
   
@@ -41,6 +48,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
   const [defaultAutonomy, setDefaultAutonomy] = useState(project?.default_autonomy ?? "supervised");
   const [autoReviewPolicy, setAutoReviewPolicy] = useState(project?.auto_review_policy ?? "complexity_based");
   const [reviewHarnessPolicy, setReviewHarnessPolicy] = useState(project?.review_harness_policy ?? "different_model");
+  const [smartRouting, setSmartRouting] = useState<boolean>(project?.smart_routing ?? true);
+  const [pipelineConfig, setPipelineConfig] = useState<unknown>(project?.pipeline_config ?? null);
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
   const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
@@ -61,6 +70,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setDefaultAutonomy(project.default_autonomy ?? "supervised");
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
       setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
+      setSmartRouting(project.smart_routing ?? true);
+      setPipelineConfig(project.pipeline_config ?? null);
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -77,6 +88,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
     (project?.default_autonomy ?? "supervised") !== defaultAutonomy ||
     (project?.auto_review_policy ?? "complexity_based") !== autoReviewPolicy ||
     (project?.review_harness_policy ?? "different_model") !== reviewHarnessPolicy ||
+    (project?.smart_routing ?? true) !== smartRouting ||
+    JSON.stringify(project?.pipeline_config ?? null) !== JSON.stringify(pipelineConfig) ||
     (project?.max_retries ?? 3) !== maxRetries ||
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
     (project?.default_branch ?? "main") !== defaultBranch ||
@@ -91,6 +104,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
       setDefaultAutonomy(project.default_autonomy ?? "supervised");
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
       setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
+      setSmartRouting(project.smart_routing ?? true);
+      setPipelineConfig(project.pipeline_config ?? null);
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -117,6 +132,8 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
         default_autonomy: defaultAutonomy,
         auto_review_policy: autoReviewPolicy,
         review_harness_policy: reviewHarnessPolicy,
+        smart_routing: smartRouting,
+        pipeline_config: pipelineConfig,
         max_retries: maxRetries,
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
@@ -253,6 +270,23 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
                 disabled={isUpdating}
               />
             </Field>
+
+            <div className="col-span-1 md:col-span-2 pt-3 border-t border-stroke/10 flex items-center justify-between">
+              <div>
+                <label htmlFor="smart-routing-toggle" className="text-sm font-medium text-foreground block cursor-pointer">
+                  Smart LLM Routing
+                </label>
+                <p className="text-xs text-content-muted">
+                  Automatically route tasks to optimal model based on complexity and retry rules
+                </p>
+              </div>
+              <Switch
+                id="smart-routing-toggle"
+                checked={smartRouting}
+                onChange={setSmartRouting}
+                disabled={isUpdating}
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -279,6 +313,15 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
             )}
           </CardContent>
         </Card>
+
+        {/* Governance Config Editor */}
+        <GovernanceConfigEditor
+          pipelineConfig={pipelineConfig}
+          token={token ?? ""}
+          onChange={setPipelineConfig}
+          serverError={updateError}
+          disabled={isUpdating}
+        />
 
         {updateError && (
           <span className="text-xs text-danger font-medium leading-normal block">{updateError}</span>
@@ -313,6 +356,9 @@ export function ProjectProfile({ project, onUpdateProject }: ProjectProfileProps
           )}
         </div>
       </form>
+
+      {/* Learned Skills Management Panel */}
+      <LearnedSkillsPanel projectID={project?.id ?? ""} token={token ?? ""} />
     </div>
   );
 }

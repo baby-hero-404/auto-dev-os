@@ -13,3 +13,7 @@
 - [x] 1.7 UI: project setting select + task detail hiển thị coded_by/reviewed_by — added Review Harness Policy select field to `project-profile.tsx` and `coded_by`/`reviewed_by` metadata badges in `TaskSidebar.tsx`.
 - [ ] 1.8 Integration: CLI task với policy different_provider chạy đủ vòng review-fail-fix — **deferred**; covered instead by unit tests on `CrossReviewStep` (pass/fail/cycle-limit) and the DAG-shape test, not a full engine-driven end-to-end run
 - [x] 1.9 Update specs.md status
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

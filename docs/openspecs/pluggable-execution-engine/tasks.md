@@ -46,3 +46,7 @@
 - [x] 6.1 Cập nhật `ARCHITECTURE.md` (engine layer, dependency map, models, migration #13)
 - [x] 6.2 Sandbox image README: ghi chú cách cài CLI vào image (`docker/README.md`)
 - [x] 6.3 Update status icons trong `specs.md` + roadmap (`docs/openspecs/ROADMAP-cli-execution-engine.md`)
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

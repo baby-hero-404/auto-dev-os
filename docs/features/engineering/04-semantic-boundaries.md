@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 04. Semantic Boundaries & Filesystem RBAC
 
 **Status:** 🟢 Implemented (audited 2026-07-12: `ExecutionBoundary`/`ExpandedBoundary` in `pkg/models/task.go`, capability validation in `patch/policy_engine.go`, JIT expansion + audit trail in `steps/boundary_tool_executor.go` — matches or exceeds this doc's design)

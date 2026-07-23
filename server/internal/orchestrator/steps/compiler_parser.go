@@ -37,7 +37,7 @@ func updateAffectedFilesWithErrors(ctx context.Context, taskID string, tasks Tas
 	if len(parsedFiles) == 0 {
 		return
 	}
-	_ = updateTaskAnalysis(ctx, taskID, tasks, rtTask, func(analysis *models.TaskAnalysis) bool {
+	_ = UpdateTaskAnalysis(ctx, taskID, tasks, rtTask, func(analysis *models.TaskAnalysis) bool {
 		changed := false
 		for _, pf := range parsedFiles {
 			found := false

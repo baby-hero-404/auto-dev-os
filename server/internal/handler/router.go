@@ -106,6 +106,7 @@ func NewRouter(d Deps) http.Handler {
 	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
 
 	providerModelH := NewProviderModelHandler(d.ProviderModelSvc)
+	govH := NewGovernanceHandler()
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -256,6 +257,8 @@ func NewRouter(d Deps) http.Handler {
 
 			r.Get("/attestations/keys", attestationH.Keys)
 			r.Get("/attestations/{commit}", attestationH.GetByCommit)
+
+			r.Get("/governance/presets", govH.ListPresets)
 
 			r.Get("/rules/{ruleID}", ruleH.GetByID)
 			r.Patch("/rules/{ruleID}", ruleH.Update)

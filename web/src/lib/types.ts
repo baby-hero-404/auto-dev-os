@@ -40,6 +40,8 @@ export type Project = {
   execution_engine?: ExecutionEngine;
   cli_engine_config?: CLIEngineConfig;
   review_harness_policy?: string;
+  smart_routing?: boolean;
+  pipeline_config?: unknown;
   repositories_count?: number;
   agents_count?: number;
   tasks_done_count?: number;
@@ -47,6 +49,44 @@ export type Project = {
   created_at: string;
   updated_at: string;
 };
+
+export interface Attestation {
+  id: string;
+  task_id: string;
+  job_id: string;
+  commit_hash: string;
+  key_id: string;
+  coded_by: { engine?: string; provider: string; model: string } | null;
+  reviewed_by: { provider: string; model: string } | null;
+  prompt_hash: string;
+  policy_snapshot: { autonomy?: string; review_harness?: string; fix_cycles_used?: number } | null;
+  created_at: string;
+}
+
+export interface AttestationVerifyResult {
+  envelope: unknown;
+  verified: boolean;
+  key_id: string;
+}
+
+export interface GovernancePreset {
+  name: string;
+  config: unknown;
+}
+
+export interface LearnedSkill {
+  id: string;
+  project_id: string;
+  title: string;
+  trigger_keywords: string[];
+  content: string;
+  status: "draft" | "active" | "disabled";
+  source_task_id: string | null;
+  usage_count: number;
+  success_count: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export type SpecViolation = {
   requirement: string;

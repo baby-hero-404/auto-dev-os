@@ -95,3 +95,7 @@
 ## P3 — Low
 
 (none)
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

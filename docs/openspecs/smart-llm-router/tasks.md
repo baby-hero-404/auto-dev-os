@@ -11,3 +11,7 @@
 - [x] 1.7 `GET /projects/{id}/usage` aggregate + tests (REQ-005) — pre-existing (`handler/analytics.go` + `repository/analytics.go`), predates this session.
 - [x] 1.8 UI usage card (pattern stat cards hiện có) — pre-existing (`web/src/app/analytics/*`), predates this session. Deferred: a `smart_routing` on/off *toggle* in the project-settings UI (`project-profile.tsx`) was not added — the codebase has no boolean-checkbox primitive (only `<Select>` dropdowns are used for project settings), and adding one is out of scope for this pass; the field defaults to `true` and can be set today via the update-project API directly.
 - [x] 1.9 Update specs.md status
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

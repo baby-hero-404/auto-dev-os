@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,5 +163,10 @@ func sanitizeToken(value, token string) string {
 	if token == "" {
 		return value
 	}
-	return strings.ReplaceAll(value, token, "[redacted]")
+	value = strings.ReplaceAll(value, token, "[redacted]")
+	// Also redact the base64 basic-auth form passed to git via
+	// http.extraHeader ("x-access-token:<token>") — it decodes trivially
+	// back to the raw token if it ever surfaces in output or logs.
+	b64 := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	return strings.ReplaceAll(value, b64, "[redacted]")
 }

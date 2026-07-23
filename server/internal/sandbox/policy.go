@@ -19,17 +19,18 @@ func validateCommand(command []string) error {
 	return nil
 }
 
-func validateExecutionPolicy(req CommandRequest) error {
-	networkMode := req.NetworkMode
-	if networkMode == NetworkModeDefault {
-		networkMode = NetworkModeNone
-	}
-	switch networkMode {
-	case NetworkModeNone, NetworkModeBridge:
+// validateExecutionPolicy enforces the secrets/network-egress exclusion.
+// resolvedNetworkMode must be the mode the runtime will actually apply to
+// the container (after resolving NetworkModeDefault against runtime config),
+// not the raw requested mode — the two previously diverged, letting secrets
+// be injected into containers that ended up with network access.
+func validateExecutionPolicy(req CommandRequest, resolvedNetworkMode string) error {
+	switch req.NetworkMode {
+	case NetworkModeDefault, NetworkModeNone, NetworkModeBridge:
 	default:
-		return fmt.Errorf("unsupported sandbox network mode %q", networkMode)
+		return fmt.Errorf("unsupported sandbox network mode %q", req.NetworkMode)
 	}
-	if networkMode != NetworkModeNone && len(req.SecretEnv) > 0 {
+	if resolvedNetworkMode != NetworkModeNone && len(req.SecretEnv) > 0 {
 		return fmt.Errorf("sandbox policy blocks injecting secrets when network egress is enabled")
 	}
 	return nil

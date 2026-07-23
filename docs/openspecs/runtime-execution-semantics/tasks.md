@@ -108,3 +108,7 @@ After all phases are complete, re-run the same task type (4-subtask Go backend) 
 | Empty checkpoints passed | 4 | 0 |
 | Delivery completion rate | 25% (1/4 files) | ≥ 75% |
 | Total token consumption | 2.1M | ≤ 1.2M |
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

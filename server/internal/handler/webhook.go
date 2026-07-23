@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -19,15 +24,38 @@ func NewWebhookHandler(taskSvc TaskService, orch *orchestrator.Orchestrator) *We
 	return &WebhookHandler{taskSvc: taskSvc, orch: orch}
 }
 
+// verifyGitHubSignature checks the X-Hub-Signature-256 header (GitHub's
+// HMAC-SHA256 of the raw request body, keyed with the shared webhook
+// secret) in constant time. GitHub cannot send custom headers, so a
+// signature over the body is the only authentication mechanism it supports.
+func verifyGitHubSignature(secret string, body []byte, signatureHeader string) bool {
+	sig := strings.TrimPrefix(signatureHeader, "sha256=")
+	if sig == signatureHeader || sig == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(sig))
+}
+
 func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
-	if secret := os.Getenv("WEBHOOK_SECRET"); secret != "" && r.Header.Get("X-AutoCodeOS-Webhook-Token") != secret {
-		writeError(w, http.StatusUnauthorized, "invalid webhook token")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read webhook body")
 		return
+	}
+
+	if secret := os.Getenv("WEBHOOK_SECRET"); secret != "" {
+		if !verifyGitHubSignature(secret, body, r.Header.Get("X-Hub-Signature-256")) {
+			writeError(w, http.StatusUnauthorized, "invalid webhook signature")
+			return
+		}
 	}
 
 	event := r.Header.Get("X-GitHub-Event")
 	var payload map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid webhook payload")
 		return
 	}

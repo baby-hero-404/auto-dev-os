@@ -62,12 +62,13 @@
 | [`reusable-skills-system/`](./reusable-skills-system/proposal.md) | P4.1 + P4.4 (gộp — cùng learning pipeline) | ✅ Done |
 | [`declarative-governance-schemas/`](./declarative-governance-schemas/proposal.md) | P4.2 | ✅ Done (scope-reduced — see tasks.md) |
 | [`attestation-audit-trail/`](./attestation-audit-trail/proposal.md) | P4.3 | ✅ Done (scope-reduced; see specs.md/tasks.md for REQ-003/REQ-005 deferral) |
-| [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | 📝 Authored |
+| [`feature-docs-sync/`](./feature-docs-sync/proposal.md) | Cross-cutting (làm sớm, song song Wave 0) — chống outdate cho `docs/features/` | ✅ Done |
+| [`roadmap-ui-surfacing/`](./roadmap-ui-surfacing/proposal.md) | Post-Wave 4 — surface 4 UI items đã deferred (attestation audit panel, governance editor, learned skills, smart-routing toggle) | ✅ Done |
 
 Ghi chú phối hợp giữa các set:
 - **Pause/resume helper** dùng chung bởi `definition-of-ready-gate`, `cli-spec-first-flow` (spec approval), `review-verdict-split` (escalation) — set nào implement trước thì tạo helper, các set sau tái dùng.
 - **Prerequisites**: `smart-llm-router` ← `llm-prompt-caching`; `cross-harness-review` ← `pluggable-execution-engine` + `review-verdict-split`; `attestation-audit-trail` ← `cross-harness-review`; `cli-spec-first-flow` ← `pluggable-execution-engine`; `declarative-governance-schemas` ← Wave 1-3.
-- **Docs sync**: mỗi set khi ship phải thực hiện mapping trong `feature-docs-sync/design.md`.
+- **Docs sync**: mỗi set khi ship phải thực hiện mapping trong `feature-docs-sync/design.md`. Các spec set tương lai BẮT BUỘC có mục "Docs sync" trong `tasks.md` để khai báo các `docs/features/` bị tác động.
 
 ## Key risks (Wave 1)
 

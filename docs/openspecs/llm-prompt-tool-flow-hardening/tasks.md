@@ -121,3 +121,7 @@
 - [x] Outer retry backoff sleeps in `llmrunner/runner.go:125,228` use a ctx-aware wait (`select` on `ctx.Done()` / timer) instead of plain `time.Sleep`.
 - [x] `AIGateway.ChatWithOptions` records one usage/cost row per attempted provider/credential (not only the last), matching the granularity already present in the unused `pkg/llm.Gateway` (`router.go:174-206`).
 - [x] `fmt.Printf` calls in `gemini.go:169` and `router.go:191` are replaced with structured `slog` calls at the appropriate level.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

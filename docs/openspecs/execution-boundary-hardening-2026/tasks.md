@@ -52,3 +52,7 @@
      - zero `execution boundary violation` errors in any tool result across `logs/llm/call-*/prompt.md`;
      - if any step still fails with zero edits, the log shows at most one re-attempt (Phase 4) instead of the original 3× retry burn.
   5. Attach the resulting task ID + a short pass/fail note per criterion to this spec (update REQ statuses in `specs.md`).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

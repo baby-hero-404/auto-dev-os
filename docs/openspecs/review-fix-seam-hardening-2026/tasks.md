@@ -157,3 +157,7 @@
 > Links to: REQ-003
 
 The review raised whether hardcoding `"main"` in `fix.go`'s two `paths.CanonicalizeRepoRelative(f.File, repoName, "main")` calls (rather than deriving it from `repo.DefaultBranch`/`repo.Paths.Main` the way `path_normalizer.go` does) could break repos whose default branch isn't `main`. Verified against `paths.OSWorkspacePaths.RepoMain` (`pkg/paths/workspace.go`): the fix step's tool workspace is always resolved via `RepoMain`, whose on-disk directory is literally named `"main"` regardless of the repo's git default branch — `path_normalizer.go`'s branch-derivation logic handles a different, more variable input (arbitrary LLM/external diff text), not this call site's own physical layout. Left as-is with a clarifying comment added in `fix.go` referencing `resolveAgenticWorkspace`.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

@@ -50,3 +50,7 @@
 - [x] Page renders 9 top-level components (down from 12) with data redistributed, no information loss.
 - [x] Lint/typecheck clean (removed 2 pre-existing unused imports in touched files); no new design tokens.
 - [x] `specs.md` status icons updated (`❌`→`✅`).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

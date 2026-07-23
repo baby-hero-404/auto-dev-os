@@ -279,6 +279,7 @@ function ProjectDetailContent() {
               {activeView === "settings" && (
                 <ProjectProfile
                   project={project}
+                  token={token}
                   onUpdateProject={handleUpdateProject}
                 />
               )}

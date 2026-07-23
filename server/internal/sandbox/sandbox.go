@@ -54,7 +54,8 @@ func (r *StubRuntime) Run(ctx context.Context, req CommandRequest) (*CommandResu
 	if err := validateCommand(req.Command); err != nil {
 		return nil, err
 	}
-	if err := validateExecutionPolicy(req); err != nil {
+	// The stub runs nothing, so treat every request as network-isolated.
+	if err := validateExecutionPolicy(req, NetworkModeNone); err != nil {
 		return nil, err
 	}
 	select {

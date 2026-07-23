@@ -65,3 +65,7 @@
 - [x] `orchestrator/checkpoint/` resume loads from `ExecutionSnapshot`; restore is byte-identical, verified by `PromptHash`.
 - [x] Remove the Git salvage-checkpoint path from `steps/patch_retry_loop.go` (flag-on builds only).
 - [x] Round-trip test: snapshot → restore → continue with remaining budget.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

@@ -1,3 +1,10 @@
+---
+sources:
+  - "server/**"
+  - "web/src/components/projects/project-profile.tsx"
+verified: 2026-07-23
+---
+
 # 01. Unified AI Gateway
 
 **Status:** 🟡 In Progress (baseline implemented; hardening planned)  
@@ -42,12 +49,14 @@ Thay vì buộc Agent chọn một model cụ thể (vd: `gpt-4o`), Admin cấu 
 
 Khi thêm Provider mới, hệ thống **tự động tạo danh sách model mặc định** chia vào 3 nhóm. Admin có thể thêm model, bật/tắt model, chỉnh priority, xoá model trên UI; backend API cũng hỗ trợ cập nhật đầy đủ model metadata.
 
-## C. Model Routing
+## C. Model Routing & Smart LLM Routing
 
 Khi Agent được cấu hình với một level (ví dụ: "Balanced"):
 1.  Gateway tra cứu danh sách model trong nhóm Balanced.
 2.  Kết hợp với các API key đang có sẵn và không bị rate-limit cho model đó.
 3.  Chọn model có ưu tiên cao nhất (theo `priority` config) và thực hiện request.
+
+**Smart LLM Router Toggle (Implemented):** Hệ thống tích hợp tính năng tự động tối ưu hóa việc phân luồng model dựa trên độ phức tạp của từng tác vụ. Tính năng này được cấu hình thông qua **Smart LLM Routing Toggle** ở Project Settings (UI). Nếu kích hoạt, các task có độ phức tạp thấp sẽ tự động rơi vào nhóm Fast, độ phức tạp trung bình rơi vào Balanced, và phức tạp cao sẽ rơi vào Powerful (giúp tiết kiệm token budget mà không cần tự chuyển level bằng tay).
 
 **Dynamic Fallback Chain (Baseline):** Nếu model ưu tiên cao nhất bị lỗi hoặc hết quota, Gateway tự động chuyển sang model tiếp theo trong cùng level group (dựa trên cấu hình model priority và credential retry) → đảm bảo zero downtime.
 *(Lưu ý: Advanced scoring, format translation và token saver hiện mới ở mức Planned).*

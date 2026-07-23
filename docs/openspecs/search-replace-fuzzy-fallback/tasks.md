@@ -10,3 +10,7 @@
 - [x] 1.8 `notFoundWithHint` error + tier telemetry log (REQ-006, REQ-M01) — telemetry: `log.Printf("search_replace tier=%d (%s) file=%s", ...)` on successful fuzzy match. Hint: pre-existing `nearestSimilarRange` (token-overlap closest-match) reused unchanged for the final all-tiers-failed error.
 - [x] 1.9 Chạy corpus fixtures — ghi tỷ lệ patch được cứu vào design.md — skipped, see 1.1 (no corpus available in this environment).
 - [x] 1.10 Update specs.md status — done.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

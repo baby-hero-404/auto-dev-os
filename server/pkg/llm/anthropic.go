@@ -54,12 +54,31 @@ func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opt
 	var systemPrompt string
 	var userMessages []map[string]any
 
-	for _, msg := range messages {
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
 		if msg.Role == "system" {
 			systemPrompt = msg.Content
-		} else {
-			userMessages = append(userMessages, anthropicMessage(msg))
+			continue
 		}
+
+		if msg.Role == "tool" {
+			var toolContents []map[string]any
+			for j := i; j < len(messages) && messages[j].Role == "tool"; j++ {
+				toolContents = append(toolContents, map[string]any{
+					"type":        "tool_result",
+					"tool_use_id": messages[j].ToolCallID,
+					"content":     messages[j].Content,
+				})
+				i = j
+			}
+			userMessages = append(userMessages, map[string]any{
+				"role":    "user",
+				"content": toolContents,
+			})
+			continue
+		}
+
+		userMessages = append(userMessages, anthropicMessage(msg))
 	}
 
 	payload := map[string]interface{}{
@@ -101,6 +120,7 @@ func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opt
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", a.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
@@ -163,16 +183,7 @@ func (a *Anthropic) ChatWithOptions(ctx context.Context, messages []Message, opt
 
 func anthropicMessage(msg Message) map[string]any {
 	role := msg.Role
-	if role == "tool" {
-		return map[string]any{
-			"role": "user",
-			"content": []map[string]any{{
-				"type":        "tool_result",
-				"tool_use_id": msg.ToolCallID,
-				"content":     msg.Content,
-			}},
-		}
-	}
+	// "tool" role is now handled directly in the loop to group consecutive tool results.
 	if len(msg.ToolCalls) > 0 {
 		var content []map[string]any
 		if msg.Content != "" {

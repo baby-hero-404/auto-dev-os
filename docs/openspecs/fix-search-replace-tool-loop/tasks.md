@@ -92,3 +92,7 @@
       search_replace → succeeds without loop
 - [x] Test simulates: LLM ignores guidance → calls search_replace with search != "" on missing
       file → circuit-breaker fires → LLM self-corrects
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

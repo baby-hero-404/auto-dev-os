@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 08. Workflow Engine
 
 **Status:** 🟡 In Progress (implemented; multi-agent expansion planned)  

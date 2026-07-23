@@ -16,3 +16,7 @@
 - [x] Refactor `SupportingAccordion` to act strictly as a historical reference/fallback (Spec, Logs, Checkpoints), without taking over primary elements like the Description.
 - [x] Conditionally hide the Specification and Execution Logs accordions when they are actively being displayed as Hero Cards to prevent UI duplication and strictly enforce the status-driven approach.
 - [x] Ensure all states are properly handled and the UI feels cohesive and uncluttered.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

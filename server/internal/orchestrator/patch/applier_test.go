@@ -325,8 +325,24 @@ func TestRunner_ApplyPatch_AllowsNewFileUnderAffectedDir(t *testing.T) {
 			applyCalled = true
 			return map[string]any{"exit_code": 0}, nil
 		},
-		UpdateTaskAnalysis: func(ctx context.Context, taskID string, analysis json.RawMessage) error {
-			persistedAnalysis = append([]byte(nil), analysis...)
+		UpdateTaskAnalysis: func(ctx context.Context, task *models.Task, mutate func(*models.TaskAnalysis) bool) error {
+			// Emulate the safe read-modify-write contract: apply mutate to a
+			// fresh copy of the stored analysis and persist the result.
+			var analysis models.TaskAnalysis
+			if len(task.Analysis) > 0 {
+				if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+					return err
+				}
+			}
+			if !mutate(&analysis) {
+				return nil
+			}
+			raw, err := json.Marshal(analysis)
+			if err != nil {
+				return err
+			}
+			task.Analysis = raw
+			persistedAnalysis = append([]byte(nil), raw...)
 			return nil
 		},
 	}

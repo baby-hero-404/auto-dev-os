@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 01. Context Management Engine (Repository Map)
 
 **Status:** 🟢 Implemented (audited 2026-07-12: `server/internal/context/{source,parser,symbol,repomap,provider}/` all present, matching every module this doc describes)

@@ -58,3 +58,7 @@ Phase 0 (cleanup) → Phase 1 (agent-platform) → Phase 2 (memory)
 ```
 
 **Tổng**: 25 tasks (Phase 0: 3 · Phase 1-4: 20 reports · Phase 5: 2) · **Estimated**: Mỗi report ~15-20 phút phân tích
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

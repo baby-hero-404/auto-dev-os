@@ -5,3 +5,7 @@
 - [x] 1.3 Wiring already existed pre-spec: `CalculatePageRank(activeFiles, taskDescription)` takes task text directly (not a `WithMentions` builder option as design.md sketched); `internal/prompts/builder.go:1019` passes `task.Title+"\n"+task.Description` via `provider.TaskDescriptionKey` context value, consumed in `provider.go:319-320`. Empty description is a no-op, satisfying REQ-M01 without a signature change.
 - [x] 1.4 Rank comparison tests (ident-mention pre-existing; new path-mention test asserting ×50 > ×10 and > baseline) + no-mention snapshot test (pre-existing, still passing) (REQ-002/003/004)
 - [x] 1.5 Update specs.md status
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

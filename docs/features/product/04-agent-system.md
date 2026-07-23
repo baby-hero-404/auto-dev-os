@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 04. Agent System (Role-Based Capability Agents)
 
 **Status:** 🟡 In Progress (baseline implemented; hardening planned)  

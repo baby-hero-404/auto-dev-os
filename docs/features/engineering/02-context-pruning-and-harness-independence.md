@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 02. Context Pruning & Harness Independence
 
 **Status:** 🟢 Implemented (audited 2026-07-12: PageRank buffing in `repomap/ranking.go`, binary-search pruning in `repomap/pruning.go`, and Harness Independence end-to-end in `steps/review.go` + `pkg/llm/router.go` — including the graceful-fallback edge case)

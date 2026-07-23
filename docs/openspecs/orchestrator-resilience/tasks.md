@@ -47,3 +47,7 @@
 - `go build ./...`, `go vet ./...`, and `go test ./...` all pass after these changes.
 - New test: `TestExtractSpecsSectionForSubtask_ClassificationMatchesParseTasksMD` in `server/internal/prompts/helpers_test.go` reproduces the pre-fix drift and confirms the fix.
 - No test coverage exists for `server/internal/orchestrator/repoutil` (pre-existing gap, not introduced by this change) — the rescue-branch and retry logic were verified by build/vet/read-through only, not by an integration test against a real sandbox.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

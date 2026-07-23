@@ -2,7 +2,6 @@ package patch
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,44 +11,29 @@ import (
 )
 
 func (r *Runner) appendNewAffectedFiles(ctx context.Context, task *models.Task, files map[string]bool) error {
-	if len(files) == 0 {
+	if len(files) == 0 || r.UpdateTaskAnalysis == nil {
 		return nil
 	}
 
-	var analysis models.TaskAnalysis
-	if len(task.Analysis) > 0 {
-		if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
-			return err
+	// Merge into the freshest analysis via the safe read-modify-write
+	// callback rather than the possibly-stale in-memory task.Analysis, so
+	// concurrent step updates (e.g. the other agent's affected-files write)
+	// are never clobbered.
+	return r.UpdateTaskAnalysis(ctx, task, func(analysis *models.TaskAnalysis) bool {
+		changed := false
+		existing := make(map[string]bool, len(analysis.AffectedFiles))
+		for _, file := range analysis.AffectedFiles {
+			existing[file.File] = true
 		}
-	}
-
-	changed := false
-	existing := make(map[string]bool, len(analysis.AffectedFiles))
-	for _, file := range analysis.AffectedFiles {
-		existing[file.File] = true
-	}
-	for file := range files {
-		if !existing[file] {
-			analysis.AffectedFiles = append(analysis.AffectedFiles, models.AffectedFile{File: file})
-			existing[file] = true
-			changed = true
+		for file := range files {
+			if !existing[file] {
+				analysis.AffectedFiles = append(analysis.AffectedFiles, models.AffectedFile{File: file})
+				existing[file] = true
+				changed = true
+			}
 		}
-	}
-	if !changed {
-		return nil
-	}
-
-	raw, err := json.Marshal(analysis)
-	if err != nil {
-		return err
-	}
-	task.Analysis = raw
-	if r.UpdateTaskAnalysis != nil {
-		if err := r.UpdateTaskAnalysis(ctx, task.ID, raw); err != nil {
-			return err
-		}
-	}
-	return nil
+		return changed
+	})
 }
 
 func IsSafeNewFilePath(path string) bool {

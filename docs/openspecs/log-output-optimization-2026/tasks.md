@@ -20,3 +20,7 @@
 - [x] **3.4** Integrate a virtualized list (`react-virtuoso` preferred for variable row heights) and lift the 200-line render cap.
 - [x] **3.5** Verify styling with ANSI/semantic colors against the dark mode aesthetic.
 - [x] **3.6** E2E check: long-running task streams live logs, groups collapse correctly, reconnect after server restart shows no duplicates or gaps.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

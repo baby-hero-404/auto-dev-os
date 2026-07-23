@@ -10,3 +10,7 @@
 - [x] 1.8 Wire vào `toolloop.go` trước hard-cut + metrics log (REQ-005, REQ-006) — `outputfilter.Run` called immediately before the existing `truncateToolResult`; `slog.Info("outputfilter", ...)` logged when input >= 1KB.
 - [x] 1.9 Property test: line-subsequence invariant (REQ-007) — `TestRun_LineSubsequenceInvariant`.
 - [x] 1.10 Chạy trên fixtures, ghi savings % vào design.md; update specs.md status — see "Measured savings" in `docs/implementation/tool-output-filtering-notes.md` (no real corpus, so this is illustrative rather than measured against production logs); specs.md updated.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

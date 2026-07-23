@@ -205,3 +205,7 @@ Task 3.1 ──► Task 3.2    (Independent — can run parallel with P1)
 
 Task 4.1 ──► Task 4.2    (Independent — can run parallel with P1/P2)
 ```
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

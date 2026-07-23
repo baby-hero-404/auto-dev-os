@@ -1,3 +1,11 @@
+---
+sources:
+  - "server/**"
+  - "web/src/components/projects/project-profile.tsx"
+  - "web/src/components/projects/GovernanceConfigEditor.tsx"
+verified: 2026-07-23
+---
+
 # 06. Project System
 
 **Status:** 🟡 In Progress (AI defaults + rules/skills isolation implemented; RAG knowledge base + members planned)  
@@ -50,6 +58,8 @@ Cấu hình mặc định cho tất cả task trong project (task có thể over
 | `max_retries` | `3` | Số lần retry tối đa trước khi task chuyển `failed` |
 | `max_review_fix_cycles` | `3` | Số vòng lặp Review → Fix → Re-review tối đa. Khi vượt quá → skip fix, đẩy sang testing + cảnh báo (§08) |
 | `default_branch` | `main` | Branch mặc định để tạo PR target |
+| `smart_routing` | `true` | Smart LLM Router Toggle: Tự động điều hướng task đến LLM provider phù hợp với độ phức tạp để tối ưu chi phí |
+| `pipeline_config` | `null` | Cấu hình Governance Pipeline Editor: Tùy chỉnh rules & constraints (bypass, skip, cycles) thông qua declarative schema (UI JSON Editor) |
 
 ## D. Knowledge Base (Partially Implemented)
 

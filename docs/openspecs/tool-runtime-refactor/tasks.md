@@ -286,3 +286,7 @@
 - [x] Delete `analyzeToolDefinitions()` and `executeAnalyzeTool()` from `steps/analyze_tools.go`
 - [x] Verify no imports reference deleted functions
 - [x] All tests pass after cleanup
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

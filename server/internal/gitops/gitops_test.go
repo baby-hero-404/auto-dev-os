@@ -128,6 +128,7 @@ func TestSanitizeToken(t *testing.T) {
 		expected string
 	}{
 		{"redacts token", "error: ghp_abc123 leaked", "ghp_abc123", "error: [redacted] leaked"},
+		{"redacts base64 basic-auth form", "http.extraHeader='AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hwX2FiYzEyMw==' failed", "ghp_abc123", "http.extraHeader='AUTHORIZATION: basic [redacted]' failed"},
 		{"empty token", "error: nothing to redact", "", "error: nothing to redact"},
 		{"no match", "clean output", "ghp_xyz", "clean output"},
 	}

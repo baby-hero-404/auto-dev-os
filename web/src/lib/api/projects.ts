@@ -23,6 +23,9 @@ export function update(projectID: string, token: string, input: {
   default_model_level?: string;
   default_autonomy?: string;
   auto_review_policy?: string;
+  review_harness_policy?: string;
+  smart_routing?: boolean;
+  pipeline_config?: unknown;
   max_retries?: number;
   max_review_fix_cycles?: number;
   default_branch?: string;

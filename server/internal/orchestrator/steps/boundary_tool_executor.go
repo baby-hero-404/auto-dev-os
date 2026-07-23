@@ -55,7 +55,7 @@ func NewBoundaryCheckedToolExecutor(registry *tool.Registry, workspace string, t
 					return fmt.Sprintf("Error: execution boundary violation on %q: %s. Choose a file within your assigned module, or explain in your summary why this file must change.", path, decision.Reason), nil
 				case patch.SeverityWarning, patch.SeverityInfo:
 					if tasks != nil {
-						_ = updateTaskAnalysis(ctx, task.ID, tasks, task, func(a *models.TaskAnalysis) bool {
+						_ = UpdateTaskAnalysis(ctx, task.ID, tasks, task, func(a *models.TaskAnalysis) bool {
 							a.ExpandedBoundaries = append(a.ExpandedBoundaries, models.ExpandedBoundary{
 								File:       path,
 								Reason:     decision.Reason,

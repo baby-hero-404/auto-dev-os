@@ -45,3 +45,7 @@
 - [x] 6.1 Integration test: task engine=cli chạy đủ 4 step với fake CLI engine runner tạo files thật trong worktree tạm (`steps/cli_spec_first_integration_test.go`)
 - [x] 6.2 Cập nhật `ARCHITECTURE.md` + roadmap status
 - [x] 6.3 Update status icons trong `specs.md`
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

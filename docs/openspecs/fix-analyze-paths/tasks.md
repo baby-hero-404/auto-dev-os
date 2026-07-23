@@ -29,3 +29,7 @@
 
 **Acceptance Criteria:**
 - [x] Intercept `s.rt.Agent` in `AnalyzeStep.Execute` and override its Role to `models.AgentRolePlanner` to ensure the `# Planner Role` text is appended to the system prompt, regardless of the user-assigned task agent role.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

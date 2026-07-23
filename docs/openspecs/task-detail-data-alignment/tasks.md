@@ -17,3 +17,7 @@
 ### TaskSubtasks Adjustments
 - [ ] Verify `implementationItems` is correctly iterated.
 - [ ] Hide or show a placeholder if `implementationItems` is empty but the task is running.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

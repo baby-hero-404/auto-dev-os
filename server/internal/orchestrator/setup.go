@@ -2,13 +2,20 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/checkpoint"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+// safeUpdateTaskAnalysis routes analysis mutations from the patch/repoutil
+// layer through the same locked read-modify-write helper the step layer
+// uses, so the two can never race and overwrite each other's writes.
+func (o *Orchestrator) safeUpdateTaskAnalysis(ctx context.Context, task *models.Task, mutate func(*models.TaskAnalysis) bool) error {
+	return steps.UpdateTaskAnalysis(ctx, task.ID, o.tasks, task, mutate)
+}
 
 func (o *Orchestrator) initWkspace() {
 	if o.wkspace == nil {
@@ -119,12 +126,7 @@ func (o *Orchestrator) initRepoutil() {
 			getWorkspaceDiff,
 			getPRDiff,
 			o.log,
-			func(ctx context.Context, taskID string, analysis json.RawMessage) error {
-				_, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{
-					Analysis: analysis,
-				})
-				return err
-			},
+			o.safeUpdateTaskAnalysis,
 			o.gitConfig.DefaultAgentName,
 			o.gitConfig.DefaultAgentEmail,
 		)
@@ -132,12 +134,7 @@ func (o *Orchestrator) initRepoutil() {
 		o.repoutil.WorkspaceRoot = o.workspaceRoot
 		o.repoutil.DefaultAgentName = o.gitConfig.DefaultAgentName
 		o.repoutil.DefaultAgentEmail = o.gitConfig.DefaultAgentEmail
-		o.repoutil.UpdateTaskAnalysis = func(ctx context.Context, taskID string, analysis json.RawMessage) error {
-			_, err := o.tasks.Update(ctx, taskID, models.UpdateTaskInput{
-				Analysis: analysis,
-			})
-			return err
-		}
+		o.repoutil.UpdateTaskAnalysis = o.safeUpdateTaskAnalysis
 		if o.repositories != nil {
 			o.repoutil.ListRepositories = o.repositories.ListByProjectID
 		}

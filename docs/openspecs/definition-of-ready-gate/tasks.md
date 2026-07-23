@@ -11,3 +11,7 @@
 - [x] 1.8 UI: clarifications panel + answer form + status badge — `ready_with_warnings` badge added to `TaskTitleBlock.tsx` for bypassed DoR gate tasks.
 - [x] 1.9 Integration: task thiếu AC → pause → answer → resume → coding nhận answers trong context — covered by pre-existing `TestAnalyzeStep_*` + service tests; new bypass path covered by `TestAnalyzeStep_DefinitionOfReadyBypass_HotfixLabel`.
 - [x] 1.10 Update specs.md status + ARCHITECTURE.md — done (specs.md below); ARCHITECTURE.md skipped, no dedicated DoR section exists there to update (gate lives inline in existing analyze docs).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

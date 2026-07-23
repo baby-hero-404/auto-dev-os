@@ -32,3 +32,7 @@
 ## 5. Wrap-up
 
 - [x] 5.1 Update specs.md status — done. ARCHITECTURE.md update: no new package was introduced (MMR lives in the existing `memory_search.go`), so no structural entry was needed.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

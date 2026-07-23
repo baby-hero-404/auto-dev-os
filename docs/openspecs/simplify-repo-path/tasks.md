@@ -27,3 +27,7 @@
 **Acceptance Criteria:**
 - [x] Fix compiler errors in `pkg/paths/workspace_test.go` and other tests.
 - [x] Ensure `go test ./...` passes across the entire orchestrator and paths packages.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

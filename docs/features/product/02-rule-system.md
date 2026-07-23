@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 02. Rule System
 
 **Status:** 🟡 In Progress (baseline implemented; hardening planned)  

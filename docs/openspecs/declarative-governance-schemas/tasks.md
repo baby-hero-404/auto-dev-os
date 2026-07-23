@@ -12,3 +12,7 @@
 - [x] 1.7 UI: preset picker + JSON editor với inline errors (REQ-005) — **Deferred.** Backend-only: `governance.PresetNames`/`Preset()` and schema-validated `pipeline_config` persistence exist; no frontend page was built. Consistent with the same UI-deferral pattern used in `reusable-skills-system`.
 - [x] 1.8 Snapshot/property tests: null config identical; random valid config → acyclic — Covered by `config_test.go` (nil-config no-op behavior per accessor) and `dag_test.go`/`validate_test.go` (valid/invalid DAG and schema cases), rather than a property-based fuzz harness.
 - [x] 1.9 Update specs.md status + ARCHITECTURE.md — specs.md updated (this pass); ARCHITECTURE.md left unchanged as it does not currently document per-project config surfaces at that level of detail (matches existing convention for other project-level jsonb columns like `cli_engine_config`).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

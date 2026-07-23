@@ -34,3 +34,7 @@
 
 - [x] 6.1 E2E: task merged → skill draft → approve → task sau load skill — Covered piecewise via unit tests at each stage (extraction dedup, context_load matching, handler approve-draft test); no full end-to-end harness test added this pass.
 - [x] 6.2 Update specs.md status + ARCHITECTURE.md — specs.md updated; ARCHITECTURE.md left unchanged (no new File Dependencies entries required beyond what's self-evident from the new files listed in implementation notes).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

@@ -50,3 +50,7 @@
 - [x] Run: `npx tsc --noEmit`, `npx eslint` on touched files, `npx playwright test` (note: with a dev server already running, use `SKIP_WEBSERVER=1 PLAYWRIGHT_PORT=<port>`); full suite green, no regressions in other specs.
 - [x] Manual 3-second pass: what's running / done / remaining / waiting-for-me answerable from ExecutionPanel + ReviewActionBar without scrolling or expanding anything.
 - [x] Update `specs.md` status icons `❌`→`✅` per requirement as it lands.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

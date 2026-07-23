@@ -74,7 +74,34 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 - **Header block:** every doc opens with `**Status:**`, `**Owner docs:**`, `**Code areas:**`, and (product docs only) `**Acceptance criteria:**`/`**Blocking decisions:**`, followed by a one-paragraph **Mục tiêu**.
 - **Don't duplicate policy across files.** If two docs would describe the same mechanism (a status table, a config default, a gating rule), pick the doc that *owns* that concept and have the other cross-reference it — see "Canonical sources" above.
 - **Numbering:** never split a doc into `NNa`/`NNb` siblings — give each its own sequential number instead (e.g. Rule System and Skill System are `02` and `03`, not `02a`/`02b`). When a doc is added or removed, renumber the affected subfolder rather than leaving a gap or reusing a letter suffix.
+- **Docs Sync:** Each new or modified spec in `docs/openspecs/` MUST specify the `docs/features/` documents it impacts under a "Docs sync" section in its `tasks.md`. All `docs/features/` documents MUST contain a `sources:` frontmatter block pointing to the code they describe.
 
 ## History
 
 - This folder previously used `5.1`–`5.21` numbering tied to `docs/ROADMAP.md` §5, with sub-lettered `5.2a`/`5.2b` siblings. Both were dropped (2026-07): the ROADMAP coupling because ROADMAP's own list had already drifted out of sync independent of any doc reorg, and the letter-suffix scheme because a folder-local index doesn't need to preserve a legacy numbering's history — each subfolder now just counts up from `01`. `docs/ROADMAP.md` §5 now links here instead of maintaining its own duplicate list.
+
+## Status Legend
+
+<!-- freshness:begin -->
+| Document | Last-verified | Status |
+|----------|---------------|--------|
+| [engineering/01-context-management.md](./engineering/01-context-management.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/02-context-pruning-and-harness-independence.md](./engineering/02-context-pruning-and-harness-independence.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/03-global-path-manager.md](./engineering/03-global-path-manager.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/04-semantic-boundaries.md](./engineering/04-semantic-boundaries.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/05-execution-unit-dag.md](./engineering/05-execution-unit-dag.md) | 2026-07-12 | ✅ Fresh |
+| [hardening/01-retry-patch-context-hardening.md](./hardening/01-retry-patch-context-hardening.md) | 2026-07-12 | ✅ Fresh |
+| [product/01-unified-ai-gateway.md](./product/01-unified-ai-gateway.md) | 2026-07-23 | ✅ Fresh |
+| [product/02-rule-system.md](./product/02-rule-system.md) | 2026-07-12 | ✅ Fresh |
+| [product/03-skill-system.md](./product/03-skill-system.md) | 2026-07-23 | ✅ Fresh |
+| [product/04-agent-system.md](./product/04-agent-system.md) | 2026-07-12 | ✅ Fresh |
+| [product/05-git-integration.md](./product/05-git-integration.md) | 2026-07-12 | ✅ Fresh |
+| [product/06-project-system.md](./product/06-project-system.md) | 2026-07-23 | ✅ Fresh |
+| [product/07-task-system.md](./product/07-task-system.md) | 2026-07-12 | ✅ Fresh |
+| [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-12 | ✅ Fresh |
+| [product/09-pr-human-review.md](./product/09-pr-human-review.md) | 2026-07-23 | ✅ Fresh |
+| [product/10-dashboard-analytics.md](./product/10-dashboard-analytics.md) | 2026-07-12 | ✅ Fresh |
+| [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-12 | ✅ Fresh |
+| [product/12-repository-profile-cache.md](./product/12-repository-profile-cache.md) | 2026-07-12 | ✅ Fresh |
+| [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-12 | ✅ Fresh |
+<!-- freshness:end -->

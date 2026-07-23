@@ -26,7 +26,12 @@ type Runner struct {
 	ListRepositories         func(ctx context.Context, projectID string) ([]models.Repository, error)
 	LoadTaskWorkspace        func(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error)
 	GetRoleFromSuffix        func(suffix string) string
-	UpdateTaskAnalysis       func(ctx context.Context, taskID string, analysis json.RawMessage) error
+	// UpdateTaskAnalysis must be a concurrency-safe read-modify-write: the
+	// implementation fetches the freshest analysis (under the same lock the
+	// step layer uses), applies mutate to it, persists, and refreshes
+	// task.Analysis. Pushing raw stale bytes here previously raced with
+	// concurrent step updates and silently dropped their writes.
+	UpdateTaskAnalysis func(ctx context.Context, task *models.Task, mutate func(*models.TaskAnalysis) bool) error
 	Log                      func(ctx context.Context, taskID string, level string, message string)
 }
 
@@ -208,11 +213,10 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 			if len(expansions) > 0 {
 				analysis.ExpandedBoundaries = append(analysis.ExpandedBoundaries, expansions...)
 				if r.UpdateTaskAnalysis != nil {
-					newAnalysisBytes, marshalErr := json.Marshal(analysis)
-					if marshalErr == nil {
-						_ = r.UpdateTaskAnalysis(ctx, task.ID, newAnalysisBytes)
-						task.Analysis = newAnalysisBytes
-					}
+					_ = r.UpdateTaskAnalysis(ctx, task, func(fresh *models.TaskAnalysis) bool {
+						fresh.ExpandedBoundaries = append(fresh.ExpandedBoundaries, expansions...)
+						return true
+					})
 				}
 			}
 		}

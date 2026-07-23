@@ -7,8 +7,11 @@ import * as analytics from "./analytics";
 import * as audit from "./audit";
 import * as gateway from "./gateway";
 import * as memories from "./memories";
+import * as attestations from "./attestations";
+import * as governance from "./governance";
+import * as learnedSkills from "./learned-skills";
 
-export { auth, projects, agents, analytics, audit, gateway, memories };
+export { auth, projects, agents, analytics, audit, gateway, memories, attestations, governance, learnedSkills };
 
 export const api = {
   auth,
@@ -18,6 +21,9 @@ export const api = {
   audit,
   gateway,
   memories,
+  attestations,
+  governance,
+  learnedSkills,
 
   register: auth.register,
   login: auth.login,

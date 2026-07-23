@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 12. Repository Profile Cache (Bộ Nhớ Ngữ Cảnh Repository)
 
 **Status:** 🔵 Proposed (corrected 2026-07-12 — see audit note below; not "In Progress")  

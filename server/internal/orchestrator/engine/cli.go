@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,8 +24,8 @@ const (
 	// block in the subprocess's combined stdout/stderr output. The path
 	// requested (relative to ContainerWorkDir) is appended to the start
 	// marker so extractCapturedFiles can key CodeStepResult.Files by it.
-	captureFileMarker    = "\x00AUTOCODE_CAPTURE_START:"
-	captureFileEndMarker = "\x00AUTOCODE_CAPTURE_END\x00"
+	captureFileMarker    = "===AUTOCODE_CAPTURE_START:"
+	captureFileEndMarker = "===AUTOCODE_CAPTURE_END==="
 )
 
 // extractCapturedFiles pulls capture blocks (written by the RunCodeStep
@@ -137,6 +139,25 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	return "", nil
 }
 
+// hostPathForContainerPath maps a path inside the sandbox container back to
+// its host location, given that hostWorkspace is bind-mounted at the
+// container workspace root ("/workspace" — see sandbox.DockerRuntime and
+// pkg/paths helpers, which share this convention).
+func hostPathForContainerPath(hostWorkspace, containerPath string) (string, error) {
+	const containerRoot = "/workspace"
+	if hostWorkspace == "" {
+		return "", fmt.Errorf("host workspace is required to map container path %q", containerPath)
+	}
+	if containerPath == containerRoot {
+		return hostWorkspace, nil
+	}
+	rel, ok := strings.CutPrefix(containerPath, containerRoot+"/")
+	if !ok {
+		return "", fmt.Errorf("container path %q is outside the workspace mount %q", containerPath, containerRoot)
+	}
+	return filepath.Join(hostWorkspace, rel), nil
+}
+
 // RunCodeStep writes the instruction to .autocode/prompt.md inside the
 // worktree, spawns the configured CLI with {prompt_file}/{workdir}
 // placeholders substituted, and cleans up .autocode/ afterward so the
@@ -160,7 +181,25 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 
 	autocodeDir := req.ContainerWorkDir + "/.autocode"
 	promptFile := autocodeDir + "/prompt.md"
-	encodedPrompt := base64.StdEncoding.EncodeToString([]byte(req.Instruction))
+
+	// Write the prompt to the host side of the bind mount before spawning,
+	// instead of inlining it (base64) into the bash script: a single argv
+	// string is capped at MAX_ARG_STRLEN (128KB on Linux), so large prompts
+	// inlined into the script would make execve fail with E2BIG.
+	hostAutocodeDir, err := hostPathForContainerPath(req.HostWorkspace, autocodeDir)
+	if err != nil {
+		return nil, fmt.Errorf("cli engine: %w", err)
+	}
+	if err := os.MkdirAll(hostAutocodeDir, 0o755); err != nil {
+		return nil, fmt.Errorf("cli engine: create prompt dir: %w", err)
+	}
+	// Backup cleanup in case the sandbox never runs the in-script rm -rf
+	// (e.g. container create fails); idempotent when the script already
+	// removed the container-side copy.
+	defer os.RemoveAll(hostAutocodeDir)
+	if err := os.WriteFile(filepath.Join(hostAutocodeDir, "prompt.md"), []byte(req.Instruction), 0o644); err != nil {
+		return nil, fmt.Errorf("cli engine: write prompt file: %w", err)
+	}
 
 	args := make([]string, len(cfg.Args))
 	for i, a := range cfg.Args {
@@ -187,11 +226,8 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	}
 
 	script := fmt.Sprintf(
-		"cd %s && mkdir -p %s && printf '%%s' '%s' | base64 -d > %s && %s; status=$?%s; rm -rf %s; exit $status",
+		"cd %s && %s; status=$?%s; rm -rf %s; exit $status",
 		paths.QuoteShellArg(req.ContainerWorkDir),
-		paths.QuoteShellArg(autocodeDir),
-		encodedPrompt,
-		paths.QuoteShellArg(promptFile),
 		strings.Join(quotedInvocation, " "),
 		captureScript.String(),
 		paths.QuoteShellArg(autocodeDir),

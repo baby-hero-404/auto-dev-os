@@ -86,3 +86,7 @@
 - [x] Extract spec/manifest injection into `collectSpecs()` method
 - [x] `collect()` becomes an orchestrator calling these sub-collectors
 - [x] All existing tests pass without modification
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

@@ -88,12 +88,20 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 				// Remove worktree cleanly via Git
 				rmCmd := exec.CommandContext(ctx, "git", "-C", repoMain, "worktree", "remove", "-f", wtAbs)
 				if rmErr := rmCmd.Run(); rmErr != nil {
-					// Fallback: just delete the directory
-					_ = os.RemoveAll(wtAbs)
+					// Fallback: just delete the directory. A failure here is
+					// usually root-owned files written by the sandbox
+					// container — surfacing it is the only way an operator
+					// can spot workspaces leaking disk instead of silently
+					// accumulating.
+					if delErr := os.RemoveAll(wtAbs); delErr != nil {
+						observability.Warn(ctx, "workspace worktree cleanup failed (possible root-owned files from sandbox)", "task_id", taskID, "path", wtAbs, "error", delErr)
+					}
 				}
 			}
 			// Delete the worktrees parent directory as it should be empty now
-			_ = os.RemoveAll(wtParentDir)
+			if delErr := os.RemoveAll(wtParentDir); delErr != nil {
+				observability.Warn(ctx, "workspace worktrees dir cleanup failed (possible root-owned files from sandbox)", "task_id", taskID, "path", wtParentDir, "error", delErr)
+			}
 		}
 	}
 

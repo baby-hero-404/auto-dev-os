@@ -186,12 +186,23 @@ type ArtifactRepository interface {
 	ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error)
 }
 
-var analysisMu sync.Mutex
+// analysisLocks serializes analysis read-modify-write cycles per task, so
+// concurrent updates to the same task never clobber each other while
+// unrelated tasks don't contend on a single process-wide lock (the critical
+// section spans two DB round-trips, which made a global mutex a real
+// throughput bottleneck under load).
+var analysisLocks sync.Map // taskID -> *sync.Mutex
 
-// updateTaskAnalysis updates task.Analysis concurrently-safe.
-func updateTaskAnalysis(ctx context.Context, taskID string, tasks TaskRepository, rtTask *models.Task, updateFn func(*models.TaskAnalysis) bool) error {
-	analysisMu.Lock()
-	defer analysisMu.Unlock()
+func lockTaskAnalysis(taskID string) func() {
+	mu, _ := analysisLocks.LoadOrStore(taskID, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
+
+// UpdateTaskAnalysis updates task.Analysis concurrently-safe.
+func UpdateTaskAnalysis(ctx context.Context, taskID string, tasks TaskRepository, rtTask *models.Task, updateFn func(*models.TaskAnalysis) bool) error {
+	defer lockTaskAnalysis(taskID)()
 
 	// 1. Fetch fresh task from DB
 	freshTask, err := tasks.GetByID(ctx, taskID)

@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 10. Dashboard & Analytics
 
 **Status:** 🟡 In Progress (baseline implemented; observability expansion planned)  

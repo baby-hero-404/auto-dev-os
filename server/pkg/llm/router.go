@@ -85,6 +85,9 @@ func NewGateway(chains []FallbackChain, opts GatewayOptions) (*Gateway, error) {
 		}
 		g.chains[chain.LevelGroup] = chain
 	}
+	if _, ok := g.chains[g.defaultLevelGroup]; !ok {
+		return nil, fmt.Errorf("gateway default level group %q has no configured fallback chain", g.defaultLevelGroup)
+	}
 	return g, nil
 }
 
@@ -237,7 +240,7 @@ func (g *Gateway) chatWithRetry(ctx context.Context, provider Provider, messages
 			return resp, time.Since(start).Milliseconds(), nil
 		}
 		lastErr = err
-		if attempt == attempts-1 {
+		if attempt == attempts-1 || !IsTransientError(err) {
 			break
 		}
 		backoff := time.Duration(100*(1<<attempt)) * time.Millisecond

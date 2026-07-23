@@ -1,3 +1,10 @@
+---
+sources:
+  - "server/**"
+  - "web/src/components/projects/LearnedSkillsPanel.tsx"
+verified: 2026-07-23
+---
+
 # 03. Skill System (Git-Sync Architecture)
 
 **Status:** 🟢 Implemented  
@@ -93,3 +100,7 @@ Hệ thống cung cấp cơ chế phân tầng kỹ năng để linh hoạt cho 
     - *Left Panel:* Hiển thị cấu trúc cây (Folder Tree) của Skill đó.
     - *Right Panel:* Trình xem code/markdown có hỗ trợ highlight syntax cho file đang chọn.
 - **Ràng Buộc Chặt Chẽ:** Đảm bảo không tồn tại bất kỳ Component nào cho phép sửa đổi dữ liệu (Read-only UI).
+
+### 4.3. Project Local Skills UI (`web/src/components/projects/LearnedSkillsPanel.tsx`)
+- Bảng quản lý Project-Scoped Learned Skills trong phần Project Settings (ẩn khỏi Global `/skills`).
+- Hỗ trợ filter theo status, xem thông số sử dụng (`usage_count`, `success_count`) và thực hiện các thao tác: approve, disable, delete (có dialog confirm).

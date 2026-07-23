@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 07. Task System
 
 **Status:** 🟡 In Progress (baseline implemented; issue-tracker integrations planned)

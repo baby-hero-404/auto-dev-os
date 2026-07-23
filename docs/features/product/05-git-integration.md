@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 05. Git Integration
 
 **Status:** 🟢 Implemented  

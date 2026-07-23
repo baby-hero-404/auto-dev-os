@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 01. Retry, Patch & Context Hardening
 
 **Status:** 🟢 Implemented (audited 2026-07-12 — see note below)

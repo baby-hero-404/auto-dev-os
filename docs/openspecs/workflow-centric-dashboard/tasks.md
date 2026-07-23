@@ -115,3 +115,7 @@
 - **Phase 7, 8** are independent of the execution unit mapping
 - **Phase 9** should be done after Phases 2-4 are integrated
 - **Phase 10** should be done last
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

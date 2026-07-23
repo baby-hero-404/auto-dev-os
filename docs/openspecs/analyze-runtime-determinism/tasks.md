@@ -33,3 +33,7 @@
 - [x] `go test ./...` under `server/` green; `go vet ./internal/orchestrator/...` clean.
 - [x] `specs.md` status icons updated `❌`→`✅`.
 - [ ] If a later run captures `code`/`review`/`fix`, open a **new** verification pass against that log before acting on report Findings 26/28/29/30/33/34/35.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

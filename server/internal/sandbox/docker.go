@@ -68,13 +68,26 @@ func (r *DockerRuntime) Prewarm(ctx context.Context) error {
 	return nil
 }
 
+// resolveNetworkMode maps the requested mode to the mode the container will
+// actually run with, resolving NetworkModeDefault against the runtime's
+// DisableNetworking config. This single resolution point feeds both policy
+// validation and ContainerCreate, so the two can never disagree about
+// whether the container has network access.
+func (r *DockerRuntime) resolveNetworkMode(requested string) string {
+	if requested == NetworkModeBridge || (requested == NetworkModeDefault && !r.config.DisableNetworking) {
+		return "host"
+	}
+	return NetworkModeNone
+}
+
 func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandResult, error) {
 	ctx, span := otel.Tracer("auto-code-os/sandbox").Start(ctx, "sandbox.docker.run")
 	defer span.End()
 	if err := validateCommand(req.Command); err != nil {
 		return nil, err
 	}
-	if err := validateExecutionPolicy(req); err != nil {
+	resolvedNetworkMode := r.resolveNetworkMode(req.NetworkMode)
+	if err := validateExecutionPolicy(req, resolvedNetworkMode); err != nil {
 		return nil, err
 	}
 	if len(req.Command) == 0 {
@@ -132,20 +145,37 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 		for absHostPath, targetContainerPath := range cacheDirs {
 			if stat, err := os.Stat(absHostPath); err == nil && stat.IsDir() {
-				readOnly := true
-				if targetContainerPath == "/go/pkg/mod" {
-					readOnly = false
-				}
+				// Writable: npm (cacache) and maven/gradle must write into
+				// their cache to install anything not already present — a
+				// read-only mount breaks dependency installation outright.
 				mounts = append(mounts, mount.Mount{
-					Type:     mount.TypeBind,
-					Source:   absHostPath,
-					Target:   targetContainerPath,
-					ReadOnly: readOnly,
+					Type:   mount.TypeBind,
+					Source: absHostPath,
+					Target: targetContainerPath,
 				})
 				// If we mounted Go cache, set GOPATH env var
 				if targetContainerPath == "/go/pkg/mod" {
 					envMap["GOPATH"] = "/go"
 				}
+			}
+		}
+
+		// Inject host CLI credentials into the sandbox as read-only so the container
+		// can automatically utilize the host's existing OAuth sessions without manual config.
+		authDirs := map[string]string{
+			filepath.Join(homeDir, ".claude.json"):     "/root/.claude.json", // Claude Code
+			filepath.Join(homeDir, ".gemini"):          "/root/.gemini",      // Antigravity CLI
+			filepath.Join(homeDir, ".config", "codex"): "/root/.config/codex",    // Codex CLI
+		}
+
+		for absHostPath, targetContainerPath := range authDirs {
+			if _, err := os.Stat(absHostPath); err == nil {
+				mounts = append(mounts, mount.Mount{
+					Type:     mount.TypeBind,
+					Source:   absHostPath,
+					Target:   targetContainerPath,
+					ReadOnly: true,
+				})
 			}
 		}
 	}
@@ -155,10 +185,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		env = append(env, key+"="+value)
 	}
 
-	networkMode := container.NetworkMode("none")
-	if req.NetworkMode == NetworkModeBridge || (req.NetworkMode == NetworkModeDefault && !r.config.DisableNetworking) {
-		networkMode = "host"
-	}
+	networkMode := container.NetworkMode(resolvedNetworkMode)
 
 	createResp, err := r.client.ContainerCreate(ctx, &container.Config{
 		Image:      r.config.Image,

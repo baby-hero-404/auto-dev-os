@@ -6,6 +6,7 @@ export interface FieldProps {
   htmlFor?: string;
   error?: string;
   hint?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
@@ -15,18 +16,24 @@ export function Field({
   htmlFor,
   error,
   hint,
+  action,
   children,
   className,
 }: FieldProps) {
   return (
     <div className={cn("flex flex-col gap-1.5 w-full", className)}>
-      {label && (
-        <label
-          htmlFor={htmlFor}
-          className="text-[10px] font-mono uppercase tracking-wider text-muted font-semibold"
-        >
-          {label}
-        </label>
+      {(label || action) && (
+        <div className="flex items-center justify-between">
+          {label && (
+            <label
+              htmlFor={htmlFor}
+              className="text-[10px] font-mono uppercase tracking-wider text-muted font-semibold"
+            >
+              {label}
+            </label>
+          )}
+          {action}
+        </div>
       )}
       {children}
       {hint && !error && (

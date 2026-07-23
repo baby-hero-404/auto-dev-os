@@ -7,3 +7,7 @@
 
 ## Thứ Tự Thực Hiện
 T-001 (done) → T-002 → T-003 → T-004
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

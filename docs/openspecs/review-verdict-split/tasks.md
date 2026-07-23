@@ -9,3 +9,7 @@
 - [x] 1.7 UI: 2 badges + expandable lists; legacy render (REQ-M01) — created `ReviewVerdictCard.tsx` rendering Spec Compliance & Code Quality badges with expandable violation & finding lists in `CheckpointsPanel.tsx`.
 - [x] 1.8 Integration test: spec fail 2 cycles → escalation — `TestReviewStep_SpecFailEscalation_PausesOnRepeatViolation` seeds a prior `StepReview` checkpoint with a matching violation and asserts the second cycle pauses with the escalation reason and routes the task to `human_review`.
 - [x] 1.9 Update specs.md status — done (see specs.md).
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

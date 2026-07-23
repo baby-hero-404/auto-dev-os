@@ -66,8 +66,26 @@ export function CLIEngineConfigForm({
     onChange({ ...value, env: [...value.env, { key: "", value: "" }] });
   }
 
+  function applyClaudePreset() {
+    const newEnv = value.env.filter((e) => e.key && e.key !== "ANTHROPIC_AUTH_TOKEN");
+    newEnv.push({ key: "ANTHROPIC_AUTH_TOKEN", value: "" });
+    onChange({
+      ...value,
+      command: "claude",
+      argsText: "-p\n{prompt_file}",
+      authCheckCommand: "claude --version",
+      env: newEnv,
+    });
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-end mb-2">
+        <Button type="button" variant="secondary" size="sm" onClick={applyClaudePreset} disabled={disabled} className="text-xs h-7">
+          Fill Claude Code Preset
+        </Button>
+      </div>
+
       <Field label="Command *" htmlFor="cli-command" hint='e.g. "claude"'>
         <Input
           id="cli-command"

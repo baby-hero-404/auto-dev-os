@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 03. Global Path Management System
 
 **Status:** 🟢 Implemented (audited 2026-07-12: `server/pkg/paths/{types,fs,interfaces,registry,testing}.go` all present, matching this doc's design; the Phase 2 backward-compat deprecation wrapper was skipped rather than left as a shim, otherwise built as specified)

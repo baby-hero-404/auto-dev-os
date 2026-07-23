@@ -1,3 +1,10 @@
+---
+sources:
+  - "server/**"
+  - "web/src/app/projects/[id]/tasks/[taskID]/components/AuditPanel.tsx"
+verified: 2026-07-23
+---
+
 # 09. PR & Human Review
 
 **Status:** 🟡 In Progress (implemented; AI PR assistant planned)  
@@ -95,6 +102,13 @@ Mỗi PR được tạo tự động theo template chuẩn:
 *   Nếu `review_limit_exceeded: true` → reviewer phải explicitly acknowledge warning trước khi approve.
 
 > **PR ≠ Task hoàn thành.** Task ở trạng thái `pr_ready` cho đến khi reviewer approve. Chỉ sau merge thành công, task mới chuyển sang `merged` (hoàn thành). Xem đầy đủ vòng đời tại §07 Task System — "Vòng Đời Task" (nguồn canonical).
+
+## F. Attestation Audit Panel (Implemented)
+
+Tính minh bạch và bảo mật mã nguồn do AI tạo ra được củng cố bằng chữ ký điện tử (DSSE - Dead Simple Signing Envelope) thông qua **Attestation Audit Panel** trên giao diện chi tiết tác vụ (Task Detail UI):
+* **Hiển thị Audit Trail:** Danh sách các chữ ký đi kèm theo từng commit (bao gồm mã hash commit rút gọn, AI thực hiện, AI review, Key ID, và Timestamp).
+* **Kiểm tra trực tiếp (Lazy Verification):** Cấp badge xác thực khi chữ ký hợp lệ thông qua lazy load.
+* **Chi Tiết Envelope:** Cho phép người dùng nhấn "View envelope" để xem chuỗi JSON chuẩn DSSE Pretty-printed chứng minh nguồn gốc đoạn mã đó được mã hoá bởi Agent và có track chuỗi review chéo an toàn.
 
 ---
 

@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,12 +17,16 @@ type mockRuntime struct {
 	results []*sandbox.CommandResult
 	errs    []error
 	i       int
+	onRun   func(req sandbox.CommandRequest)
 }
 
 func (m *mockRuntime) Prewarm(ctx context.Context) error { return nil }
 
 func (m *mockRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
 	m.calls = append(m.calls, req)
+	if m.onRun != nil {
+		m.onRun(req)
+	}
 	idx := m.i
 	m.i++
 	if idx < len(m.errs) && m.errs[idx] != nil {
@@ -37,11 +43,22 @@ func baseReq(cfg *models.CLIEngineConfig) CodeStepRequest {
 		Task:             &models.Task{ID: "task-1"},
 		Agent:            &models.Agent{ID: "agent-1"},
 		Instruction:      "implement the feature",
-		HostWorkspace:    "/host/ws/task-1",
+		HostWorkspace:    hostWorkspaceForTest,
 		ContainerWorkDir: "/workspace/backend",
 		CLIConfig:        cfg,
 	}
 }
+
+// hostWorkspaceForTest is a real writable directory: RunCodeStep now writes
+// the prompt file to the host side of the workspace bind mount before
+// spawning, so the host workspace must exist.
+var hostWorkspaceForTest = func() string {
+	dir, err := os.MkdirTemp("", "cli-engine-test-ws-")
+	if err != nil {
+		panic(err)
+	}
+	return dir
+}()
 
 func TestCLIEngine_Preflight_MissingCommand(t *testing.T) {
 	e := NewCLIEngine(&mockRuntime{})
@@ -218,6 +235,55 @@ func TestCLIEngine_RunCodeStep_CaptureFiles_ScriptWiring(t *testing.T) {
 	cleanupIdx := strings.Index(script, "rm -rf")
 	if captureIdx < 0 || cleanupIdx < 0 || captureIdx > cleanupIdx {
 		t.Errorf("expected capture block before cleanup, script: %s", script)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_LargePromptNotInlinedInScript(t *testing.T) {
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
+	e := NewCLIEngine(rt)
+	cfg := &models.CLIEngineConfig{Command: "claude", Args: []string{"--prompt-file", "{prompt_file}"}}
+	req := baseReq(cfg)
+	// Well past MAX_ARG_STRLEN (128KB): inlining this into the bash script
+	// would make execve fail with E2BIG.
+	req.Instruction = strings.Repeat("x", 300*1024)
+
+	if _, err := e.RunCodeStep(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	script := rt.calls[0].Command[2]
+	if len(script) > 64*1024 {
+		t.Errorf("script grew with prompt size (%d bytes) — prompt must not be inlined", len(script))
+	}
+	if strings.Contains(script, "xxxxxxxxxx") {
+		t.Error("expected prompt content to be absent from the script")
+	}
+	if !strings.Contains(script, "/workspace/backend/.autocode/prompt.md") {
+		t.Errorf("expected script to reference the prompt file path, got: %s", script)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_WritesPromptFileOnHost(t *testing.T) {
+	promptSeen := make(chan string, 1)
+	rt := &mockRuntime{onRun: func(req sandbox.CommandRequest) {
+		// Read the host-side prompt file while the "subprocess" is running,
+		// before RunCodeStep's deferred cleanup removes it.
+		data, err := os.ReadFile(filepath.Join(hostWorkspaceForTest, "backend", ".autocode", "prompt.md"))
+		if err != nil {
+			promptSeen <- "READ_ERROR: " + err.Error()
+			return
+		}
+		promptSeen <- string(data)
+	}}
+	e := NewCLIEngine(rt)
+	req := baseReq(&models.CLIEngineConfig{Command: "claude"})
+	req.Instruction = "implement the feature"
+
+	if _, err := e.RunCodeStep(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := <-promptSeen; got != "implement the feature" {
+		t.Errorf("expected prompt file to contain the instruction, got: %q", got)
 	}
 }
 

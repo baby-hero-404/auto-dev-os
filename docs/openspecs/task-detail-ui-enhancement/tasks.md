@@ -49,3 +49,7 @@
 ## Phase 10: Cleanup (Removed Requirements)
 - [x] Confirm no `.glass-card` utility or sliding-tab-indicator work was started under the prior spec revision; remove if present.
 - [x] Update this task list's checkboxes as each phase ships; do not mark the change complete until Phases 1–8 are done.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

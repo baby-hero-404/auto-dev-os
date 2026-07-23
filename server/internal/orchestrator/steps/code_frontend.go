@@ -233,7 +233,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	}
 
 	if len(changedFiles) > 0 {
-		err := updateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
+		err := UpdateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
 			updated := false
 			for _, newFile := range changedFiles {
 				exists := false
@@ -273,7 +273,7 @@ func (s *CodeFrontendStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 				}
 				if taskIdx >= 0 && taskIdx < len(feTasks) {
 					if taskText, ok := feTasks[taskIdx].(string); ok {
-						err := updateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
+						err := UpdateTaskAnalysis(ctx, s.rt.Task.ID, s.tasks, s.rt.Task, func(analysis *models.TaskAnalysis) bool {
 							if updatedTasksMD, ok := updateTaskSubtaskMarkdown(analysis.TasksMD, taskText); ok {
 								analysis.TasksMD = updatedTasksMD
 								return true

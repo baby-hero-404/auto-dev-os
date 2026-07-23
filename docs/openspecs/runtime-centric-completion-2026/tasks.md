@@ -154,3 +154,7 @@
       `PromptCompiler` still delegates to; golden tests updated accordingly.
 - [ ] No remaining call site can reach the shadow-FSM code path (`updateShadowSM`,
       `runner.go`'s `runAgentic`) — `runStateMachine` is the only execution path left.
+
+## Docs sync
+
+- [ ] Update corresponding `docs/features/` as specified in feature-docs-sync/design.md

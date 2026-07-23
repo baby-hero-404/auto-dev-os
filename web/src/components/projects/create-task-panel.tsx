@@ -4,7 +4,7 @@ import { Loader2, Plus, X, GitBranch, ChevronDown, Sparkles, AlertCircle, Maximi
 import type { Agent, ExecutionEngine, Repository } from "@/lib/types";
 import { TaskMarkdownEditor } from "./TaskMarkdownEditor";
 import { AgentSelection } from "./AgentSelection";
-import { Field } from "./Field";
+import { Field } from "@/components/ui/field";
 import { ComplexitySelection, TaskComplexity } from "./ComplexitySelection";
 import { PrioritySelection } from "./PrioritySelection";
 

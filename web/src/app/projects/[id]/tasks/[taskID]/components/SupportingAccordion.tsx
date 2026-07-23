@@ -7,6 +7,7 @@ import { SpecPanel } from "./SpecPanel";
 import { CLISpecPanel } from "./CLISpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { CheckpointsPanel } from "./CheckpointsPanel";
+import { AuditPanel } from "./AuditPanel";
 
 interface AccordionItemProps {
   title: string;
@@ -174,6 +175,20 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
         }
       >
         <CheckpointsPanel />
+      </AccordionItem>
+
+      {/* Accordion 4: Attestation Audit */}
+      <AccordionItem
+        title="Attestation Audit"
+        isOpen={!!openSections.audit}
+        onToggle={() => onToggleSection("audit")}
+        summary={
+          <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] text-content-muted">
+            <span>Commit provenance & verification</span>
+          </div>
+        }
+      >
+        <AuditPanel />
       </AccordionItem>
     </section>
   );

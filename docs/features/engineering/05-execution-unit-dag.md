@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 05. Execution Unit & Dynamic Scheduler DAG
 
 **Status:** 🟢 Implemented (audited 2026-07-12: `ExecutionUnit`/`ExecutionProfile`/`ExecutionConstraints` in `pkg/models/task.go`, cost+cycle validation in `policy/scheduler_policy.go`, DAG scheduling wired via `workflow.DynamicDAGWorkflow` in `steps/plan.go` and `worker.go` — exceeds this doc's Phase 1-3 scope, e.g. adds automatic Analyze retry on validation failure)

@@ -1,3 +1,8 @@
+---
+sources:
+  - "server/**"
+---
+
 # 11. Multi-Channel Interaction (Remote Coding Sessions)
 
 **Status:** ⚪ Deferred (until core features stabilize)  

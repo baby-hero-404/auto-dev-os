@@ -207,6 +207,8 @@ func run() error {
 	attestationSvc := service.NewAttestationService(attestationRepo, attestationKeyRepo, secretCipher)
 	opts = append(opts, orchestrator.WithAttestationSigner(service.NewAttestationSignerAdapter(attestationSvc)))
 	opts = append(opts, orchestrator.WithCredentials(credentialPoolSvc))
+	opts = append(opts, orchestrator.WithCredentialAvailability(credentialPoolSvc))
+	opts = append(opts, orchestrator.WithCooldownSetter(credentialPoolSvc))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 

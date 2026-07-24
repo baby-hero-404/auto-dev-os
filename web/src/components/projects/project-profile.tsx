@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Save, Settings, Bot, RefreshCw, Terminal } from "lucide-react";
 import { ApiError } from "@/lib/api";
-import type { ExecutionEngine, Project } from "@/lib/types";
+import type { ExecutionEngine, ExecutionProviderConfig, Project } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,7 @@ import {
   type CLIEngineConfigFormValue,
 } from "./cli-engine-config-form";
 import { Switch } from "@/components/ui/switch";
+import { ExecutionProvidersList, defaultExecutionProviders } from "./execution-providers-list";
 import { GovernanceConfigEditor } from "./GovernanceConfigEditor";
 import { LearnedSkillsPanel } from "./LearnedSkillsPanel";
 import { toast } from "sonner";
@@ -37,6 +38,7 @@ interface ProjectProfileProps {
     default_branch?: string;
     execution_engine?: ExecutionEngine;
     cli_engine_config?: ReturnType<typeof formValueToCLIConfig>;
+    execution_providers?: ExecutionProviderConfig[];
   }) => Promise<void>;
 }
 
@@ -55,6 +57,9 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
   const [executionEngine, setExecutionEngine] = useState<ExecutionEngine>(project?.execution_engine ?? "api_native");
   const [cliConfig, setCliConfig] = useState<CLIEngineConfigFormValue>(cliConfigToFormValue(project?.cli_engine_config));
+  const [executionProviders, setExecutionProviders] = useState<ExecutionProviderConfig[]>(
+    project?.execution_providers ?? defaultExecutionProviders(),
+  );
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -77,6 +82,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setDefaultBranch(project.default_branch ?? "main");
       setExecutionEngine(project.execution_engine ?? "api_native");
       setCliConfig(cliConfigToFormValue(project.cli_engine_config));
+      setExecutionProviders(project.execution_providers ?? defaultExecutionProviders());
     }
   }
 
@@ -94,7 +100,8 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
     (project?.default_branch ?? "main") !== defaultBranch ||
     (project?.execution_engine ?? "api_native") !== executionEngine ||
-    !formValuesEqual(cliConfigToFormValue(project?.cli_engine_config), cliConfig);
+    !formValuesEqual(cliConfigToFormValue(project?.cli_engine_config), cliConfig) ||
+    JSON.stringify(project?.execution_providers ?? defaultExecutionProviders()) !== JSON.stringify(executionProviders);
 
   function handleReset() {
     if (project) {
@@ -111,6 +118,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setDefaultBranch(project.default_branch ?? "main");
       setExecutionEngine(project.execution_engine ?? "api_native");
       setCliConfig(cliConfigToFormValue(project.cli_engine_config));
+      setExecutionProviders(project.execution_providers ?? defaultExecutionProviders());
       setUpdateError("");
       toast.info("Project settings reverted.");
     }
@@ -139,6 +147,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
         default_branch: defaultBranch.trim(),
         execution_engine: executionEngine,
         cli_engine_config: formValueToCLIConfig(cliConfig),
+        execution_providers: executionProviders,
       });
       toast.success("Project settings updated successfully.");
     } catch (err) {
@@ -317,6 +326,21 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
             {executionEngine === "cli" && (
               <CLIEngineConfigForm value={cliConfig} onChange={setCliConfig} disabled={isUpdating} />
             )}
+          </CardContent>
+        </Card>
+
+        {/* Execution Providers (priority-ordered routing) */}
+        <Card>
+          <CardHeader
+            title="Execution Providers"
+            icon={<Terminal size={18} className="text-brand-primary" />}
+          />
+          <CardContent className="space-y-2">
+            <p className="text-xs text-content-muted">
+              Optional: enable and prioritize multiple providers for automatic failover (e.g. fall back from Claude Code to
+              the Anthropic API on quota exhaustion). Leave all disabled to use the legacy Execution Engine setting above.
+            </p>
+            <ExecutionProvidersList value={executionProviders} onChange={setExecutionProviders} disabled={isUpdating} />
           </CardContent>
         </Card>
 

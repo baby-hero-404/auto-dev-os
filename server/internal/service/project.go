@@ -52,6 +52,9 @@ func (s *ProjectService) Create(ctx context.Context, orgID string, input models.
 	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
 		return nil, err
 	}
+	if _, err := models.ValidateExecutionProviders(input.ExecutionProviders); err != nil {
+		return nil, ErrValidation(err.Error())
+	}
 	if input.ReviewHarnessPolicy != nil {
 		if err := models.ValidateReviewHarnessPolicy(*input.ReviewHarnessPolicy); err != nil {
 			return nil, ErrValidation(err.Error())
@@ -109,6 +112,9 @@ func (s *ProjectService) Update(ctx context.Context, id string, input models.Upd
 	}
 	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
 		return nil, err
+	}
+	if _, err := models.ValidateExecutionProviders(input.ExecutionProviders); err != nil {
+		return nil, ErrValidation(err.Error())
 	}
 	if input.ReviewHarnessPolicy != nil {
 		if err := models.ValidateReviewHarnessPolicy(*input.ReviewHarnessPolicy); err != nil {

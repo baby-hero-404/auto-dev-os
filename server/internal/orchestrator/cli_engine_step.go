@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +11,12 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
+
+// cliCooldownDuration is how long a CLI credential is cooled down for after
+// its output matches a quota/rate-limit signature (REQ-006 write-side).
+// Matches gateway.go's capped transient-error cooldown for consistency; not
+// configurable in this phase.
+const cliCooldownDuration = 1 * time.Minute
 
 func worktreeSuffixForRole(role string) string {
 	switch role {
@@ -30,16 +35,17 @@ func worktreeSuffixForRole(role string) string {
 // engine "cli" (see stepRunners). Preflight runs once per job via sync.Once
 // so a repeated auth/binary check doesn't run on every patch-retry attempt.
 type cliEngineRunner struct {
-	o     *Orchestrator
-	cfg   *models.CLIEngineConfig
-	orgID string
-	eng   engine.ExecutionEngine
-	once  sync.Once
-	pErr  error
+	o      *Orchestrator
+	cfg    *models.CLIEngineConfig
+	orgID  string
+	credID string
+	eng    engine.ExecutionEngine
+	once   sync.Once
+	pErr   error
 }
 
-func newCLIEngineRunner(o *Orchestrator, cfg *models.CLIEngineConfig, orgID string) *cliEngineRunner {
-	return &cliEngineRunner{o: o, cfg: cfg, orgID: orgID, eng: engine.NewCLIEngine(o.runtime, o.credentials)}
+func newCLIEngineRunner(o *Orchestrator, cfg *models.CLIEngineConfig, orgID, credID string) *cliEngineRunner {
+	return &cliEngineRunner{o: o, cfg: cfg, orgID: orgID, credID: credID, eng: engine.NewCLIEngine(o.runtime, o.credentials)}
 }
 
 func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (engine.CodeStepRequest, string) {
@@ -103,6 +109,15 @@ func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, age
 		return nil, fmt.Errorf("cli engine: %w", err)
 	}
 
+	// Write-side of REQ-006: a CLI subprocess has no HTTP status code, so
+	// quota/rate-limit is detected post-hoc from the captured output/exit
+	// code (RunCodeStep already did the pattern match — see cli_quota.go).
+	// This only affects the *next* ResolveExecutionProvider call, not this
+	// step's own outcome (REQ-005, no mid-task switch).
+	if res.QuotaExceeded && r.credID != "" && r.o.cooldownSetter != nil {
+		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cliCooldownDuration))
+	}
+
 	r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf("%s: cli engine finished (success=%v)", stepID, res.Success))
 	if res.Output != "" {
 		r.o.initCheckpoints()
@@ -148,13 +163,9 @@ func (o *Orchestrator) resolveCLIEngineRunner(ctx context.Context, task *models.
 	if err != nil {
 		return nil
 	}
-	resolved := engine.ResolveEngine(task.ExecutionEngine, project.ExecutionEngine)
-	if resolved != models.ExecutionEngineCLI {
+	resolved, err := o.ResolveExecutionProvider(ctx, task, project)
+	if err != nil || resolved.Type != "cli" {
 		return nil
 	}
-	var cfg models.CLIEngineConfig
-	if len(project.CLIEngineConfig) > 0 {
-		_ = json.Unmarshal(project.CLIEngineConfig, &cfg)
-	}
-	return newCLIEngineRunner(o, &cfg, project.OrgID)
+	return newCLIEngineRunner(o, resolved.CLIConfig, project.OrgID, resolved.CredentialID)
 }

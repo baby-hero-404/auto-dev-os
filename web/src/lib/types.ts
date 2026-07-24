@@ -27,6 +27,15 @@ export type CLIEngineConfig = {
   allow_noop?: boolean;
 };
 
+export type ExecutionProviderConfig = {
+  type: "api" | "cli";
+  ref: string;
+  credential_id?: string;
+  priority: number;
+  enabled: boolean;
+  cli_config?: CLIEngineConfig;
+};
+
 export type Project = {
   id: string;
   org_id: string;
@@ -40,6 +49,7 @@ export type Project = {
   default_branch?: string;
   execution_engine?: ExecutionEngine;
   cli_engine_config?: CLIEngineConfig;
+  execution_providers?: ExecutionProviderConfig[];
   review_harness_policy?: string;
   smart_routing?: boolean;
   pipeline_config?: unknown;

@@ -58,6 +58,61 @@ type CLIEngineConfig struct {
 	// can pick a genuinely different provider instead of assuming the CLI is
 	// automatically "different" from every API provider (REQ-001b).
 	UnderlyingProvider string `json:"underlying_provider,omitempty"`
+	// ProfileRef is the CLIProfiles/ExecutionProviderConfig ref that produced
+	// this config ("claude_code"/"openai_codex"/"antigravity"/"custom", or ""
+	// for the legacy fallback path). Not user-settable — set by the Execution
+	// Router when building this config, used to select the right CLIQuotaRules
+	// entry for quota/rate-limit detection (REQ-006).
+	ProfileRef string `json:"-"`
+}
+
+// ExecutionProviderConfig is one candidate in Project.ExecutionProviders — an
+// API or CLI provider the Execution Router may pick for a Task, in priority
+// order. See docs/openspecs/cli-execution-provider-routing.
+type ExecutionProviderConfig struct {
+	Type         string           `json:"type"`                    // "api" | "cli"
+	Ref          string           `json:"ref"`                     // api: provider id (openai/anthropic/gemini/...); cli: "claude_code"/"openai_codex"/"antigravity"/"custom"
+	CredentialID string           `json:"credential_id,omitempty"` // optional pin; empty = auto-pick first available
+	Priority     int              `json:"priority"`
+	Enabled      bool             `json:"enabled"`
+	CLIConfig    *CLIEngineConfig `json:"cli_config,omitempty"` // only when ref=="custom"
+}
+
+var validExecutionProviderTypes = map[string]bool{"api": true, "cli": true}
+var validCLIProviderRefs = map[string]bool{"claude_code": true, "openai_codex": true, "antigravity": true, "custom": true}
+
+// ValidateExecutionProviders parses and validates a raw execution_providers
+// jsonb payload. Returns (nil, nil) for an empty/absent payload — callers
+// must treat that as "use legacy ExecutionEngine/CLIEngineConfig fallback"
+// (REQ-003), not as an error.
+func ValidateExecutionProviders(raw json.RawMessage) ([]ExecutionProviderConfig, error) {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, nil
+	}
+	var list []ExecutionProviderConfig
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("execution_providers: invalid JSON: %w", err)
+	}
+	for i, p := range list {
+		if !validExecutionProviderTypes[p.Type] {
+			return nil, fmt.Errorf("execution_providers[%d].type must be \"api\" or \"cli\", got %q", i, p.Type)
+		}
+		if p.Type == "cli" {
+			if !validCLIProviderRefs[p.Ref] {
+				return nil, fmt.Errorf("execution_providers[%d].ref %q is not a known CLI profile", i, p.Ref)
+			}
+			if p.Ref == "custom" && (p.CLIConfig == nil || strings.TrimSpace(p.CLIConfig.Command) == "") {
+				return nil, fmt.Errorf("execution_providers[%d]: ref=\"custom\" requires cli_config.command", i)
+			}
+			if p.Ref == "custom" && strings.TrimSpace(p.CredentialID) == "" {
+				return nil, fmt.Errorf("execution_providers[%d]: ref=\"custom\" requires credential_id", i)
+			}
+		}
+		if p.Type == "api" && !IsAllowedProvider(p.Ref) {
+			return nil, fmt.Errorf("execution_providers[%d].ref %q is not a known API provider", i, p.Ref)
+		}
+	}
+	return list, nil
 }
 
 // MaskedEnv returns a copy of the config with env values redacted, preserving keys.
@@ -87,6 +142,7 @@ type Project struct {
 	DefaultBranch       string          `json:"default_branch" gorm:"column:default_branch;default:'main';not null"`
 	ExecutionEngine     string          `json:"execution_engine" gorm:"column:execution_engine;default:'api_native';not null"`
 	CLIEngineConfig     json.RawMessage `json:"cli_engine_config" gorm:"column:cli_engine_config;type:jsonb;default:'{}'"`
+	ExecutionProviders  json.RawMessage `json:"execution_providers,omitempty" gorm:"column:execution_providers;type:jsonb;default:'[]'"`
 	ReviewHarnessPolicy string          `json:"review_harness_policy" gorm:"column:review_harness_policy;default:'different_model';not null"`
 	SmartRouting        bool            `json:"smart_routing" gorm:"column:smart_routing;default:true;not null"`
 	PipelineConfig      json.RawMessage `json:"pipeline_config,omitempty" gorm:"column:pipeline_config;type:jsonb"`
@@ -110,6 +166,7 @@ type CreateProjectInput struct {
 	DefaultBranch       *string          `json:"default_branch,omitempty"`
 	ExecutionEngine     *string          `json:"execution_engine,omitempty"`
 	CLIEngineConfig     *CLIEngineConfig `json:"cli_engine_config,omitempty"`
+	ExecutionProviders  json.RawMessage  `json:"execution_providers,omitempty"`
 	ReviewHarnessPolicy *string          `json:"review_harness_policy,omitempty"`
 	SmartRouting        *bool            `json:"smart_routing,omitempty"`
 	PipelineConfig      json.RawMessage  `json:"pipeline_config,omitempty"`
@@ -127,6 +184,7 @@ type UpdateProjectInput struct {
 	DefaultBranch       *string          `json:"default_branch,omitempty"`
 	ExecutionEngine     *string          `json:"execution_engine,omitempty"`
 	CLIEngineConfig     *CLIEngineConfig `json:"cli_engine_config,omitempty"`
+	ExecutionProviders  json.RawMessage  `json:"execution_providers,omitempty"`
 	ReviewHarnessPolicy *string          `json:"review_harness_policy,omitempty"`
 	SmartRouting        *bool            `json:"smart_routing,omitempty"`
 	PipelineConfig      json.RawMessage  `json:"pipeline_config,omitempty"`

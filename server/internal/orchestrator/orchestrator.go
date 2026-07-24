@@ -67,6 +67,8 @@ type Orchestrator struct {
 	learnedSkills       LearnedSkillReader
 	attestations        steps.AttestationSigner
 	credentials         engine.CredentialGetter
+	credentialPool      CredentialAvailability
+	cooldownSetter      CooldownSetter
 }
 
 func (o *Orchestrator) wake() {
@@ -133,6 +135,24 @@ func WithAttestationSigner(signer steps.AttestationSigner) Option {
 func WithCredentials(credentials engine.CredentialGetter) Option {
 	return func(o *Orchestrator) {
 		o.credentials = credentials
+	}
+}
+
+// WithCredentialAvailability wires the credential pool used by
+// ResolveExecutionProvider to check whether an api/cli provider candidate
+// has at least one non-cooling-down credential (REQ-004, REQ-006).
+func WithCredentialAvailability(pool CredentialAvailability) Option {
+	return func(o *Orchestrator) {
+		o.credentialPool = pool
+	}
+}
+
+// WithCooldownSetter wires the credential pool used to cool down a CLI
+// credential when RunCodeStep's output matches a known quota/rate-limit
+// signature (REQ-006 write-side, see cli_quota.go).
+func WithCooldownSetter(setter CooldownSetter) Option {
+	return func(o *Orchestrator) {
+		o.cooldownSetter = setter
 	}
 }
 

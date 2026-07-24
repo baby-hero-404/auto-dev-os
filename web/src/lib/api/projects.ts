@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { CLIEngineConfig, ExecutionEngine, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
+import type { CLIEngineConfig, ExecutionEngine, ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -31,6 +31,7 @@ export function update(projectID: string, token: string, input: {
   default_branch?: string;
   execution_engine?: ExecutionEngine;
   cli_engine_config?: CLIEngineConfig;
+  execution_providers?: ExecutionProviderConfig[];
 }) {
   return request<Project>(`/projects/${projectID}`, {
     method: "PATCH",

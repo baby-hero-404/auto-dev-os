@@ -68,6 +68,14 @@ type CodeStepResult struct {
 	// because its output was judged to be looping (see loopDetector).
 	LoopKilled bool
 
+	// QuotaExceeded is true when the captured output/exit code matched a
+	// known quota/rate-limit signature for this CLI (see cli_quota.go,
+	// REQ-006 write-side). The caller (cliEngineRunner.RunLLMStep) uses this
+	// to cool down the credential that ran this step — it does not change
+	// Success/Error, which are still decided purely by exit code + loop
+	// detection.
+	QuotaExceeded bool
+
 	// Files holds the content of paths requested via CaptureFiles that were
 	// present after the run (missing files are simply absent from the map).
 	Files map[string]string

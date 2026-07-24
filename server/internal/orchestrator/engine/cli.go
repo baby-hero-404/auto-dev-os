@@ -317,12 +317,14 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	}
 	combined, capturedFiles := extractCapturedFiles(combined)
 	killed := detectLoop(combined)
+	quotaExceeded := detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
 
 	res := &CodeStepResult{
-		Success:    result.ExitCode == 0 && !killed,
-		Output:     redactSecrets(combined),
-		LoopKilled: killed,
-		Files:      capturedFiles,
+		Success:       result.ExitCode == 0 && !killed,
+		Output:        redactSecrets(combined),
+		LoopKilled:    killed,
+		QuotaExceeded: quotaExceeded,
+		Files:         capturedFiles,
 	}
 	switch {
 	case killed:

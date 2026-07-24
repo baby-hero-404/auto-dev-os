@@ -50,6 +50,16 @@ Biến môi trường trong `cli_engine_config.env` được mã hoá/lưu như 
 
 **UI:** Project Settings có section "Execution Engine" (radio API-native/CLI, hiện form command/args/env/timeout khi chọn CLI — `cli-engine-config-form.tsx`). Task creation dialog có dropdown Engine (Inherit/API-native/CLI, mặc định Inherit). Task detail hiển thị badge engine đã dùng.
 
+## B2. Execution Provider Routing (ưu tiên hơn Execution Engine)
+
+`Project.execution_providers` (jsonb, `[]ExecutionProviderConfig`) thay thế field nhị phân `execution_engine` bằng một danh sách provider ưu tiên (`{type: api|cli, ref, credential_id?, priority, enabled, cli_config?}`). `Orchestrator.ResolveExecutionProvider` (`server/internal/orchestrator/execution_router.go`) chọn candidate `enabled=true` có priority thấp nhất và credential còn khả dụng (không `cooldown`/`rate_limited`); nếu danh sách rỗng, fallback **byte-identical** về `execution_engine`/`cli_engine_config` cũ (không breaking change cho project chưa migrate). Việc resolve diễn ra **một lần khi Task bắt đầu** — không failover giữa chừng task đang chạy.
+
+`ref` cho `type=cli` là một trong `claude_code | openai_codex | antigravity | custom`, ánh xạ tới `CLIProfile` registry built-in (`server/pkg/models/cli_profiles.go`) — chỉ `custom` mới cần `cli_config` inline và **bắt buộc** `credential_id` (không có provider cố định để auto-map).
+
+**Quota detection (write-side):** Do CLI chạy blocking trong sandbox, phát hiện quota/rate-limit dựa trên pattern-matching stdout+stderr đã capture sau khi tiến trình kết thúc (`server/internal/orchestrator/engine/cli_quota.go`, bảng `CLIQuotaRules` keyed theo `ProfileRef`, có fallback `"*"`). Khi khớp, `CredentialPoolService.SetCooldown` ghi `cooldown_until` (mặc định 1 phút) lên `ProviderCredential` tương ứng, để lần resolve tiếp theo tự động fallthrough qua candidate priority thấp hơn.
+
+**UI:** Project Settings có thêm section "Execution Providers" (`execution-providers-list.tsx`) — danh sách cố định 7 hàng (Anthropic/OpenAI/Gemini API + Claude Code/OpenAI Codex/Antigravity/Custom CLI), mỗi hàng có checkbox Enabled, nút ▲/▼ đổi priority, và dropdown "CLI Authentication Profile" (bắt buộc cho Custom CLI, mặc định "Auto" cho 3 preset CLI). Section "Execution Engine" cũ vẫn giữ nguyên làm fallback khi để trống toàn bộ Execution Providers.
+
 ## C. CLI Spec-First Pipeline
 
 Vì CLI agent đã tự có tool-loop, context loading, planning và self-review bên trong nó, DAG API-native (context_load → analyze → plan → code → merge → review → fix → test → pr) không phù hợp khi `execution_engine = cli`. Thay vào đó, `BuildWorkflow` chọn workflow definition thứ hai — `cli_spec_first` (`server/internal/workflow/step.go`) — theo engine đã resolve của task:

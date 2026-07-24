@@ -563,6 +563,10 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			o.log(ctx, task.ID, &job.ID, "warn", "structural failure (no workspace progress); skipping remaining retries")
 			break
 		}
+		if errors.Is(err, cliengine.ErrConfigInvalid) {
+			o.log(ctx, task.ID, &job.ID, "warn", "cli engine configuration is invalid; skipping remaining retries (fix cli_engine_config and retry manually)")
+			break
+		}
 		if attempt < maxRetries {
 			backoff := o.calculateBackoff(attempt)
 			o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("Workflow failed: %v. Retrying attempt %d of %d in %v...", err, attempt+1, maxRetries, backoff))

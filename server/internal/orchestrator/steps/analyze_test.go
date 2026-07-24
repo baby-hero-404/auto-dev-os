@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,10 @@ func (m *mockAnalyzeSandboxRuntime) Run(ctx context.Context, req sandbox.Command
 }
 
 func (m *mockAnalyzeSandboxRuntime) Health(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockAnalyzeSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
 	return nil
 }
 

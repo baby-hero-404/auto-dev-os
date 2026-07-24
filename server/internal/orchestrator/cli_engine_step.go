@@ -30,15 +30,16 @@ func worktreeSuffixForRole(role string) string {
 // engine "cli" (see stepRunners). Preflight runs once per job via sync.Once
 // so a repeated auth/binary check doesn't run on every patch-retry attempt.
 type cliEngineRunner struct {
-	o    *Orchestrator
-	cfg  *models.CLIEngineConfig
-	eng  engine.ExecutionEngine
-	once sync.Once
-	pErr error
+	o     *Orchestrator
+	cfg   *models.CLIEngineConfig
+	orgID string
+	eng   engine.ExecutionEngine
+	once  sync.Once
+	pErr  error
 }
 
-func newCLIEngineRunner(o *Orchestrator, cfg *models.CLIEngineConfig) *cliEngineRunner {
-	return &cliEngineRunner{o: o, cfg: cfg, eng: engine.NewCLIEngine(o.runtime)}
+func newCLIEngineRunner(o *Orchestrator, cfg *models.CLIEngineConfig, orgID string) *cliEngineRunner {
+	return &cliEngineRunner{o: o, cfg: cfg, orgID: orgID, eng: engine.NewCLIEngine(o.runtime, o.credentials)}
 }
 
 func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (engine.CodeStepRequest, string) {
@@ -69,6 +70,7 @@ func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, j
 		ContainerWorkDir: containerWorkDir,
 		NetworkMode:      networkMode,
 		CLIConfig:        r.cfg,
+		OrgID:            r.orgID,
 	}
 	if r.cfg != nil && r.cfg.TimeoutMinutes > 0 {
 		req.Timeout = time.Duration(r.cfg.TimeoutMinutes) * time.Minute
@@ -154,5 +156,5 @@ func (o *Orchestrator) resolveCLIEngineRunner(ctx context.Context, task *models.
 	if len(project.CLIEngineConfig) > 0 {
 		_ = json.Unmarshal(project.CLIEngineConfig, &cfg)
 	}
-	return newCLIEngineRunner(o, &cfg)
+	return newCLIEngineRunner(o, &cfg, project.OrgID)
 }

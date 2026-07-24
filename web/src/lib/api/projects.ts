@@ -270,6 +270,9 @@ export const tasks = {
   artifacts(jobID: string, token: string) {
     return request<WorkflowArtifact[]>(`/workflows/${jobID}/artifacts`, { token });
   },
+  artifactsByTask(taskID: string, token: string) {
+    return request<WorkflowArtifact[]>(`/tasks/${taskID}/artifacts`, { token });
+  },
 };
 
 export const rules = {

@@ -1,9 +1,42 @@
 "use client";
- 
+
+import { useState } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
-import { AlertTriangle, Bot, Milestone, Calendar, Info } from "lucide-react";
+import { AlertTriangle, Bot, Milestone, Calendar, Info, Terminal, ChevronDown, ChevronRight } from "lucide-react";
 import { ReviewVerdictCard } from "./ReviewVerdictCard";
-import type { ReviewVerdict } from "@/lib/types";
+import type { ReviewVerdict, WorkflowArtifact } from "@/lib/types";
+
+// Artifacts for retried steps are saved with a "_cycle_N" suffix appended to
+// the step name (see checkpoint.Store.SaveArtifact), so a checkpoint's own
+// step name only matches artifacts by prefix, not exact equality.
+function artifactsForStep(artifacts: WorkflowArtifact[] | undefined, step: string, type: string): WorkflowArtifact[] {
+  if (!artifacts) return [];
+  return artifacts.filter(
+    (a) => a.type === type && (a.step === step || a.step.startsWith(`${step}_cycle_`))
+  );
+}
+
+function CliOutputViewer({ output }: { output: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-1.5 rounded-lg border border-stroke/10 bg-slate-950/[0.03] dark:bg-slate-950/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-content-muted hover:text-foreground transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Terminal size={11} />
+        CLI Output
+      </button>
+      {expanded && (
+        <pre className="text-[10px] font-mono whitespace-pre-wrap break-all p-2.5 pt-0 max-h-[320px] overflow-y-auto custom-scrollbar text-foreground/80">
+          {output}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 const STEP_LABELS: Record<string, string> = {
   cli_analyze: "Analyze (CLI)",
@@ -17,7 +50,7 @@ function friendlyStepName(step: string): string {
 }
 
 export function CheckpointsPanel() {
-  const { task, workflow } = useTaskDetail();
+  const { task, workflow, artifacts } = useTaskDetail();
  
   if (!workflow) return null;
  
@@ -110,6 +143,7 @@ export function CheckpointsPanel() {
               /* eslint-disable @typescript-eslint/no-explicit-any */
               const reviewVerdict = (cp.state?.output as any)?.review_verdict as ReviewVerdict | undefined;
               /* eslint-enable @typescript-eslint/no-explicit-any */
+              const cliOutputArtifacts = artifactsForStep(artifacts, cp.step, "cli_output");
 
               return (
                 <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-slate-500/5 transition-colors duration-150">
@@ -129,6 +163,15 @@ export function CheckpointsPanel() {
                       {error}
                     </p>
                   )}
+                  {cliOutputArtifacts.map((art) => {
+                    let output = "";
+                    try {
+                      output = typeof art.payload === "string" ? art.payload : JSON.stringify(art.payload, null, 2);
+                    } catch {
+                      output = String(art.payload);
+                    }
+                    return <CliOutputViewer key={art.id} output={output} />;
+                  })}
                 </div>
               );
             })}

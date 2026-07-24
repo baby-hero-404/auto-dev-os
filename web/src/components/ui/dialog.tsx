@@ -8,7 +8,7 @@ export interface DialogProps {
   onClose: () => void;
   title: string;
   description?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   dismissable?: boolean;
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -28,6 +28,7 @@ export function Dialog({
     sm: "max-w-sm",
     md: "max-w-md",
     lg: "max-w-lg",
+    xl: "max-w-4xl",
   };
 
   return (
@@ -45,7 +46,7 @@ export function Dialog({
         <div className="fixed inset-0 z-30 overflow-y-auto flex items-center justify-center p-4">
           <DialogPrimitive.Content
             className={cn(
-              "w-full animate-modal-in rounded-xl border border-stroke bg-card p-6 shadow-xl relative",
+              "w-full max-h-[90vh] overflow-y-auto animate-modal-in rounded-xl border border-stroke bg-card p-6 shadow-xl relative",
               sizeClasses[size]
             )}
             onEscapeKeyDown={(event) => {

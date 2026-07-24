@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
+	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 type contextKey string
@@ -151,15 +152,15 @@ type Provider interface {
 // NewProvider creates the appropriate LLM provider based on configuration.
 func NewProvider(cfg *config.Config) (Provider, error) {
 	switch cfg.LLM.Provider {
-	case "openai":
+	case models.ProviderOpenAI:
 		return NewOpenAI(cfg.LLM.APIKey, cfg.LLM.Model), nil
-	case "anthropic":
+	case models.ProviderAnthropic:
 		return NewAnthropic(cfg.LLM.APIKey, cfg.LLM.Model), nil
-	case "gemini":
+	case models.ProviderGemini:
 		return NewGemini(cfg.LLM.APIKey, cfg.LLM.Model), nil
-	case "9router":
+	case models.Provider9Router:
 		return NewNineRouter(cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.BaseURL), nil
-	case "gateway":
+	case models.ProviderGateway:
 		return NewGatewayFromConfig(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", cfg.LLM.Provider)

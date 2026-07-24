@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -18,6 +19,10 @@ func (m *mockRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*san
 }
 
 func (m *mockRuntime) Prewarm(ctx context.Context) error { return nil }
+
+func (m *mockRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
 
 func TestGitDiffTool(t *testing.T) {
 	mr := &mockRuntime{

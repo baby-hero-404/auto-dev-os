@@ -420,6 +420,7 @@ interface TaskDetailContextType {
   parsedDiffFiles: string[];
   implementationItems: ImplementationItem[];
   currentImplementationItem: ImplementationItem | null;
+  artifacts: WorkflowArtifact[] | undefined;
 }
 
 const TaskDetailContext = createContext<TaskDetailContextType | undefined>(undefined);
@@ -474,11 +475,12 @@ export function TaskDetailProvider({
     workflowError,
   } = useTaskWorkflow(taskID);
 
-  // Fetch live workspace artifacts for the active workflow job
-  const jobID = workflow?.job?.id;
+  // Fetch checkpoint artifacts (diffs, cli_output, ...) across the task's
+  // whole run history, not just the currently active job, so output from a
+  // retried/prior attempt (and CLI-engine cli_output) is still visible.
   const { data: artifacts } = useAuthedSWR(
-    jobID ? ["workflow-artifacts", jobID] : null,
-    (token) => api.taskArtifacts(jobID!, token),
+    taskID ? ["task-artifacts", taskID] : null,
+    (token) => api.taskArtifactsByTask(taskID, token),
   );
 
   // Parse task analysis
@@ -831,6 +833,7 @@ export function TaskDetailProvider({
         parsedDiffFiles,
         implementationItems,
         currentImplementationItem,
+        artifacts,
       }}
     >
       {children}

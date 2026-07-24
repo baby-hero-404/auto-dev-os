@@ -21,6 +21,6 @@ Auto Code OS currently relies strictly on a heavy Docker container and custom AP
 While HTTPS/WSS encrypts the packet over the network, placing tokens in the URL is a security risk because the URL (and token) is often logged in plain text by web servers (Nginx, Go Chi router) and saved in browser history.
 
 **Action Items**:
-- [ ] **Refactor WebSocket Authentication**: Migrate away from query parameter tokens to a more secure enterprise pattern. Two proposed solutions are open for consideration:
+- [x] **Refactor WebSocket Authentication**: Migrate away from query parameter tokens to a more secure enterprise pattern. Implemented as Option A (`docs/openspecs/cli-terminal-ws-ticket-auth/`): `POST /organizations/{orgID}/cli-auth/ws-ticket` (Bearer-authenticated) mints a 20s single-use ticket; `cli-auth/terminal` now moved out from behind `AuthMiddleware` (a WS upgrade can't send Bearer headers) and authenticates itself by consuming `?ticket=`.
     - **Option A (Recommended - One-time Ticket)**: Create a REST endpoint (e.g., `POST /api/v1/auth/ws-ticket`) that requires standard Bearer auth and returns a short-lived (10-30s), single-use ticket. The frontend then connects via WebSocket using `?ticket=<short-lived-ticket>`.
     - **Option B (Sub-protocol)**: Pass the JWT token as a WebSocket sub-protocol from the frontend (`new WebSocket(url, ["access_token", "<token>"])`) and parse the `Sec-WebSocket-Protocol` header on the Go backend.

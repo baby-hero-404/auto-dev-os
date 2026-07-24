@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { CheckCircle2, ChevronDown, Eye, EyeOff, KeyRound, Loader2, Plus, Terminal as TerminalIcon, X, XCircle } from "lucide-react";
 import { PROVIDERS } from "@/lib/model-options";
-import { api } from "@/lib/api";
 import dynamic from "next/dynamic";
 
 const InteractiveTerminal = dynamic(
@@ -110,20 +109,11 @@ export function AddCredentialModal({
   const [showBaseUrl, setShowBaseUrl] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalError, setTerminalError] = useState("");
-  const [wsUrl, setWsUrl] = useState("");
 
-  async function openTerminal() {
+  function openTerminal() {
     if (!orgID || !token) return;
     setTerminalError("");
-    try {
-      const { ticket } = await api.mintCliAuthWSTicket(orgID, token, form.provider);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:32080/api/v1";
-      const wsBaseUrl = apiUrl.replace(/^http/, "ws");
-      setWsUrl(`${wsBaseUrl}/organizations/${orgID}/cli-auth/terminal?provider=${form.provider}&ticket=${ticket}`);
-      setShowTerminal(true);
-    } catch {
-      setTerminalError("Failed to start terminal session. Please try again.");
-    }
+    setShowTerminal(true);
   }
 
   useEffect(() => {
@@ -248,27 +238,26 @@ export function AddCredentialModal({
                     <TerminalIcon size={18} />
                     Launch Interactive Login Terminal
                   </button>
+                  {terminalError && <p className="text-red-500 text-xs mt-1">{terminalError}</p>}
                 </div>
               )}
 
-              {showTerminal && wsUrl && (
+              {showTerminal && orgID && token && (
                 <div className="mb-2">
                   <InteractiveTerminal
-                    wsUrl={wsUrl}
+                    orgID={orgID}
+                    token={token}
+                    provider={form.provider}
                     onExit={(payload) => {
                       onSetForm((prev) => ({ ...prev, apiKey: JSON.stringify(payload, null, 2) }));
                       setShowTerminal(false);
-                      setWsUrl("");
                     }}
                     onError={(err) => setTerminalError(err)}
                   />
                   {terminalError && <p className="text-red-500 text-xs mt-1">{terminalError}</p>}
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowTerminal(false);
-                      setWsUrl("");
-                    }}
+                    onClick={() => setShowTerminal(false)}
                     className="mt-2 text-xs text-content-muted hover:text-foreground underline"
                   >
                     Close Terminal (Cancel)

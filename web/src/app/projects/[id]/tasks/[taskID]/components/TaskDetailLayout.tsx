@@ -10,7 +10,7 @@ import { TaskHeroCards } from "./TaskHeroCards";
 import { TaskSubtasks } from "./TaskSubtasks";
 import { TaskSidebar } from "./TaskSidebar";
 import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
-import { CLISpecReviewControls } from "./CLISpecReviewControls";
+
 import { SupportingAccordion } from "./SupportingAccordion";
 
 export function TaskDetailLayout() {
@@ -107,6 +107,7 @@ export function TaskDetailLayout() {
         {workflow?.job?.status === "paused" &&
           workflow?.job?.last_error &&
           !workflow.job.last_error.includes("workflow paused for human task clarification") &&
+          task?.status !== "spec_review" &&
           task?.status !== "pr_ready" &&
           task?.status !== "human_review" &&
           task?.status !== "merged" && (
@@ -123,24 +124,13 @@ export function TaskDetailLayout() {
                 {workflow.job.last_error}
               </p>
               <div className="z-10">
-                {workflow.job.last_error === "workflow paused for human spec review" && task?.execution_engine === "cli" ? (
-                  <CLISpecReviewControls
-                    taskID={taskID}
-                    token={token}
-                    onReviewed={async () => {
-                      await mutateWorkflow();
-                    }}
-                    setError={setError}
-                  />
-                ) : (
-                  <BoundaryResolutionControls
-                    errorMsg={workflow.job.last_error}
-                    task={task}
-                    updateTask={updateTask}
-                    execute={execute}
-                    setError={setError}
-                  />
-                )}
+                <BoundaryResolutionControls
+                  errorMsg={workflow.job.last_error}
+                  task={task}
+                  updateTask={updateTask}
+                  execute={execute}
+                  setError={setError}
+                />
               </div>
             </div>
           )}

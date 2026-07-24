@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -106,6 +107,10 @@ func (m *noopSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest
 }
 func (m *noopSandboxRuntime) Health(ctx context.Context) error  { return nil }
 func (m *noopSandboxRuntime) Prewarm(ctx context.Context) error { return nil }
+
+func (m *noopSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
 
 func TestCLIEngineRunner_RunLLMStep_NoChangesFailsByDefault(t *testing.T) {
 	rt := &noopSandboxRuntime{}

@@ -56,8 +56,18 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(observability.TraceMiddleware("auto-code-os-api"))
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(30 * time.Second))
-
+	
+	// Apply 30s timeout to all routes except the websocket terminal
+	r.Use(func(next http.Handler) http.Handler {
+		timeoutHandler := chimw.Timeout(30 * time.Second)(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if strings.Contains(req.URL.Path, "/cli-auth/terminal") || strings.Contains(req.URL.Path, "/cli-test/terminal") {
+				next.ServeHTTP(w, req)
+			} else {
+				timeoutHandler.ServeHTTP(w, req)
+			}
+		})
+	})
 	webPort := d.WebPort
 	if webPort == "" {
 		webPort = "32300"
@@ -110,6 +120,7 @@ func NewRouter(d Deps) http.Handler {
 	providerModelH := NewProviderModelHandler(d.ProviderModelSvc)
 	govH := NewGovernanceHandler()
 	cliAuthH := NewCLIAuthHandler(d.SandboxRuntime)
+	cliTestH := NewCLITestHandler(d.SandboxRuntime, d.ProviderCredSvc)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -120,6 +131,12 @@ func NewRouter(d Deps) http.Handler {
 		})
 		// Public: webhook (token-based auth in handler)
 		r.Post("/webhooks/github", webhookH.GitHub)
+
+		// Public: browser WebSocket upgrades can't set an Authorization header, so this
+		// route can't sit behind AuthMiddleware. Terminal authenticates itself via the
+		// single-use ticket minted by the Bearer-authenticated MintWSTicket endpoint below.
+		r.Get("/organizations/{orgID}/cli-auth/terminal", cliAuthH.Terminal)
+		r.Get("/organizations/{orgID}/cli-test/terminal", cliTestH.Terminal)
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {
@@ -145,8 +162,8 @@ func NewRouter(d Deps) http.Handler {
 						r.Get("/", projH.List)
 					})
 
-					r.Get("/cli-auth/terminal", cliAuthH.Terminal)
 					r.Post("/cli-auth/ws-ticket", cliAuthH.MintWSTicket)
+					r.Post("/cli-test/ws-ticket", cliTestH.MintWSTicket)
 
 					r.Route("/rules", func(r chi.Router) {
 						r.Get("/", ruleH.ListGlobal)
@@ -252,6 +269,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/tasks/{taskID}/logs", workflowH.Logs)
 			r.Get("/tasks/{taskID}/logs/stream", workflowH.StreamLogs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
+			r.Get("/tasks/{taskID}/artifacts", workflowH.ArtifactsByTask)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
 			r.Post("/tasks/{taskID}/restart", workflowH.Retry)
 			r.Post("/tasks/{taskID}/retry", workflowH.Retry)

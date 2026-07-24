@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/spf13/viper"
 )
 
@@ -246,29 +247,29 @@ func normalize(cfg *Config) error {
 
 func configureLLM(cfg *LLMConfig) error {
 	switch cfg.Provider {
-	case "openai":
+	case models.ProviderOpenAI:
 		if cfg.Model == "" {
 			cfg.Model = "gpt-5.5"
 		}
 		cfg.APIKey = cfg.OpenAIAPIKey
-	case "anthropic":
+	case models.ProviderAnthropic:
 		if cfg.Model == "" {
 			cfg.Model = "claude-sonnet-4-6"
 		}
 		cfg.APIKey = cfg.AnthropicAPIKey
-	case "gemini":
+	case models.ProviderGemini:
 		if cfg.Model == "" {
 			cfg.Model = "gemini-2.5-pro"
 		}
 		cfg.APIKey = cfg.GeminiAPIKey
-	case "9router":
+	case models.Provider9Router:
 		if cfg.Model == "" {
 			cfg.Model = "balanced"
 		}
+		cfg.APIKey = cfg.LLMAPIKey
 		if cfg.BaseURL == "" {
 			cfg.BaseURL = "http://localhost:20128/v1"
 		}
-		cfg.APIKey = cfg.LLMAPIKey
 	case "gateway":
 		// Gateway can resolve provider credentials from the database at runtime.
 		// Environment keys remain supported as a fallback but are not required.

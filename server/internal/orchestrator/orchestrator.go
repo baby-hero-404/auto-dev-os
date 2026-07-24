@@ -12,6 +12,7 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/checkpoint"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
@@ -65,6 +66,7 @@ type Orchestrator struct {
 	gitConfig           config.GitConfig
 	learnedSkills       LearnedSkillReader
 	attestations        steps.AttestationSigner
+	credentials         engine.CredentialGetter
 }
 
 func (o *Orchestrator) wake() {
@@ -122,6 +124,15 @@ func WithLearnedSkills(repo LearnedSkillReader) Option {
 func WithAttestationSigner(signer steps.AttestationSigner) Option {
 	return func(o *Orchestrator) {
 		o.attestations = signer
+	}
+}
+
+// WithCredentials wires an org-scoped credential resolver used by the CLI
+// execution engine to materialize a task's linked CLIEngineConfig.CredentialID
+// into the sandbox before running.
+func WithCredentials(credentials engine.CredentialGetter) Option {
+	return func(o *Orchestrator) {
+		o.credentials = credentials
 	}
 }
 
@@ -279,6 +290,16 @@ func (o *Orchestrator) ListArtifacts(ctx context.Context, jobID string) ([]model
 		return nil, fmt.Errorf("artifact repository not configured")
 	}
 	return o.artifacts.ListByJobID(ctx, jobID)
+}
+
+// ListArtifactsByTask returns all checkpoint artifacts (e.g. cli_output,
+// patch, execution_snapshot) saved for a task across its whole run history,
+// so the UI can render them without needing a specific job ID.
+func (o *Orchestrator) ListArtifactsByTask(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error) {
+	if o.artifacts == nil {
+		return nil, fmt.Errorf("artifact repository not configured")
+	}
+	return o.artifacts.ListByTaskID(ctx, taskID)
 }
 
 func (o *Orchestrator) Execute(ctx context.Context, taskID string) (*models.WorkflowJob, error) {

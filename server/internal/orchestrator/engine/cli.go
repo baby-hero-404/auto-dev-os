@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -14,6 +15,12 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
+
+// ErrConfigInvalid marks a cli engine failure as a permanent configuration
+// problem (missing command, unresolvable linked credential, ...) rather than
+// a transient one. Callers should not burn retry attempts on it — the same
+// misconfiguration will fail identically every time until a human fixes it.
+var ErrConfigInvalid = errors.New("cli engine: invalid configuration")
 
 const (
 	authPreflightTimeout = 30 * time.Second
@@ -68,18 +75,57 @@ func extractCapturedFiles(combined string) (string, map[string]string) {
 	return combined, files
 }
 
+// CredentialGetter resolves an org-scoped saved credential to its decrypted
+// payload, matching service.CredentialPoolService.GetDecryptedCredential.
+// The payload maps a relative path (as captured during interactive CLI
+// login, e.g. ".claude.json" or ".config/codex/auth.json") to file content.
+type CredentialGetter interface {
+	GetDecryptedCredential(ctx context.Context, orgID, id string) (provider string, payload map[string]string, err error)
+}
+
 // cliEngine spawns a generic, configurable CLI subprocess inside the
 // existing sandbox container. The prompt is written to a file
 // (.autocode/prompt.md) rather than passed as an argv value, to avoid
 // shell-escaping/length limits; success/failure is judged purely by the
 // process exit code and the git diff the caller inspects afterwards.
 type cliEngine struct {
-	runtime sandbox.Runtime
+	runtime     sandbox.Runtime
+	credentials CredentialGetter
 }
 
-// NewCLIEngine constructs the subprocess-CLI execution engine.
-func NewCLIEngine(runtime sandbox.Runtime) ExecutionEngine {
-	return &cliEngine{runtime: runtime}
+// NewCLIEngine constructs the subprocess-CLI execution engine. credentials
+// may be nil, in which case CLIConfig.CredentialID is ignored (the run
+// proceeds unauthenticated, same as before credential linking existed).
+func NewCLIEngine(runtime sandbox.Runtime, credentials CredentialGetter) ExecutionEngine {
+	return &cliEngine{runtime: runtime, credentials: credentials}
+}
+
+// resolveCredentialFiles fetches the linked saved credential (if any) and
+// maps its relative-path payload onto absolute container paths under
+// /root, matching the layout the interactive CLI auth flow captured it in
+// (see cli_auth.go's Terminal handler, which runs with HOME=/workspace
+// during capture) and the container's runtime HOME of /root.
+func (e *cliEngine) resolveCredentialFiles(ctx context.Context, req CodeStepRequest) (map[string]string, error) {
+	cfg := req.CLIConfig
+	if cfg == nil || strings.TrimSpace(cfg.CredentialID) == "" {
+		return nil, nil
+	}
+	if e.credentials == nil {
+		return nil, fmt.Errorf("cli engine: cli_engine_config.credential_id is set but no credential service is configured: %w", ErrConfigInvalid)
+	}
+	_, payload, err := e.credentials.GetDecryptedCredential(ctx, req.OrgID, cfg.CredentialID)
+	if err != nil {
+		return nil, fmt.Errorf("cli engine: failed to load linked credential: %w", err)
+	}
+	files := make(map[string]string, len(payload))
+	for relPath, content := range payload {
+		clean := filepath.Clean("/" + relPath)
+		if clean == "/" || strings.Contains(clean, "..") {
+			continue
+		}
+		files["/root"+clean] = content
+	}
+	return files, nil
 }
 
 func (e *cliEngine) Name() string { return models.ExecutionEngineCLI }
@@ -92,18 +138,24 @@ func (e *cliEngine) Name() string { return models.ExecutionEngineCLI }
 func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string, error) {
 	cfg := req.CLIConfig
 	if cfg == nil || strings.TrimSpace(cfg.Command) == "" {
-		return "", fmt.Errorf("cli engine: cli_engine_config.command is required")
+		return "", fmt.Errorf("cli engine: cli_engine_config.command is required: %w", ErrConfigInvalid)
+	}
+
+	credentialFiles, err := e.resolveCredentialFiles(ctx, req)
+	if err != nil {
+		return "", err
 	}
 
 	checkCmd := fmt.Sprintf("command -v %s >/dev/null 2>&1", paths.QuoteShellArg(cfg.Command))
 	res, err := e.runtime.Run(ctx, sandbox.CommandRequest{
-		TaskID:      req.Task.ID,
-		AgentID:     agentID(req.Agent),
-		Workspace:   req.HostWorkspace,
-		Command:     []string{"bash", "-lc", checkCmd},
-		Env:         map[string]string{"CI": "1"},
-		NetworkMode: req.NetworkMode,
-		Timeout:     binaryCheckTimeout,
+		TaskID:          req.Task.ID,
+		AgentID:         agentID(req.Agent),
+		Workspace:       req.HostWorkspace,
+		Command:         []string{"bash", "-lc", checkCmd},
+		Env:             map[string]string{"CI": "1"},
+		NetworkMode:     req.NetworkMode,
+		Timeout:         binaryCheckTimeout,
+		CredentialFiles: credentialFiles,
 	})
 	if err != nil {
 		return "", fmt.Errorf("cli engine: preflight failed to run: %w", err)
@@ -122,13 +174,14 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
 	authRes, err := e.runtime.Run(ctx, sandbox.CommandRequest{
-		TaskID:      req.Task.ID,
-		AgentID:     agentID(req.Agent),
-		Workspace:   req.HostWorkspace,
-		Command:     []string{"bash", "-lc", cfg.AuthCheckCommand},
-		Env:         env,
-		NetworkMode: req.NetworkMode,
-		Timeout:     authPreflightTimeout,
+		TaskID:          req.Task.ID,
+		AgentID:         agentID(req.Agent),
+		Workspace:       req.HostWorkspace,
+		Command:         []string{"bash", "-lc", cfg.AuthCheckCommand},
+		Env:             env,
+		NetworkMode:     req.NetworkMode,
+		Timeout:         authPreflightTimeout,
+		CredentialFiles: credentialFiles,
 	})
 	if err != nil {
 		return "", fmt.Errorf("cli engine: auth check failed to run: %w", err)
@@ -168,7 +221,7 @@ func hostPathForContainerPath(hostWorkspace, containerPath string) (string, erro
 func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*CodeStepResult, error) {
 	cfg := req.CLIConfig
 	if cfg == nil || strings.TrimSpace(cfg.Command) == "" {
-		return nil, fmt.Errorf("cli engine: cli_engine_config.command is required")
+		return nil, fmt.Errorf("cli engine: cli_engine_config.command is required: %w", ErrConfigInvalid)
 	}
 
 	timeout := req.Timeout
@@ -236,14 +289,20 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
 
+	credentialFiles, err := e.resolveCredentialFiles(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
 	result, err := e.runtime.Run(ctx, sandbox.CommandRequest{
-		TaskID:      req.Task.ID,
-		AgentID:     agentID(req.Agent),
-		Workspace:   req.HostWorkspace,
-		Command:     []string{"bash", "-lc", script},
-		Env:         env,
-		NetworkMode: req.NetworkMode,
-		Timeout:     timeout,
+		TaskID:          req.Task.ID,
+		AgentID:         agentID(req.Agent),
+		Workspace:       req.HostWorkspace,
+		Command:         []string{"bash", "-lc", script},
+		Env:             env,
+		NetworkMode:     req.NetworkMode,
+		Timeout:         timeout,
+		CredentialFiles: credentialFiles,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cli engine: run failed: %w", err)

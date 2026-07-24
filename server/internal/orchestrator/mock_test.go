@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
@@ -217,6 +218,10 @@ func (m *mockSandboxRuntime) Prewarm(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
+
 type mockAnalyzeSandboxRuntime struct {
 	commands []string
 	outputs  map[string]string
@@ -241,6 +246,10 @@ func (m *mockAnalyzeSandboxRuntime) Health(ctx context.Context) error {
 }
 
 func (m *mockAnalyzeSandboxRuntime) Prewarm(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockAnalyzeSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
 	return nil
 }
 

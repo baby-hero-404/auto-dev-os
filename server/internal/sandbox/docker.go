@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -162,6 +163,9 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 		// Inject host CLI credentials into the sandbox as read-only so the container
 		// can automatically utilize the host's existing OAuth sessions without manual config.
+		// A per-org CredentialFiles entry targeting the same path always wins (see below),
+		// since that reflects an explicit, task-scoped credential rather than whichever
+		// operator happens to be running the server process.
 		authDirs := map[string]string{
 			filepath.Join(homeDir, ".claude.json"):     "/root/.claude.json", // Claude Code
 			filepath.Join(homeDir, ".gemini"):          "/root/.gemini",      // Antigravity CLI
@@ -169,6 +173,9 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 
 		for absHostPath, targetContainerPath := range authDirs {
+			if _, ok := req.CredentialFiles[targetContainerPath]; ok {
+				continue
+			}
 			if _, err := os.Stat(absHostPath); err == nil {
 				mounts = append(mounts, mount.Mount{
 					Type:     mount.TypeBind,
@@ -177,6 +184,28 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 					ReadOnly: true,
 				})
 			}
+		}
+	}
+
+	if len(req.CredentialFiles) > 0 {
+		credDir, err := os.MkdirTemp("", "auto-code-os-cred-*")
+		if err != nil {
+			return nil, fmt.Errorf("create credential staging dir: %w", err)
+		}
+		defer os.RemoveAll(credDir)
+
+		i := 0
+		for targetContainerPath, content := range req.CredentialFiles {
+			hostPath := filepath.Join(credDir, fmt.Sprintf("f%d", i))
+			i++
+			if err := os.WriteFile(hostPath, []byte(content), 0o600); err != nil {
+				return nil, fmt.Errorf("stage credential file: %w", err)
+			}
+			mounts = append(mounts, mount.Mount{
+				Type:   mount.TypeBind,
+				Source: hostPath,
+				Target: targetContainerPath,
+			})
 		}
 	}
 
@@ -319,33 +348,63 @@ func (r *DockerRuntime) RunInteractive(ctx context.Context, req CommandRequest, 
 	defer attachResp.Close()
 
 	// Connect streams
-	errCh := make(chan error, 2)
 	go func() {
-		_, err := io.Copy(attachResp.Conn, stdin)
-		errCh <- err
+		_, _ = io.Copy(attachResp.Conn, stdin)
 	}()
+	// Tty=true merges stdout and stderr, but we can copy it to both just in case
+	stdoutDone := make(chan struct{})
 	go func() {
-		// Tty=true merges stdout and stderr, but we can copy it to both just in case
-		_, err := io.Copy(stdout, attachResp.Reader)
-		errCh <- err
+		defer close(stdoutDone)
+		_, _ = io.Copy(stdout, attachResp.Reader)
 	}()
 
 	if err := r.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("start docker container: %w", err)
 	}
 
+	if req.ResizeCh != nil {
+		go func() {
+			for {
+				select {
+				case size, ok := <-req.ResizeCh:
+					if !ok {
+						return
+					}
+					_ = r.client.ContainerResize(ctx, containerID, container.ResizeOptions{
+						Height: size.Rows,
+						Width:  size.Cols,
+					})
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	waitCh, waitErrCh := r.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	var waitErr error
 	select {
 	case err := <-waitErrCh:
 		if err != nil {
-			return fmt.Errorf("wait for docker container: %w", err)
+			waitErr = fmt.Errorf("wait for docker container: %w", err)
 		}
 	case <-waitCh:
 		// Completed
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return nil
+
+	// The container has stopped, but attachResp.Reader may still have buffered
+	// output in flight (e.g. the final line printed right before exit). Wait
+	// for the copy goroutine to drain it before the deferred attachResp.Close()
+	// tears down the stream out from under it, otherwise trailing output is lost.
+	select {
+	case <-stdoutDone:
+	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
+	}
+
+	return waitErr
 }
 
 func splitDockerLogs(reader io.Reader) (string, string, error) {

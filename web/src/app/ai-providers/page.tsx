@@ -13,9 +13,12 @@ import type { ProviderCredential } from "@/lib/types";
 import { ProviderSummarySkeleton, ProviderTableSkeleton } from "./components/ProviderSkeletons";
 import { ProviderSummary } from "./components/ProviderSummary";
 import { ProviderCredentialsTable } from "./components/ProviderCredentialsTable";
-import { AddCredentialModal, generatedCredentialLabel } from "./components/AddCredentialModal";
+import { AddApiCredentialModal } from "./components/AddApiCredentialModal";
+import { CliAuthModal } from "./components/CliAuthModal";
+import { generatedCredentialLabel } from "./components/AddApiCredentialModal";
 import { AddModelModal } from "./components/AddModelModal";
 import { ModelRoutingRules } from "./components/ModelRoutingRules";
+import { TestCliModal } from "./components/TestCliModal";
 
 type FormState = {
   provider: string;
@@ -38,6 +41,8 @@ export default function AIProvidersPage() {
   const token = session?.token ?? "";
   const orgID = session?.user.org_id ?? "";
 
+  const [activeTab, setActiveTab] = useState<"api" | "cli">("api");
+  
   const [form, setForm] = useState<FormState>(initialForm);
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,12 +51,16 @@ export default function AIProvidersPage() {
   const [testingMap, setTestingMap] = useState<Record<string, "idle" | "testing" | "success" | "error">>({});
   const [deleteConfirmID, setDeleteConfirmID] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [addModalMode, setAddModalMode] = useState<"api" | "cli">("api");
+  
+  const [isAddApiOpen, setIsAddApiOpen] = useState(false);
+  const [selectedCliProvider, setSelectedCliProvider] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [addModelLevel, setAddModelLevel] = useState<"fast" | "balanced" | "powerful">("fast");
+
+  const [testingCliCredentialID, setTestingCliCredentialID] = useState<string | null>(null);
+  const [testingCliProvider, setTestingCliProvider] = useState<string | null>(null);
 
   const handleSetForm: React.Dispatch<React.SetStateAction<FormState>> = (update) => {
     setForm(update);
@@ -69,30 +78,37 @@ export default function AIProvidersPage() {
     () => api.listProviderModels(orgID, token),
   );
 
+  const activeTabCredentials = useMemo(() => {
+    return credentials.filter((credential) => 
+      activeTab === "api" ? !credential.provider.startsWith("cli:") : credential.provider.startsWith("cli:")
+    );
+  }, [credentials, activeTab]);
+
   const credentialsByProvider = useMemo(() => {
-    return credentials.reduce<Record<string, ProviderCredential[]>>((groups, credential) => {
+    return activeTabCredentials.reduce<Record<string, ProviderCredential[]>>((groups, credential) => {
       groups[credential.provider] = groups[credential.provider] || [];
       groups[credential.provider].push(credential);
       return groups;
     }, {});
-  }, [credentials]);
+  }, [activeTabCredentials]);
 
   const configuredProviderCount = useMemo(() => {
-    return PROVIDERS.filter((provider) => provider !== "gateway" && (credentialsByProvider[provider]?.length || 0) > 0).length;
-  }, [credentialsByProvider]);
+    const validProviders = activeTab === "api" ? PROVIDERS.filter(p => p !== "gateway" && !p.startsWith("cli:")) : PROVIDERS.filter(p => p.startsWith("cli:"));
+    return validProviders.filter((provider) => (credentialsByProvider[provider]?.length || 0) > 0).length;
+  }, [credentialsByProvider, activeTab]);
 
   const activeCredentialCount = useMemo(() => {
-    return credentials.filter((credential) => credential.status === "active").length;
-  }, [credentials]);
+    return activeTabCredentials.filter((credential) => credential.status === "active").length;
+  }, [activeTabCredentials]);
 
   async function handleAddCredential(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !orgID) return;
     if (!form.apiKey.trim()) {
-      setFormError("API key is required.");
+      setFormError(activeTab === "api" ? "API key is required." : "Session data is required.");
       return;
     }
-    if (draftTestState !== "success") {
+    if (activeTab === "api" && draftTestState !== "success") {
       setFormError("Test the connection successfully before saving.");
       return;
     }
@@ -115,13 +131,41 @@ export default function AIProvidersPage() {
       setDraftTestState("idle");
       setTimeout(() => {
         setSaveState("idle");
-        setIsAddOpen(false);
+        setIsAddApiOpen(false);
       }, 600);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Failed to save provider credential.";
       setFormError(message);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleSaveCliCredential(provider: string, label: string, apiKey: string): Promise<string | null> {
+    if (!token || !orgID) return null;
+    try {
+      await api.createProviderCredential(orgID, token, {
+        provider,
+        label,
+        api_key: apiKey.trim(),
+        priority: 0,
+      });
+      setSelectedCliProvider(null);
+      toast.success("CLI Profile added successfully");
+      Promise.all([mutate(), mutateModels()]).catch(err => {
+        console.error("Failed to mutate after saving CLI profile:", err);
+      });
+      return null;
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to save CLI profile.";
+      // If it's a conflict (duplicate label), return the error so the modal
+      // can show it inline and let the user rename — do NOT close the modal.
+      if (err instanceof ApiError && err.status === 409) {
+        return message;
+      }
+      toast.error(message);
+      setSelectedCliProvider(null);
+      return null;
     }
   }
 
@@ -150,6 +194,15 @@ export default function AIProvidersPage() {
 
   async function testCredential(credentialID: string) {
     if (!token || !orgID) return;
+    
+    // Find the credential
+    const cred = credentials.find((c: any) => c.id === credentialID);
+    if (cred && cred.provider.startsWith("cli:")) {
+      setTestingCliCredentialID(credentialID);
+      setTestingCliProvider(cred.provider);
+      return;
+    }
+
     setTestingMap((prev) => ({ ...prev, [credentialID]: "testing" }));
     try {
       await api.testProviderCredential(orgID, credentialID, token);
@@ -258,7 +311,7 @@ export default function AIProvidersPage() {
   return (
     <DashboardLayout>
       <Toaster richColors position="top-right" />
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-1">
           <h2 className="text-2xl font-semibold text-foreground">AI Providers</h2>
           <p className="text-sm text-content-muted">
@@ -266,47 +319,72 @@ export default function AIProvidersPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={!token || !orgID}
-            onClick={() => {
-              setFormError("");
-              setSaveState("idle");
-              setDraftTestState("idle");
-              setForm((prev) => ({
-                ...prev,
-                provider: "openai",
-                label: generatedCredentialLabel("openai"),
-              }));
-              setAddModalMode("api");
-              setIsAddOpen(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus size={16} />
-            Add API Key
-          </button>
-          <button
-            type="button"
-            disabled={!token || !orgID}
-            onClick={() => {
-              setFormError("");
-              setSaveState("idle");
-              setDraftTestState("idle");
-              setForm((prev) => ({
-                ...prev,
-                provider: "cli:claude",
-                label: generatedCredentialLabel("cli:claude"),
-              }));
-              setAddModalMode("cli");
-              setIsAddOpen(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2.5 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus size={16} />
-            Add CLI Profile
-          </button>
+          {activeTab === "api" ? (
+            <button
+              type="button"
+              disabled={!token || !orgID}
+              onClick={() => {
+                setFormError("");
+                setSaveState("idle");
+                setDraftTestState("idle");
+                setForm((prev) => ({
+                  ...prev,
+                  provider: "openai",
+                  label: generatedCredentialLabel("openai"),
+                  apiKey: "",
+                  baseURL: "",
+                }));
+                setIsAddApiOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              Add API Key
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={!token || !orgID}
+                onClick={() => setSelectedCliProvider("cli:claude")}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                + Connect Claude CLI
+              </button>
+              <button
+                type="button"
+                disabled={!token || !orgID}
+                onClick={() => setSelectedCliProvider("cli:codex")}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                + Connect Codex CLI
+              </button>
+              <button
+                type="button"
+                disabled={!token || !orgID}
+                onClick={() => setSelectedCliProvider("cli:antigravity")}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                + Connect Antigravity CLI
+              </button>
+            </div>
+          )}
         </div>
+      </div>
+
+      <div className="mb-6 border-b border-stroke flex items-center gap-6">
+        <button
+          onClick={() => setActiveTab("api")}
+          className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === "api" ? "border-brand-primary text-foreground" : "border-transparent text-content-muted hover:text-foreground"}`}
+        >
+          API Connections
+        </button>
+        <button
+          onClick={() => setActiveTab("cli")}
+          className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === "cli" ? "border-brand-primary text-foreground" : "border-transparent text-content-muted hover:text-foreground"}`}
+        >
+          CLI Profiles
+        </button>
       </div>
 
       <div className="grid gap-6">
@@ -322,65 +400,79 @@ export default function AIProvidersPage() {
               <ProviderSummarySkeleton />
               <ProviderTableSkeleton />
             </>
-          ) : credentials.length === 0 ? (
+          ) : activeTabCredentials.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-stroke bg-card p-12 text-center animate-fade-in">
               <div className="grid size-12 place-items-center rounded-xl bg-surface text-brand-primary">
                 <Cpu size={24} />
               </div>
-              <h3 className="mt-4 font-semibold text-foreground">No credentials configured</h3>
+              <h3 className="mt-4 font-semibold text-foreground">
+                {activeTab === "api" ? "No API keys configured" : "No CLI profiles configured"}
+              </h3>
               <p className="mt-2 max-w-sm text-sm text-content-muted font-normal leading-relaxed">
-                Add an API key for OpenAI, Anthropic, Gemini, or a custom router to enable LLM access for your agents.
+                {activeTab === "api" 
+                  ? "Add an API key for OpenAI, Anthropic, Gemini, or a custom router to enable LLM access for your agents."
+                  : "Add CLI authentication profiles for Claude Code or Cursor to enable sandbox execution."}
               </p>
               <div className="mt-5 flex gap-3 justify-center">
-                <button
-                  onClick={() => {
-                    setFormError("");
-                    setSaveState("idle");
-                    setDraftTestState("idle");
-                    setForm((prev) => ({
-                      ...prev,
-                      provider: "openai",
-                      label: generatedCredentialLabel("openai"),
-                    }));
-                    setAddModalMode("api");
-                    setIsAddOpen(true);
-                  }}
-                  className="flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.15)]"
-                  type="button"
-                >
-                  <Plus size={16} />
-                  Add API Key
-                </button>
-                <button
-                  onClick={() => {
-                    setFormError("");
-                    setSaveState("idle");
-                    setDraftTestState("idle");
-                    setForm((prev) => ({
-                      ...prev,
-                      provider: "cli:claude",
-                      label: generatedCredentialLabel("cli:claude"),
-                    }));
-                    setAddModalMode("cli");
-                    setIsAddOpen(true);
-                  }}
-                  className="flex items-center justify-center gap-2 rounded-md border border-brand-primary bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 cursor-pointer"
-                  type="button"
-                >
-                  <Plus size={16} />
-                  Add CLI Profile
-                </button>
+                {activeTab === "api" ? (
+                  <button
+                    onClick={() => {
+                      setFormError("");
+                      setSaveState("idle");
+                      setDraftTestState("idle");
+                      setForm((prev) => ({
+                        ...prev,
+                        provider: "openai",
+                        label: generatedCredentialLabel("openai"),
+                        apiKey: "",
+                      }));
+                      setIsAddApiOpen(true);
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 cursor-pointer shadow-[0_0_15px_rgba(34,197,94,0.15)]"
+                    type="button"
+                  >
+                    <Plus size={16} />
+                    Add API Key
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      disabled={!token || !orgID}
+                      onClick={() => setSelectedCliProvider("cli:claude")}
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                    >
+                      + Connect Claude CLI
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!token || !orgID}
+                      onClick={() => setSelectedCliProvider("cli:codex")}
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                    >
+                      + Connect Codex CLI
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!token || !orgID}
+                      onClick={() => setSelectedCliProvider("cli:antigravity")}
+                      className="inline-flex items-center justify-center gap-2 rounded-md border border-brand-primary/30 bg-brand-primary/10 px-4 py-2 text-sm font-semibold text-brand-primary transition hover:bg-brand-primary/20 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                    >
+                      + Connect Antigravity CLI
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
             <>
               <ProviderSummary
                 configuredProviderCount={configuredProviderCount}
-                totalCredentialCount={credentials.length}
+                totalCredentialCount={activeTabCredentials.length}
                 activeCredentialCount={activeCredentialCount}
               />
               <ProviderCredentialsTable
-                credentials={credentials}
+                credentials={activeTabCredentials}
                 testingMap={testingMap}
                 deleteConfirmID={deleteConfirmID}
                 onTest={testCredential}
@@ -392,8 +484,8 @@ export default function AIProvidersPage() {
           )}
         </section>
 
-        {/* Model level group config */}
-        {credentials.length > 0 && (
+        {/* Model level group config - Only show for API */}
+        {activeTab === "api" && activeTabCredentials.length > 0 && (
           <ModelRoutingRules
             selectedProvider={selectedProvider}
             setSelectedProvider={setSelectedProvider}
@@ -410,8 +502,8 @@ export default function AIProvidersPage() {
         )}
       </div>
 
-      {isAddOpen && (
-        <AddCredentialModal
+      {isAddApiOpen && (
+        <AddApiCredentialModal
           form={form}
           formError={formError}
           isSubmitting={isSubmitting}
@@ -420,12 +512,24 @@ export default function AIProvidersPage() {
           showApiKey={showApiKey}
           token={token}
           orgID={orgID}
-          mode={addModalMode}
-          onClose={() => setIsAddOpen(false)}
+          onClose={() => setIsAddApiOpen(false)}
           onSubmit={handleAddCredential}
           onSetForm={handleSetForm}
           onTestKey={testDraftCredential}
           onToggleApiKey={() => setShowApiKey(!showApiKey)}
+        />
+      )}
+
+      {selectedCliProvider && (
+        <CliAuthModal
+          provider={selectedCliProvider}
+          token={token}
+          orgID={orgID}
+          existingLabels={credentials
+            .filter((c: any) => c.provider === selectedCliProvider)
+            .map((c: any) => c.label as string)}
+          onClose={() => setSelectedCliProvider(null)}
+          onSave={handleSaveCliCredential}
         />
       )}
 
@@ -434,6 +538,20 @@ export default function AIProvidersPage() {
           level={addModelLevel}
           onClose={() => setIsAddModelOpen(false)}
           onSubmit={handleAddModelSubmit}
+        />
+      )}
+
+      {testingCliCredentialID && testingCliProvider && (
+        <TestCliModal
+          isOpen={true}
+          onClose={() => {
+            setTestingCliCredentialID(null);
+            setTestingCliProvider(null);
+          }}
+          orgID={orgID}
+          token={token}
+          credentialID={testingCliCredentialID}
+          provider={testingCliProvider}
         />
       )}
     </DashboardLayout>

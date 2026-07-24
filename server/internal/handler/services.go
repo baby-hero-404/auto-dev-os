@@ -147,6 +147,7 @@ type ProviderCredentialService interface {
 	Delete(ctx context.Context, orgID string, id string) error
 	TestConnection(ctx context.Context, orgID string, id string) error
 	TestConnectionInput(ctx context.Context, orgID string, input models.TestProviderCredentialInput) error
+	GetDecryptedCredential(ctx context.Context, orgID, id string) (string, map[string]string, error)
 }
 
 type ProviderModelService interface {

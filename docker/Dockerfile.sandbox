@@ -1,5 +1,7 @@
 FROM golang:1.26-bookworm
 
+# CLI coding agents (claude, codex) require Node 22+; Debian bookworm's apt
+# nodejs is only 18.x, so NodeSource replaces it instead of using apt's package.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -9,18 +11,28 @@ RUN apt-get update \
         git \
         make \
         maven \
-        nodejs \
-        npm \
         patch \
         python3 \
         python3-pip \
         python3-pytest \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+
+# CLI coding agents available to cli:* execution engine profiles (see
+# web/src/lib/model-options.ts PROVIDERS). npm global installs land in
+# /usr/local, already on PATH for every user.
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 WORKDIR /workspace
 
 RUN useradd --create-home --shell /bin/bash agent
 USER agent
+
+# The antigravity installer has no per-user variant of its own; it installs to
+# $HOME/.local/bin, so it must run as `agent` (not root) to land somewhere this
+# user can execute from.
+RUN bash -c 'set -o pipefail; curl -fsSL https://antigravity.google/cli/install.sh | bash'
 
 CMD ["bash", "-lc", "pwd && ls -la"]

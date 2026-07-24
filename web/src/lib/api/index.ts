@@ -64,6 +64,7 @@ export const api = {
   rejectPR: projects.tasks.rejectPR,
   startReview: projects.tasks.startReview,
   taskArtifacts: projects.tasks.artifacts,
+  taskArtifactsByTask: projects.tasks.artifactsByTask,
 
   listAgents: agents.list,
   createAgent: agents.create,
@@ -113,6 +114,7 @@ export const api = {
   updateProviderModel: gateway.providerModels.update,
   deleteProviderModel: gateway.providerModels.remove,
   mintCliAuthWSTicket: gateway.cliAuth.mintWSTicket,
+  mintCliTestWSTicket: gateway.cliTest.mintWSTicket,
 
   listMemories: memories.list,
   searchMemories: memories.search,

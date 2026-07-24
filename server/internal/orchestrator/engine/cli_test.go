@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,10 @@ type mockRuntime struct {
 }
 
 func (m *mockRuntime) Prewarm(ctx context.Context) error { return nil }
+
+func (m *mockRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
 
 func (m *mockRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
 	m.calls = append(m.calls, req)
@@ -61,7 +66,7 @@ var hostWorkspaceForTest = func() string {
 }()
 
 func TestCLIEngine_Preflight_MissingCommand(t *testing.T) {
-	e := NewCLIEngine(&mockRuntime{})
+	e := NewCLIEngine(&mockRuntime{}, nil)
 	_, err := e.Preflight(context.Background(), baseReq(nil))
 	if err == nil {
 		t.Fatal("expected error when cli_engine_config is nil")
@@ -70,7 +75,7 @@ func TestCLIEngine_Preflight_MissingCommand(t *testing.T) {
 
 func TestCLIEngine_Preflight_BinaryNotFound(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 1}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	_, err := e.Preflight(context.Background(), baseReq(cfg))
 	if err == nil || !strings.Contains(err.Error(), "not found") {
@@ -83,7 +88,7 @@ func TestCLIEngine_Preflight_AuthCheckFails(t *testing.T) {
 		{ExitCode: 0},                          // binary check ok
 		{ExitCode: 1, Stderr: "not logged in"}, // auth check fails
 	}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude", AuthCheckCommand: "claude auth status"}
 	_, err := e.Preflight(context.Background(), baseReq(cfg))
 	if err == nil || !strings.Contains(err.Error(), "auth check") {
@@ -100,7 +105,7 @@ func TestCLIEngine_Preflight_Success(t *testing.T) {
 		{ExitCode: 0},
 		{ExitCode: 0},
 	}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude", AuthCheckCommand: "claude auth status"}
 	if _, err := e.Preflight(context.Background(), baseReq(cfg)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -109,7 +114,7 @@ func TestCLIEngine_Preflight_Success(t *testing.T) {
 
 func TestCLIEngine_Preflight_WarnsWhenNoAuthConfig(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	warning, err := e.Preflight(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -122,7 +127,7 @@ func TestCLIEngine_Preflight_WarnsWhenNoAuthConfig(t *testing.T) {
 
 func TestCLIEngine_Preflight_NoWarningWhenEnvConfigured(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude", Env: map[string]string{"ANTHROPIC_API_KEY": "sk-x"}}
 	warning, err := e.Preflight(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -135,7 +140,7 @@ func TestCLIEngine_Preflight_NoWarningWhenEnvConfigured(t *testing.T) {
 
 func TestCLIEngine_RunCodeStep_Success(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "all good"}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude", Args: []string{"-p", "--file", "{prompt_file}"}}
 	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -161,7 +166,7 @@ func TestCLIEngine_RunCodeStep_Success(t *testing.T) {
 
 func TestCLIEngine_RunCodeStep_NonZeroExit(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 2, Stderr: "boom"}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -181,7 +186,7 @@ func TestCLIEngine_RunCodeStep_LoopKill(t *testing.T) {
 		lines = append(lines, "Error: connection refused")
 	}
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: strings.Join(lines, "\n")}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -196,7 +201,7 @@ func TestCLIEngine_RunCodeStep_LoopKill(t *testing.T) {
 }
 
 func TestCLIEngine_RunCodeStep_MissingCommand(t *testing.T) {
-	e := NewCLIEngine(&mockRuntime{})
+	e := NewCLIEngine(&mockRuntime{}, nil)
 	_, err := e.RunCodeStep(context.Background(), baseReq(nil))
 	if err == nil {
 		t.Fatal("expected error when cli_engine_config is nil")
@@ -205,7 +210,7 @@ func TestCLIEngine_RunCodeStep_MissingCommand(t *testing.T) {
 
 func TestCLIEngine_RunCodeStep_RedactsSecrets(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "token sk-ant-" + strings.Repeat("a", 95)}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
 	if err != nil {
@@ -218,7 +223,7 @@ func TestCLIEngine_RunCodeStep_RedactsSecrets(t *testing.T) {
 
 func TestCLIEngine_RunCodeStep_CaptureFiles_ScriptWiring(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude"}
 	req := baseReq(cfg)
 	req.CaptureFiles = []string{".autocode/analysis.md"}
@@ -240,7 +245,7 @@ func TestCLIEngine_RunCodeStep_CaptureFiles_ScriptWiring(t *testing.T) {
 
 func TestCLIEngine_RunCodeStep_LargePromptNotInlinedInScript(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	cfg := &models.CLIEngineConfig{Command: "claude", Args: []string{"--prompt-file", "{prompt_file}"}}
 	req := baseReq(cfg)
 	// Well past MAX_ARG_STRLEN (128KB): inlining this into the bash script
@@ -275,7 +280,7 @@ func TestCLIEngine_RunCodeStep_WritesPromptFileOnHost(t *testing.T) {
 		}
 		promptSeen <- string(data)
 	}}
-	e := NewCLIEngine(rt)
+	e := NewCLIEngine(rt, nil)
 	req := baseReq(&models.CLIEngineConfig{Command: "claude"})
 	req.Instruction = "implement the feature"
 
@@ -318,7 +323,7 @@ func TestExtractCapturedFiles_NoCaptures(t *testing.T) {
 }
 
 func TestCLIEngine_Name(t *testing.T) {
-	e := NewCLIEngine(&mockRuntime{})
+	e := NewCLIEngine(&mockRuntime{}, nil)
 	if e.Name() != models.ExecutionEngineCLI {
 		t.Errorf("Name() = %q, want %q", e.Name(), models.ExecutionEngineCLI)
 	}

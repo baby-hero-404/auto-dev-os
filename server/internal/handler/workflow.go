@@ -211,3 +211,17 @@ func (h *WorkflowHandler) Artifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, artifacts)
 }
+
+// ArtifactsByTask handles GET /tasks/{taskID}/artifacts, returning every
+// checkpoint artifact (cli_output, patch, execution_snapshot, ...) saved
+// across the task's run history, so the UI can render CLI-engine output
+// without needing a specific job ID.
+func (h *WorkflowHandler) ArtifactsByTask(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskID")
+	artifacts, err := h.orch.ListArtifactsByTask(r.Context(), taskID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, artifacts)
+}

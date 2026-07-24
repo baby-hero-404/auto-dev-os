@@ -291,6 +291,7 @@ function ProjectDetailContent() {
       <CreateTaskPanel
         agents={projectAgents}
         repositories={repositories}
+        project={project}
         isOpen={isTaskPanelOpen}
         isSubmitting={taskActions.isCreatingTask}
         error={taskActions.taskError}

@@ -86,12 +86,17 @@ export function CLIEngineConfigForm({
   function applyClaudePreset() {
     const newEnv = value.env.filter((e) => e.key && e.key !== "ANTHROPIC_AUTH_TOKEN");
     newEnv.push({ key: "ANTHROPIC_AUTH_TOKEN", value: "" });
+    
+    // Auto-select a Claude credential if the user has one configured
+    const claudeCred = cliCredentials.find(c => c.provider === "cli:claude");
+
     onChange({
       ...value,
       command: "claude",
       argsText: "-p\n{prompt_file}",
       authCheckCommand: "claude --version",
       env: newEnv,
+      credentialID: claudeCred ? claudeCred.id : value.credentialID,
     });
   }
 

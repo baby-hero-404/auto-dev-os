@@ -297,17 +297,23 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
             icon={<Terminal size={18} className="text-brand-primary" />}
           />
           <CardContent className="space-y-4">
-            <Field label="Engine" htmlFor="profile-engine" hint="Tasks inherit this unless they override it individually.">
-              <Select
-                id="profile-engine"
-                value={executionEngine}
-                onChange={(e) => setExecutionEngine(e.target.value as ExecutionEngine)}
+            <div className="flex items-center justify-between">
+              <div>
+                <label htmlFor="cli-engine-toggle" className="text-sm font-medium text-foreground block cursor-pointer">
+                  Use CLI for code
+                </label>
+                <p className="text-xs text-content-muted">
+                  Off runs the built-in API-native tool loop. On spawns a CLI subprocess (e.g. Claude Code) in the sandbox
+                  instead. Tasks inherit this unless they override it individually.
+                </p>
+              </div>
+              <Switch
+                id="cli-engine-toggle"
+                checked={executionEngine === "cli"}
+                onChange={(checked) => setExecutionEngine(checked ? "cli" : "api_native")}
                 disabled={isUpdating}
-              >
-                <option value="api_native">API-native (built-in tool loop)</option>
-                <option value="cli">CLI (spawn a subprocess CLI in the sandbox)</option>
-              </Select>
-            </Field>
+              />
+            </div>
             {executionEngine === "cli" && (
               <CLIEngineConfigForm value={cliConfig} onChange={setCliConfig} disabled={isUpdating} />
             )}

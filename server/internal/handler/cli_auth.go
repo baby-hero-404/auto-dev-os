@@ -1,18 +1,18 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -58,10 +58,19 @@ func (h *CLIAuthHandler) MintWSTicket(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// resizeSentinel prefixes an out-of-band terminal-resize control frame sent
+// over the same WS connection as raw stdin bytes. It starts with a NUL byte,
+// which a real keyboard/xterm.js onData stream never produces, so it can't
+// collide with actual stdin content.
+const resizeSentinel = "\x00RESIZE:"
+
 // wsReader wraps a websocket connection to implement io.Reader for Docker PTY
+// stdin. It also transparently intercepts resizeSentinel control frames and
+// forwards them to onResize instead of passing them through as stdin.
 type wsReader struct {
-	conn *websocket.Conn
-	buf  []byte
+	conn     *websocket.Conn
+	buf      []byte
+	onResize func(cols, rows uint)
 }
 
 func (r *wsReader) Read(p []byte) (n int, err error) {
@@ -70,16 +79,25 @@ func (r *wsReader) Read(p []byte) (n int, err error) {
 		r.buf = r.buf[n:]
 		return n, nil
 	}
-	_, msg, err := r.conn.ReadMessage()
-	if err != nil {
-		return 0, err
+	for {
+		_, msg, err := r.conn.ReadMessage()
+		if err != nil {
+			return 0, err
+		}
+		if rest, ok := strings.CutPrefix(string(msg), resizeSentinel); ok {
+			var cols, rows uint
+			if _, scanErr := fmt.Sscanf(rest, "%d:%d", &cols, &rows); scanErr == nil && r.onResize != nil {
+				r.onResize(cols, rows)
+			}
+			continue
+		}
+		// Assume the incoming message is raw stdin data.
+		n = copy(p, msg)
+		if n < len(msg) {
+			r.buf = msg[n:]
+		}
+		return n, nil
 	}
-	// Assume the incoming message is raw stdin data.
-	n = copy(p, msg)
-	if n < len(msg) {
-		r.buf = msg[n:]
-	}
-	return n, nil
 }
 
 // wsWriter wraps a websocket connection to implement io.Writer for Docker PTY
@@ -121,43 +139,17 @@ func (h *CLIAuthHandler) Terminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	sendError := func(msg string) {
-		payload, _ := json.Marshal(map[string]interface{}{"type": "error", "message": msg})
-		_ = conn.WriteMessage(websocket.TextMessage, payload)
-	}
-
-	taskID := uuid.New().String()
-	tmpDir := filepath.Join(os.TempDir(), "auto-code-os-auth", taskID)
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		sendError(fmt.Sprintf("failed to create temp workspace: %v", err))
+	taskID, tmpDir, cleanup, err := newTerminalWorkspace("auto-code-os-auth")
+	if err != nil {
+		sendWSError(conn, "failed to create temp workspace: %v", err)
 		return
 	}
-	defer os.RemoveAll(tmpDir)
+	defer cleanup()
 
-	cmd := []string{"/bin/bash"}
+	sendWSStdout(conn, "\r\n🚀 Starting %s Sandbox for authentication...\r\nType your login command (e.g., 'claude login').\r\nFiles saved to /workspace will be automatically captured.\r\n", provider)
 
-	welcomeMsg, _ := json.Marshal(map[string]interface{}{
-		"type": "stdout",
-		"data": fmt.Sprintf("\r\n🚀 Starting %s Sandbox for authentication...\r\nType your login command (e.g., 'claude login').\r\nFiles saved to /workspace will be automatically captured.\r\n", provider),
-	})
-	_ = conn.WriteMessage(websocket.TextMessage, welcomeMsg)
-
-	req := sandbox.CommandRequest{
-		TaskID:      taskID,
-		Workspace:   tmpDir,
-		Command:     cmd,
-		NetworkMode: sandbox.NetworkModeBridge,
-		Env: map[string]string{
-			"TERM": "xterm",
-		},
-	}
-
-	reader := &wsReader{conn: conn}
-	writer := &wsWriter{conn: conn}
-
-	err = h.runtime.RunInteractive(context.Background(), req, reader, writer, writer)
-	if err != nil {
-		sendError(fmt.Sprintf("sandbox error: %v", err))
+	if err := runPTYTerminal(r.Context(), h.runtime, conn, taskID, tmpDir); err != nil {
+		sendWSError(conn, "sandbox error: %v", err)
 		return
 	}
 
@@ -166,21 +158,24 @@ func (h *CLIAuthHandler) Terminal(w http.ResponseWriter, r *http.Request) {
 		if err != nil || info.IsDir() {
 			return nil
 		}
+		// Skip files larger than 1MB to prevent OOM
+		if info.Size() > 1024*1024 {
+			return nil
+		}
 		content, _ := os.ReadFile(path)
 		relPath, _ := filepath.Rel(tmpDir, path)
 		resultData[relPath] = string(content)
 		return nil
 	})
 
-	finalMsg, _ := json.Marshal(map[string]interface{}{
-		"type": "stdout",
-		"data": "\r\n✅ Session ended. Packaging credential...\r\n",
-	})
-	_ = conn.WriteMessage(websocket.TextMessage, finalMsg)
+	sendWSStdout(conn, "\r\n✅ Session ended. Packaging credential...\r\n")
 
-	exitMsg, _ := json.Marshal(map[string]interface{}{
+	_ = wsSendJSON(conn, map[string]interface{}{
 		"type":    "exit",
 		"payload": resultData,
 	})
-	_ = conn.WriteMessage(websocket.TextMessage, exitMsg)
+
+	// Give a short delay to allow the OS network buffer to flush the exit payload
+	// before the TCP connection is aggressively closed by defer conn.Close()
+	time.Sleep(500 * time.Millisecond)
 }

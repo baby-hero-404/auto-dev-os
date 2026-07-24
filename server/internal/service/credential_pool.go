@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -312,12 +314,8 @@ func (s *CredentialPoolService) recordAudit(ctx context.Context, action string, 
 }
 
 func isAllowedProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "anthropic", "gemini", "9router":
-		return true
-	default:
-		return false
-	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	return models.IsAllowedProvider(provider)
 }
 
 func isAllowedCredentialStatus(status string) bool {
@@ -338,4 +336,27 @@ func keySuffix(key string) string {
 
 func (s *CredentialPoolService) GetRecoveryCount() int64 {
 	return atomic.LoadInt64(&s.recoveryCounter)
+}
+
+func (s *CredentialPoolService) GetDecryptedCredential(ctx context.Context, orgID, id string) (string, map[string]string, error) {
+	cred, err := s.repo.GetByIDAndOrg(ctx, orgID, id)
+	if err != nil {
+		return "", nil, err
+	}
+
+	payloadJSON, err := s.cipher.Decrypt(cred.EncryptedKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	var payloadMap map[string]string
+	if err := json.Unmarshal([]byte(payloadJSON), &payloadMap); err != nil {
+		// If it's not a JSON map, just return the raw string under a default key (e.g., API key)
+		if len(cred.Provider) > 4 && cred.Provider[:4] == "cli:" {
+			return cred.Provider, nil, fmt.Errorf("invalid credential format: %w", err)
+		}
+		return cred.Provider, map[string]string{"key": payloadJSON}, nil
+	}
+
+	return cred.Provider, payloadMap, nil
 }

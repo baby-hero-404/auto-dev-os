@@ -11,6 +11,28 @@ const (
 	ProviderCredentialStatusDisabled    = "disabled"
 )
 
+const (
+	ProviderOpenAI    = "openai"
+	ProviderAnthropic = "anthropic"
+	ProviderGemini    = "gemini"
+	Provider9Router   = "9router"
+	ProviderGateway   = "gateway"
+)
+
+func IsAllowedProvider(provider string) bool {
+	switch provider {
+	case ProviderOpenAI, ProviderAnthropic, ProviderGemini, Provider9Router, ProviderGateway:
+		return true
+	default:
+		// Accept any cli:* dynamic provider
+		if len(provider) > 4 && provider[:4] == "cli:" {
+			return true
+		}
+		return false
+	}
+}
+
+
 type ProviderCredential struct {
 	ID            string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
 	OrgID         string          `json:"org_id" gorm:"type:uuid;not null"`

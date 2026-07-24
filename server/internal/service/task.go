@@ -40,6 +40,9 @@ func (s *TaskService) Create(ctx context.Context, projectID string, input models
 		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
 			return nil, ErrValidation(err.Error())
 		}
+		if err := s.validateTaskEngineOverride(ctx, projectID, *input.ExecutionEngine); err != nil {
+			return nil, err
+		}
 	}
 	task, err := s.repo.Create(ctx, projectID, input)
 	if err != nil {
@@ -71,8 +74,39 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
 			return nil, ErrValidation(err.Error())
 		}
+		task, err := s.repo.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validateTaskEngineOverride(ctx, task.ProjectID, *input.ExecutionEngine); err != nil {
+			return nil, err
+		}
 	}
 	return s.repo.Update(ctx, id, input)
+}
+
+// validateTaskEngineOverride guards against setting a task's execution_engine
+// override to "cli" when the owning project has no usable CLIEngineConfig
+// (i.e. no command configured). Without this, a task-level override bypasses
+// the equivalent check ProjectService already enforces when the project
+// itself switches to engine "cli" — every run would then fail identically at
+// the CLI engine's preflight step ("cli_engine_config.command is required").
+func (s *TaskService) validateTaskEngineOverride(ctx context.Context, projectID, executionEngine string) error {
+	if executionEngine != models.ExecutionEngineCLI {
+		return nil
+	}
+	project, err := s.projectRepo.GetByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+	var cfg models.CLIEngineConfig
+	if len(project.CLIEngineConfig) > 0 {
+		_ = json.Unmarshal(project.CLIEngineConfig, &cfg)
+	}
+	if err := models.ValidateCLIEngineConfig(executionEngine, &cfg); err != nil {
+		return ErrValidation(fmt.Sprintf("task execution_engine cannot be set to \"cli\": project has no cli_engine_config configured (%s)", err.Error()))
+	}
+	return nil
 }
 
 func (s *TaskService) Delete(ctx context.Context, id string) error {

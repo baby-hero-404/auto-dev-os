@@ -22,6 +22,11 @@ type CodeStepRequest struct {
 	JobID   string
 	Timeout time.Duration
 
+	// OrgID is the owning organization of Task's project. Only needed by
+	// engines that look up org-scoped resources (e.g. the CLI engine
+	// resolving CLIConfig.CredentialID against the credential store).
+	OrgID string
+
 	// Instruction is the fully-built coding instruction/prompt text, already
 	// assembled by the caller (spec, frozen context, PR feedback, etc.).
 	Instruction string

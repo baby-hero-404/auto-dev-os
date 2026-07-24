@@ -1,7 +1,7 @@
 "use client";
 import { FormEvent, useState, useEffect, useRef } from "react";
 import { Loader2, Plus, X, GitBranch, ChevronDown, Sparkles, AlertCircle, Maximize2 } from "lucide-react";
-import type { Agent, ExecutionEngine, Repository } from "@/lib/types";
+import type { Agent, ExecutionEngine, Project, Repository } from "@/lib/types";
 import { TaskMarkdownEditor } from "./TaskMarkdownEditor";
 import { AgentSelection } from "./AgentSelection";
 import { Field } from "@/components/ui/field";
@@ -22,6 +22,7 @@ export type CreateTaskPayload = {
 export function CreateTaskPanel({
   agents,
   repositories,
+  project,
   isOpen,
   isSubmitting,
   error,
@@ -30,12 +31,18 @@ export function CreateTaskPanel({
 }: {
   agents: Agent[];
   repositories: Repository[];
+  project?: Project;
   isOpen: boolean;
   isSubmitting: boolean;
   error: string;
   onClose: () => void;
   onSubmit: (payload: CreateTaskPayload) => Promise<boolean>;
 }) {
+  // The CLI engine's preflight fails outright without a configured command,
+  // so offering "CLI" here when the project has none set up would guarantee
+  // every run of the task fails identically (see cli_engine_config.command
+  // is required). Configure it under Project Settings first.
+  const cliConfigured = !!project?.cli_engine_config?.command;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [complexity, setComplexity] = useState<TaskComplexity>("medium");
@@ -242,11 +249,6 @@ export function CreateTaskPanel({
               </div>
             </div>
           </Field>
-
-          <Field label="Assign Agent">
-            <AgentSelection agents={agents} agentID={agentID} setAgentID={setAgentID} isSubmitting={isSubmitting} />
-          </Field>
-
           <Field label="Execution Engine">
             <select
               value={executionEngine}
@@ -256,9 +258,16 @@ export function CreateTaskPanel({
             >
               <option value="">Inherit from project</option>
               <option value="api_native">API-native</option>
-              <option value="cli">CLI</option>
+              <option value="cli" disabled={!cliConfigured}>
+                CLI{!cliConfigured ? " (configure in Project Settings first)" : ""}
+              </option>
             </select>
           </Field>
+
+          <Field label="Assign Agent">
+            <AgentSelection agents={agents} agentID={agentID} setAgentID={setAgentID} isSubmitting={isSubmitting} />
+          </Field>
+
 
           {error && (
             <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200 animate-fade-in" role="alert">

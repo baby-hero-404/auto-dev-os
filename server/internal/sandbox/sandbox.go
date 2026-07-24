@@ -26,6 +26,23 @@ type CommandRequest struct {
 	SecretEnv   map[string]string
 	NetworkMode string
 	Timeout     time.Duration
+	// ResizeCh optionally delivers PTY size updates for RunInteractive
+	// sessions (e.g. driven by the browser terminal's container size).
+	// Runtimes that don't support TTY resize may ignore it.
+	ResizeCh <-chan TerminalSize
+	// CredentialFiles optionally materializes decrypted CLI credential
+	// payloads into the container at specific absolute paths (e.g.
+	// "/root/.claude.json" -> file content), keyed by target container path.
+	// Runtimes that support it must bind-mount these read-write (some CLIs
+	// refresh tokens on use) and must take priority over any other
+	// convenience credential mount that would target the same path.
+	CredentialFiles map[string]string
+}
+
+// TerminalSize describes a PTY's dimensions in character cells.
+type TerminalSize struct {
+	Rows uint
+	Cols uint
 }
 
 type CommandResult struct {

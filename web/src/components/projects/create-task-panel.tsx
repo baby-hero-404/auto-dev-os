@@ -40,9 +40,14 @@ export function CreateTaskPanel({
 }) {
   // The CLI engine's preflight fails outright without a configured command,
   // so offering "CLI" here when the project has none set up would guarantee
-  // every run of the task fails identically (see cli_engine_config.command
-  // is required). Configure it under Project Settings first.
-  const cliConfigured = !!project?.cli_engine_config?.command;
+  // every run of the task fails identically. A project can reach a usable
+  // CLI config either through the legacy single Execution Engine command,
+  // or by enabling a CLI row in the newer Execution Providers list — check
+  // both, or this option stays wrongly disabled for the latter (Project
+  // Settings still fully configures either path).
+  const cliConfigured =
+    !!project?.cli_engine_config?.command ||
+    !!project?.execution_providers?.some((p) => p.type === "cli" && p.enabled);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [complexity, setComplexity] = useState<TaskComplexity>("medium");

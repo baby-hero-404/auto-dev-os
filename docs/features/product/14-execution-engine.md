@@ -58,7 +58,7 @@ Biến môi trường trong `cli_engine_config.env` được mã hoá/lưu như 
 
 **Quota detection (write-side):** Do CLI chạy blocking trong sandbox, phát hiện quota/rate-limit dựa trên pattern-matching stdout+stderr đã capture sau khi tiến trình kết thúc (`server/internal/orchestrator/engine/cli_quota.go`, bảng `CLIQuotaRules` keyed theo `ProfileRef`, có fallback `"*"`). Khi khớp, `CredentialPoolService.SetCooldown` ghi `cooldown_until` (mặc định 1 phút) lên `ProviderCredential` tương ứng, để lần resolve tiếp theo tự động fallthrough qua candidate priority thấp hơn.
 
-**UI:** Project Settings có thêm section "Execution Providers" (`execution-providers-list.tsx`) — danh sách cố định 7 hàng (Anthropic/OpenAI/Gemini API + Claude Code/OpenAI Codex/Antigravity/Custom CLI), mỗi hàng có checkbox Enabled, nút ▲/▼ đổi priority, và dropdown "CLI Authentication Profile" (bắt buộc cho Custom CLI, mặc định "Auto" cho 3 preset CLI). Section "Execution Engine" cũ vẫn giữ nguyên làm fallback khi để trống toàn bộ Execution Providers.
+**UI:** Project Settings có thêm section "Execution Providers" (`execution-providers-list.tsx`) — danh sách cố định 7 hàng (Anthropic/OpenAI/Gemini API + Claude Code/OpenAI Codex/Antigravity/Custom CLI), mỗi hàng có checkbox Enabled, nút ▲/▼ đổi priority, và dropdown "CLI Authentication Profile" (bắt buộc cho Custom CLI, mặc định "Auto" cho 3 preset CLI).
 
 ## C. CLI Spec-First Pipeline
 

@@ -180,3 +180,89 @@ func TestResolveExecutionProvider_CLICredentialRateLimited(t *testing.T) {
 		t.Fatal("expected rate-limited pinned cli credential to make the candidate unavailable")
 	}
 }
+
+func TestResolveExecutionProvider_PinnedCredentialWrongProviderRejected(t *testing.T) {
+	pool := &fakeCredentialPool{byID: map[string]fakeCred{
+		// Active, but it's a codex credential pinned onto a claude_code row.
+		"cred-codex": {provider: "cli:codex", status: models.ProviderCredentialStatusActive},
+	}}
+	orch := New(nil, nil, nil, nil, WithCredentialAvailability(pool))
+	project := &models.Project{
+		OrgID: "org1",
+		ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+			{Type: "cli", Ref: "claude_code", CredentialID: "cred-codex", Priority: 0, Enabled: true},
+		}),
+	}
+	_, err := orch.ResolveExecutionProvider(context.Background(), &models.Task{}, project)
+	if err == nil {
+		t.Fatal("expected a pinned credential belonging to a different provider to be rejected")
+	}
+}
+
+func TestResolveExecutionProvider_TaskOverrideNarrowsToAPI(t *testing.T) {
+	pool := &fakeCredentialPool{byID: map[string]fakeCred{
+		"cred-claude": {provider: "cli:claude", status: models.ProviderCredentialStatusActive},
+		"cred-api":    {provider: "anthropic", status: models.ProviderCredentialStatusActive},
+	}}
+	orch := New(nil, nil, nil, nil, WithCredentialAvailability(pool))
+	project := &models.Project{
+		OrgID: "org1",
+		// cli is highest priority, but the task pins api_native, so it
+		// must be skipped entirely rather than silently ignored.
+		ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+			{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+			{Type: "api", Ref: "anthropic", Priority: 1, Enabled: true},
+		}),
+	}
+	apiNative := models.ExecutionEngineAPINative
+	resolved, err := orch.ResolveExecutionProvider(context.Background(), &models.Task{ExecutionEngine: &apiNative}, project)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved.Type != "api" || resolved.Ref != "anthropic" {
+		t.Fatalf("expected task override to force api-native, got %+v", resolved)
+	}
+}
+
+func TestResolveExecutionProvider_TaskOverrideNarrowsToCLI(t *testing.T) {
+	pool := &fakeCredentialPool{byID: map[string]fakeCred{
+		"cred-claude": {provider: "cli:claude", status: models.ProviderCredentialStatusActive},
+		"cred-api":    {provider: "anthropic", status: models.ProviderCredentialStatusActive},
+	}}
+	orch := New(nil, nil, nil, nil, WithCredentialAvailability(pool))
+	project := &models.Project{
+		OrgID: "org1",
+		// api is highest priority, but the task pins cli, so it must be
+		// skipped entirely rather than silently ignored.
+		ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+			{Type: "api", Ref: "anthropic", Priority: 0, Enabled: true},
+			{Type: "cli", Ref: "claude_code", Priority: 1, Enabled: true},
+		}),
+	}
+	cli := models.ExecutionEngineCLI
+	resolved, err := orch.ResolveExecutionProvider(context.Background(), &models.Task{ExecutionEngine: &cli}, project)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved.Type != "cli" || resolved.Ref != "claude_code" {
+		t.Fatalf("expected task override to force cli, got %+v", resolved)
+	}
+}
+
+func TestResolveExecutionProvider_TaskOverrideNoMatchingType(t *testing.T) {
+	pool := &fakeCredentialPool{byID: map[string]fakeCred{
+		"cred-api": {provider: "anthropic", status: models.ProviderCredentialStatusActive},
+	}}
+	orch := New(nil, nil, nil, nil, WithCredentialAvailability(pool))
+	project := &models.Project{
+		OrgID: "org1",
+		ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+			{Type: "api", Ref: "anthropic", Priority: 0, Enabled: true},
+		}),
+	}
+	cli := models.ExecutionEngineCLI
+	_, err := orch.ResolveExecutionProvider(context.Background(), &models.Task{ExecutionEngine: &cli}, project)
+	if err == nil {
+		t.Fatal("expected error when task forces cli but no cli provider is enabled")
+	}
+}

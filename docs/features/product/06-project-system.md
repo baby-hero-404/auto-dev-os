@@ -63,8 +63,8 @@ Cấu hình mặc định cho tất cả task trong project (task có thể over
 | `default_branch` | `main` | Branch mặc định để tạo PR target |
 | `smart_routing` | `true` | Smart LLM Router Toggle: Tự động điều hướng task đến LLM provider phù hợp với độ phức tạp để tối ưu chi phí |
 | `pipeline_config` | `null` | Cấu hình Governance Pipeline Editor: Tùy chỉnh rules & constraints (bypass, skip, cycles) thông qua declarative schema (UI JSON Editor). `null` = dùng preset built-in (§08 "Declarative Pipeline & Policy Config") |
-| `execution_engine` | `api_native` | `api_native` \| `cli` — chọn cơ chế thực thi mặc định cho task của project (§14 Execution Engine); task có thể override riêng |
-| `cli_engine_config` | `null` | Khi `execution_engine=cli`: `{command, args, env, timeout_minutes}` cho CLI coding agent (Claude Code, Codex CLI, aider…), cấu hình qua form riêng trong Project Settings |
+| `execution_providers` | `[]` | Mảng cấu hình ưu tiên các provider thực thi (API/CLI) cho task. Thay thế cho cấu hình Execution Engine cũ. Hỗ trợ dự phòng tự động (fallback) giữa các tool/provider khi hết quota. |
+
 | `review_harness_policy` | `same` | `same` \| `different_model` \| `different_provider` — chọn model/provider review khác với model/provider đã code (§01/§09 Cross-Harness Review); fallback về `same` + warning nếu không có lựa chọn thứ 2 |
 
 ## D. Knowledge Base (Partially Implemented)

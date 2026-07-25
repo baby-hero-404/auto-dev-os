@@ -46,6 +46,12 @@ type ResolvedExecutionProvider struct {
 // ExecutionProviders falls back to the legacy ExecutionEngine/CLIEngineConfig
 // behavior unchanged (REQ-003). Selection happens once per call — callers
 // must not re-invoke mid-task to "switch" providers (REQ-005).
+//
+// A per-task execution_engine override (task.ExecutionEngine) narrows the
+// priority-ordered list to just that type instead of being ignored: without
+// this, once a project has any provider routing configured, the per-task
+// "API-native" / "CLI" override in the task UI silently stopped doing
+// anything, since only the legacy (empty-list) path ever consulted it.
 func (o *Orchestrator) ResolveExecutionProvider(ctx context.Context, task *models.Task, project *models.Project) (*ResolvedExecutionProvider, error) {
 	providers, err := models.ValidateExecutionProviders(project.ExecutionProviders)
 	if err != nil {
@@ -58,6 +64,20 @@ func (o *Orchestrator) ResolveExecutionProvider(ctx context.Context, task *model
 	sorted := make([]models.ExecutionProviderConfig, len(providers))
 	copy(sorted, providers)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
+
+	if task.ExecutionEngine != nil && *task.ExecutionEngine != "" {
+		wantType := "api"
+		if *task.ExecutionEngine == models.ExecutionEngineCLI {
+			wantType = "cli"
+		}
+		filtered := make([]models.ExecutionProviderConfig, 0, len(sorted))
+		for _, p := range sorted {
+			if p.Type == wantType {
+				filtered = append(filtered, p)
+			}
+		}
+		sorted = filtered
+	}
 
 	for _, p := range sorted {
 		if !p.Enabled {
@@ -114,6 +134,14 @@ func (o *Orchestrator) hasAvailableCredential(ctx context.Context, orgID, provid
 	if credentialID != "" {
 		resp, err := o.credentialPool.GetByID(ctx, credentialID)
 		if err != nil {
+			return false
+		}
+		// A pinned credential_id must actually belong to the provider this
+		// row claims (e.g. a claude_code row pinning a cli:codex or API
+		// credential) — otherwise the wrong secret material gets resolved
+		// downstream (resolveCredentialFiles mounts by ID alone, with no
+		// provider check of its own).
+		if resp.Provider != provider {
 			return false
 		}
 		return resp.Status == models.ProviderCredentialStatusActive && (resp.CooldownUntil == nil || resp.CooldownUntil.Before(time.Now()))

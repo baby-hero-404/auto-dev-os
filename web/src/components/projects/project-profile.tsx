@@ -8,13 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
-import {
-  CLIEngineConfigForm,
-  cliConfigToFormValue,
-  formValueToCLIConfig,
-  formValuesEqual,
-  type CLIEngineConfigFormValue,
-} from "./cli-engine-config-form";
+
 import { Switch } from "@/components/ui/switch";
 import { ExecutionProvidersList, defaultExecutionProviders } from "./execution-providers-list";
 import { GovernanceConfigEditor } from "./GovernanceConfigEditor";
@@ -55,8 +49,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
   const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
-  const [executionEngine, setExecutionEngine] = useState<ExecutionEngine>(project?.execution_engine ?? "api_native");
-  const [cliConfig, setCliConfig] = useState<CLIEngineConfigFormValue>(cliConfigToFormValue(project?.cli_engine_config));
+
   const [executionProviders, setExecutionProviders] = useState<ExecutionProviderConfig[]>(
     project?.execution_providers ?? defaultExecutionProviders(),
   );
@@ -80,8 +73,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
-      setExecutionEngine(project.execution_engine ?? "api_native");
-      setCliConfig(cliConfigToFormValue(project.cli_engine_config));
+
       setExecutionProviders(project.execution_providers ?? defaultExecutionProviders());
     }
   }
@@ -99,8 +91,6 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
     (project?.max_retries ?? 3) !== maxRetries ||
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
     (project?.default_branch ?? "main") !== defaultBranch ||
-    (project?.execution_engine ?? "api_native") !== executionEngine ||
-    !formValuesEqual(cliConfigToFormValue(project?.cli_engine_config), cliConfig) ||
     JSON.stringify(project?.execution_providers ?? defaultExecutionProviders()) !== JSON.stringify(executionProviders);
 
   function handleReset() {
@@ -116,8 +106,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
-      setExecutionEngine(project.execution_engine ?? "api_native");
-      setCliConfig(cliConfigToFormValue(project.cli_engine_config));
+
       setExecutionProviders(project.execution_providers ?? defaultExecutionProviders());
       setUpdateError("");
       toast.info("Project settings reverted.");
@@ -127,10 +116,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
   async function handleUpdateProject(e: FormEvent) {
     e.preventDefault();
     setUpdateError("");
-    if (executionEngine === "cli" && !cliConfig.command.trim()) {
-      setUpdateError("A command is required when Execution Engine is set to CLI.");
-      return;
-    }
+
     setIsUpdating(true);
     try {
       await onUpdateProject({
@@ -145,8 +131,6 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
         max_retries: maxRetries,
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
-        execution_engine: executionEngine,
-        cli_engine_config: formValueToCLIConfig(cliConfig),
         execution_providers: executionProviders,
       });
       toast.success("Project settings updated successfully.");
@@ -299,35 +283,6 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
           </CardContent>
         </Card>
 
-        {/* Execution Engine */}
-        <Card>
-          <CardHeader
-            title="Execution Engine"
-            icon={<Terminal size={18} className="text-brand-primary" />}
-          />
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label htmlFor="cli-engine-toggle" className="text-sm font-medium text-foreground block cursor-pointer">
-                  Use CLI for code
-                </label>
-                <p className="text-xs text-content-muted">
-                  Off runs the built-in API-native tool loop. On spawns a CLI subprocess (e.g. Claude Code) in the sandbox
-                  instead. Tasks inherit this unless they override it individually.
-                </p>
-              </div>
-              <Switch
-                id="cli-engine-toggle"
-                checked={executionEngine === "cli"}
-                onChange={(checked) => setExecutionEngine(checked ? "cli" : "api_native")}
-                disabled={isUpdating}
-              />
-            </div>
-            {executionEngine === "cli" && (
-              <CLIEngineConfigForm value={cliConfig} onChange={setCliConfig} disabled={isUpdating} />
-            )}
-          </CardContent>
-        </Card>
 
         {/* Execution Providers (priority-ordered routing) */}
         <Card>

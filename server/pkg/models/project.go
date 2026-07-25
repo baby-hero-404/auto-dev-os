@@ -101,10 +101,14 @@ func ValidateExecutionProviders(raw json.RawMessage) ([]ExecutionProviderConfig,
 			if !validCLIProviderRefs[p.Ref] {
 				return nil, fmt.Errorf("execution_providers[%d].ref %q is not a known CLI profile", i, p.Ref)
 			}
-			if p.Ref == "custom" && (p.CLIConfig == nil || strings.TrimSpace(p.CLIConfig.Command) == "") {
+			// Config requirements for ref="custom" only matter once the row is
+			// actually enabled; a disabled placeholder row (as the UI always
+			// includes for every known profile) shouldn't block saving the rest
+			// of the list.
+			if p.Enabled && p.Ref == "custom" && (p.CLIConfig == nil || strings.TrimSpace(p.CLIConfig.Command) == "") {
 				return nil, fmt.Errorf("execution_providers[%d]: ref=\"custom\" requires cli_config.command", i)
 			}
-			if p.Ref == "custom" && strings.TrimSpace(p.CredentialID) == "" {
+			if p.Enabled && p.Ref == "custom" && strings.TrimSpace(p.CredentialID) == "" {
 				return nil, fmt.Errorf("execution_providers[%d]: ref=\"custom\" requires credential_id", i)
 			}
 		}

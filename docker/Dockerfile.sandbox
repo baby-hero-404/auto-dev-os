@@ -1,8 +1,19 @@
 FROM golang:1.26-bookworm
 
+# Allow host to pass a custom UID/GID to avoid permission issues when mounting volumes
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# Fix PIP PEP 668 to allow system-wide global installs in the sandbox without breaking
+RUN mkdir -p /etc/pip && echo "[global]\nbreak-system-packages = true" > /etc/pip.conf
+
 # CLI coding agents (claude, codex) require Node 22+; Debian bookworm's apt
 # nodejs is only 18.x, so NodeSource replaces it instead of using apt's package.
-RUN apt-get update \
+# Optimization: Enable APT cache for faster rebuilds
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -16,23 +27,28 @@ RUN apt-get update \
         python3-pip \
         python3-pytest \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+    && apt-get install -y --no-install-recommends nodejs
 
 # CLI coding agents available to cli:* execution engine profiles (see
 # web/src/lib/model-options.ts PROVIDERS). npm global installs land in
 # /usr/local, already on PATH for every user.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
+# Optimization: Cache NPM downloads for faster rebuilds & clean local cache
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g @anthropic-ai/claude-code @openai/codex \
+    && npm cache clean --force
+
+RUN groupadd --gid ${USER_GID} agent \
+    && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash agent
 
 WORKDIR /workspace
 
-RUN useradd --create-home --shell /bin/bash agent
 USER agent
+# Explicitly set PATH so tools like antigravity are always accessible
+ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # The antigravity installer has no per-user variant of its own; it installs to
 # $HOME/.local/bin, so it must run as `agent` (not root) to land somewhere this
 # user can execute from.
 RUN bash -c 'set -o pipefail; curl -fsSL https://antigravity.google/cli/install.sh | bash'
 
-CMD ["bash", "-lc", "pwd && ls -la"]
+CMD ["bash", "-c", "pwd && ls -la"]

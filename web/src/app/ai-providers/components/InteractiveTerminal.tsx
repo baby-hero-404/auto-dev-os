@@ -253,8 +253,8 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
                     let step = 0;
                     exitIntervalRef.current = setInterval(() => {
                       if (ws.readyState === WebSocket.OPEN) {
-                        if (step === 0) ws.send("\r");
-                        else if (step === 1) ws.send("\r");
+                        if (step === 0) ws.send("\x03\r");
+                        else if (step === 1) ws.send("/exit\r");
                         else if (step === 2) ws.send("\x04");
                         else if (step === 3) ws.send("\x04");
                         else if (step === 4) ws.send("exit\r");

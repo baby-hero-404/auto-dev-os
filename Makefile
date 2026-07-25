@@ -11,7 +11,7 @@ WEB_PORT ?= 3000
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
 LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
 
-.PHONY: help init build run clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-references rollout-gate
+.PHONY: help init build clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-references rollout-gate
 
 # Default target displays the help menu
 .DEFAULT_GOAL := help
@@ -29,7 +29,7 @@ init: ## Setup local environment (configs & deps)
 	@echo "==> Installing web dependencies..."
 	cd web && npm install
 	@echo "==> Installing server dependencies & syncing vendor..."
-	cd server && go mod tidy && go mod vendor
+	cd server && go mod tidy
 	@echo "==> Initialization complete. Please update your .env file with necessary keys."
 
 clone-references: ## Clone external test/skill references
@@ -61,13 +61,13 @@ rollout-gate: ## Evaluate state machine rollout gate (e.g. make rollout-gate SAM
 
 # ── Build & Sandbox ──────────────────────────────────────────────────────
 
-build: ## Build the CLI binary
-	@echo "==> Building CLI binary..."
-	cd server && go build $(LDFLAGS) -o ../bin/auto-code-os ./cmd/cli
+build: ## Build the API binary
+	@echo "==> Building API binary..."
+	cd server && go build $(LDFLAGS) -o ../bin/auto-code-os-api ./cmd/api
 
 sandbox-build: ## Build the Docker sandbox image for agents
 	@echo "==> Building agent Docker sandbox image..."
-	docker build -t auto-code-os-sandbox:latest -f docker/Dockerfile.sandbox .
+	docker build -t auto-code-os-sandbox:latest -f docker/Dockerfile.sandbox . --network host
 
 # ── Running Development Servers (Host-Direct + Docker DB) ────────────────
 
@@ -108,8 +108,7 @@ web: ## Run Next.js web app on Host
 	@echo "==> Starting Next.js Web dev server on port $(WEB_PORT)..."
 	cd web && NEXT_PUBLIC_API_URL=http://localhost:$(SERVER_PORT)/api/v1 PORT=$(WEB_PORT) npm run dev
 
-run: ## Run the CLI (PoC mode) with ARGS='--task "..."'
-	cd server && go run $(LDFLAGS) ./cmd/cli $(ARGS)
+
 
 # ── Quality, Formatting & Testing ─────────────────────────────────────────
 

@@ -61,8 +61,15 @@ func (m *Manager) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 						expectedBranch = "main"
 					}
 					if rWS.DefaultBranch != expectedBranch {
+						newMain := paths.NewOSWorkspacePaths("").RepoMainRelative(rWS.Name)
+						if m.Log != nil {
+							m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf(
+								"wkspace: reconciling repo %q DefaultBranch %q -> %q, rewriting Paths.Main %q -> %q",
+								rWS.Name, rWS.DefaultBranch, expectedBranch, rWS.Paths.Main, newMain,
+							))
+						}
 						meta.Repos[i].DefaultBranch = expectedBranch
-						meta.Repos[i].Paths.Main = paths.NewOSWorkspacePaths("").RepoMainRelative(rWS.Name)
+						meta.Repos[i].Paths.Main = newMain
 						updated = true
 					}
 				}

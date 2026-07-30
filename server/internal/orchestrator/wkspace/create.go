@@ -140,17 +140,27 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 	}
 
 	checkpoints, cpErr := m.Workflows.ListCheckpoints(ctx, task.ID)
-	hasSuccessfulCodeStep := false
+	hasWorkToPreserve := false
 	completedSteps := make(map[string]bool)
 	if cpErr == nil && len(checkpoints) > 0 {
 		for _, cp := range checkpoints {
 			var state map[string]any
 			if json.Unmarshal(cp.State, &state) == nil {
-				if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
+				status, _ := state["status"].(string)
+				if status == workflow.StepStatusSuccess {
 					completedSteps[cp.Step] = true
 					if cp.Step == workflow.StepCodeBackend || cp.Step == workflow.StepCodeFrontend || cp.Step == workflow.StepFix || cp.Step == workflow.StepMerge {
-						hasSuccessfulCodeStep = true
+						hasWorkToPreserve = true
 					}
+				}
+				// cli_spec/cli_implement write directly to the worktree (docs/openspecs/*.md,
+				// application code) and deliberately leave it uncommitted while paused for human
+				// review — resuming after approval must not wipe that work. Their checkpoint is
+				// "paused"/"waiting_approval" (not "success") at the moment of resume, since the
+				// step itself hasn't completed yet, so success-only detection above misses them.
+				if (cp.Step == workflow.StepCLISpec || cp.Step == workflow.StepCLIImplement) &&
+					(status == workflow.StepStatusSuccess || status == workflow.StepStatusPaused || status == workflow.StepStatusWaitingApproval) {
+					hasWorkToPreserve = true
 				}
 			}
 		}
@@ -168,7 +178,7 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 		}
 
 		if workspaceExists {
-			if !hasSuccessfulCodeStep {
+			if !hasWorkToPreserve {
 				if err := ResetExistingWorkspace(ctx, repoAbsPath); err != nil {
 					return fmt.Errorf("reset existing workspace at %s: %w", repoAbsPath, err)
 				}
@@ -197,7 +207,7 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 		return fmt.Errorf("failed to save metadata: %w", err)
 	}
 
-	if hasSuccessfulCodeStep && workspaceRestored {
+	if hasWorkToPreserve && workspaceRestored {
 		if m.Artifacts != nil {
 			if arts, errArts := m.Artifacts.ListByTaskID(ctx, task.ID); errArts == nil {
 				for _, art := range arts {

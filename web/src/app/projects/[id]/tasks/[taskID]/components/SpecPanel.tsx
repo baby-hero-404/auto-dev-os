@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
 import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
+import { tasks as tasksApi } from "@/lib/api/projects";
+import { useAuthedSWR } from "@/lib/use-authed-swr";
 import { useTaskDetail, isAffectedFile } from "./TaskDetailContext";
 
 interface SpecPanelProps {
@@ -99,6 +101,15 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
     analysisData.design_md ||
     analysisData.tasks_md
   );
+
+  const { data: cliSpec } = useAuthedSWR(
+    ["task-spec", taskID],
+    (token) => tasksApi.getSpec(taskID, token)
+  );
+
+  if (cliSpec && (cliSpec.proposal || cliSpec.specs || cliSpec.design || cliSpec.tasks)) {
+    return null;
+  }
 
   if (!task?.analysis || !task?.spec_status || task.spec_status === "none" || Object.keys(analysisData).length === 0) {
     return null;

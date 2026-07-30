@@ -101,6 +101,10 @@ type SignInput struct {
 // SignCommit builds a Statement for the given input, signs it with the
 // active key, and persists the resulting attestation (REQ-001).
 func (s *AttestationService) SignCommit(ctx context.Context, in SignInput) (*models.Attestation, error) {
+	if existing, err := s.repo.GetByCommitHash(ctx, in.CommitHash); err == nil && existing != nil {
+		return existing, nil
+	}
+
 	key, err := s.EnsureActiveKey(ctx)
 	if err != nil {
 		return nil, err

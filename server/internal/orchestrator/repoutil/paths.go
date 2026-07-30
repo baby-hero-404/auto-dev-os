@@ -82,6 +82,9 @@ func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (s
 			}
 		}
 	}
+	if m.Log != nil {
+		m.Log(ctx, task.ID, nil, "error", fmt.Sprintf("repoutil: GetTaskRepoHostPath -> repository %s not found in workspace metadata or project repositories", *task.RepositoryID))
+	}
 	return "", fmt.Errorf("task repository %s not found in workspace metadata or project repositories", *task.RepositoryID)
 }
 

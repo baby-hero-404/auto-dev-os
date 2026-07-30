@@ -418,6 +418,7 @@ interface TaskDetailContextType {
   hasPR: boolean;
   isExecutionReady: boolean;
   isPaused: boolean;
+  isCliFlow: boolean;
   diffText: string;
   parsedDiffs: ParsedFileDiff[];
   parsedDiffFiles: string[];
@@ -522,7 +523,32 @@ export function TaskDetailProvider({
     return data;
   }, [task]);
 
+  const isCliFlow = useMemo(() => {
+    return workflow?.checkpoints?.some(cp => cp.step.startsWith("cli_")) ?? false;
+  }, [workflow?.checkpoints]);
+
   const workflowSteps = useMemo(() => {
+    if (isCliFlow) {
+      const steps = Array.from(new Set((workflow?.checkpoints ?? [])
+        .map(cp => cp.step)
+        .filter(step => step.startsWith("cli_"))));
+      // Ensure expected CLI flow steps are present and ordered roughly correctly
+      const expectedCli = ["cli_analyze", "cli_spec", "cli_implement", "cli_mr"];
+      for (const s of expectedCli) {
+        if (!steps.includes(s)) steps.push(s);
+      }
+      // Sort so expected steps are in order, others go before/after
+      steps.sort((a, b) => {
+        const idxA = expectedCli.indexOf(a);
+        const idxB = expectedCli.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return 1;
+        if (idxB !== -1) return -1;
+        return 0;
+      });
+      return steps;
+    }
+
     if (task?.complexity === "easy") {
       return EASY_STEPS;
     }
@@ -835,6 +861,7 @@ export function TaskDetailProvider({
         isReviewWaiting,
         isPRMerged,
         hasPR,
+        isCliFlow,
         isExecutionReady,
         isPaused,
         diffText,

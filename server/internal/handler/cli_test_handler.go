@@ -85,21 +85,3 @@ func (h *CLITestHandler) Terminal(w http.ResponseWriter, r *http.Request) {
 
 	_ = wsSendJSON(conn, map[string]interface{}{"type": "exit"})
 }
-
-// writeCredentialFile writes content to relPath under baseDir, refusing to
-// write anywhere relPath would resolve outside baseDir. Matches the
-// filepath.Rel-based containment check engine/cli.go uses for the same
-// class of untrusted-relative-path problem (a plain filepath.Clean+HasPrefix
-// string check is not sufficient: a sibling directory that merely shares
-// baseDir's string prefix, e.g. baseDir+"-evil", would incorrectly pass it).
-func writeCredentialFile(baseDir, relPath, content string) {
-	fullPath := filepath.Join(baseDir, relPath)
-	rel, err := filepath.Rel(baseDir, fullPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(fullPath, []byte(content), 0o600)
-}

@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { SpecPanel } from "./SpecPanel";
-import { CLISpecPanel } from "./CLISpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { CheckpointsPanel } from "./CheckpointsPanel";
 import { AuditPanel } from "./AuditPanel";
@@ -76,6 +75,7 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
     reloadFullLogs,
     isReloadingLogs,
     analysisData,
+    isCliFlow,
   } = useTaskDetail();
 
   // Specification presence chips
@@ -145,12 +145,11 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
           }
         >
           <SpecPanel isExpanded={true} onToggle={() => {}} />
-          <CLISpecPanel />
         </AccordionItem>
       )}
 
       {/* Accordion 2: Execution Logs */}
-      {!['coding', 'testing', 'fixing', 'failed', 'merged', 'pr_ready', 'human_review'].includes(task?.status || '') && (
+      {(!['coding', 'testing', 'fixing', 'failed', 'merged', 'pr_ready', 'human_review'].includes(task?.status || '') || (isCliFlow && ['coding', 'testing', 'fixing'].includes(task?.status || ''))) && (
         <AccordionItem
           title="Execution Logs"
           isOpen={!!openSections.logs}

@@ -77,6 +77,75 @@ func TestOrchestrator_Resume_DoesNotLoseCode(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_Resume_DoesNotLoseCLISpec guards against the regression where resuming a
+// paused cli_spec step (spec approved for human review, e.g. docs/openspecs/<slug>/*.md written
+// but not committed) wiped that work via `git reset --hard && git clean -fdx` on every job
+// resume, because hasWorkToPreserve only recognized StepCodeBackend/Frontend/Fix/Merge
+// checkpoints and cli_spec's own checkpoint is "paused"/"waiting_approval", not "success", at
+// the moment EnsureWorkspaceCloned runs on resume.
+func TestOrchestrator_Resume_DoesNotLoseCLISpec(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "orch-resume-clispec-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	task := &models.Task{
+		ID:        "task-resume-clispec-123",
+		ProjectID: "proj-resume-clispec-123",
+	}
+	agent := &models.Agent{
+		ID:   "agent-123",
+		Name: "Test Agent",
+	}
+
+	repo := models.Repository{
+		ID:        "repo-123",
+		ProjectID: "proj-resume-clispec-123",
+		URL:       "https://github.com/test/repo.git",
+		Branch:    "main",
+	}
+
+	localPath := sandbox.WorkspacePath(tmpDir, task.ID)
+	gitDir := filepath.Join(localPath, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("failed to setup mock git dir: %v", err)
+	}
+
+	taskRepo := &mockTaskRepo{task: task}
+	agentAssigner := &mockAgentAssigner{agent: agent}
+	sandboxRuntime := &mockSandboxRuntime{}
+	gitOps := &mockGitOpsClient{}
+	reposRepo := &mockRepositoriesRepo{repo: repo}
+
+	workflowRepo := &mockWorkflowRepo{
+		job: &models.WorkflowJob{
+			ID:     "job-123",
+			TaskID: task.ID,
+			Status: models.WorkflowJobStatusQueued,
+		},
+		checkpoint: &models.WorkflowCheckpoint{
+			TaskID: task.ID,
+			Step:   workflow.StepCLISpec,
+			State:  []byte(`{"status": "paused"}`),
+		},
+	}
+
+	orch := New(taskRepo, workflowRepo, agentAssigner, sandboxRuntime,
+		WithGitOpsClient(gitOps),
+		WithRepositoryRepository(reposRepo),
+		WithWorkspaceRoot(tmpDir),
+	)
+
+	// A paused cli_spec checkpoint must be enough to preserve the worktree, even though
+	// cli_spec itself hasn't reached "success" yet — ensureWorkspaceCloned must NOT call
+	// resetExistingWorkspace (so gitOps must not be queried or clean git commands run).
+	err = orch.ensureWorkspaceCloned(context.Background(), task, agent, "job-123")
+	if err != nil {
+		t.Errorf("expected no error in ensureWorkspaceCloned, got %v", err)
+	}
+}
+
 func TestOrchestrator_Fix_WithPRRejection(t *testing.T) {
 	task := &models.Task{
 		ID:         "task-fix-123",

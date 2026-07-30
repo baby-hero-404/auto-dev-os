@@ -40,8 +40,13 @@ export function TaskSidebar() {
     const failedHere = status === 'failed';
     const dur = stepDurations.get(step);
     
+    const formatStepName = (step: string) => {
+      const capitalized = step.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      return capitalized.replace(/^Cli\b/, "CLI");
+    };
+    
     // Formatting step name
-    let label = step.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    let label = formatStepName(step);
     let desc = '';
     let tasks: string[] = [];
     if (step.startsWith("code_backend_") || step.startsWith("code_frontend_")) {

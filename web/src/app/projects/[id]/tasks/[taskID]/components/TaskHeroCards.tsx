@@ -52,6 +52,8 @@ export function TaskHeroCards() {
     setFeedback,
     submittingPR,
     startReview,
+    workflowSteps,
+    isCliFlow,
   } = useTaskDetail();
 
   const [isRejectFormOpen, setIsRejectFormOpen] = useState(false);
@@ -73,6 +75,7 @@ export function TaskHeroCards() {
     const currentRunningStep = workflow?.job?.status === "running" ? workflow?.job?.step : undefined;
     for (const cp of workflow.checkpoints) {
       if (!cp.step || seen.has(cp.step)) continue;
+      if (!workflowSteps.includes(cp.step)) continue;
       if (cp.step === currentRunningStep || cp.state?.status === "running") continue;
       const status = cp.state?.status;
       if (status === "success" || status === "recorded" || status === "skipped" || !status) {
@@ -121,24 +124,27 @@ export function TaskHeroCards() {
       )}
 
       {heroLoad && (
-        <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
-          <div className="absolute -top-10 -right-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-          <div className="flex items-center gap-3 mb-4 z-10">
-            <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
-            <span className="text-sm font-bold text-blue-700 dark:text-blue-400 tracking-wide capitalize">
-              {st === 'context_loading' ? 'Loading Context...' : st === 'planning' ? 'Planning Execution...' : 'Analyzing Requirements...'}
-            </span>
+        <div className="flex flex-col gap-4">
+          <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
+            <div className="absolute -top-10 -right-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="flex items-center gap-3 mb-4 z-10">
+              <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
+              <span className="text-sm font-bold text-blue-700 dark:text-blue-400 tracking-wide capitalize">
+                {st === 'context_loading' ? 'Loading Context...' : st === 'planning' ? 'Planning Execution...' : 'Analyzing Requirements...'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2 pl-1 z-10">
+              {completedCheckpoints.map((cp, idx) => (
+                <div key={idx} className="flex items-center gap-2.5 py-1 text-xs font-mono text-emerald-800 dark:text-emerald-400/90">
+                  <span className="w-4 h-4 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                  </span>
+                  <span className="font-semibold">{cp.step.replace(/^cli_/, "CLI ").replace(/_/g, " ")}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-col gap-2 pl-1 z-10">
-            {completedCheckpoints.map((cp, idx) => (
-              <div key={idx} className="flex items-center gap-2.5 py-1 text-xs font-mono text-emerald-800 dark:text-emerald-400/90">
-                <span className="w-4 h-4 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 shrink-0">
-                  <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                </span>
-                <span className="capitalize">{cp.step.replace(/_/g, " ")}</span>
-              </div>
-            ))}
-          </div>
+          <CLISpecPanel />
         </div>
       )}
 
@@ -170,18 +176,33 @@ export function TaskHeroCards() {
       )}
 
       {heroExec && (
-        <div className="rounded-2xl border border-stroke/10 bg-background shadow-lg overflow-hidden transition-all duration-300">
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-stroke/10 bg-surface/20">
-            <div className="flex items-center gap-2.5">
-              <span className="relative flex h-2 w-2">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${st === 'fixing' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${st === 'fixing' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+        isCliFlow ? (
+          <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
+            <div className="absolute -top-10 -right-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="flex items-center gap-3 mb-2 z-10 relative">
+              <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
+              <span className="text-sm font-bold text-blue-700 dark:text-blue-400 tracking-wide capitalize">
+                CLI Engine Executing...
               </span>
-              <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} in progress</span>
+            </div>
+            <div className="text-xs text-content-muted z-10 pl-8 relative">
+              The agent is running locally in the background. Terminal output will be captured and displayed once the command completes.
             </div>
           </div>
-          <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
-        </div>
+        ) : (
+          <div className="rounded-2xl border border-stroke/10 bg-background shadow-lg overflow-hidden transition-all duration-300">
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-stroke/10 bg-surface/20">
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-2 w-2">
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${st === 'fixing' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${st === 'fixing' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                </span>
+                <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} in progress</span>
+              </div>
+            </div>
+            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
+          </div>
+        )
       )}
 
       {heroReview && (

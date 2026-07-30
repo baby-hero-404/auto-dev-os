@@ -22,6 +22,10 @@ func (o *Orchestrator) checkpoint(ctx context.Context, taskID string, jobID *str
 }
 
 func (o *Orchestrator) log(ctx context.Context, taskID string, jobID *string, level, message string) {
+	if o.workflows == nil {
+		slog.Warn(message, "task_id", taskID, "level", level)
+		return
+	}
 	stepID, hasStep := ctx.Value("workflow_step_id").(string)
 	attempt, hasAttempt := ctx.Value("workflow_attempt").(int)
 	if hasStep && stepID != "" {

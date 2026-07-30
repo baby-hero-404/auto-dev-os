@@ -21,6 +21,13 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
   for (const log of logs) {
     const startMatch = log.message.match(/\[#\d+\] step ([\w-]+) running/);
     if (startMatch) {
+      const stepName = startMatch[1];
+      if (stepName.startsWith("cli_")) {
+        // Flatten cli_ steps: Treat them as normal lines instead of nested UI groups
+        result.push({ type: "log", log });
+        continue;
+      }
+      
       if (currentGroup) {
         if (currentGroup.status === "running") {
           currentGroup.status = "failed"; // Implicitly failed/interrupted if a new step starts
@@ -29,8 +36,8 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
       }
       groupCount++;
       currentGroup = {
-        key: `${startMatch[1]}_${groupCount}`,
-        stepName: startMatch[1],
+        key: `${stepName}_${groupCount}`,
+        stepName: stepName,
         status: "running",
         logs: [log]
       };

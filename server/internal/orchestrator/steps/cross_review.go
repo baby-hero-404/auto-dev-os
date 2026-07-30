@@ -169,7 +169,11 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 
 	var diffText string
 	if s.diff != nil {
-		diffText, _ = s.diff.CaptureWorkspaceDiff(ctx, s.rt.Task, s.rt.Agent, workflow.StepCrossReview, "")
+		// cli_implement commits its changes directly (rather than leaving them as
+		// uncommitted worktree edits), so CaptureWorkspaceDiff (git diff, uncommitted-only)
+		// always sees an empty diff here — CapturePRDiff (diff against the base branch)
+		// is what actually shows the committed implementation for review.
+		diffText, _ = s.diff.CapturePRDiff(ctx, s.rt.Task, s.rt.Agent, "main")
 		if s.artifacts != nil && diffText != "" {
 			_ = s.artifacts.SaveArtifact(ctx, s.rt.JobID, s.rt.Task.ID, stepCtx.StepID, "diff", diffText)
 		}
@@ -285,6 +289,7 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 				if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusHumanReview); err != nil {
 					return nil, err
 				}
+				s.rt.Task.Status = models.TaskStatusHumanReview
 			}
 			return out, workflow.PauseError{Step: workflow.StepCrossReview, Reason: "awaiting_review_escalation: same spec violation repeated across consecutive cross-review cycles"}
 		}
@@ -299,6 +304,7 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 			if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusHumanReview); err != nil {
 				return nil, err
 			}
+			s.rt.Task.Status = models.TaskStatusHumanReview
 		}
 		return out, nil
 	}
@@ -311,6 +317,7 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 			if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusCoding); err != nil {
 				return nil, err
 			}
+			s.rt.Task.Status = models.TaskStatusCoding
 		}
 		return out, workflow.ErrCrossReviewFixLoop
 	}
@@ -319,6 +326,7 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusHumanReview); err != nil {
 			return nil, err
 		}
+		s.rt.Task.Status = models.TaskStatusHumanReview
 	}
 	return out, nil
 }

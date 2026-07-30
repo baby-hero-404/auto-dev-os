@@ -1,6 +1,6 @@
 ---
 sources:
-  - "server/**"
+  - "server/pkg/paths/**"
 ---
 
 # 03. Global Path Management System

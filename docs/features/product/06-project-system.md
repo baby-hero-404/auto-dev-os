@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/service/project.go"
+  - "server/internal/repository/**"
+  - "server/pkg/models/**"
+  - "web/src/**"
   - "web/src/components/projects/project-profile.tsx"
   - "web/src/components/projects/GovernanceConfigEditor.tsx"
   - "web/src/components/projects/execution-providers-list.tsx"

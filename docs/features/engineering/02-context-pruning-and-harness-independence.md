@@ -1,6 +1,7 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/context/**"
+  - "server/internal/prompts/**"
   - "server/internal/orchestrator/llmrunner/outputfilter/**"
   - "server/internal/orchestrator/llmrunner/toolloop.go"
 verified: 2026-07-23

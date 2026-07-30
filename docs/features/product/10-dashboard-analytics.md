@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/handler/analytics_dashboard.go"
+  - "server/internal/service/analytics_dashboard.go"
+  - "server/internal/handler/audit.go"
+  - "web/src/**"
 verified: 2026-07-23
 ---
 

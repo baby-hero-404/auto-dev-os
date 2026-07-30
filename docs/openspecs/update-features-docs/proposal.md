@@ -1,26 +1,25 @@
-# Proposal: Update Feature Docs to Match Recent Code
+# Proposal: Comprehensive Feature Docs Audit & Sync
 
 ## Problem
-Recent codebase developments—such as WebSocket ticket-based authentication, PTY terminal resizing, per-run auth directory staging for CLI agents, and CLI artifact versioning—have been implemented in code but are not yet reflected in the `docs/features/` specification documents.
+The `docs/features/` directory serves as the source of truth for Auto Code OS capabilities, but it easily drifts out of sync with the actual codebase. Incremental updates are insufficient because they miss deprecated features, architectural refactors, and implicitly added capabilities. We lack a systematic approach to create, update, or remove documentation based on the *actual* codebase reality.
 
 ## Goal
-Update the `docs/features` directory to accurately reflect the current state of the codebase, ensuring new capabilities are properly documented and status badges reflect reality.
+Establish and execute a comprehensive methodology to audit the entire `server/` and `web/` codebase, mapping actual implementations to the `docs/features/` index. Create, update, or remove documentation to ensure 100% parity with the current system state.
 
 ## Success
-The `docs/features/` directory accurately describes the newly added WebSocket terminal capabilities and the hardened CLI execution engine.
+Every feature documented in `docs/features/` is verifiable in the codebase. Every major capability in the codebase (e.g., Gateway, Governance, Orchestrator, CLI Engine, Tooling, Auth) has an accurate, up-to-date specification document. Outdated docs are removed or marked as deprecated.
 
 ## Decisions
-- Update `product/14-execution-engine.md` to include per-run auth directory staging, context file injection, credential re-authentication status, and CLI artifact versioning by attempt.
-- Reactivate `product/11-multi-channel-interaction.md` (change status from Deferred to In Progress/Implemented) to document the WebSocket ticket-based authentication, PTY resizing, and terminal reconnect logic.
-- Add documentation for the `minttoken` development CLI tool used to generate test JWT tokens for authentication.
+- Adopt a **Code-First Audit Methodology**: We will scan the entry points (`server/internal/*`, `web/src/*`) and trace the domain logic to identify what exists.
+- Docs that describe removed systems (e.g., deprecated patch engines) will be deleted or moved to an `archive/` folder.
+- Docs that describe heavily refactored systems (e.g., Orchestrator execution units, workflow DAGs) will be completely rewritten.
+- New undocumented domains (e.g., `tool/`, `policy/`, `governance/`) will receive new `product/` or `engineering/` specs.
 
 ## Trade-offs
-- Modifying existing feature docs keeps the documentation centralized but increases the density of `14-execution-engine.md`.
+- A full audit takes significant time compared to surgical updates, but it prevents accumulating documentation debt and misleading AI agents that rely on these specs.
 
 ## Out of Scope
-- No code logic changes to the Orchestrator, CLI Engine, or Auth handlers.
+- No code refactoring. If we find bad code, we document it as-is or note the technical debt, but we do not fix the code in this task.
 
 ## Impact
-- `docs/features/product/14-execution-engine.md`
-- `docs/features/product/11-multi-channel-interaction.md`
-- `docs/features/README.md` (freshness table)
+- Entire `docs/features/` directory tree.

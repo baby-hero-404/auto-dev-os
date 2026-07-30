@@ -1,6 +1,6 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/context/**"
   - "server/internal/service/memory.go"
   - "server/internal/service/memory_search.go"
   - "server/pkg/llm/embedding.go"

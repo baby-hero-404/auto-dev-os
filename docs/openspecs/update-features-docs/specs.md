@@ -1,26 +1,25 @@
-# Expected Behavior: Update Feature Docs
+# Expected Behavior: Feature Docs Audit & Sync
 
-## Scenario: Document CLI Execution Engine Hardening
+## Scenario: Code-to-Doc Parity Check
 **When:**
-- A developer reads `product/14-execution-engine.md`
+- The audit process runs.
 **Then:**
-- It should explain that sandbox CLI credentials are now staged in a per-run auth directory.
-- It should explain how context files are injected into CLI runtime environments.
-- It should detail how CLI artifacts are versioned by attempt.
-- It should explain the credential re-authentication status.
+- It must map each `server/internal/` package (e.g., `gateway/`, `governance/`, `policy/`, `tool/`) to its corresponding feature document.
+- If a package has no document, a new document must be created.
+- If a document has no corresponding code, it must be removed or marked as `⚪ Deferred`/`Archived`.
 
-## Scenario: Document WebSocket Terminal
+## Scenario: Status Alignment
 **When:**
-- A developer reads `product/11-multi-channel-interaction.md`
+- Evaluating a feature document's `Status`.
 **Then:**
-- It should detail the WebSocket ticket-based authentication flow for secure CLI and remote terminal access.
-- It should explain the PTY terminal resizing mechanism and WS reconnect resilience.
-- It should mention how verified auth claims are consulted for RBAC.
-- It should mention the `minttoken` tool for generating test tokens.
+- It must be `🟢 Implemented` if the feature is actively running in production code.
+- It must be `🟡 In Progress` if only the baseline is implemented.
+- It must be `🔵 Proposed` if the code does not exist yet.
 
 ## Rules
-- All docs must follow the existing conventions (Vietnamese body prose, English headers/identifiers).
-- Each updated document's frontmatter `verified` date must be bumped to the current date (`2026-07-30`).
+- **No Hallucinations:** Every documented feature must include a `sources:` frontmatter block pointing to the exact files (`server/internal/...`) that implement it.
+- **Single Source of Truth:** Do not duplicate policies across files. Use cross-references (`§NN`).
+- **Language Convention:** Vietnamese for body prose, English for technical terms, file paths, and headers.
 
 ## Constraints
-- Cross-references must use the full folder path.
+- The `docs/features/README.md` must be regenerated to reflect the final list of documents and their freshness dates.

@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/workflow/**"
+  - "server/internal/orchestrator/**"
+  - "server/internal/sandbox/**"
+  - "server/internal/gitops/**"
   - "docs/schemas/pipeline.schema.json"
   - "docs/schemas/policies.schema.json"
 verified: 2026-07-23
@@ -143,7 +146,8 @@ Pipeline/policy của project không còn hoàn toàn hard-code. Hai JSON Schema
 - `docs/schemas/pipeline.schema.json` — steps, `dependsOn`, điều kiện bật/tắt node (vd skip `dor_check` cho hotfix), engine bindings.
 - `docs/schemas/policies.schema.json` — DoR criteria, review harness policy (§01/§09), routing matrix override (§01 Smart LLM Router), retry/cycle limits.
 
-Cột `projects.pipeline_config` (jsonb, nullable, `server/pkg/models/project.go`) đã tồn tại và được validate (`governance/validate.go`), nhưng **chưa được đọc để dựng DAG**: workflow selection hiện tại vẫn là switch cứng trong `worker.go` (`shouldUseCLISpecFirstWorkflow` → `workflow.CLISpecFirstWorkflow` / DAG API-native mặc định), không có hàm `BuildWorkflow` data-driven và không có `presets/*.json` nào được ship. Phần data-driven DAG (đọc `pipeline_config` để dựng DAG thay vì switch cứng, 2 preset JSON, validate acyclic/`dependsOn`, UI editor chọn preset) là **kế hoạch chưa triển khai** — không mô tả hành vi hiện tại.
+Cột `projects.pipeline_config` (jsonb, nullable, `server/pkg/models/project.go`) được validate nghiêm ngặt bởi Governance Engine (`server/internal/governance/dag.go` và `validate.go`). Hệ thống thực hiện kiểm tra cấu trúc DAG toàn diện (acyclic, deps resolve, single entry, no dead ends) trước khi cho phép lưu cấu hình. 
+Mặc dù DAG validation đã được triển khai đầy đủ (Implemented), workflow selection lúc runtime hiện tại vẫn đang dùng cơ chế kết hợp giữa `worker.go` và JSON Schema. Cơ chế Data-driven DAG (đọc `pipeline_config` để dựng hoàn toàn graph thực thi) đang dần được rollout.
 
 ---
 

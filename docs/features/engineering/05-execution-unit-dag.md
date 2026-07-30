@@ -1,6 +1,7 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/orchestrator/steps/plan.go"
+  - "server/pkg/models/**"
 ---
 
 # 05. Execution Unit & Dynamic Scheduler DAG

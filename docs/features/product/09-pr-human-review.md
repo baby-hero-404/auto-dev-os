@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/handler/pr.go"
+  - "server/internal/orchestrator/steps/**"
+  - "server/internal/service/task.go"
+  - "web/src/**"
   - "web/src/app/projects/[id]/tasks/[taskID]/components/AuditPanel.tsx"
   - "server/pkg/attest/**"
 verified: 2026-07-23

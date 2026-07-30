@@ -1,6 +1,12 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/orchestrator/worker.go"
+  - "server/internal/orchestrator/steps/**"
+  - "server/internal/orchestrator/patch/**"
+  - "server/internal/orchestrator/sandbox.go"
+  - "server/internal/orchestrator/llmrunner/runner.go"
+  - "server/internal/prompts/builder.go"
+  - "server/internal/context/provider/provider.go"
 ---
 
 # 01. Retry, Patch & Context Hardening

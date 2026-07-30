@@ -1,6 +1,7 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/orchestrator/patch/applier.go"
+  - "server/pkg/models/boundary.go"
 ---
 
 # 04. Semantic Boundaries & Filesystem RBAC

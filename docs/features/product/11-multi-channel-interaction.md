@@ -1,6 +1,6 @@
 ---
 sources:
-  - "server/api/cli_auth.go"
+  - "server/internal/handler/cli_auth.go"
   - "server/cmd/minttoken/main.go"
 verified: 2026-07-30
 ---
@@ -9,7 +9,7 @@ verified: 2026-07-30
 
 **Status:** 🟡 In Progress (Websocket terminal implemented; chat integrations planned)  
 **Owner docs:** `docs/ARCHITECTURE.md`  
-**Code areas:** `server/api/cli_auth.go`, `server/internal/handler`, `server/cmd/minttoken`  
+**Code areas:** `server/internal/handler/cli_auth.go`, `server/internal/handler`, `server/cmd/minttoken`  
 **Blocking decisions:** First chat channel to support (Discord vs Slack).  
 **Acceptance criteria:** Developer can create tasks, receive progress, approve/reject actions from authenticated remote sessions, and securely access CLI via WebSocket terminal.
 

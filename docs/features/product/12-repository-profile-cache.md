@@ -1,6 +1,7 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/orchestrator/steps/context_load.go"
+  - "server/.data/repositories/*/profile.json"
 ---
 
 # 12. Repository Profile Cache (Bộ Nhớ Ngữ Cảnh Repository)

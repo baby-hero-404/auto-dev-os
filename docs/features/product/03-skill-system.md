@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/pkg/models/**"
+  - "server/internal/service/skill.go"
+  - "server/internal/prompts/**"
+  - "web/src/app/skills/**"
   - "web/src/components/projects/LearnedSkillsPanel.tsx"
 verified: 2026-07-23
 ---

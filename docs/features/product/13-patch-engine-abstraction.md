@@ -1,6 +1,6 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/orchestrator/patch/**"
 verified: 2026-07-23
 ---
 

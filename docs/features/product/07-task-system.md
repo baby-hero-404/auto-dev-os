@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/service/task.go"
+  - "server/internal/repository/**"
+  - "server/pkg/models/**"
+  - "web/src/**"
 verified: 2026-07-23
 ---
 

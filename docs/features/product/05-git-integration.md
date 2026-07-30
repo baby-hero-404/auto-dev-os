@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/internal/gitops/**"
+  - "server/internal/workflow/**"
+  - "server/internal/orchestrator/**"
+  - "web/**"
   - "server/pkg/attest/**"
 verified: 2026-07-23
 ---

@@ -41,6 +41,8 @@ Each doc states its own status once in its header (`**Status:**` line) — this 
 | 12 | [Repository Profile Cache](product/12-repository-profile-cache.md) | 🔵 Proposed |
 | 13 | [Patch Engine Abstraction](product/13-patch-engine-abstraction.md) | 🟢 Implemented |
 | 14 | [Execution Engine (Pluggable API-Native / CLI)](product/14-execution-engine.md) | 🟢 Implemented |
+| 15 | [Knowledge & Learning Engine](product/15-knowledge-learning-engine.md) | 🟢 Implemented |
+| 16 | [Attestation & Code Provenance](product/16-attestation-provenance.md) | 🟢 Implemented |
 
 **Canonical sources** (avoid restating these elsewhere — cross-reference instead):
 - Task lifecycle (12 states) + "PR ≠ Task hoàn thành" completion policy → **product/07** Task System.
@@ -56,6 +58,8 @@ Each doc states its own status once in its header (`**Status:**` line) — this 
 | 03 | [Global Path Management System](engineering/03-global-path-manager.md) | 🟢 Implemented |
 | 04 | [Semantic Boundaries & Filesystem RBAC](engineering/04-semantic-boundaries.md) | 🟢 Implemented |
 | 05 | [Execution Unit & Dynamic Scheduler DAG](engineering/05-execution-unit-dag.md) | 🟢 Implemented |
+| 06 | [Governance, Policy & Audit](engineering/06-governance-audit.md) | 🟢 Implemented |
+| 07 | [Authentication & Secrets Management](engineering/07-auth-secrets.md) | 🟢 Implemented |
 
 > All five were audited against the current codebase on 2026-07-12 and found **already fully built** — every mechanism each doc "proposes" already exists in `server/`. They're kept as engineering RFCs (design rationale) rather than deleted, but their status reflects reality, not their original "Proposed" framing at authoring time.
 
@@ -91,19 +95,23 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 | [engineering/03-global-path-manager.md](./engineering/03-global-path-manager.md) | 2026-07-12 | ✅ Fresh |
 | [engineering/04-semantic-boundaries.md](./engineering/04-semantic-boundaries.md) | 2026-07-12 | ✅ Fresh |
 | [engineering/05-execution-unit-dag.md](./engineering/05-execution-unit-dag.md) | 2026-07-12 | ✅ Fresh |
+| [engineering/06-governance-audit.md](./engineering/06-governance-audit.md) | 2026-07-30 | ✅ Fresh |
+| [engineering/07-auth-secrets.md](./engineering/07-auth-secrets.md) | 2026-07-30 | ✅ Fresh |
 | [hardening/01-retry-patch-context-hardening.md](./hardening/01-retry-patch-context-hardening.md) | 2026-07-12 | ✅ Fresh |
 | [product/01-unified-ai-gateway.md](./product/01-unified-ai-gateway.md) | 2026-07-23 | ✅ Fresh |
 | [product/02-rule-system.md](./product/02-rule-system.md) | 2026-07-12 | ✅ Fresh |
 | [product/03-skill-system.md](./product/03-skill-system.md) | 2026-07-23 | ✅ Fresh |
-| [product/04-agent-system.md](./product/04-agent-system.md) | 2026-07-23 | ✅ Fresh |
+| [product/04-agent-system.md](./product/04-agent-system.md) | 2026-07-30 | ✅ Fresh |
 | [product/05-git-integration.md](./product/05-git-integration.md) | 2026-07-23 | ✅ Fresh |
 | [product/06-project-system.md](./product/06-project-system.md) | 2026-07-23 | ✅ Fresh |
 | [product/07-task-system.md](./product/07-task-system.md) | 2026-07-23 | ✅ Fresh |
-| [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-23 | ✅ Fresh |
+| [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-30 | ✅ Fresh |
 | [product/09-pr-human-review.md](./product/09-pr-human-review.md) | 2026-07-23 | ✅ Fresh |
 | [product/10-dashboard-analytics.md](./product/10-dashboard-analytics.md) | 2026-07-23 | ✅ Fresh |
 | [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-30 | ✅ Fresh |
 | [product/12-repository-profile-cache.md](./product/12-repository-profile-cache.md) | 2026-07-12 | ✅ Fresh |
 | [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-23 | ✅ Fresh |
 | [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-07-30 | ✅ Fresh |
+| [product/15-knowledge-learning-engine.md](./product/15-knowledge-learning-engine.md) | 2026-07-30 | ✅ Fresh |
+| [product/16-attestation-provenance.md](./product/16-attestation-provenance.md) | 2026-07-30 | ✅ Fresh |
 <!-- freshness:end -->

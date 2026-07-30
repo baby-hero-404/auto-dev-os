@@ -1,6 +1,11 @@
 ---
 sources:
-  - "server/**"
+  - "server/pkg/models/rule.go"
+  - "server/internal/service/rule.go"
+  - "server/internal/prompts/builder.go"
+  - "server/internal/prompts/assembler.go"
+  - "server/internal/prompts/rules.go"
+  - "server/internal/repository/rule.go"
 ---
 
 # 02. Rule System

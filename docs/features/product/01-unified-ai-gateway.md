@@ -1,6 +1,9 @@
 ---
 sources:
-  - "server/**"
+  - "server/pkg/llm/**"
+  - "server/internal/service/credential_pool.go"
+  - "server/internal/service/provider_model.go"
+  - "web/src/**"
   - "web/src/components/projects/project-profile.tsx"
   - "server/pkg/llm/anthropic.go"
   - "server/internal/orchestrator/llmrunner/outputfilter/**"

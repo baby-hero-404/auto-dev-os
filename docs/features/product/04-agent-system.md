@@ -1,6 +1,10 @@
 ---
 sources:
-  - "server/**"
+  - "server/pkg/models/agent.go"
+  - "server/internal/repository/agent.go"
+  - "server/internal/service/agent.go"
+  - "server/internal/orchestrator/**"
+  - "web/src/**"
   - "server/pkg/models/learned_skill.go"
 verified: 2026-07-23
 ---
@@ -65,21 +69,17 @@ Việc pattern nào (Sequential/Fan-out) được chọn cho từng task phụ t
     *   **Auto-Join:** Agent tự động tham gia tất cả project trong Organization.
     *   **Manual Add:** Agent chỉ tham gia project khi được chỉ định.
 
-## D. Self-Improving Learning Loop (Reusable Skills System)
+## D. Role-Based Capabilities (Tooling)
 
-> **Audit note (2026-07-23):** Cập nhật so với ghi chú 2026-07-12 — cơ chế mô tả dưới đây **đã được triển khai** dưới dạng bảng `learned_skills` (`server/pkg/models/learned_skill.go`: `trigger_keywords[]`, `usage_count`, `success_rate`, `source_task_id`, `status`), không còn là Planned Target.
+Hệ thống quản lý Tool/Skill thông qua module `server/internal/tool`. Mỗi Agent được cấp các quyền (Capabilities) dựa trên Role của nó:
 
-Agent tự cải thiện qua vòng lặp học tập (Implemented):
-
-1.  **Task đạt `merged`** → job history (steps, fixes, review feedback) được đưa qua 1 LLM call trích xuất (mở rộng từ `learning.DetectPatterns`).
-2.  **Skill Extraction** → Đề xuất 0-2 `learned_skill` record ("cách chạy test ở repo X", "pattern sửa lỗi Y"). Autonomy `supervised` → skill ở trạng thái `draft` chờ approve trong `LearnedSkillsPanel` (§03); `autonomous` → active ngay.
-3.  **Context Loading** → `context_load` tìm skill theo `trigger_keywords`/title match với task description (BM25, tái dùng memory search infra), nạp top-3 vào context với budget riêng (~2k tokens).
-4.  **Usage Tracking** → Task merged/failed cập nhật `usage_count`/`success_rate` của skill đã được nạp.
-5.  **Mid-Task Anti-Loop Nudge:** Trong tool-loop, mỗi 15 iterations, hệ thống chèn 1 system nudge (thuần Go, không LLM) tổng kết "những gì đã thử & thất bại" dựa trên tool-call history — cùng cùng tool + cùng args fail ≥3 lần → nudge cảnh báo cụ thể, chống lặp vòng vô ích.
+*   **Capabilities & Role Policies:** Được định nghĩa trong `server/internal/tool/rolepolicy.go` và `capability.go`.
+*   **Tool Registration:** Orchestrator tự động đăng ký các tool cần thiết vào Registry (`registry.go`) và gắn (bind) chúng với Agent runtime tùy thuộc vào Policy của Role.
+*   **Dynamic Binding:** Khi chuyển đổi Role trong quá trình execution, các Capabilities sẽ được nạp lại thông qua cơ chế JIT Loading, đảm bảo Agent chỉ sử dụng các tool phù hợp với Context hiện tại.
 
 ## E. Quy Tắc Bắt Buộc
 
-*   Agent phải tuân thủ Rule System (§02).
+*   Agent phải tuân thủ Rule System (§02) và Governance Policy (§06 Engineering).
 *   Backend validate chặt khi tạo Agent: reject provider không hợp lệ, role không nằm trong allowlist.
 *   Tách biệt `model_route` (input config) và `resolved_model` (chỉ dùng cho telemetry).
 

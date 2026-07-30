@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -201,5 +202,49 @@ func TestCLIEngineRunner_RunLLMStep_PreflightRunsOnce(t *testing.T) {
 	}
 	if n := preflightChecks(); n != 1 {
 		t.Errorf("expected exactly 1 preflight binary check across 2 RunLLMStep calls (sync.Once), got %d", n)
+	}
+}
+
+// TestFinishCLIRun_AuthInvalidConfirmed_MarksReauth guards Option C's
+// confirmed side: a profile-specific (high-confidence) auth-invalid match
+// still marks the credential as needing reauth via the shared finishCLIRun
+// bookkeeping, same as before the confidence split.
+func TestFinishCLIRun_AuthInvalidConfirmed_MarksReauth(t *testing.T) {
+	credStatus := &fakeCredStatusSetter{}
+	orch := New(nil, &mockWorkflowRepo{job: &models.WorkflowJob{}}, nil, nil,
+		WithCredentialStatusSetter(credStatus),
+	)
+	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", &engine.CodeStepResult{
+		Success: false, AuthInvalid: true, AuthInvalidConfirmed: true, Error: "credential not authenticated",
+	})
+	if len(credStatus.ids) != 1 || credStatus.ids[0] != "cred-1" {
+		t.Errorf("expected MarkNeedsReauth called once for cred-1, got %+v", credStatus.ids)
+	}
+}
+
+// TestFinishCLIRun_AuthInvalidSuspected_DoesNotMarkReauth guards Option C's
+// suspected side: a generic-fallback-only match must NOT disable the
+// credential — it's left active to retry normally, with only a warning
+// logged (see cli_spec_step.go's mirrored policy for the same reasoning).
+func TestFinishCLIRun_AuthInvalidSuspected_DoesNotMarkReauth(t *testing.T) {
+	credStatus := &fakeCredStatusSetter{}
+	workflows := &mockWorkflowRepo{job: &models.WorkflowJob{}}
+	orch := New(nil, workflows, nil, nil,
+		WithCredentialStatusSetter(credStatus),
+	)
+	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", &engine.CodeStepResult{
+		Success: false, AuthInvalid: true, AuthInvalidConfirmed: false, Error: "possible auth failure, unconfirmed signature",
+	})
+	if len(credStatus.ids) != 0 {
+		t.Errorf("expected MarkNeedsReauth NOT called for a merely suspected match, got %+v", credStatus.ids)
+	}
+	var foundWarn bool
+	for _, entry := range workflows.logs {
+		if entry.Level == "warn" && strings.Contains(entry.Message, "suspected auth-invalid") {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Errorf("expected a warn-level log entry about the suspected auth-invalid match, got: %+v", workflows.logs)
 	}
 }

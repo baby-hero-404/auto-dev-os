@@ -159,9 +159,9 @@ func WithCooldownSetter(setter CooldownSetter) Option {
 }
 
 // WithCredentialStatusSetter wires the credential pool used to mark a CLI
-// credential as needing re-login when RunCodeStep's output matches a known
-// "session/token invalid" signature (see engine.CodeStepResult.AuthInvalid,
-// cli_auth.go).
+// credential as needing re-login when RunCodeStep's output matches a
+// confirmed "session/token invalid" signature (see
+// engine.CodeStepResult.AuthInvalidConfirmed, cli_auth.go).
 func WithCredentialStatusSetter(setter CredentialStatusSetter) Option {
 	return func(o *Orchestrator) {
 		o.credStatusSetter = setter

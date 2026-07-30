@@ -94,16 +94,27 @@ type CodeStepResult struct {
 	QuotaExceeded bool
 
 	// AuthInvalid is true when the captured output matched a known "not
-	// authenticated" signature for this CLI (see cli_auth.go). The caller
-	// marks the linked credential as needing re-login (a new non-Active
-	// status) so SelectCredential stops auto-picking it until a human
-	// re-authenticates — mirrors QuotaExceeded's cooldown write-side but for
-	// a failure that won't self-resolve with time. It also marks the
-	// failure as permanent for the *current* run: the caller should not
-	// spend remaining retry attempts on it, since the same credential will
-	// produce the same failure every time until a human re-runs the CLI
-	// auth capture flow.
+	// authenticated" signature for this CLI at any confidence level (see
+	// cli_auth.go). The caller always treats this as a failed step
+	// (Success=false); AuthInvalidConfirmed decides whether it's further
+	// treated as *permanent*.
 	AuthInvalid bool
+
+	// AuthInvalidConfirmed is true only when AuthInvalid matched a
+	// profile-specific rule (engine.AuthInvalidConfirmed confidence, see
+	// cli_auth.go) rather than the generic "*" fallback list (engine.
+	// AuthInvalidSuspected). Only a confirmed match is treated as
+	// permanent: the caller marks the linked credential as needing
+	// re-login (a new non-Active status) so SelectCredential stops
+	// auto-picking it until a human re-authenticates — mirrors
+	// QuotaExceeded's cooldown write-side but for a failure that won't
+	// self-resolve with time — and should not spend remaining retry
+	// attempts on it, since the same credential will produce the same
+	// failure every time until a human re-runs the CLI auth capture flow.
+	// A merely suspected (fallback-only) match is left to fail and retry
+	// like any other runtime error instead, since the generic patterns can
+	// incidentally match legitimate output.
+	AuthInvalidConfirmed bool
 
 	// AwaitingInput is true when the CLI's last output line looks like it
 	// was blocked waiting for a clarifying answer (see

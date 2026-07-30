@@ -32,8 +32,9 @@ type CooldownSetter interface {
 }
 
 // CredentialStatusSetter marks a credential as needing re-login after a CLI
-// run's captured output matches a "session/token invalid" signature (see
-// engine.CodeStepResult.AuthInvalid / cli_auth.go). Unlike
+// run's captured output matches a confirmed "session/token invalid"
+// signature (see engine.CodeStepResult.AuthInvalidConfirmed / cli_auth.go).
+// Unlike
 // CooldownSetter, this failure won't self-resolve with time — the credential
 // stays excluded from SelectCredential until a human re-authenticates it.
 // Satisfied by *service.CredentialPoolService.MarkNeedsReauth.

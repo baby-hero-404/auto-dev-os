@@ -37,9 +37,17 @@ func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, 
 
 	// Auth-failure write-side: a bad session/token won't self-resolve like a
 	// quota cooldown does, so mark the credential out instead of cooling it
-	// down (see engine.CodeStepResult.AuthInvalid, cli_auth.go).
-	if res.AuthInvalid && credID != "" && o.credStatusSetter != nil {
+	// down (see engine.CodeStepResult.AuthInvalidConfirmed, cli_auth.go).
+	// Gated on AuthInvalidConfirmed, not the broader AuthInvalid: a merely
+	// suspected match (generic fallback rules only) isn't reliable enough
+	// to disable a possibly-still-good credential on — see cli_spec_step.go's
+	// mirrored block for the same reasoning.
+	if res.AuthInvalidConfirmed && credID != "" && o.credStatusSetter != nil {
 		_ = o.credStatusSetter.MarkNeedsReauth(ctx, credID)
+	} else if res.AuthInvalid {
+		o.log(ctx, taskID, &jobID, "warn", fmt.Sprintf(
+			"%s: suspected auth-invalid match on generic fallback rules only (not profile-specific) — credential left active, will retry normally; add a profile-specific rule to engine/cli_auth.go if this recurs",
+			stepID))
 	}
 
 	o.log(ctx, taskID, &jobID, "info", fmt.Sprintf(

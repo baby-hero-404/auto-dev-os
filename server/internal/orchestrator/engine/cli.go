@@ -210,7 +210,12 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 		}
 		authOutput += authRes.Stderr
 	}
-	if detectAuthInvalid(cfg.ProfileRef, authOutput) {
+	// Any confidence level blocks Preflight (unlike RunCodeStep, which
+	// softens its reaction for a merely-suspected match): authOutput is the
+	// auth_check_command's own small, purpose-built response, not a noisy
+	// agent trace, so the mid-transcript false-positive risk that
+	// motivates the confidence split elsewhere barely applies here.
+	if detectAuthInvalid(cfg.ProfileRef, authOutput) != AuthInvalidNone {
 		return "", fmt.Errorf("cli engine: auth check command reports not authenticated: %s", redactSecrets(strings.TrimSpace(authOutput)))
 	}
 	return "", nil
@@ -392,12 +397,15 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	}
 	combined, capturedFiles := extractCapturedFiles(combined)
 	killed := detectLoop(combined)
-	authInvalid := detectAuthInvalid(cfg.ProfileRef, combined)
+	authConfidence := detectAuthInvalid(cfg.ProfileRef, combined)
+	authInvalid := authConfidence != AuthInvalidNone
+	authInvalidConfirmed := authConfidence == AuthInvalidConfirmed
 	// Auth-invalid takes priority over quota: both are runtime failure
 	// signatures but auth-invalid is permanent (retrying never helps) while
 	// quota is transient (cools down and retries later) — reporting both on
 	// the same output would let the quota cooldown path mask the permanent
-	// one.
+	// one. Applies at any confidence level: even a merely suspected match
+	// isn't a quota signature, so it shouldn't cool down the credential.
 	quotaExceeded := !authInvalid && detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
 	// Checked regardless of exit code: some CLIs print a question and then
 	// exit 0 ("can't prompt non-interactively"), which would otherwise be
@@ -415,6 +423,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		LoopKilled:              killed,
 		QuotaExceeded:           quotaExceeded,
 		AuthInvalid:             authInvalid,
+		AuthInvalidConfirmed:    authInvalidConfirmed,
 		AwaitingInput:           awaitingInput,
 		Files:                   capturedFiles,
 		ExitCode:                result.ExitCode,
@@ -425,8 +434,10 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	switch {
 	case killed:
 		res.Error = "cli engine: repeated error output detected, killing step as a stuck loop"
-	case authInvalid:
+	case authInvalidConfirmed:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: credential not authenticated (permanent, will not retry): %s", lastNonEmptyLine(combined)))
+	case authInvalid: // suspected only — see AuthInvalidSuspected doc
+		res.Error = redactSecrets(fmt.Sprintf("cli engine: possible auth failure, unconfirmed signature (will retry): %s", lastNonEmptyLine(combined)))
 	case awaitingInput:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: process appears to be waiting for input: %s", lastNonEmptyLine(combined)))
 	case result.ExitCode != 0:

@@ -159,9 +159,16 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 
 	// Auth-failure write-side: a bad session/token won't self-resolve like a
 	// quota cooldown does, so mark the credential out instead of cooling it
-	// down (see engine.CodeStepResult.AuthInvalid, cli_auth.go).
-	if res.AuthInvalid && r.credID != "" && r.o.credStatusSetter != nil {
+	// down (see engine.CodeStepResult.AuthInvalidConfirmed, cli_auth.go).
+	// Gated on AuthInvalidConfirmed, not the broader AuthInvalid: a merely
+	// suspected match (generic fallback rules only) isn't reliable enough
+	// to disable a possibly-still-good credential on.
+	if res.AuthInvalidConfirmed && r.credID != "" && r.o.credStatusSetter != nil {
 		_ = r.o.credStatusSetter.MarkNeedsReauth(ctx, r.credID)
+	} else if res.AuthInvalid {
+		r.o.log(ctx, task.ID, &jobID, "warn", fmt.Sprintf(
+			"%s: suspected auth-invalid match on generic fallback rules only (not profile-specific) — credential left active, will retry normally; add a profile-specific rule to engine/cli_auth.go if this recurs",
+			stepID))
 	}
 
 	// REQ-001: log the real failure reason at error level instead of a bare
@@ -208,12 +215,14 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		if errMsg == "" {
 			errMsg = "cli engine: step failed"
 		}
-		if res.AuthInvalid {
+		if res.AuthInvalidConfirmed {
 			// Wrap as ErrConfigInvalid so worker.go's retry loop (which
 			// already special-cases this sentinel for Preflight-time
 			// config errors) also skips remaining retries here: the same
 			// credential will fail identically on every attempt until a
-			// human re-runs the CLI auth capture flow.
+			// human re-runs the CLI auth capture flow. A merely suspected
+			// (fallback-only) match falls through to the plain error below
+			// instead, so it retries like any other runtime failure.
 			return out, fmt.Errorf("%s: %w", errMsg, engine.ErrConfigInvalid)
 		}
 		return out, fmt.Errorf("%s", errMsg)

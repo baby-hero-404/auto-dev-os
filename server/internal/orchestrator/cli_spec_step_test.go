@@ -127,6 +127,15 @@ func (f *fakeCooldownSetter) SetCooldown(ctx context.Context, id string, model s
 	return nil
 }
 
+type fakeCredStatusSetter struct {
+	ids []string
+}
+
+func (f *fakeCredStatusSetter) MarkNeedsReauth(ctx context.Context, id string) error {
+	f.ids = append(f.ids, id)
+	return nil
+}
+
 // plainFailureSandboxRuntime answers preflight cleanly, then makes the real
 // CLI invocation fail with a non-quota, non-auth error message — used to
 // verify RunCLIStep logs the actual failure reason (REQ-001) rather than a
@@ -275,12 +284,88 @@ func TestCLIStepRunner_RunCLIStep_AuthInvalidSkipsRetry(t *testing.T) {
 	runner := newCLIStepRunner(orch)
 	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
 
+	credStatus := &fakeCredStatusSetter{}
+	orch.credStatusSetter = credStatus
+
 	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
 	if !errors.Is(err, engine.ErrConfigInvalid) {
 		t.Errorf("expected error to wrap engine.ErrConfigInvalid so worker.go's retry loop skips remaining retries, got: %v", err)
+	}
+	if len(credStatus.ids) != 1 || credStatus.ids[0] != "cred-claude" {
+		t.Errorf("expected MarkNeedsReauth called once for cred-claude (confirmed match), got %+v", credStatus.ids)
+	}
+}
+
+// suspectedAuthInvalidSandboxRuntime answers preflight cleanly, then makes
+// the real CLI invocation fail with a signature that only the generic "*"
+// fallback list covers (not claude_code's own profile-specific rules) —
+// e.g. a stray "401 unauthorized" that isn't necessarily a real auth
+// failure for this CLI.
+type suspectedAuthInvalidSandboxRuntime struct{ commands []string }
+
+func (m *suspectedAuthInvalidSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
+	m.commands = append(m.commands, req.Command...)
+	if len(req.Command) >= 3 && strings.Contains(req.Command[2], "status=$?") {
+		return &sandbox.CommandResult{ExitCode: 1, Stdout: "request failed: 401 unauthorized\n"}, nil
+	}
+	return &sandbox.CommandResult{ExitCode: 0}, nil
+}
+func (m *suspectedAuthInvalidSandboxRuntime) Health(ctx context.Context) error  { return nil }
+func (m *suspectedAuthInvalidSandboxRuntime) Prewarm(ctx context.Context) error { return nil }
+func (m *suspectedAuthInvalidSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
+
+// TestCLIStepRunner_RunCLIStep_SuspectedAuthInvalidRetriesNormally guards
+// Option C of the auth-invalid confidence policy: a match on the generic
+// "*" fallback list only (not a profile-specific rule) must NOT skip
+// retries or disable the credential — it's treated as an ordinary
+// retriable failure, with a warning logged instead, since the generic
+// patterns (bare "401", "unauthorized") can incidentally match legitimate
+// output unrelated to this CLI's actual auth state.
+func TestCLIStepRunner_RunCLIStep_SuspectedAuthInvalidRetriesNormally(t *testing.T) {
+	rt := &suspectedAuthInvalidSandboxRuntime{}
+	pool := &fakeCredentialPool{byID: map[string]fakeCred{
+		"cred-claude": {provider: "cli:claude", status: models.ProviderCredentialStatusActive},
+	}}
+	workflows := &mockWorkflowRepo{job: &models.WorkflowJob{}}
+	orch := New(nil, workflows, nil, rt,
+		WithProjectRepository(&fakeProjectRepo{project: &models.Project{
+			OrgID: "org1",
+			ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+				{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+			}),
+		}}),
+		WithCredentialAvailability(pool),
+		WithCredentials(fakeCredentialGetter{}),
+		WithWorkspaceRoot(t.TempDir()),
+	)
+	credStatus := &fakeCredStatusSetter{}
+	orch.credStatusSetter = credStatus
+	runner := newCLIStepRunner(orch)
+	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
+
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	if err == nil {
+		t.Fatal("expected an error since the mocked cli invocation exits non-zero")
+	}
+	if errors.Is(err, engine.ErrConfigInvalid) {
+		t.Errorf("expected a plain retriable error, not engine.ErrConfigInvalid, for a merely suspected (fallback-only) auth match, got: %v", err)
+	}
+	if len(credStatus.ids) != 0 {
+		t.Errorf("expected MarkNeedsReauth NOT called for a merely suspected auth match, got %+v", credStatus.ids)
+	}
+	var foundWarn bool
+	for _, entry := range workflows.logs {
+		if entry.Level == "warn" && strings.Contains(entry.Message, "suspected auth-invalid") {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Errorf("expected a warn-level log entry about the suspected auth-invalid match, got: %+v", workflows.logs)
 	}
 }
 

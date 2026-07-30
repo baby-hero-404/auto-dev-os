@@ -3,6 +3,9 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -161,6 +164,19 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	if repoHostPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task); err == nil {
 		if changed, cErr := r.o.repoutil.GetChangedFiles(ctx, task, agent, repoHostPath, ""); cErr == nil {
 			out.ChangedFiles = changed
+		}
+
+		if stepID == "cli_spec" && r.o.workspaceRoot != "" {
+			slug := steps.TaskSpecSlug(task)
+			worktreeRoot := r.o.repoutil.HostWorktreePath(task, repoHostPath, "")
+			srcDir := filepath.Join(worktreeRoot, "docs", "openspecs", slug)
+			dstDir := filepath.Join(sandbox.WorkspacePath(r.o.workspaceRoot, task.ID), "specs")
+
+			if stat, err := os.Stat(srcDir); err == nil && stat.IsDir() {
+				_ = os.MkdirAll(dstDir, 0755)
+				cmd := exec.CommandContext(ctx, "cp", "-r", srcDir+"/.", dstDir+"/")
+				_ = cmd.Run()
+			}
 		}
 	}
 

@@ -9,13 +9,18 @@ This document provides a high-level comparison and recommended server setup for 
 
 ## Quick Comparison (Linux Headless)
 
-| Tool | Install | Headless invocation | Prompt input | Auto-approve flag | Best use |
-|------|---------|----------------------|---------------|--------------------|----------|
-| Antigravity (`agy`) | `install.sh` | `agy --headless "<task>"` | Literal text arg | `--dangerously-skip-permissions` | Agent workflow + skills |
-| Codex CLI (`codex`) | `install.sh` | `codex exec "<task>"` | Literal text arg | `--full-auto` | Automation + coding |
-| Claude Code (`claude`) | `install.sh` | `claude -p "<task>"` | Literal text arg (or stdin) | `--allowedTools "Read,Edit,Bash"` (required for auto-edit) | Long context + repo agent |
+| Tool | Install | Headless invocation | Model Selection | Auto-approve flag | Best use |
+|------|---------|----------------------|-----------------|--------------------|----------|
+| Antigravity (`agy`) | `install.sh` | `agy -p "<task>"` | `--effort high\|medium\|low` | `--dangerously-skip-permissions` | Agent workflow + skills |
+| Codex CLI (`codex`) | `install.sh` | `codex exec "<task>"` | `--model gpt-4o` | `--full-auto` | Automation + coding |
+| Claude Code (`claude`) | `install.sh` | `claude -p "<task>"` | `--model claude-3-7-sonnet...` | `--allowedTools "Read,Edit,Bash"` | Long context + repo agent |
 
 **Common trait**: all three take the prompt as a **literal text argument** in their basic headless form — none of them accept a bare file path as the prompt and read its contents automatically. If you need to hand a tool a large prompt without hitting the shell's `ARG_MAX`/`MAX_ARG_STRLEN` limits, write the task to a file and give the CLI a short literal instruction telling it to open and follow that file (all three are agentic and can read files themselves) — don't pass the file path as the entire prompt.
+
+**Model Configurations:**
+- **Antigravity**: Abstracts model selection via reasoning effort (`--effort high|medium|low`), auto-mapping to Gemini tiers.
+- **Codex**: Supports explicit model assignment via `--model` or `OPENAI_MODEL` environment variable.
+- **Claude Code**: Supports explicit model assignment via `--model` or `ANTHROPIC_MODEL` environment variable.
 
 **Auto-approve flags differ per tool** — there is no shared "skip confirmation" flag name:
 - Antigravity: `--dangerously-skip-permissions`

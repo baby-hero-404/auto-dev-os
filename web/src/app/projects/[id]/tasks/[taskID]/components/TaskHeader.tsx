@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTaskDetail } from "./TaskDetailContext";
+import { canResumeTask, showAnalyzeAction } from "@/lib/status";
 
 export function TaskHeader() {
   const {
@@ -20,17 +21,8 @@ export function TaskHeader() {
 
   const jobStatus = workflow?.job?.status?.toLowerCase();
   const canPause = jobStatus === "running";
-  const canResume = !!(
-    task &&
-    isPaused &&
-    task.status !== "pr_ready" &&
-    task.status !== "human_review" &&
-    task.status !== "merged" &&
-    task.spec_status !== "pending_review" &&
-    task.spec_status !== "changes_requested" &&
-    task.spec_status !== "clarification_required"
-  );
-  const showAnalyze = !!(task && (task.status === "todo" || task.status === "failed") && !isExecutionReady);
+  const canResume = !!(task && isPaused && canResumeTask(task));
+  const showAnalyze = !!(task && showAnalyzeAction(task));
   const showExecute = !!(task && isExecutionReady);
   const st = task?.status || "todo";
   const totalSteps = workflowSteps.length;

@@ -55,7 +55,7 @@ func (c *DefaultSandboxGitClient) HasBranch(ctx context.Context, task *models.Ta
 }
 
 func (c *DefaultSandboxGitClient) ResetSoft(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, target string) error {
-	cmd := fmt.Sprintf("git -C %s reset --soft %s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(target))
+	cmd := fmt.Sprintf("git -C %[1]s reset --soft origin/%[2]s 2>/dev/null || git -C %[1]s reset --soft %[2]s", paths.QuoteShellArg(containerPath), paths.QuoteShellArg(target))
 	_, err := c.RunSandboxStep(ctx, task, agent, "git_reset_soft", cmd)
 	return err
 }
@@ -118,9 +118,14 @@ func (c *DefaultSandboxGitClient) GetDiff(ctx context.Context, task *models.Task
 }
 
 func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Task, agent *models.Agent, containerPath, baseBranch string) (string, error) {
-	diffCmd := fmt.Sprintf("cd %[1]s && (git diff %[2]s...HEAD 2>/dev/null || git diff master...HEAD 2>/dev/null || git diff HEAD~1 2>/dev/null || git diff)",
+	// Prefer the remote-tracking ref first: in the CLI flow the feature branch
+	// isn't checked out until PRStep runs, so HEAD may still equal the local
+	// baseBranch name itself (e.g. cross_review captures a diff while still on
+	// "master"), which would make `git diff master...HEAD` trivially empty even
+	// though local master is genuinely ahead of origin/master.
+	diffCmd := fmt.Sprintf("cd %[1]s && (git diff origin/%[2]s...HEAD 2>/dev/null | grep -q . && git diff origin/%[2]s...HEAD || git diff %[2]s...HEAD 2>/dev/null | grep -q . && git diff %[2]s...HEAD || git diff HEAD~1 2>/dev/null || git diff)",
 		paths.QuoteShellArg(containerPath),
-		paths.QuoteShellArg(baseBranch),
+		baseBranch,
 	)
 	out, err := c.RunSandboxStep(ctx, task, agent, "git_pr_diff", diffCmd)
 	if out != nil {

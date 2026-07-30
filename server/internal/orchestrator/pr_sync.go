@@ -101,6 +101,7 @@ func syncPRStatuses(ctx context.Context, o *Orchestrator) {
 				})
 				_ = o.checkpoint(ctx, t.ID, &job.ID, models.WorkflowStepDone, map[string]any{"status": models.WorkflowJobStatusDone})
 			}
+			o.cleanupWorkspaceAfterFinalState(context.WithoutCancel(ctx), t.ID)
 			slog.Info("task automatically updated to merged status", "task_id", updated.ID)
 		}
 	}
@@ -146,6 +147,7 @@ func (o *Orchestrator) SyncPRMerged(ctx context.Context, prURL string) (*models.
 		})
 		_ = o.checkpoint(ctx, matchedTask.ID, &job.ID, models.WorkflowStepDone, map[string]any{"status": models.WorkflowJobStatusDone})
 	}
+	o.cleanupWorkspaceAfterFinalState(context.WithoutCancel(ctx), matchedTask.ID)
 	slog.Info("task automatically updated to merged status", "task_id", updated.ID)
 	return updated, nil
 }

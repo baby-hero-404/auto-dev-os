@@ -82,7 +82,14 @@ func (s *PRStep) ID() string                         { return workflow.StepPR }
 func (s *PRStep) StatusOnResume(_ StepResult) string { return models.TaskStatusHumanReview }
 
 func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
-	if s.rt.Task.Status == models.TaskStatusPrReady || s.rt.Task.Status == models.TaskStatusHumanReview {
+	// Only treat this as an already-completed resume if PR work actually happened
+	// (PR URLs/metadata recorded). Task.Status alone is not reliable evidence: a
+	// preceding step in the SAME job run (e.g. cross_review's clean-pass branch)
+	// can set the task to pr_ready/human_review and fall through to this step
+	// without ever pausing, which would otherwise make this guard fire before
+	// any real PR was ever created.
+	prAlreadyCreated := len(s.rt.Task.PRURLs) > 0 || len(s.rt.Task.PRMetadata) > 0
+	if prAlreadyCreated && (s.rt.Task.Status == models.TaskStatusPrReady || s.rt.Task.Status == models.TaskStatusHumanReview) {
 		return nil, workflow.ErrWaitingApproval
 	}
 	if s.gitops == nil {

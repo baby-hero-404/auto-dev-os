@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTaskDetail } from "./TaskDetailContext";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { getTaskStatusBadge } from "@/lib/status";
 
 export function TaskSidebar() {
   const router = useRouter();
@@ -9,42 +10,29 @@ export function TaskSidebar() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const st = task?.status || "todo";
-  
+
   const jobStatus = workflow?.job?.status?.toLowerCase();
   const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
 
-  const P: Record<string, [string, string, string, string, string]> = {
-    todo:            ['Todo','todo','var(--surface)','var(--content-muted)','Preparation'],
-    context_loading: ['Loading Context','context_loading','#e0efff','#005bb8','Preparation'],
-    analyzing:       ['Analyzing','analyzing','#e0efff','#005bb8','Preparation'],
-    planning:        ['Planning','planning','#e0efff','#005bb8','Preparation'],
-    spec_review:     ['Spec Review','spec_review','#fef3c6','#795800','Preparation · Gate'],
-    coding:          ['Coding','coding','#e0efff','#005bb8','Execution'],
-    testing:         ['Testing','testing','#e0efff','#005bb8','Execution'],
-    reviewing:       ['Reviewing','reviewing','#f3e8ff','#7f22fe','Execution'],
-    fixing:          ['Fixing','fixing','#fff1e0','#b75000','Execution'],
-    pr_ready:        ['PR Ready','pr_ready','#d9f5e7','#007956','Finalization'],
-    human_review:    ['Human Review','human_review','#fef3c6','#795800','Finalization · Gate'],
-    merged:          ['Merged','merged','#e6f4ea','#00590e','Finalization'],
-    failed:          ['Failed','failed','#ffe2e2','#bf000f','Finalization'],
-  };
-  const [, code, , fg] = P[st] || P.todo;
+  const badge = getTaskStatusBadge(st);
+  const code = st;
+  const fg = badge.fg || "var(--content-muted)";
 
   const phases = workflowSteps.map((step) => {
     const status = latest.get(step) || 'pending';
     const done = status === 'success' || status === 'recorded' || status === 'skipped' || status === 'waiting_approval';
-    
+
     // Highlight step if it is running, OR if the job is paused and this is the current job step
     const isPausedAtThisStep = jobStatus === 'paused' && workflow?.job?.step === step;
     const active = status === 'running' || isPausedAtThisStep;
     const failedHere = status === 'failed';
     const dur = stepDurations.get(step);
-    
+
     const formatStepName = (step: string) => {
       const capitalized = step.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       return capitalized.replace(/^Cli\b/, "CLI");
     };
-    
+
     // Formatting step name
     let label = formatStepName(step);
     let desc = '';
@@ -113,7 +101,7 @@ export function TaskSidebar() {
         <div className="text-[10px] font-bold tracking-wider uppercase text-content-muted mb-3.5">Workflow Progress</div>
         <div className="flex flex-col gap-2">
           {phases.map((ph, idx) => (
-            <div key={idx} className="flex items-start gap-3 py-2 border-b border-stroke/[0.03] last:border-none">
+            <div key={idx} className="flex items-start gap-3 py-2 border-b border-stroke/3 last:border-none">
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 border mt-0.5 transition-all" style={{
                 borderColor: ph.ring,
                 background: ph.bg,
@@ -136,7 +124,7 @@ export function TaskSidebar() {
                   <ul className="mt-2 space-y-1.5 pl-0.5">
                     {ph.tasks.map((t, tidx) => (
                       <li key={tidx} className="flex items-start gap-2 text-[11px] text-content-muted leading-relaxed">
-                        <span className="shrink-0 mt-[4px]">
+                        <span className="shrink-0 mt-1">
                           {ph.done ? (
                             <span className="text-emerald-500 font-bold text-[10px]">✓</span>
                           ) : ph.active ? (
@@ -165,7 +153,7 @@ export function TaskSidebar() {
           {codedBy && (
             <div className="flex justify-between items-center py-1 border-b border-stroke/5">
               <span className="text-content-muted">Coded By</span>
-              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-blue-500/10 dark:text-blue-400 border border-blue-500/20">
                 {codedBy.provider || codedBy.model || codedBy.engine || "API-native"}
               </span>
             </div>
@@ -173,7 +161,7 @@ export function TaskSidebar() {
           {reviewedBy && (
             <div className="flex justify-between items-center py-1 border-b border-stroke/5">
               <span className="text-content-muted">Reviewed By</span>
-              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-purple-500/10 dark:text-purple-400 border border-purple-500/20">
                 {reviewedBy.provider || reviewedBy.model || "Reviewer"}
               </span>
             </div>
@@ -183,7 +171,7 @@ export function TaskSidebar() {
         </div>
       </div>
 
-      <div className="bg-card border border-rose-500/15 bg-rose-500/[0.01] rounded-2xl p-5.5 shadow-sm hover:shadow-md transition-all duration-200">
+      <div className="bg-card border border-rose-500/15 rounded-2xl p-5.5 shadow-sm hover:shadow-md transition-all duration-200">
         <div className="text-[10px] font-bold tracking-wider uppercase text-rose-600 dark:text-rose-500 mb-3.5">Danger Zone</div>
         <div className="flex flex-col gap-2">
           {canCancel && (

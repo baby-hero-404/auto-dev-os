@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { AlertCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTaskDetail } from "./TaskDetailContext";
+import { isActiveStatus } from "@/lib/status";
 import { TaskHeader } from "./TaskHeader";
 import { TaskTitleBlock } from "./TaskTitleBlock";
 import { TaskHeroCards } from "./TaskHeroCards";
@@ -28,8 +29,7 @@ export function TaskDetailLayout() {
   }, []);
 
   useEffect(() => {
-    const runningStatuses = ["context_loading", "analyzing", "planning", "coding", "testing", "reviewing", "fixing"];
-    if (task && runningStatuses.includes(task.status)) {
+    if (task && isActiveStatus(task.status)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenSections((prev) => {
         if (!prev.logs || !prev.checkpoints) {

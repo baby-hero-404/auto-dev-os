@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { SpecPanel } from "./SpecPanel";
+import { CLISpecPanel } from "./CLISpecPanel";
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { CheckpointsPanel } from "./CheckpointsPanel";
 import { AuditPanel } from "./AuditPanel";
@@ -125,27 +126,31 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
       </h2>
 
       {/* Accordion 1: Specification */}
-      {task?.status !== 'spec_review' && (
-        <AccordionItem
-          title="Specification"
-          isOpen={!!openSections.specification}
-          onToggle={() => onToggleSection("specification")}
-          summary={
-            <div className="flex flex-wrap gap-1">
-              {presenceChips.map((c) => (
-                <span
-                  key={c.label}
-                  className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 shadow-sm"
-                >
-                  <Check size={9} className="stroke-[3]" />
-                  {c.label}
-                </span>
-              ))}
-            </div>
-          }
-        >
-          <SpecPanel isExpanded={true} onToggle={() => {}} />
-        </AccordionItem>
+      {isCliFlow ? (
+        <CLISpecPanel />
+      ) : (
+        task?.status !== 'spec_review' && (
+          <AccordionItem
+            title="Specification"
+            isOpen={!!openSections.specification}
+            onToggle={() => onToggleSection("specification")}
+            summary={
+              <div className="flex flex-wrap gap-1">
+                {presenceChips.map((c) => (
+                  <span
+                    key={c.label}
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 shadow-sm"
+                  >
+                    <Check size={9} className="stroke-[3]" />
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+            }
+          >
+            <SpecPanel isExpanded={true} onToggle={() => {}} />
+          </AccordionItem>
+        )
       )}
 
       {/* Accordion 2: Execution Logs */}
@@ -164,6 +169,7 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
             onReloadFullHistory={reloadFullLogs}
             isReloadingHistory={isReloadingLogs}
             onToggle={() => {}}
+            isCliFlow={isCliFlow}
           />
         </AccordionItem>
       )}

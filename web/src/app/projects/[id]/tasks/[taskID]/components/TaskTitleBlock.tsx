@@ -6,6 +6,7 @@ import { ShieldCheck, Loader2 } from "lucide-react";
 import { attestations as attestationsApi } from "@/lib/api";
 import { useTaskDetail } from "./TaskDetailContext";
 import { DescriptionBody } from "./DescriptionBody";
+import { getTaskStatusBadge, isActiveStatus } from "@/lib/status";
 
 export function TaskTitleBlock() {
   const { task, workflow, isPaused, token } = useTaskDetail();
@@ -48,23 +49,12 @@ export function TaskTitleBlock() {
   };
 
   const st = task?.status || "todo";
-  const P: Record<string, [string, string, string, string, string]> = {
-    todo:            ['Todo','todo','var(--surface)','var(--content-muted)','Preparation'],
-    context_loading: ['Loading Context','context_loading','#e0efff','#005bb8','Preparation'],
-    analyzing:       ['Analyzing','analyzing','#e0efff','#005bb8','Preparation'],
-    planning:        ['Planning','planning','#e0efff','#005bb8','Preparation'],
-    spec_review:     ['Spec Review','spec_review','#fef3c6','#795800','Preparation · Gate'],
-    coding:          ['Coding','coding','#e0efff','#005bb8','Execution'],
-    testing:         ['Testing','testing','#e0efff','#005bb8','Execution'],
-    reviewing:       ['Reviewing','reviewing','#f3e8ff','#7f22fe','Execution'],
-    fixing:          ['Fixing','fixing','#fff1e0','#b75000','Execution'],
-    pr_ready:        ['PR Ready','pr_ready','#d9f5e7','#007956','Finalization'],
-    human_review:    ['Human Review','human_review','#fef3c6','#795800','Finalization · Gate'],
-    merged:          ['Merged','merged','#e6f4ea','#00590e','Finalization'],
-    failed:          ['Failed','failed','#ffe2e2','#bf000f','Finalization'],
-  };
-  const [label, , bg, fg, group] = P[st] || P.todo;
-  const running = ['context_loading','analyzing','planning','coding','testing','reviewing','fixing'].includes(st);
+  const badge = getTaskStatusBadge(st);
+  const label = badge.label;
+  const bg = badge.bg || "var(--surface)";
+  const fg = badge.fg || "var(--content-muted)";
+  const group = badge.group || "Preparation";
+  const running = isActiveStatus(st);
   const paused = isPaused;
 
   return (

@@ -16,21 +16,12 @@ export function formatLatency(ms: number) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export const STATUS_COLORS: Record<string, string> = {
-  todo: "#64748b",
-  context_loading: "#3b82f6",
-  analyzing: "#f59e0b",
-  planning: "#818cf8",
-  spec_review: "#a78bfa",
-  assigned: "#38bdf8",
-  coding: "#22c55e",
-  reviewing: "#06b6d4",
-  fixing: "#fb923c",
-  testing: "#14b8a6",
-  pr_ready: "#10b981",
-  human_review: "#e879f9",
-  merged: "#34d399",
-  in_progress: "#60a5fa",
-  failed: "#ef4444",
-  completed: "#22c55e",
-};
+import type { TaskStatus } from "@/lib/types";
+import { TASK_STATUS_BADGES } from "@/lib/status";
+
+export const STATUS_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(TASK_STATUS_BADGES).map(([status, badge]) => [
+    status,
+    badge.chartColor || "#64748b"
+  ])
+);

@@ -141,7 +141,6 @@ export type TaskStatus =
   | "todo"
   | "context_loading"
   | "analyzing"
-  | "planning"
   | "spec_review"
   | "coding"
   | "reviewing"
@@ -151,6 +150,16 @@ export type TaskStatus =
   | "human_review"
   | "merged"
   | "failed";
+
+export type TaskSpecStatus =
+  | "none"
+  | "draft"
+  | "pending_review"
+  | "changes_requested"
+  | "clarification_required"
+  | "approved"
+  | "auto_approved"
+  | "ready_with_warnings";
 
 export type Task = {
   id: string;
@@ -167,7 +176,7 @@ export type Task = {
   pr_urls?: string[];
   pr_metadata?: Record<string, unknown>;
   analysis?: TaskAnalysis;
-  spec_status: string;
+  spec_status: TaskSpecStatus;
   clarifications?: ClarificationRound[];
   execution_engine?: string;
   created_at: string;

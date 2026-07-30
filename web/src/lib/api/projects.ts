@@ -256,9 +256,6 @@ export const tasks = {
   approvePR(taskID: string, token: string) {
     return request<Task>(`/tasks/${taskID}/pr/approve`, { method: "POST", token });
   },
-  startReview(taskID: string, token: string) {
-    return request<Task>(`/tasks/${taskID}/pr/start-review`, { method: "POST", token });
-  },
   rejectPR(taskID: string, token: string, feedback: string) {
     return request<Task>(`/tasks/${taskID}/pr/reject`, {
       method: "POST",

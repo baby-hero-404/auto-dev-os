@@ -42,6 +42,12 @@ claude auth logout
 claude -p "Analyze this project"
 ```
 
+**Specifying a Model**
+```bash
+claude --model claude-3-7-sonnet-20250219 -p "Review architecture"
+```
+*(You can also set the `ANTHROPIC_MODEL` environment variable to define the default model for headless runs).*
+
 **Single command (Auto-edit / Automation)**
 ```bash
 claude -p "Analyze failing tests and fix them" --allowedTools "Read,Edit,Bash"

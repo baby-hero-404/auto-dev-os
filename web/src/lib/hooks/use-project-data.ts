@@ -1,6 +1,7 @@
 import useSWR from "swr";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { isActiveStatus } from "@/lib/status";
 import type { Task } from "@/lib/types";
 
 export function useProjectData(projectID: string) {
@@ -20,7 +21,7 @@ export function useProjectData(projectID: string) {
   const { data: tasks = [], mutate: mutateTasks, isLoading: isTasksLoading } = useSWR(
     projectID && token ? ["tasks", projectID] : null,
     () => api.listTasks(projectID, token),
-    { refreshInterval: (latest?: Task[]) => (latest?.some(isActiveTask) ? 5000 : 0) },
+    { refreshInterval: (latest?: Task[]) => (latest?.some((task) => isActiveStatus(task.status)) ? 5000 : 0) },
   );
 
   const { data: projectAgents = [], mutate: mutateProjectAgents, isLoading: isAgentsLoading } = useSWR(
@@ -51,8 +52,4 @@ export function useProjectData(projectID: string) {
     isRulesLoading,
     projectError,
   };
-}
-
-function isActiveTask(task: Task) {
-  return ["context_loading", "analyzing", "running", "assigned", "planning", "coding", "reviewing", "fixing", "testing", "in_progress"].includes(task.status);
 }

@@ -487,7 +487,10 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
 		return nil, fmt.Errorf("task is not waiting for human PR approval")
 	}
-	if len(task.PRURLs) > 0 && o.gitOps != nil {
+	if len(task.PRURLs) == 0 {
+		return nil, fmt.Errorf("cannot approve merge: no PR has been created for this task yet")
+	}
+	if o.gitOps != nil {
 		repos, err := o.repositories.ListByProjectID(ctx, task.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list project repositories: %w", err)
@@ -505,8 +508,13 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 				return nil, fmt.Errorf("no matching repository found for PR URL: %s", prURL)
 			}
 			if err := o.gitOps.MergePullRequest(ctx, matchRepo, prURL); err != nil {
-				o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to merge PR %s: %v", prURL, err))
-				return nil, fmt.Errorf("failed to merge PR %s: %w", prURL, err)
+				isMerged, checkErr := o.gitOps.IsPullRequestMerged(ctx, matchRepo, prURL)
+				if checkErr == nil && isMerged {
+					o.log(ctx, task.ID, nil, "info", fmt.Sprintf("PR was already merged: %s", prURL))
+				} else {
+					o.log(ctx, task.ID, nil, "error", fmt.Sprintf("failed to merge PR %s: %v", prURL, err))
+					return nil, fmt.Errorf("failed to merge PR %s: %w", prURL, err)
+				}
 			} else {
 				o.log(ctx, task.ID, nil, "info", fmt.Sprintf("successfully merged PR: %s", prURL))
 			}
@@ -526,6 +534,12 @@ func (o *Orchestrator) ApproveMerge(ctx context.Context, taskID string) (*models
 		_ = o.checkpoint(ctx, taskID, &job.ID, models.WorkflowStepDone, map[string]any{"status": models.WorkflowJobStatusDone})
 	}
 	o.log(ctx, taskID, nil, "info", "human approved workflow for merge")
+
+	// Reclaim disk immediately rather than waiting for the next periodic
+	// pruner tick (up to o.retention.Interval later): code/ has served its
+	// purpose once the PR is merged, and logs/specs live outside it.
+	o.cleanupWorkspaceAfterFinalState(context.WithoutCancel(ctx), taskID)
+
 	return updated, nil
 }
 
@@ -581,16 +595,17 @@ func (o *Orchestrator) GetTaskSpec(ctx context.Context, taskID string) (*models.
 	if err != nil {
 		return nil, err
 	}
-	if o.repoutil == nil {
-		return nil, fmt.Errorf("spec unavailable: no repository configured")
+	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, taskID), "specs")
+	if _, err := os.Stat(specDir); err != nil {
+		if o.repoutil != nil {
+			repoPath, repoErr := o.repoutil.GetTaskRepoHostPath(ctx, task)
+			if repoErr == nil {
+				root := o.repoutil.HostWorktreePath(task, repoPath, "")
+				slug := steps.TaskSpecSlug(task)
+				specDir = filepath.Join(root, "docs", "openspecs", slug)
+			}
+		}
 	}
-	repoPath, err := o.repoutil.GetTaskRepoHostPath(ctx, task)
-	if err != nil {
-		return nil, err
-	}
-	root := o.repoutil.HostWorktreePath(task, repoPath, "")
-	slug := steps.TaskSpecSlug(task)
-	specDir := filepath.Join(root, "docs", "openspecs", slug)
 
 	if _, err := os.Stat(specDir); err != nil {
 		return nil, fmt.Errorf("spec not found: cli_spec has not run yet for this task")

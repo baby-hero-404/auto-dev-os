@@ -14,17 +14,27 @@ import (
 )
 
 // CleanupWorkspaceAfterFinalState releases locks and prunes workspace repositories to save space.
+// The lock release is synchronous (cheap, and callers may rely on it before
+// returning), but the actual disk cleanup (git status/diff + RemoveAll of a
+// full repo clone) runs in the background: several call sites invoke this
+// directly from an HTTP request path (PR approve, PR-merged webhook), and
+// blocking those on cleanup would add unrelated latency to the response.
 func (m *Manager) CleanupWorkspaceAfterFinalState(ctx context.Context, taskID string) {
 	m.ReleaseWorkspaceLock(taskID)
 
-	if err := m.PartialCleanupWorkspace(ctx, taskID); err != nil {
-		observability.Warn(ctx, "workspace partial cleanup failed", "task_id", taskID, "error", err)
-	} else {
-		observability.Info(ctx, "workspace partially cleaned after final state", "task_id", taskID)
-	}
+	go func() {
+		bgCtx := context.WithoutCancel(ctx)
+		if err := m.PartialCleanupWorkspace(bgCtx, taskID); err != nil {
+			observability.Warn(bgCtx, "workspace partial cleanup failed", "task_id", taskID, "error", err)
+		} else {
+			observability.Info(bgCtx, "workspace partially cleaned after final state", "task_id", taskID)
+		}
+	}()
 }
 
-// PartialCleanupWorkspace removes all cloned repositories under code/repos/ while preserving diffs and metadata.
+// PartialCleanupWorkspace removes all cloned repositories under code/repos/
+// (main checkout and worktrees alike) while preserving logs, specs, and
+// captured diffs/metadata, which live outside code/repos/ and are untouched.
 func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) error {
 	m.ReleaseWorkspaceLock(taskID)
 
@@ -38,6 +48,23 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			return nil
 		}
 		return err
+	}
+
+	// Last-chance safety net for tasks whose cli_spec ran before the specs/
+	// dir mirroring existed: if specs/ is still empty, grab the OpenSpec
+	// bundle straight out of the repo checkout before it's deleted below,
+	// so older in-flight tasks don't permanently lose spec access on their
+	// first merge-triggered cleanup.
+	specsDir := wp.SpecsDir(taskID).String()
+	specsDirEmpty := true
+	if entries, statErr := os.ReadDir(specsDir); statErr == nil && len(entries) > 0 {
+		specsDirEmpty = false
+	}
+	var specSlug string
+	if specsDirEmpty && m.Tasks != nil {
+		if task, tErr := m.Tasks.GetByID(ctx, taskID); tErr == nil {
+			specSlug = paths.DeriveTaskSlug(task.ID, task.Title)
+		}
 	}
 
 	for _, rEntry := range repos {
@@ -75,7 +102,6 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			}
 		}
 
-		// Clean up worktrees to save space, but KEEP the main repository clone.
 		repoMain := wp.RepoMain(taskID, repoName).String()
 		if _, err := os.Stat(wtParentDir); err == nil && worktrees != nil {
 			for _, wtEntry := range worktrees {
@@ -102,6 +128,48 @@ func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) er
 			if delErr := os.RemoveAll(wtParentDir); delErr != nil {
 				observability.Warn(ctx, "workspace worktrees dir cleanup failed (possible root-owned files from sandbox)", "task_id", taskID, "path", wtParentDir, "error", delErr)
 			}
+		}
+
+		// Capture uncommitted changes in the main checkout itself before
+		// deleting it, same safety net as the worktree loop above.
+		if stat, statErr := os.Stat(repoMain); statErr == nil && stat.IsDir() {
+			statusCmd := exec.CommandContext(ctx, "git", "-C", repoMain, "status", "--porcelain")
+			statusOut, statusErr := statusCmd.CombinedOutput()
+			if statusErr == nil && len(strings.TrimSpace(string(statusOut))) > 0 {
+				diffCmd := exec.CommandContext(ctx, "git", "-C", repoMain, "diff", "HEAD")
+				diffOut, diffErr := diffCmd.CombinedOutput()
+				if diffErr == nil {
+					statusClean := strings.TrimSpace(string(statusOut))
+					fullDiffContent := []byte(fmt.Sprintf("=== Main Checkout Status ===\n%s\n\n=== Diffs ===\n%s", statusClean, string(diffOut)))
+
+					diffDir := filepath.Join(root, "artifacts", "diffs")
+					_ = os.MkdirAll(diffDir, 0o755)
+					diffPath := filepath.Join(diffDir, fmt.Sprintf("cleanup-%s-main.diff", repoName))
+					_ = os.WriteFile(diffPath, fullDiffContent, 0o644)
+				}
+			}
+		}
+
+		if specsDirEmpty && specSlug != "" {
+			srcDir := filepath.Join(repoMain, "docs", "openspecs", specSlug)
+			if stat, statErr := os.Stat(srcDir); statErr == nil && stat.IsDir() {
+				if mkErr := os.MkdirAll(specsDir, 0o755); mkErr == nil {
+					cpCmd := exec.CommandContext(ctx, "cp", "-r", srcDir+"/.", specsDir+"/")
+					if cpErr := cpCmd.Run(); cpErr != nil {
+						observability.Warn(ctx, "fallback spec copy to workspace specs dir failed", "task_id", taskID, "path", srcDir, "error", cpErr)
+					} else {
+						specsDirEmpty = false
+					}
+				}
+			}
+		}
+
+		// Remove the entire repo clone (main checkout included) to actually
+		// reclaim disk space. Logs, specs, and captured diffs/metadata live
+		// outside code/repos/ and are unaffected.
+		repoDir := wp.RepoRoot(taskID, repoName).String()
+		if delErr := os.RemoveAll(repoDir); delErr != nil {
+			observability.Warn(ctx, "workspace repo clone cleanup failed (possible root-owned files from sandbox)", "task_id", taskID, "path", repoDir, "error", delErr)
 		}
 	}
 

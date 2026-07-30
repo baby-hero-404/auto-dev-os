@@ -43,6 +43,7 @@ const STEP_LABELS: Record<string, string> = {
   cli_analyze: "Analyze (CLI)",
   cli_spec: "Author Spec (CLI)",
   cli_implement: "Implement (CLI)",
+  cross_review: "Cross Review",
   cli_mr: "Merge Request (CLI)",
 };
 

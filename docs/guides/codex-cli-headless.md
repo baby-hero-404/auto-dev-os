@@ -44,6 +44,12 @@ source ~/.bashrc
 codex exec "Analyze this repository"
 ```
 
+**Specifying a Model**
+```bash
+codex exec --model gpt-4o "Analyze this repository"
+```
+*(You can also set the `OPENAI_MODEL` environment variable to define the default model for headless runs).*
+
 **Code modification**
 ```bash
 codex exec "Implement JWT authentication"

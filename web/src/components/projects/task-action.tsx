@@ -2,6 +2,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { Play, Search, CheckCircle2, ShieldAlert, Activity, Loader2, Eye, Trash2 } from "lucide-react";
 import type { Task } from "@/lib/types";
+import {
+  isActiveStatus,
+  isPendingSpecReview as statusIsPendingSpecReview,
+  isExecutionReady as statusIsExecutionReady,
+} from "@/lib/status";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface TaskActionProps {
@@ -14,22 +19,9 @@ interface TaskActionProps {
 export function TaskAction({ task, projectID, isLoading, onAction }: TaskActionProps) {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
-  const isPendingSpecReview =
-    task.status === "spec_review" ||
-    task.spec_status === "pending_review" ||
-    task.spec_status === "clarification_required";
-  const isExecutionReady =
-    (task.spec_status === "auto_approved" || task.spec_status === "approved") &&
-    task.status === "todo";
-
-  const showMonitor = [
-    "context_loading",
-    "analyzing",
-    "coding",
-    "reviewing",
-    "fixing",
-    "testing",
-  ].includes(task.status);
+  const isPendingSpecReview = statusIsPendingSpecReview(task);
+  const isExecutionReady = statusIsExecutionReady(task);
+  const showMonitor = isActiveStatus(task.status);
 
   return (
     <div className="flex shrink-0 flex-wrap gap-2">

@@ -261,18 +261,21 @@ func assessRisk(task *models.Task, changedFiles []string) (string, string) {
 		}
 	}
 
+	fileLabel := "files"
+	if fileCount == 1 {
+		fileLabel = "file"
+	}
+
 	switch {
-	case hasMigration && task.Complexity == models.TaskComplexityHard:
-		return models.PRRiskCritical, "Database migration in a hard-complexity task requires careful review"
 	case hasMigration:
 		return models.PRRiskHigh, "Contains database migration files"
 	case task.Complexity == models.TaskComplexityHard || fileCount > 15:
-		return models.PRRiskHigh, fmt.Sprintf("Hard complexity task affecting %d files", fileCount)
+		return models.PRRiskHigh, fmt.Sprintf("%s complexity task affecting %d %s", strings.Title(task.Complexity), fileCount, fileLabel)
 	case hasConfig:
 		return models.PRRiskMedium, "Modifies configuration or infrastructure files"
 	case task.Complexity == models.TaskComplexityMedium || fileCount > 5:
-		return models.PRRiskMedium, fmt.Sprintf("Medium complexity task affecting %d files", fileCount)
+		return models.PRRiskMedium, fmt.Sprintf("%s complexity task affecting %d %s", strings.Title(task.Complexity), fileCount, fileLabel)
 	default:
-		return models.PRRiskLow, fmt.Sprintf("Simple change affecting %d files", fileCount)
+		return models.PRRiskLow, fmt.Sprintf("Simple change affecting %d %s", fileCount, fileLabel)
 	}
 }

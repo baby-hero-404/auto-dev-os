@@ -1,5 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/cn";
+import { getTaskStatusBadge, getSpecStatusBadge } from "@/lib/status";
+import type { TaskStatus, TaskSpecStatus } from "@/lib/types";
 
 export interface BadgeProps {
   children?: React.ReactNode;
@@ -41,54 +43,12 @@ export function Badge({
   );
 }
 
-export function taskStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
-  const norm = status.toLowerCase();
-  switch (norm) {
-    case "todo":
-      return { variant: "neutral", label: "Todo" };
-    case "context_loading":
-      return { variant: "indigo", label: "Loading Context" };
-    case "analyzing":
-      return { variant: "info", label: "Analyzing" };
-    case "spec_review":
-      return { variant: "purple", label: "Spec Review" };
-    case "planning":
-      return { variant: "indigo", label: "Planning" };
-    case "coding":
-      return { variant: "cyan", label: "Coding" };
-    case "reviewing":
-      return { variant: "violet", label: "Reviewing" };
-    case "fixing":
-      return { variant: "orange", label: "Fixing" };
-    case "testing":
-      return { variant: "teal", label: "Testing" };
-    case "pr_ready":
-      return { variant: "purple", label: "PR Ready" };
-    case "human_review":
-      return { variant: "yellow", label: "Human Review" };
-    case "merged":
-      return { variant: "success", label: "Merged" };
-    default:
-      return { variant: "neutral", label: status.replaceAll("_", " ") };
-  }
+export function taskStatusBadge(status: TaskStatus): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  return getTaskStatusBadge(status);
 }
 
-export function prStatusBadge(status: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
-  const norm = status.toLowerCase();
-  switch (norm) {
-    case "draft":
-      return { variant: "info", label: "Draft" };
-    case "pending_review":
-      return { variant: "warning", label: "Pending Review" };
-    case "changes_requested":
-      return { variant: "danger", label: "Changes Requested" };
-    case "approved":
-      return { variant: "success", label: "Approved" };
-    case "auto_approved":
-      return { variant: "success", label: "Auto Approved" };
-    default:
-      return { variant: "neutral", label: status.replaceAll("_", " ") };
-  }
+export function prStatusBadge(status: TaskSpecStatus): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {
+  return getSpecStatusBadge(status);
 }
 
 export function ruleEnforcementBadge(enforcement: string): { variant: "neutral" | "accent" | "success" | "warning" | "danger" | "info" | "purple" | "cyan" | "orange" | "violet" | "indigo" | "teal" | "yellow"; label: string } {

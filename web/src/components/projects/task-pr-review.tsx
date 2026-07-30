@@ -1,5 +1,6 @@
 import { Sparkles, MessageSquare, AlertCircle, Check } from "lucide-react";
 import type { Task } from "@/lib/types";
+import { isPrReadyStatus } from "@/lib/status";
 
 interface TaskPrReviewProps {
   task: Task | null;
@@ -24,13 +25,13 @@ export function TaskPrReview({
   rejectPR,
   approvePR,
 }: TaskPrReviewProps) {
-  if (!((isReviewWaiting || task?.status === "pr_ready") && hasPR)) {
+  if (!((isReviewWaiting || isPrReadyStatus(task?.status)) && hasPR)) {
     return null;
   }
 
   return (
     <div className="p-5 bg-surface/40 flex flex-col gap-4">
-      {task?.status === "pr_ready" ? (
+      {isPrReadyStatus(task?.status) ? (
         <div className="flex justify-end">
           <button
             onClick={startReview}

@@ -190,20 +190,6 @@ export function useTaskWorkflow(taskID: string) {
     }
   }
 
-  async function startReview() {
-    if (!token) return;
-    setError("");
-    setSubmittingPR(true);
-    try {
-      await api.startReview(taskID, token);
-      await mutateWorkflow();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to start review");
-    } finally {
-      setSubmittingPR(false);
-    }
-  }
-
   function requestSpecChanges() {
     setIsRequestingChanges(true);
   }
@@ -283,7 +269,6 @@ export function useTaskWorkflow(taskID: string) {
     submitSpecChanges,
     approvePR,
     rejectPR,
-    startReview,
     deleteTask,
     updateTask,
     mutateWorkflow,
@@ -291,7 +276,7 @@ export function useTaskWorkflow(taskID: string) {
 }
 
 function isWorkflowTerminal(status?: string) {
-  return status === "done" || status === "completed" || status === "failed" || status === "merged";
+  return status === "failed" || status === "merged";
 }
 
 function toRealtimeLog(taskID: string, log: TaskLog): RealtimeLog {

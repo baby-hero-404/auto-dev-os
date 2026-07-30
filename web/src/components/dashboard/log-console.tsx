@@ -13,7 +13,7 @@ export type FlattenedLogItem =
   | { type: "log"; log: RealtimeLog; isGroupChild?: boolean }
   | { type: "group"; key: string; stepName: string; status: LogGroupStatus; logs: RealtimeLog[]; isExpanded: boolean; defaultExpanded: boolean; originalIndex: number };
 
-function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
+function groupLogs(logs: RealtimeLog[], isCliFlow: boolean): GroupedLogItem[] {
   const result: GroupedLogItem[] = [];
   let currentGroup: { key: string; stepName: string; status: LogGroupStatus; logs: RealtimeLog[] } | null = null;
   let groupCount = 0;
@@ -22,8 +22,8 @@ function groupLogs(logs: RealtimeLog[]): GroupedLogItem[] {
     const startMatch = log.message.match(/\[#\d+\] step ([\w-]+) running/);
     if (startMatch) {
       const stepName = startMatch[1];
-      if (stepName.startsWith("cli_")) {
-        // Flatten cli_ steps: Treat them as normal lines instead of nested UI groups
+      if (isCliFlow) {
+        // Flatten CLI-flow steps: treat them as normal lines instead of nested UI groups
         result.push({ type: "log", log });
         continue;
       }
@@ -166,6 +166,8 @@ interface LogConsoleProps {
   droppedLogCount?: number;
   onReloadFullHistory?: () => void;
   isReloadingHistory?: boolean;
+  /** Whether this task is running the CLI-spec-first flow; controls whether steps are grouped or flattened. */
+  isCliFlow?: boolean;
 }
 
 export function LogConsole({
@@ -176,6 +178,7 @@ export function LogConsole({
   droppedLogCount = 0,
   onReloadFullHistory,
   isReloadingHistory = false,
+  isCliFlow = false,
 }: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<"milestones" | "all">("all");
@@ -230,7 +233,7 @@ export function LogConsole({
 
   const flattenedItems = useMemo(() => {
     const items: FlattenedLogItem[] = [];
-    const grouped = groupLogs(logs);
+    const grouped = groupLogs(logs, isCliFlow);
 
     grouped.forEach((item, index) => {
       if (item.type === "log") {
@@ -246,7 +249,7 @@ export function LogConsole({
       }
     });
     return items;
-  }, [logs, expanded]);
+  }, [logs, expanded, isCliFlow]);
 
   const getStatusIcon = (status: LogGroupStatus) => {
     switch (status) {

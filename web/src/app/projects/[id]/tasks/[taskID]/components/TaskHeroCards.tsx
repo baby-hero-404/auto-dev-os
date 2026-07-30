@@ -3,8 +3,15 @@
 import { useState, useMemo } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { LogConsole } from "@/components/dashboard/log-console";
-import { SpecPanel } from "./SpecPanel";
-import { CLISpecPanel } from "./CLISpecPanel";
+import { SpecReviewGate } from "./SpecReviewGate";
+import { 
+  isTodoStatus, 
+  isPreparationStatus, 
+  isExecutionStatus, 
+  isReviewingStatus, 
+  isFailedStatus, 
+  isMergedStatus 
+} from "@/lib/status";
 import {
   Clock,
   Sparkles,
@@ -39,8 +46,6 @@ export function TaskHeroCards() {
     droppedLogCount,
     reloadFullLogs,
     isReloadingLogs,
-    requestSpecChanges,
-    approveSpec,
     rejectPR,
     approvePR,
     retry,
@@ -51,22 +56,20 @@ export function TaskHeroCards() {
     feedback,
     setFeedback,
     submittingPR,
-    startReview,
     workflowSteps,
     isCliFlow,
   } = useTaskDetail();
 
   const [isRejectFormOpen, setIsRejectFormOpen] = useState(false);
   const st = task?.status || "todo";
-  
-  const heroTodo = st === 'todo';
-  const heroLoad = st === 'context_loading' || st === 'analyzing' || st === 'planning';
+  const heroTodo = isTodoStatus(st);
+  const heroLoad = isPreparationStatus(st);
   const heroSpec = st === 'spec_review';
-  const heroExec = ['coding','testing','fixing'].includes(st);
-  const heroReview = st === 'reviewing';
+  const heroExec = isExecutionStatus(st);
+  const heroReview = isReviewingStatus(st);
   const heroPr = st === 'pr_ready' || st === 'human_review';
-  const heroMerged = st === 'merged';
-  const heroFailed = st === 'failed';
+  const heroMerged = isMergedStatus(st);
+  const heroFailed = isFailedStatus(st);
 
   const completedCheckpoints = useMemo(() => {
     if (!workflow?.checkpoints) return [];
@@ -130,7 +133,7 @@ export function TaskHeroCards() {
             <div className="flex items-center gap-3 mb-4 z-10">
               <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
               <span className="text-sm font-bold text-blue-700 dark:text-blue-400 tracking-wide capitalize">
-                {st === 'context_loading' ? 'Loading Context...' : st === 'planning' ? 'Planning Execution...' : 'Analyzing Requirements...'}
+                {st === 'context_loading' ? 'Loading Context...' : 'Analyzing Requirements...'}
               </span>
             </div>
             <div className="flex flex-col gap-2 pl-1 z-10">
@@ -144,36 +147,10 @@ export function TaskHeroCards() {
               ))}
             </div>
           </div>
-          <CLISpecPanel />
         </div>
       )}
 
-      {heroSpec && (
-        <div className="flex flex-col gap-4">
-          <div className="bg-linear-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border border-amber-500/25 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-md relative overflow-hidden animate-fade-in">
-            <div className="absolute -top-10 -right-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-            <div className="flex items-center gap-3.5 z-10">
-              <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20 shrink-0">
-                <Pause className="h-5.5 w-5.5 text-amber-600 dark:text-amber-500" />
-              </span>
-              <div>
-                <div className="text-sm font-bold text-foreground">Definition-of-Ready Gate</div>
-                <div className="text-xs text-content-muted mt-0.5 leading-normal">Review the specification below and approve it before coding starts.</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 z-10 self-end md:self-center">
-              <button onClick={requestSpecChanges} className="px-4 py-2 rounded-xl border border-stroke bg-background/50 text-content text-xs font-semibold hover:bg-surface transition-all duration-150 cursor-pointer">
-                Request Changes
-              </button>
-              <button onClick={approveSpec} className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
-                <Check className="h-3.5 w-3.5" /> Approve Spec
-              </button>
-            </div>
-          </div>
-          <SpecPanel isExpanded={true} />
-          <CLISpecPanel />
-        </div>
-      )}
+      {heroSpec && <SpecReviewGate />}
 
       {heroExec && (
         isCliFlow ? (
@@ -200,7 +177,7 @@ export function TaskHeroCards() {
                 <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} in progress</span>
               </div>
             </div>
-            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
+            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} isCliFlow={isCliFlow} />
           </div>
         )
       )}
@@ -262,13 +239,6 @@ export function TaskHeroCards() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
                   <button
-                    onClick={() => startReview()}
-                    disabled={submittingPR}
-                    className="px-4 py-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:shadow-sm active:scale-95 transition-all duration-150 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Clock className="h-3.5 w-3.5" /> Start Review
-                  </button>
-                  <button
                     onClick={() => setIsRejectFormOpen(!isRejectFormOpen)}
                     disabled={submittingPR}
                     className="px-4 py-2 rounded-xl border border-rose-500/25 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-semibold hover:shadow-sm active:scale-95 transition-all duration-150 cursor-pointer"
@@ -325,130 +295,10 @@ export function TaskHeroCards() {
               </div>
             )}
 
-            <div className="px-5.5 py-5">
-              <div className="flex flex-col gap-5">
-                {/* PR metadata view */}
-                {prSummaries && prSummaries.length > 0 ? (
-                  prSummaries.map((prItem, idx: number) => {
-                    const pr = prItem as unknown as PRSummary;
-                    return (
-                    <div key={idx} className="glass-panel p-5 glow-on-hover flex flex-col gap-3.5">
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex items-center gap-2">
-                          <GitPullRequest className="h-5 w-5 text-success" />
-                          <h3 className="font-semibold text-base text-foreground leading-snug">{pr.title || "Pull Request"}</h3>
-                        </div>
-                        {pr.pr_url && (
-                          <a href={pr.pr_url} target="_blank" rel="noreferrer" className="text-brand-primary hover:underline text-xs flex items-center gap-1 font-medium shrink-0">
-                            View on Git Provider <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        )}
-                      </div>
-                      
-                      {pr.body && (
-                        <div className="text-[13px] text-foreground whitespace-pre-wrap font-mono leading-relaxed bg-surface border border-stroke p-3.5 rounded-lg">
-                          {pr.body}
-                        </div>
-                      )}
-                      
-                      {pr.changed_files && pr.changed_files.length > 0 && (
-                        <div className="flex flex-col gap-1.5">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted flex items-center gap-1">
-                            <FileText className="h-3.5 w-3.5" /> Files Changed ({pr.changed_files.length})
-                          </span>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {pr.changed_files.map((f: string, i: number) => (
-                              <span key={i} className="text-[11px] px-2 py-0.5 bg-surface border border-stroke rounded text-foreground font-mono truncate max-w-[280px]" title={f}>
-                                {f.split("/").pop()}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {(pr.risk_level || pr.risk_reason) && (
-                        <div className="bg-surface border border-stroke p-3.5 rounded-lg flex flex-col gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted">Risk Assessment:</span>
-                            <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                              pr.risk_level === 'critical' || pr.risk_level === 'high'
-                                ? 'bg-danger/10 text-danger border border-danger/25'
-                                : pr.risk_level === 'medium'
-                                ? 'bg-warning/10 text-warning border border-warning/25'
-                                : 'bg-success/10 text-success border border-success/25'
-                            }`}>
-                              {(pr.risk_level === 'critical' || pr.risk_level === 'high') && <Flame className="h-3 w-3 animate-pulse" />}
-                              {pr.risk_level || 'Unknown'}
-                            </span>
-                          </div>
-                          {pr.risk_reason && <p className="text-[12px] text-content-muted leading-relaxed">{pr.risk_reason}</p>}
-                          
-                          {pr.review_limit_exceeded && (
-                            <p className="text-[11px] text-danger font-medium italic flex items-center gap-1.5 mt-1">
-                              <AlertTriangle className="h-3.5 w-3.5" /> Auto-review limit exceeded. Human review required.
-                            </p>
-                          )}
-                          {pr.self_review_fallback && (
-                            <p className="text-[11px] text-warning font-medium italic flex items-center gap-1.5">
-                              <AlertCircle className="h-3.5 w-3.5" /> Self-review fallback was used.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    );
-                  })
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center gap-2 text-content-muted">
-                      <GitPullRequest className="h-4 w-4" />
-                      <span className="text-sm font-semibold">Pull Request Status</span>
-                    </div>
-                    {task?.pr_urls && task.pr_urls.length > 0 ? (
-                      <div className="flex flex-col gap-2">
-                        {task.pr_urls.map((url, uidx) => {
-                          let label = "View Pull Request";
-                          const match = url.match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
-                          if (match) {
-                            label = `${match[1]}/${match[2]} #${match[3]}`;
-                          }
-                          return (
-                            <div key={uidx} className="flex items-center justify-between bg-surface border border-stroke rounded-lg p-3 hover:border-brand-primary/50 transition">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <GitPullRequest className="h-4 w-4 text-brand-primary" />
-                                <div className="flex flex-col min-w-0">
-                                  <span className="text-xs font-semibold text-foreground truncate">
-                                    {label}
-                                  </span>
-                                  <span className="text-[10px] text-content-muted truncate max-w-[250px] sm:max-w-[400px]">
-                                    {url}
-                                  </span>
-                                </div>
-                              </div>
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-3 py-1 bg-brand-primary/10 border border-brand-primary/20 hover:bg-brand-primary/20 text-brand-primary rounded-md text-[11px] font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
-                              >
-                                View PR <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-content-muted bg-surface border border-stroke p-3 rounded-lg">
-                        No PR links or metadata registered yet for this task.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+            <PRMetadataView />
           </div>
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
+            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} isCliFlow={isCliFlow} />
           )}
         </div>
       )}
@@ -472,7 +322,7 @@ export function TaskHeroCards() {
             </button>
           </div>
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
+            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} isCliFlow={isCliFlow} />
           )}
         </div>
       )}
@@ -491,11 +341,144 @@ export function TaskHeroCards() {
               </div>
             </div>
           </div>
+          
+          <div className="bg-card border border-stroke/10 rounded-2xl shadow-md overflow-hidden">
+            <PRMetadataView />
+          </div>
+
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
+            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} isCliFlow={isCliFlow} />
           )}
         </div>
       )}
     </>
+  );
+}
+
+function PRMetadataView() {
+  const { prSummaries, task } = useTaskDetail();
+  
+  return (
+    <div className="px-5.5 py-5">
+      <div className="flex flex-col gap-5">
+        {/* PR metadata view */}
+        {prSummaries && prSummaries.length > 0 ? (
+          prSummaries.map((prItem, idx: number) => {
+            const pr = prItem as unknown as PRSummary;
+            return (
+            <div key={idx} className="glass-panel p-5 glow-on-hover flex flex-col gap-3.5">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex items-center gap-2">
+                  <GitPullRequest className="h-5 w-5 text-success" />
+                  <h3 className="font-semibold text-base text-foreground leading-snug">{pr.title || "Pull Request"}</h3>
+                </div>
+                {pr.pr_url && (
+                  <a href={pr.pr_url} target="_blank" rel="noreferrer" className="text-brand-primary hover:underline text-xs flex items-center gap-1 font-medium shrink-0">
+                    View on Git Provider <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+              </div>
+              
+              {pr.body && (
+                <div className="text-[13px] text-foreground whitespace-pre-wrap font-mono leading-relaxed bg-surface border border-stroke p-3.5 rounded-lg">
+                  {pr.body}
+                </div>
+              )}
+              
+              {pr.changed_files && pr.changed_files.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted flex items-center gap-1">
+                    <FileText className="h-3.5 w-3.5" /> Files Changed ({pr.changed_files.length})
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {pr.changed_files.map((f: string, i: number) => (
+                      <span key={i} className="text-[11px] px-2 py-0.5 bg-surface border border-stroke rounded text-foreground font-mono truncate max-w-[280px]" title={f}>
+                        {f.split("/").pop()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {(pr.risk_level || pr.risk_reason) && (
+                <div className="bg-surface border border-stroke p-3.5 rounded-lg flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-content-muted">Risk Assessment:</span>
+                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                      pr.risk_level === 'critical' || pr.risk_level === 'high'
+                        ? 'bg-danger/10 text-danger border border-danger/25'
+                        : pr.risk_level === 'medium'
+                        ? 'bg-warning/10 text-warning border border-warning/25'
+                        : 'bg-success/10 text-success border border-success/25'
+                    }`}>
+                      {(pr.risk_level === 'critical' || pr.risk_level === 'high') && <Flame className="h-3 w-3 animate-pulse" />}
+                      {pr.risk_level || 'Unknown'}
+                    </span>
+                  </div>
+                  {pr.risk_reason && <p className="text-[12px] text-content-muted leading-relaxed">{pr.risk_reason}</p>}
+                  
+                  {pr.review_limit_exceeded && (
+                    <p className="text-[11px] text-danger font-medium italic flex items-center gap-1.5 mt-1">
+                      <AlertTriangle className="h-3.5 w-3.5" /> Auto-review limit exceeded. Human review required.
+                    </p>
+                  )}
+                  {pr.self_review_fallback && (
+                    <p className="text-[11px] text-warning font-medium italic flex items-center gap-1.5">
+                      <AlertCircle className="h-3.5 w-3.5" /> Self-review fallback was used.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            );
+          })
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-content-muted">
+              <GitPullRequest className="h-4 w-4" />
+              <span className="text-sm font-semibold">Pull Request Status</span>
+            </div>
+            {task?.pr_urls && task.pr_urls.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {task.pr_urls.map((url, uidx) => {
+                  let label = "View Pull Request";
+                  const match = url.match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
+                  if (match) {
+                    label = `${match[1]}/${match[2]} #${match[3]}`;
+                  }
+                  return (
+                    <div key={uidx} className="flex items-center justify-between bg-surface border border-stroke rounded-lg p-3 hover:border-brand-primary/50 transition">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <GitPullRequest className="h-4 w-4 text-brand-primary" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-semibold text-foreground truncate">
+                            {label}
+                          </span>
+                          <span className="text-[10px] text-content-muted truncate max-w-[250px] sm:max-w-[400px]">
+                            {url}
+                          </span>
+                        </div>
+                      </div>
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1 bg-brand-primary/10 border border-brand-primary/20 hover:bg-brand-primary/20 text-brand-primary rounded-md text-[11px] font-medium transition flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        View PR <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-content-muted bg-surface border border-stroke p-3 rounded-lg">
+                No PR links or metadata registered yet for this task.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

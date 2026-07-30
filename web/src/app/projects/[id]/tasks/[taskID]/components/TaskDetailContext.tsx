@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useMemo, useCallback } from "react";
 import type { Task, WorkflowStatus, WorkflowArtifact, TaskAnalysis, AffectedFile, ExecutionUnit, WorkflowCheckpoint } from "@/lib/types";
 import { getRiskAssessment, splitTaskDescription } from "@/lib/utils/task-utils";
+import { CLI_STEPS } from "@/lib/status";
 import { parseUnifiedDiff, type ParsedFileDiff } from "@/components/projects/task-diff-viewer";
 import { useTaskWorkflow } from "@/lib/hooks/use-task-workflow";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
@@ -388,7 +389,7 @@ interface TaskDetailContextType {
   submitSpecChanges: () => Promise<void>;
   approvePR: () => Promise<void>;
   rejectPR: () => Promise<void>;
-  startReview: () => Promise<void>;
+
   deleteTask: () => Promise<boolean>;
   updateTask: (fields: Partial<Task>) => Promise<boolean>;
   mutateWorkflow: () => Promise<unknown>;
@@ -471,7 +472,6 @@ export function TaskDetailProvider({
     submitSpecChanges,
     approvePR,
     rejectPR,
-    startReview,
     deleteTask,
     updateTask,
     mutateWorkflow,
@@ -533,7 +533,7 @@ export function TaskDetailProvider({
         .map(cp => cp.step)
         .filter(step => step.startsWith("cli_"))));
       // Ensure expected CLI flow steps are present and ordered roughly correctly
-      const expectedCli = ["cli_analyze", "cli_spec", "cli_implement", "cli_mr"];
+      const expectedCli: string[] = [...CLI_STEPS];
       for (const s of expectedCli) {
         if (!steps.includes(s)) steps.push(s);
       }
@@ -833,7 +833,7 @@ export function TaskDetailProvider({
         submitSpecChanges,
         approvePR,
         rejectPR,
-        startReview,
+
         deleteTask,
         updateTask,
         mutateWorkflow,

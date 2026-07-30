@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,8 +10,6 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
-	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
@@ -22,39 +19,29 @@ var upgrader = websocket.Upgrader{
 
 type CLIAuthHandler struct {
 	runtime sandbox.Runtime
-	tickets *wsTicketStore
+	tickets *wsTerminalTicketStore
 }
 
 func NewCLIAuthHandler(runtime sandbox.Runtime) *CLIAuthHandler {
-	return &CLIAuthHandler{runtime: runtime, tickets: newWSTicketStore()}
+	return &CLIAuthHandler{runtime: runtime, tickets: newWSTerminalTicketStore()}
 }
 
 // MintWSTicket handles POST /organizations/{orgID}/cli-auth/ws-ticket.
 // Runs behind the existing AuthMiddleware chi.Router group (Bearer-only).
 func (h *CLIAuthHandler) MintWSTicket(w http.ResponseWriter, r *http.Request) {
-	orgID := chi.URLParam(r, "orgID")
-	claims, ok := r.Context().Value(authClaimsKey).(*service.TokenClaims)
-	if !ok || claims.OrgID != orgID {
-		writeError(w, http.StatusForbidden, "org mismatch")
-		return
-	}
-
-	var body struct {
-		Provider string `json:"provider"`
-	}
-	if err := decodeJSON(r, &body); err != nil || body.Provider == "" {
-		writeError(w, http.StatusBadRequest, "missing provider")
-		return
-	}
-
-	ticket, err := h.tickets.Mint(claims.Subject, claims.OrgID, body.Provider)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to mint ticket")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ticket":     ticket,
-		"expires_in": int(wsTicketTTL.Seconds()),
+	h.tickets.mintTicket(w, r, func(r *http.Request) (string, bool) {
+		var body struct {
+			Provider string `json:"provider"`
+		}
+		if err := decodeJSON(r, &body); err != nil || body.Provider == "" {
+			return "", false
+		}
+		return body.Provider, true
+	}, "missing provider", func(w http.ResponseWriter, ticket string) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ticket":     ticket,
+			"expires_in": int(wsTicketTTL.Seconds()),
+		})
 	})
 }
 
@@ -119,32 +106,14 @@ func (w *wsWriter) Write(p []byte) (n int, err error) {
 }
 
 func (h *CLIAuthHandler) Terminal(w http.ResponseWriter, r *http.Request) {
-	orgID := chi.URLParam(r, "orgID")
-	ticketStr := r.URL.Query().Get("ticket")
-	if ticketStr == "" {
-		http.Error(w, "missing ticket", http.StatusUnauthorized)
-		return
-	}
-	ticket, ok := h.tickets.Consume(ticketStr, orgID)
+	conn, ticket, taskID, tmpDir, cleanup, ok := h.tickets.beginTerminal(w, r, "auto-code-os-auth")
 	if !ok {
-		http.Error(w, "invalid, expired, or already-used ticket", http.StatusUnauthorized)
-		return
-	}
-	provider := ticket.Provider // derived from ticket, not query param (REQ-007)
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("failed to upgrade websocket: %v", err)
 		return
 	}
 	defer conn.Close()
-
-	taskID, tmpDir, cleanup, err := newTerminalWorkspace("auto-code-os-auth")
-	if err != nil {
-		sendWSError(conn, "failed to create temp workspace: %v", err)
-		return
-	}
 	defer cleanup()
+
+	provider := ticket.Provider // derived from ticket, not query param (REQ-007)
 
 	sendWSStdout(conn, "\r\n🚀 Starting %s Sandbox for authentication...\r\nType your login command (e.g., 'claude login').\r\nFiles saved to /workspace will be automatically captured.\r\n", provider)
 

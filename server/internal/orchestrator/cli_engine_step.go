@@ -19,6 +19,41 @@ import (
 // configurable in this phase.
 const cliCooldownDuration = 1 * time.Minute
 
+// finishCLIRun performs the bookkeeping shared by every CLI subprocess
+// dispatch path once RunCodeStep returns without a transport-level error:
+// quota-cooldown write-back, auth-failure write-back, the finish log line,
+// and saving the cli_output checkpoint artifact. Both
+// cliEngineRunner.RunLLMStep (code_backend/code_frontend/fix) and
+// cliStepRunner.RunCLIStep (cli_analyze/cli_spec/cli_implement) call this
+// immediately after RunCodeStep succeeds — each then applies its own
+// caller-specific handling afterward (noop-check vs. ChangedFiles lookup).
+func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, credID string, res *engine.CodeStepResult) {
+	// Write-side of REQ-006: only affects the *next* ResolveExecutionProvider
+	// call, not this step's own outcome (REQ-005, no mid-task switch).
+	if res.QuotaExceeded && credID != "" && o.cooldownSetter != nil {
+		_ = o.cooldownSetter.SetCooldown(ctx, credID, "", time.Now().Add(cliCooldownDuration))
+	}
+
+	// Auth-failure write-side: a bad session/token won't self-resolve like a
+	// quota cooldown does, so mark the credential out instead of cooling it
+	// down (see engine.CodeStepResult.AuthFailed, cli_auth_failure.go).
+	if res.AuthFailed && credID != "" && o.credStatusSetter != nil {
+		_ = o.credStatusSetter.MarkNeedsReauth(ctx, credID)
+	}
+
+	o.log(ctx, taskID, &jobID, "info", fmt.Sprintf(
+		"%s: cli engine finished (success=%v, exit_code=%d, output_bytes=%d)",
+		stepID, res.Success, res.ExitCode, len(res.Output),
+	))
+
+	o.initCheckpoints()
+	artifactBody := res.Output
+	if artifactBody == "" {
+		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
+	}
+	_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_output", artifactBody)
+}
+
 func worktreeSuffixForRole(role string) string {
 	switch role {
 	case models.AgentRoleBackend:
@@ -127,31 +162,7 @@ func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, age
 		return nil, fmt.Errorf("cli engine: %w", err)
 	}
 
-	// Write-side of REQ-006: a CLI subprocess has no HTTP status code, so
-	// quota/rate-limit is detected post-hoc from the captured output/exit
-	// code (RunCodeStep already did the pattern match — see cli_quota.go).
-	// This only affects the *next* ResolveExecutionProvider call, not this
-	// step's own outcome (REQ-005, no mid-task switch).
-	if res.QuotaExceeded && r.credID != "" && r.o.cooldownSetter != nil {
-		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cliCooldownDuration))
-	}
-
-	// Auth-failure write-side: see cli_spec_step.go's mirrored block.
-	if res.AuthFailed && r.credID != "" && r.o.credStatusSetter != nil {
-		_ = r.o.credStatusSetter.MarkNeedsReauth(ctx, r.credID)
-	}
-
-	r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf(
-		"%s: cli engine finished (success=%v, exit_code=%d, output_bytes=%d)",
-		stepID, res.Success, res.ExitCode, len(res.Output),
-	))
-
-	r.o.initCheckpoints()
-	artifactBody := res.Output
-	if artifactBody == "" {
-		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
-	}
-	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
+	r.o.finishCLIRun(ctx, task.ID, jobID, stepID, r.credID, res)
 
 	if !res.Success {
 		if res.Error != "" {

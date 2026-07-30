@@ -1,98 +1,67 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/internal/service"
-	"github.com/go-chi/chi/v5"
 )
 
 type CLITestHandler struct {
 	runtime sandbox.Runtime
 	svc     ProviderCredentialService
-	tickets *wsTicketStore
+	tickets *wsTerminalTicketStore
 }
 
 func NewCLITestHandler(runtime sandbox.Runtime, svc ProviderCredentialService) *CLITestHandler {
 	return &CLITestHandler{
 		runtime: runtime,
 		svc:     svc,
-		tickets: newWSTicketStore(),
+		tickets: newWSTerminalTicketStore(),
 	}
 }
 
 // MintWSTicket handles POST /organizations/{orgID}/cli-test/ws-ticket.
 func (h *CLITestHandler) MintWSTicket(w http.ResponseWriter, r *http.Request) {
-	orgID := chi.URLParam(r, "orgID")
-	claims, ok := r.Context().Value(authClaimsKey).(*service.TokenClaims)
-	if !ok || claims.OrgID != orgID {
-		writeError(w, http.StatusForbidden, "org mismatch")
-		return
-	}
-
-	var body struct {
-		CredentialID string `json:"credential_id"`
-	}
-	if err := decodeJSON(r, &body); err != nil || body.CredentialID == "" {
-		writeError(w, http.StatusBadRequest, "missing credential_id")
-		return
-	}
-
-	ticket, err := h.tickets.Mint(claims.Subject, claims.OrgID, body.CredentialID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to mint ticket")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
+	h.tickets.mintTicket(w, r, func(r *http.Request) (string, bool) {
+		var body struct {
+			CredentialID string `json:"credential_id"`
+		}
+		if err := decodeJSON(r, &body); err != nil || body.CredentialID == "" {
+			return "", false
+		}
+		return body.CredentialID, true
+	}, "missing credential_id", func(w http.ResponseWriter, ticket string) {
+		writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
+	})
 }
 
 // Terminal handles GET /organizations/{orgID}/cli-test/terminal via WebSocket.
 func (h *CLITestHandler) Terminal(w http.ResponseWriter, r *http.Request) {
-	orgID := chi.URLParam(r, "orgID")
-	ticketStr := r.URL.Query().Get("ticket")
-	if ticketStr == "" {
-		http.Error(w, "missing ticket", http.StatusUnauthorized)
-		return
-	}
-	ticket, ok := h.tickets.Consume(ticketStr, orgID)
+	conn, ticket, taskID, tmpDir, cleanup, ok := h.tickets.beginTerminal(w, r, "auto-code-os-cli-test")
 	if !ok {
-		http.Error(w, "invalid, expired, or already-used ticket", http.StatusUnauthorized)
-		return
-	}
-	credentialID := ticket.Provider // The ticket system stores the requested string in 'Provider'
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("failed to upgrade websocket: %v", err)
 		return
 	}
 	defer conn.Close()
+	defer cleanup()
+
+	credentialID := ticket.Provider // The ticket system stores the requested string in 'Provider'
 
 	// Fetch decrypted credential
-	provider, payloadMap, err := h.svc.GetDecryptedCredential(r.Context(), orgID, credentialID)
+	provider, payloadMap, err := h.svc.GetDecryptedCredential(r.Context(), ticket.OrgID, credentialID)
 	if err != nil {
 		sendWSError(conn, "failed to get credential: %v", err)
 		return
 	}
 
-	taskID, tmpDir, cleanup, err := newTerminalWorkspace("auto-code-os-cli-test")
-	if err != nil {
-		sendWSError(conn, "failed to create temp workspace: %v", err)
-		return
-	}
-	defer cleanup()
-
 	// Write credential payload to the temp dir based on the JSON payload structure
 	for relPath, content := range payloadMap {
 		fullPath := filepath.Join(tmpDir, relPath)
 		// Ensure no directory traversal
-		if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(tmpDir)) {
+		rel, err := filepath.Rel(tmpDir, fullPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -103,8 +72,8 @@ func (h *CLITestHandler) Terminal(w http.ResponseWriter, r *http.Request) {
 
 	providerName := provider
 	// Extract basic tool name (e.g. 'claude' from 'cli:claude')
-	if len(providerName) > 4 && providerName[:4] == "cli:" {
-		providerName = providerName[4:]
+	if rest, ok := strings.CutPrefix(providerName, "cli:"); ok {
+		providerName = rest
 	}
 
 	sendWSStdout(conn, "\r\n✅ Workspace prepared with your %s credential.\r\nType the CLI command (e.g. '%s') to test it.\r\n", provider, providerName)
@@ -115,4 +84,22 @@ func (h *CLITestHandler) Terminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = wsSendJSON(conn, map[string]interface{}{"type": "exit"})
+}
+
+// writeCredentialFile writes content to relPath under baseDir, refusing to
+// write anywhere relPath would resolve outside baseDir. Matches the
+// filepath.Rel-based containment check engine/cli.go uses for the same
+// class of untrusted-relative-path problem (a plain filepath.Clean+HasPrefix
+// string check is not sufficient: a sibling directory that merely shares
+// baseDir's string prefix, e.g. baseDir+"-evil", would incorrectly pass it).
+func writeCredentialFile(baseDir, relPath, content string) {
+	fullPath := filepath.Join(baseDir, relPath)
+	rel, err := filepath.Rel(baseDir, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(fullPath, []byte(content), 0o600)
 }

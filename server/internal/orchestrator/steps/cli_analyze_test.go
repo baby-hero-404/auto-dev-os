@@ -113,6 +113,32 @@ func TestCLIAnalyzeStep_RunnerError(t *testing.T) {
 	}
 }
 
+func TestCLIAnalyzeStep_PausesForClarification(t *testing.T) {
+	task := newCLITestTask()
+	runner := &mockCLIStepRunner{output: CLIStepOutput{Output: "Analyzing...\nProceed with deletion? (y/n)", AwaitingInput: true}}
+	updater := &mockCLITaskUpdater{}
+	step := NewCLIAnalyzeStep(StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"}, updater, runner, &mockStepPromptLoader{prompt: "base"}, &mockCLILogger{})
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected workflow.PauseError, got: %v", err)
+	}
+	if pauseErr.Step != workflow.StepCLIAnalyze {
+		t.Errorf("expected pause on cli_analyze step, got %q", pauseErr.Step)
+	}
+	if updater.updated.SpecStatus == nil || *updater.updated.SpecStatus != models.TaskSpecStatusClarificationRequired {
+		t.Errorf("expected SpecStatus=clarification_required to be persisted, got %+v", updater.updated)
+	}
+	var rounds []models.ClarificationRound
+	if err := json.Unmarshal(updater.updated.Clarifications, &rounds); err != nil {
+		t.Fatalf("failed to unmarshal clarifications: %v", err)
+	}
+	if len(rounds) != 1 || len(rounds[0].Questions) != 1 || rounds[0].Questions[0] != "Proceed with deletion? (y/n)" {
+		t.Errorf("expected 1 round with the extracted question, got %+v", rounds)
+	}
+}
+
 func TestCLIAnalyzeStep_PromptLoadError(t *testing.T) {
 	task := newCLITestTask()
 	step := NewCLIAnalyzeStep(StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"}, &mockCLITaskUpdater{}, &mockCLIStepRunner{}, &mockStepPromptLoader{err: errors.New("missing template")}, &mockCLILogger{})

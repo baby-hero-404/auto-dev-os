@@ -192,6 +192,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.prompts,                 // StepPromptLoader
 			loggerAdapter{log: o.log}, // Logger
 			o.workflows,               // CheckpointLister
+			o.tasks,                   // TaskUpdater
 		),
 		steps.NewCrossReviewStep(
 			rt,

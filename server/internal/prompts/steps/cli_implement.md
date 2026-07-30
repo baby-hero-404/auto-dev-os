@@ -20,3 +20,11 @@ set referenced below. Treat `specs.md`'s scenarios as your acceptance criteria.
 - This step is judged by the diff you produce: a run that only edits files under
   `docs/openspecs/` (spec-only, no application code) is treated as a failure unless
   the task was explicitly marked docs-only in the spec's `proposal.md` frontmatter.
+
+## Do not ask clarifying questions
+
+You are running non-interactively — there is no user available to answer a
+question mid-run. If something is ambiguous or underspecified, make the most
+reasonable assumption, proceed, and record the assumption explicitly (under
+Risks for cli_analyze, under "## Implementation Notes" for cli_spec/
+cli_implement). Never stop and wait for input.

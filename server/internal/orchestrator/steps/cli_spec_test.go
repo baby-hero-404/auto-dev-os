@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -60,6 +61,41 @@ func TestCLISpecStep_HappyPath(t *testing.T) {
 	}
 	if res["task_count"] != 2 {
 		t.Errorf("expected task_count 2, got %v", res["task_count"])
+	}
+}
+
+func TestCLISpecStep_PausesForClarification(t *testing.T) {
+	root := t.TempDir()
+	task := newCLITestTask()
+	updater := &mockCLITaskUpdater{}
+
+	step := NewCLISpecStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockWorktreeHostPathResolver{root: root},
+		&mockCLIStepRunner{output: CLIStepOutput{Output: "Please confirm the target directory before I proceed.", AwaitingInput: true}},
+		&mockStepPromptLoader{prompt: "base"},
+		&mockCLILogger{},
+		updater,
+		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected workflow.PauseError, got: %v", err)
+	}
+	if pauseErr.Step != workflow.StepCLISpec {
+		t.Errorf("expected pause on cli_spec step, got %q", pauseErr.Step)
+	}
+	if updater.updated.SpecStatus == nil || *updater.updated.SpecStatus != models.TaskSpecStatusClarificationRequired {
+		t.Errorf("expected SpecStatus=clarification_required to be persisted, got %+v", updater.updated)
+	}
+	var rounds []models.ClarificationRound
+	if err := json.Unmarshal(updater.updated.Clarifications, &rounds); err != nil {
+		t.Fatalf("failed to unmarshal clarifications: %v", err)
+	}
+	if len(rounds) != 1 {
+		t.Errorf("expected 1 clarification round, got %+v", rounds)
 	}
 }
 

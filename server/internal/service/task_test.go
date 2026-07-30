@@ -47,6 +47,24 @@ func expectProjectGetByIDWithEngine(mock sqlmock.Sqlmock, projectID, executionEn
 			AddRow(projectID, "org-1", executionEngine, []byte(cliEngineConfig), []byte(executionProviders)))
 }
 
+// newTaskServiceWithTaskRepoTestDB additionally wires a real (sqlmock-backed)
+// TaskRepo, needed for tests that exercise Clarify (GetByID + Update against
+// the tasks table) rather than just the project/org-routing helpers above.
+func newTaskServiceWithTaskRepoTestDB(t *testing.T) (*TaskService, sqlmock.Sqlmock, func()) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{})
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to open gorm db: %v", err)
+	}
+	svc := NewTaskService(repository.NewTaskRepo(gormDB), repository.NewProjectRepo(gormDB), nil, repository.NewOrganizationRepo(gormDB))
+	return svc, mock, func() { _ = db.Close() }
+}
+
 func expectOrgGetByID(mock sqlmock.Sqlmock, orgID, defaultExecutionProviders string) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "organizations" WHERE id = $1 ORDER BY "organizations"."id" LIMIT $2`)).
 		WithArgs(orgID, 1).
@@ -132,6 +150,66 @@ func TestValidateTaskEngineOverride_PaddedButAllDisabledFallsThrough(t *testing.
 
 	if err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI); err != nil {
 		t.Fatalf("expected override to fall through to the org default when the project list has rows but none enabled, got: %v", err)
+	}
+}
+
+func TestTaskService_Clarify_ResumesPausedCLIStep(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceWithTaskRepoTestDB(t)
+	defer cleanup()
+
+	// Clarify calls s.repo.GetByID directly once, then s.repo.Update (which
+	// internally calls GetByID again before issuing the UPDATE) — 2 SELECTs
+	// total, in this exact order.
+	selectRows := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "status", "spec_status", "paused_step"}).
+			AddRow("task-1", models.TaskStatusCoding, models.TaskSpecStatusClarificationRequired, workflow.StepCLIImplement)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "tasks" WHERE id = $1 ORDER BY "tasks"."id" LIMIT $2`)).
+		WithArgs("task-1", 1).
+		WillReturnRows(selectRows())
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "tasks" WHERE id = $1 ORDER BY "tasks"."id" LIMIT $2`)).
+		WithArgs("task-1", 1).
+		WillReturnRows(selectRows())
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "tasks" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	updated, err := svc.Clarify(context.Background(), "task-1", models.ClarifyTaskInput{Context: "use option A"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Status != models.TaskStatusCoding {
+		t.Errorf("expected resume status TaskStatusCoding (cli_implement's StatusOnResume), got %q", updated.Status)
+	}
+}
+
+func TestTaskService_Clarify_AnalyzeFlowUnchanged(t *testing.T) {
+	// Regression: a task with no PausedStep set (the legacy API-native
+	// flow, which never sets this field) must resume exactly like today —
+	// to TaskStatusAnalyzing.
+	svc, mock, cleanup := newTaskServiceWithTaskRepoTestDB(t)
+	defer cleanup()
+
+	selectRows := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"id", "status", "spec_status", "paused_step"}).
+			AddRow("task-2", models.TaskStatusAnalyzing, models.TaskSpecStatusClarificationRequired, "")
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "tasks" WHERE id = $1 ORDER BY "tasks"."id" LIMIT $2`)).
+		WithArgs("task-2", 1).
+		WillReturnRows(selectRows())
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "tasks" WHERE id = $1 ORDER BY "tasks"."id" LIMIT $2`)).
+		WithArgs("task-2", 1).
+		WillReturnRows(selectRows())
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "tasks" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	updated, err := svc.Clarify(context.Background(), "task-2", models.ClarifyTaskInput{Context: "answer"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Status != models.TaskStatusAnalyzing {
+		t.Errorf("expected TaskStatusAnalyzing (unchanged legacy behavior), got %q", updated.Status)
 	}
 }
 

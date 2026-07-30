@@ -100,6 +100,23 @@ func TestCLIEngine_Preflight_AuthCheckFails(t *testing.T) {
 	}
 }
 
+func TestCLIEngine_Preflight_AuthCheckExitsZeroButReportsNotLoggedIn(t *testing.T) {
+	// claude auth status / codex login status are informational commands
+	// that exit 0 regardless of login state — the failure signal is in the
+	// output content, not the exit code (REQ-003). Preflight must catch
+	// this via detectAuthInvalid, not exit-code alone.
+	rt := &mockRuntime{results: []*sandbox.CommandResult{
+		{ExitCode: 0},                                       // binary check ok
+		{ExitCode: 0, Stdout: "{\n  \"loggedIn\": false\n}"}, // auth check "succeeds" but reports logged out
+	}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", AuthCheckCommand: "claude auth status", ProfileRef: "claude_code"}
+	_, err := e.Preflight(context.Background(), baseReq(cfg))
+	if err == nil || !strings.Contains(err.Error(), "not authenticated") {
+		t.Fatalf("expected 'not authenticated' error despite exit code 0, got %v", err)
+	}
+}
+
 func TestCLIEngine_Preflight_Success(t *testing.T) {
 	rt := &mockRuntime{results: []*sandbox.CommandResult{
 		{ExitCode: 0},
@@ -197,6 +214,93 @@ func TestCLIEngine_RunCodeStep_LoopKill(t *testing.T) {
 	}
 	if res.Success {
 		t.Errorf("expected Success to be false when loop-killed even with exit code 0")
+	}
+}
+
+func TestCLIEngine_RunCodeStep_AuthInvalid(t *testing.T) {
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 1, Stdout: "Not logged in · Please run /login\n"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.AuthInvalid {
+		t.Errorf("expected AuthInvalid=true, got %+v", res)
+	}
+	if res.Success {
+		t.Errorf("expected Success=false")
+	}
+}
+
+// TestCLIEngine_RunCodeStep_AuthInvalid_ExitZeroStillMarkedFailed guards a
+// fixed bug: Success previously didn't subtract AuthInvalid, so a run whose
+// combined output incidentally matched an auth-invalid pattern (e.g. a task
+// legitimately working on auth/OAuth code) but exited 0 was reported as
+// Success=true while also carrying AuthInvalid=true — the step was accepted
+// as complete while its credential got silently disabled via
+// MarkNeedsReauth. Success must always be false when AuthInvalid is true,
+// mirroring how LoopKilled/AwaitingInput are already subtracted.
+func TestCLIEngine_RunCodeStep_AuthInvalid_ExitZeroStillMarkedFailed(t *testing.T) {
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "...token revoked test case passed\nDone.\n"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.AuthInvalid {
+		t.Fatalf("expected AuthInvalid=true for this fixture, got %+v", res)
+	}
+	if res.Success {
+		t.Errorf("expected Success=false when AuthInvalid=true, even with ExitCode=0, got %+v", res)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_AuthInvalid_TakesPriorityOverQuota(t *testing.T) {
+	// A message that could plausibly match both rule sets in some CLI
+	// output shapes — auth-invalid must win so the caller doesn't cool down
+	// a credential that will never work regardless of cooldown.
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 1, Stdout: "Not logged in · Please run /login\n"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.QuotaExceeded {
+		t.Errorf("expected QuotaExceeded=false when AuthInvalid is true, got %+v", res)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_AwaitingInput(t *testing.T) {
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 1, Stdout: "Analyzing repo...\nProceed with deletion? (y/n)"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.AwaitingInput {
+		t.Errorf("expected AwaitingInput=true, got %+v", res)
+	}
+	if res.Success {
+		t.Errorf("expected Success=false when awaiting input")
+	}
+}
+
+func TestCLIEngine_RunCodeStep_AwaitingInput_ExitZeroStillDetected(t *testing.T) {
+	// Some CLIs print a question and then exit 0 ("can't prompt
+	// non-interactively") — must not be read as a silent success.
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "Do you want to overwrite config.yaml?"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	res, err := e.RunCodeStep(context.Background(), baseReq(cfg))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.AwaitingInput || res.Success {
+		t.Errorf("expected AwaitingInput=true, Success=false, got %+v", res)
 	}
 }
 

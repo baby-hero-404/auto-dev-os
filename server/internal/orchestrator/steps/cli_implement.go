@@ -26,10 +26,11 @@ type CLIImplementStep struct {
 	prompts     StepPromptLoader
 	log         Logger
 	checkpoints CheckpointLister
+	tasks       TaskUpdater
 }
 
-func NewCLIImplementStep(rt StepRuntime, worktree WorktreeHostPathResolver, git WorktreeManager, runner CLIStepRunner, prompts StepPromptLoader, log Logger, checkpoints CheckpointLister) *CLIImplementStep {
-	return &CLIImplementStep{rt: rt, worktree: worktree, git: git, runner: runner, prompts: prompts, log: log, checkpoints: checkpoints}
+func NewCLIImplementStep(rt StepRuntime, worktree WorktreeHostPathResolver, git WorktreeManager, runner CLIStepRunner, prompts StepPromptLoader, log Logger, checkpoints CheckpointLister, tasks TaskUpdater) *CLIImplementStep {
+	return &CLIImplementStep{rt: rt, worktree: worktree, git: git, runner: runner, prompts: prompts, log: log, checkpoints: checkpoints, tasks: tasks}
 }
 
 func (s *CLIImplementStep) ID() string { return workflow.StepCLIImplement }
@@ -64,6 +65,9 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles)
 	if err != nil {
 		return nil, fmt.Errorf("cli_implement: %w", err)
+	}
+	if out.AwaitingInput {
+		return pauseForClarification(ctx, s.tasks, s.rt.Task, s.ID(), out.Output)
 	}
 
 	if len(out.ChangedFiles) == 0 {

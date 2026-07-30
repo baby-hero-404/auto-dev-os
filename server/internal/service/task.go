@@ -242,10 +242,20 @@ func (s *TaskService) Clarify(ctx context.Context, id string, input models.Clari
 
 	specStatus := models.TaskSpecStatusNone
 	status := models.TaskStatusAnalyzing
+	if task.PausedStep != "" {
+		// CLI spec-first flow: resume at the step that actually paused, not
+		// always "analyze" (REQ-006, docs/openspecs/cli-execution-reliability)
+		// — a CLI step's clarification pause can originate at cli_analyze,
+		// cli_spec, or cli_implement, unlike the legacy API-native flow
+		// where it always originates at (and resumes to) "analyze".
+		status = workflow.StatusForStep(task.PausedStep)
+	}
+	clearedPausedStep := ""
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{
 		SpecStatus:     &specStatus,
 		Status:         &status,
 		Clarifications: json.RawMessage(clarificationsBytes),
+		PausedStep:     &clearedPausedStep,
 	})
 }
 

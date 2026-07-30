@@ -51,9 +51,13 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 			continue
 		}
 
-		parts := strings.Split(pr.URL, "/")
+		cleanURL := strings.TrimRight(strings.TrimSpace(pr.URL), "/")
+		parts := strings.Split(cleanURL, "/")
 		repoName := parts[len(parts)-1]
 		repoName = strings.TrimSuffix(repoName, ".git")
+		if repoName == "" {
+			repoName = "main"
+		}
 
 		defaultBranch := pr.Branch
 		if defaultBranch == "" {
@@ -63,7 +67,7 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 		repoWS := models.RepoWorkspace{
 			RepoID:        pr.ID,
 			Name:          repoName,
-			URL:           pr.URL,
+			URL:           cleanURL,
 			DefaultBranch: defaultBranch,
 			Status: models.RepoWorkspaceStatus{
 				MergeStatus: models.MergeStatusPending,
@@ -188,8 +192,13 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 			if err := os.MkdirAll(filepath.Dir(repoAbsPath), 0o755); err != nil {
 				return fmt.Errorf("create repo parent dir: %w", err)
 			}
-			clonedBranch, err := m.GitOps.CloneForTask(ctx, rWS.URL, rWS.DefaultBranch, repoAbsPath)
+			cleanURL := strings.TrimRight(strings.TrimSpace(rWS.URL), "/")
+			clonedBranch, err := m.GitOps.CloneForTask(ctx, cleanURL, rWS.DefaultBranch, repoAbsPath)
 			if err != nil {
+				errStr := err.Error()
+				if strings.Contains(errStr, "Repository not found") || strings.Contains(errStr, "could not read Username") || strings.Contains(errStr, "128") {
+					return fmt.Errorf("clone repo %s failed: repository not found or access denied by GitHub. If %q is a private repository, please link a connected Git Account (Personal Access Token) in Project Settings: %w", rWS.Name, rWS.Name, err)
+				}
 				return fmt.Errorf("clone repo %s: %w", rWS.Name, err)
 			}
 			if clonedBranch != "" {

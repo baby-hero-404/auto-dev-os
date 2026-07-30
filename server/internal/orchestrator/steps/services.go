@@ -316,6 +316,12 @@ type CLIStepOutput struct {
 	// ChangedFiles lists repo-relative paths changed in the worktree by this
 	// run, used to validate that a step produced real code changes.
 	ChangedFiles []string
+	// AwaitingInput is true when the CLI agent's run looked like it stopped
+	// to ask a clarifying question instead of completing (see
+	// engine.CodeStepResult.AwaitingInput). The calling step pauses for
+	// human clarification instead of treating this as a failure (REQ-006,
+	// docs/openspecs/cli-execution-reliability).
+	AwaitingInput bool
 }
 
 const cliPlatformContextPointer = "## Platform Context\n\nPlatform context has been materialized for this task at `$AUTOCODE_CONTEXT_DIR`. Inspect `manifest.json` and `README.md` there, then read whatever is relevant before starting. Nothing there is mandatory — use your judgment."

@@ -19,14 +19,15 @@ import (
 // configurable in this phase.
 const cliCooldownDuration = 1 * time.Minute
 
-// finishCLIRun performs the bookkeeping shared by every CLI subprocess
-// dispatch path once RunCodeStep returns without a transport-level error:
-// quota-cooldown write-back, auth-failure write-back, the finish log line,
-// and saving the cli_output checkpoint artifact. Both
-// cliEngineRunner.RunLLMStep (code_backend/code_frontend/fix) and
-// cliStepRunner.RunCLIStep (cli_analyze/cli_spec/cli_implement) call this
-// immediately after RunCodeStep succeeds — each then applies its own
-// caller-specific handling afterward (noop-check vs. ChangedFiles lookup).
+// finishCLIRun performs the bookkeeping for the code_backend/code_frontend/
+// fix dispatch path once RunCodeStep returns without a transport-level
+// error: quota-cooldown write-back, auth-failure write-back, the finish log
+// line, and saving the cli_output checkpoint artifact. Called by
+// cliEngineRunner.RunLLMStep immediately after RunCodeStep succeeds, which
+// then applies its own noop-check afterward. cliStepRunner.RunCLIStep
+// (cli_analyze/cli_spec/cli_implement) inlines the equivalent logic itself
+// instead (see cli_spec_step.go) since it needs differentiated success/
+// failure log levels (REQ-001) that this shared helper doesn't provide.
 func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, credID string, res *engine.CodeStepResult) {
 	// Write-side of REQ-006: only affects the *next* ResolveExecutionProvider
 	// call, not this step's own outcome (REQ-005, no mid-task switch).
@@ -36,8 +37,8 @@ func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, 
 
 	// Auth-failure write-side: a bad session/token won't self-resolve like a
 	// quota cooldown does, so mark the credential out instead of cooling it
-	// down (see engine.CodeStepResult.AuthFailed, cli_auth_failure.go).
-	if res.AuthFailed && credID != "" && o.credStatusSetter != nil {
+	// down (see engine.CodeStepResult.AuthInvalid, cli_auth.go).
+	if res.AuthInvalid && credID != "" && o.credStatusSetter != nil {
 		_ = o.credStatusSetter.MarkNeedsReauth(ctx, credID)
 	}
 

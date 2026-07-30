@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -38,7 +39,8 @@ func (r *RepositoryRepo) GetByID(ctx context.Context, id string) (*models.Reposi
 
 func (r *RepositoryRepo) GetByURL(ctx context.Context, repoURL string) (*models.Repository, error) {
 	repo := &models.Repository{}
-	if err := r.db.WithContext(ctx).First(repo, "url = ?", repoURL).Error; err != nil {
+	cleanURL := strings.TrimRight(strings.TrimSpace(repoURL), "/")
+	if err := r.db.WithContext(ctx).First(repo, "url = ? OR url = ?", cleanURL, cleanURL+"/").Error; err != nil {
 		return nil, fmt.Errorf("get repository by url: %w", mapError(err))
 	}
 	return repo, nil

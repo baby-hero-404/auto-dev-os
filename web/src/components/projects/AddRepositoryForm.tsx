@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -40,7 +40,7 @@ export function AddRepositoryForm({
   }
 
   const isInputUrlValid = useMemo(() => {
-    const trimmed = url.trim();
+    const trimmed = url.trim().replace(/\/+$/, "");
     if (!trimmed) return true;
     return trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../") ||
       /^(https?:\/\/|git@|ssh:\/\/|git\+ssh:\/\/)/.test(trimmed) ||
@@ -54,8 +54,20 @@ export function AddRepositoryForm({
     (t) => api.listGitAccounts(orgID, t)
   );
 
+  // Auto-select a connected Git account matching the repository provider
+  useEffect(() => {
+    if (!gitAccountID && gitAccounts.length > 0) {
+      const matchingAccount = gitAccounts.find((acc: { provider: string }) => acc.provider === provider);
+      if (matchingAccount) {
+        setGitAccountID(matchingAccount.id);
+      } else if (gitAccounts.length === 1) {
+        setGitAccountID(gitAccounts[0].id);
+      }
+    }
+  }, [provider, gitAccounts, gitAccountID]);
+
   async function handleFetchBranches() {
-    const trimmedURL = url.trim();
+    const trimmedURL = url.trim().replace(/\/+$/, "");
     if (!trimmedURL) return;
 
     setIsFetchingBranches(true);
@@ -75,7 +87,12 @@ export function AddRepositoryForm({
         setBranch(hasMain ? "main" : (hasMaster ? "master" : res.branches[0]));
       }
     } catch (err) {
-      setFetchBranchesError(err instanceof Error ? err.message : "Failed to fetch branches. Check URL/token.");
+      const msg = err instanceof Error ? err.message : "Failed to fetch branches.";
+      if (msg.includes("404") || msg.includes("not found")) {
+        setFetchBranchesError("Repository not found or private. Please select a connected Git Account or Token.");
+      } else {
+        setFetchBranchesError(msg);
+      }
     } finally {
       setIsFetchingBranches(false);
     }
@@ -84,7 +101,7 @@ export function AddRepositoryForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLocalError("");
-    const trimmedURL = url.trim();
+    const trimmedURL = url.trim().replace(/\/+$/, "");
     if (!trimmedURL) return;
 
     if (!isInputUrlValid) {

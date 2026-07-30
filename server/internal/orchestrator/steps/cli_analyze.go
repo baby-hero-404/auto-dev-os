@@ -72,6 +72,9 @@ func (s *CLIAnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepConte
 	if err != nil {
 		return nil, fmt.Errorf("cli_analyze: %w", err)
 	}
+	if out.AwaitingInput {
+		return pauseForClarification(ctx, s.tasks, s.rt.Task, s.ID(), out.Output)
+	}
 
 	raw, ok := out.Files[cliAnalysisCapturePath]
 	if !ok || strings.TrimSpace(raw) == "" {

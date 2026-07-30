@@ -198,6 +198,21 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	if authRes.ExitCode != 0 {
 		return "", fmt.Errorf("cli engine: auth check command exited %d: %s", authRes.ExitCode, redactSecrets(strings.TrimSpace(authRes.Stderr)))
 	}
+	// Some CLIs' auth-status commands (e.g. `claude auth status`, `codex
+	// login status`) are informational and exit 0 regardless of login
+	// state, reporting it via output content instead (REQ-003) — exit code
+	// alone would let a genuinely logged-out credential pass Preflight, the
+	// exact gap that let task cfeacf66-... burn 3 retries on "Not logged in".
+	authOutput := authRes.Stdout
+	if strings.TrimSpace(authRes.Stderr) != "" {
+		if authOutput != "" {
+			authOutput += "\n"
+		}
+		authOutput += authRes.Stderr
+	}
+	if detectAuthInvalid(cfg.ProfileRef, authOutput) {
+		return "", fmt.Errorf("cli engine: auth check command reports not authenticated: %s", redactSecrets(strings.TrimSpace(authOutput)))
+	}
 	return "", nil
 }
 
@@ -377,19 +392,30 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	}
 	combined, capturedFiles := extractCapturedFiles(combined)
 	killed := detectLoop(combined)
-	quotaExceeded := detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
-	authFailed := !quotaExceeded && result.ExitCode != 0 && detectAuthFailure(cfg.ProfileRef, combined)
+	authInvalid := detectAuthInvalid(cfg.ProfileRef, combined)
+	// Auth-invalid takes priority over quota: both are runtime failure
+	// signatures but auth-invalid is permanent (retrying never helps) while
+	// quota is transient (cools down and retries later) — reporting both on
+	// the same output would let the quota cooldown path mask the permanent
+	// one.
+	quotaExceeded := !authInvalid && detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
+	// Checked regardless of exit code: some CLIs print a question and then
+	// exit 0 ("can't prompt non-interactively"), which would otherwise be
+	// read as a silent success. Skipped when a more specific outcome
+	// (killed loop, auth failure) already explains why the run stopped.
+	awaitingInput := !killed && !authInvalid && detectAwaitingInput(lastNonEmptyLine(combined))
 
 	credID := ""
 	if cfg != nil {
 		credID = cfg.CredentialID
 	}
 	res := &CodeStepResult{
-		Success:                 result.ExitCode == 0 && !killed,
+		Success:                 result.ExitCode == 0 && !killed && !awaitingInput && !authInvalid,
 		Output:                  redactSecrets(combined),
 		LoopKilled:              killed,
 		QuotaExceeded:           quotaExceeded,
-		AuthFailed:              authFailed,
+		AuthInvalid:             authInvalid,
+		AwaitingInput:           awaitingInput,
 		Files:                   capturedFiles,
 		ExitCode:                result.ExitCode,
 		Command:                 redactSecrets(strings.Join(quotedInvocation, " ")),
@@ -399,10 +425,26 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	switch {
 	case killed:
 		res.Error = "cli engine: repeated error output detected, killing step as a stuck loop"
+	case authInvalid:
+		res.Error = redactSecrets(fmt.Sprintf("cli engine: credential not authenticated (permanent, will not retry): %s", lastNonEmptyLine(combined)))
+	case awaitingInput:
+		res.Error = redactSecrets(fmt.Sprintf("cli engine: process appears to be waiting for input: %s", lastNonEmptyLine(combined)))
 	case result.ExitCode != 0:
 		res.Error = redactSecrets(fmt.Sprintf("cli exited with status %d", result.ExitCode))
 	}
 	return res, nil
+}
+
+// lastNonEmptyLine returns the last non-blank line of s, trimmed, or "" if
+// every line is blank.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 func detectLoop(output string) bool {

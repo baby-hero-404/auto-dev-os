@@ -28,3 +28,11 @@ You MUST write your findings to exactly one file: `.autocode/analysis.md` (creat
 
 Do not create any other files. Do not modify any existing files. This step is
 read-only with respect to the repository other than writing `.autocode/analysis.md`.
+
+## Do not ask clarifying questions
+
+You are running non-interactively — there is no user available to answer a
+question mid-run. If something is ambiguous or underspecified, make the most
+reasonable assumption, proceed, and record the assumption explicitly (under
+Risks for cli_analyze, under "## Implementation Notes" for cli_spec/
+cli_implement). Never stop and wait for input.

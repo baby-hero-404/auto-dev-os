@@ -30,16 +30,26 @@ const promptFileInstruction = "Read and follow the complete task instructions in
 // the same profile ID used in ExecutionProviderConfig.Ref.
 var CLIProfiles = map[string]CLIProfile{
 	"claude_code": {
-		Command:            "claude",
-		Args:               []string{"--allowedTools", "Read,Edit,Bash", "-p", promptFileInstruction},
-		AuthCheckCommand:   "claude --version",
+		Command: "claude",
+		Args:    []string{"--allowedTools", "Read,Edit,Bash", "-p", promptFileInstruction},
+		// "claude auth status" is read-only (no side effects) and always
+		// exits 0 regardless of login state, reporting it instead via a
+		// `"loggedIn": bool` JSON field (verified against the real binary,
+		// see docs/openspecs/cli-execution-reliability/tasks.md REQ-003) —
+		// exit-code-only checking would let a logged-out credential pass
+		// Preflight, so detectAuthInvalid (cli_auth.go) checks this output
+		// for the loggedIn:false signature instead of trusting exit 0.
+		AuthCheckCommand:   "claude auth status",
 		TimeoutMinutes:     30,
 		CredentialProvider: "cli:claude",
 	},
 	"openai_codex": {
-		Command:            "codex",
-		Args:               []string{"exec", "--full-auto", promptFileInstruction},
-		AuthCheckCommand:   "codex --version",
+		Command: "codex",
+		Args:    []string{"exec", "--full-auto", promptFileInstruction},
+		// "codex login status" is read-only and prints "Logged in using
+		// ChatGPT" on success (verified against the real binary, same
+		// REQ-003 investigation as claude_code above).
+		AuthCheckCommand:   "codex login status",
 		TimeoutMinutes:     30,
 		CredentialProvider: "cli:codex",
 	},
@@ -54,7 +64,10 @@ var CLIProfiles = map[string]CLIProfile{
 		// confirmed from a real run's captured output, which was agy
 		// explaining that flag instead of analyzing the repo (no
 		// .autocode/analysis.md ever got written). -p's value must be the
-		// very next arg, so boolean flags go first.
+		// very next arg, so boolean flags go first. See also
+		// docs/guides/antigravity-cli-headless.md, which independently
+		// confirms the real binary is `agy` (not `antigravity`) and that
+		// `-p` must sit immediately before the prompt.
 		Args:               []string{"--dangerously-skip-permissions", "-p", promptFileInstruction},
 		AuthCheckCommand:   "agy --version",
 		TimeoutMinutes:     30,

@@ -25,3 +25,21 @@ func TestLoadStepPrompt_CLISteps(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadStepPrompt_CLISteps_ForbidClarifyingQuestions guards REQ-004
+// (docs/openspecs/cli-execution-reliability): the CLI agent runs
+// non-interactively with no stdin attached, so it must never stop mid-run to
+// ask a clarifying question — it has to assume and document instead.
+func TestLoadStepPrompt_CLISteps_ForbidClarifyingQuestions(t *testing.T) {
+	a := NewPromptAssemblerWithRules(nil, nil, paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{})
+
+	for _, stepID := range []string{"cli_analyze", "cli_spec", "cli_implement"} {
+		content, err := a.LoadStepPrompt(stepID)
+		if err != nil {
+			t.Fatalf("LoadStepPrompt(%q): unexpected error: %v", stepID, err)
+		}
+		if !strings.Contains(content, "Do not ask clarifying questions") {
+			t.Errorf("LoadStepPrompt(%q): missing 'Do not ask clarifying questions' instruction", stepID)
+		}
+	}
+}

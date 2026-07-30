@@ -93,13 +93,24 @@ type CodeStepResult struct {
 	// detection.
 	QuotaExceeded bool
 
-	// AuthFailed is true when the captured output matched a known
-	// "session/token invalid" signature for this CLI (see cli_auth_failure.go).
-	// The caller marks the linked credential as needing re-login (a new
-	// non-Active status) so SelectCredential stops auto-picking it until a
-	// human re-authenticates — mirrors QuotaExceeded's cooldown write-side but
-	// for a failure that won't self-resolve with time.
-	AuthFailed bool
+	// AuthInvalid is true when the captured output matched a known "not
+	// authenticated" signature for this CLI (see cli_auth.go). The caller
+	// marks the linked credential as needing re-login (a new non-Active
+	// status) so SelectCredential stops auto-picking it until a human
+	// re-authenticates — mirrors QuotaExceeded's cooldown write-side but for
+	// a failure that won't self-resolve with time. It also marks the
+	// failure as permanent for the *current* run: the caller should not
+	// spend remaining retry attempts on it, since the same credential will
+	// produce the same failure every time until a human re-runs the CLI
+	// auth capture flow.
+	AuthInvalid bool
+
+	// AwaitingInput is true when the CLI's last output line looks like it
+	// was blocked waiting for a clarifying answer (see
+	// cli_question_detect.go). The caller (RunCLIStep) turns this into a
+	// workflow.PauseError instead of a plain failure (REQ-006) since no
+	// stdin is ever attached to sandboxed CLI runs.
+	AwaitingInput bool
 
 	// Files holds the content of paths requested via CaptureFiles that were
 	// present after the run (missing files are simply absent from the map).

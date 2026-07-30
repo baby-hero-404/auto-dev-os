@@ -74,6 +74,12 @@ type Task struct {
 	Analysis        json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
 	SpecStatus      string          `json:"spec_status" gorm:"default:'none'"`
 	Clarifications  json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
+	// PausedStep records which workflow step raised the clarification pause
+	// (docs/openspecs/cli-execution-reliability, REQ-006) — empty for the
+	// legacy API-native flow, where clarification always originates at, and
+	// resumes to, the "analyze" step. Set only by the CLI spec-first steps
+	// (cli_analyze/cli_spec/cli_implement).
+	PausedStep      string          `json:"paused_step,omitempty" gorm:"default:''"`
 	PRURLs          pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
 	PRMetadata      json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
 	ExecutionEngine *string         `json:"execution_engine,omitempty" gorm:"column:execution_engine"` // nil = inherit from project
@@ -108,6 +114,7 @@ type UpdateTaskInput struct {
 	Analysis        json.RawMessage `json:"analysis,omitempty"`
 	SpecStatus      *string         `json:"spec_status,omitempty"`
 	Clarifications  json.RawMessage `json:"clarifications,omitempty"`
+	PausedStep      *string         `json:"paused_step,omitempty"`
 	PRURLs          *pq.StringArray `json:"pr_urls,omitempty"`
 	PRMetadata      json.RawMessage `json:"pr_metadata,omitempty"`
 	ParentTaskID    *string         `json:"parent_task_id,omitempty"`

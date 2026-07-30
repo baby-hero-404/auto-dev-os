@@ -57,6 +57,7 @@ type mockWorkflowRepo struct {
 	checkpoints    []models.WorkflowCheckpoint
 	deletedSteps   []string
 	agentUpdateErr error
+	logs           []models.TaskLog
 }
 
 func (m *mockWorkflowRepo) Enqueue(ctx context.Context, taskID string) (*models.WorkflowJob, error) {
@@ -112,6 +113,7 @@ func (m *mockWorkflowRepo) DeleteCheckpoints(ctx context.Context, taskID string,
 }
 
 func (m *mockWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) error {
+	m.logs = append(m.logs, log)
 	return nil
 }
 

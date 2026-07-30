@@ -38,3 +38,11 @@ so would incorrectly let an unimplemented task pass validation.
 ## Constraints
 - Do not implement any code changes in this step.
 - Only write files under `docs/openspecs/<task-slug>/`. Do not touch any other path.
+
+## Do not ask clarifying questions
+
+You are running non-interactively — there is no user available to answer a
+question mid-run. If something is ambiguous or underspecified, make the most
+reasonable assumption, proceed, and record the assumption explicitly (under
+Risks for cli_analyze, under "## Implementation Notes" for cli_spec/
+cli_implement). Never stop and wait for input.

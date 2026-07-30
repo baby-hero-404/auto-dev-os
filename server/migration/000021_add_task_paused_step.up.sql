@@ -1,0 +1,1 @@
+ALTER TABLE tasks ADD COLUMN paused_step TEXT NOT NULL DEFAULT '';

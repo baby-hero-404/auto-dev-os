@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -71,6 +72,7 @@ func TestCLIImplementStep_HappyPath(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		nil,
+		nil,
 	)
 
 	res, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -85,6 +87,40 @@ func TestCLIImplementStep_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCLIImplementStep_PausesForClarification(t *testing.T) {
+	task := newCLITestTask()
+	updater := &mockCLITaskUpdater{}
+	step := NewCLIImplementStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockWorktreeHostPathResolver{root: t.TempDir()},
+		&mockCLIWorktreeManager{},
+		&mockCLIStepRunner{output: CLIStepOutput{Output: "Which approach should I use? (A) or (B)?", AwaitingInput: true}},
+		&mockStepPromptLoader{prompt: "base"},
+		&mockCLILogger{},
+		nil,
+		updater,
+	)
+
+	_, err := step.Execute(context.Background(), workflow.StepContext{})
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected workflow.PauseError, got: %v", err)
+	}
+	if pauseErr.Step != workflow.StepCLIImplement {
+		t.Errorf("expected pause on cli_implement step, got %q", pauseErr.Step)
+	}
+	if updater.updated.SpecStatus == nil || *updater.updated.SpecStatus != models.TaskSpecStatusClarificationRequired {
+		t.Errorf("expected SpecStatus=clarification_required to be persisted, got %+v", updater.updated)
+	}
+	var rounds []models.ClarificationRound
+	if err := json.Unmarshal(updater.updated.Clarifications, &rounds); err != nil {
+		t.Fatalf("failed to unmarshal clarifications: %v", err)
+	}
+	if len(rounds) != 1 {
+		t.Errorf("expected 1 clarification round, got %+v", rounds)
+	}
+}
+
 func TestCLIImplementStep_NoChangedFiles(t *testing.T) {
 	task := newCLITestTask()
 	step := NewCLIImplementStep(
@@ -94,6 +130,7 @@ func TestCLIImplementStep_NoChangedFiles(t *testing.T) {
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: nil}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 		nil,
 	)
 
@@ -117,6 +154,7 @@ func TestCLIImplementStep_OnlySpecDiff_NotDocsOnly(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		nil,
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -139,6 +177,7 @@ func TestCLIImplementStep_DocsOnlyViaFrontmatter_AllowsSpecOnlyDiff(t *testing.T
 		&mockCLIStepRunner{output: CLIStepOutput{ChangedFiles: []string{"docs/openspecs/" + slug + "/proposal.md"}}},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 		nil,
 	)
 
@@ -166,6 +205,7 @@ func TestCLIImplementStep_DocsOnlyViaLabel_AllowsSpecOnlyDiff(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		nil,
+		nil,
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -183,6 +223,7 @@ func TestCLIImplementStep_RunnerError(t *testing.T) {
 		&mockCLIStepRunner{err: errors.New("cli crashed")},
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
+		nil,
 		nil,
 	)
 

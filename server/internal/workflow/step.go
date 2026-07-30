@@ -314,3 +314,23 @@ func DescribeStep(name string) string {
 	}
 	return name
 }
+
+// StatusForStep returns the task status a paused-and-resumed job should be
+// set to, keyed by which step raised the pause (docs/openspecs/
+// cli-execution-reliability, REQ-006). Mirrors each CLI spec-first step's
+// own StatusOnResume without importing the orchestrator/steps package
+// (workflow sits below it in the dependency graph) — TaskService.Clarify
+// uses this to resume a paused CLI step at its own status instead of always
+// jumping back to TaskStatusAnalyzing (the correct behavior only for the
+// legacy API-native flow, where clarification always originates at, and
+// resumes to, the "analyze" step).
+func StatusForStep(step string) string {
+	switch step {
+	case StepCLIImplement:
+		return models.TaskStatusCoding
+	case StepCLIAnalyze, StepCLISpec:
+		return models.TaskStatusAnalyzing
+	default:
+		return models.TaskStatusAnalyzing
+	}
+}

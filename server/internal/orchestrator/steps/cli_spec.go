@@ -108,8 +108,12 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		instruction += "\n" + cliPlatformContextPointer + "\n"
 	}
 
-	if _, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles); err != nil {
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles)
+	if err != nil {
 		return nil, fmt.Errorf("cli_spec: %w", err)
+	}
+	if out.AwaitingInput {
+		return pauseForClarification(ctx, s.tasks, s.rt.Task, s.ID(), out.Output)
 	}
 
 	total, err := s.validateSpecFiles(specDir, slug)

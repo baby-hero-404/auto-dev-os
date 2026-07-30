@@ -150,13 +150,71 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		return steps.CLIStepOutput{}, err
 	}
 
-	r.o.finishCLIRun(ctx, task.ID, jobID, stepID, r.credID, res)
+	// Write-side of REQ-006, same as cliEngineRunner.RunLLMStep: only
+	// affects the *next* ResolveExecutionProvider call, not this step's
+	// own outcome.
+	if res.QuotaExceeded && r.credID != "" && r.o.cooldownSetter != nil {
+		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cliCooldownDuration))
+	}
 
-	out := steps.CLIStepOutput{Output: res.Output, Files: res.Files}
+	// Auth-failure write-side: a bad session/token won't self-resolve like a
+	// quota cooldown does, so mark the credential out instead of cooling it
+	// down (see engine.CodeStepResult.AuthInvalid, cli_auth.go).
+	if res.AuthInvalid && r.credID != "" && r.o.credStatusSetter != nil {
+		_ = r.o.credStatusSetter.MarkNeedsReauth(ctx, r.credID)
+	}
+
+	// REQ-001: log the real failure reason at error level instead of a bare
+	// "success=false" — see design.md Issue 1. AwaitingInput is checked
+	// first since it forces Success=false but is an expected pause for
+	// clarification (REQ-006), not a failure — logging it at "error" would
+	// bury genuine failures in the same log level.
+	switch {
+	case res.AwaitingInput:
+		r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf(
+			"%s: cli engine paused awaiting clarification: %s",
+			stepID, lastN(res.Output, 2000)))
+	case res.Success:
+		r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf(
+			"%s: cli engine finished (success=true, exit_code=%d, output_bytes=%d)",
+			stepID, res.ExitCode, len(res.Output),
+		))
+	default:
+		reason := res.Error
+		if reason == "" {
+			reason = "unknown error"
+		}
+		r.o.log(ctx, task.ID, &jobID, "error", fmt.Sprintf("%s: cli engine failed: %s\n--- output (last 2000 chars) ---\n%s",
+			stepID, reason, lastN(res.Output, 2000)))
+	}
+
+	r.o.initCheckpoints()
+	artifactBody := res.Output
+	if artifactBody == "" {
+		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
+	}
+	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
+
+	out := steps.CLIStepOutput{Output: res.Output, Files: res.Files, AwaitingInput: res.AwaitingInput}
+	if res.AwaitingInput {
+		// Not a failure in the usual sense — the caller step decides
+		// whether to pause for clarification (REQ-006). Return the output
+		// so the step can extract the question, but no error: an error
+		// here would trigger the ordinary retry path instead.
+		return out, nil
+	}
 	if !res.Success {
 		errMsg := res.Error
 		if errMsg == "" {
 			errMsg = "cli engine: step failed"
+		}
+		if res.AuthInvalid {
+			// Wrap as ErrConfigInvalid so worker.go's retry loop (which
+			// already special-cases this sentinel for Preflight-time
+			// config errors) also skips remaining retries here: the same
+			// credential will fail identically on every attempt until a
+			// human re-runs the CLI auth capture flow.
+			return out, fmt.Errorf("%s: %w", errMsg, engine.ErrConfigInvalid)
 		}
 		return out, fmt.Errorf("%s", errMsg)
 	}
@@ -194,4 +252,12 @@ func (r *cliStepRunner) ResolveHostWorktreeRoot(ctx context.Context, task *model
 		return "", err
 	}
 	return r.o.repoutil.HostWorktreePath(task, repoPath, ""), nil
+}
+
+// lastN returns the last n characters of s, or s unchanged if it's shorter.
+func lastN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }

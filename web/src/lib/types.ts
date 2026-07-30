@@ -15,7 +15,6 @@ export type AuthResponse = {
   };
 };
 
-export type ExecutionEngine = "api_native" | "cli";
 
 export type CLIEngineConfig = {
   command: string;
@@ -25,6 +24,7 @@ export type CLIEngineConfig = {
   timeout_minutes: number;
   auth_check_command?: string;
   allow_noop?: boolean;
+  underlying_provider?: string;
 };
 
 export type ExecutionProviderConfig = {
@@ -47,8 +47,6 @@ export type Project = {
   max_retries?: number;
   max_review_fix_cycles?: number;
   default_branch?: string;
-  execution_engine?: ExecutionEngine;
-  cli_engine_config?: CLIEngineConfig;
   execution_providers?: ExecutionProviderConfig[];
   review_harness_policy?: string;
   smart_routing?: boolean;
@@ -171,7 +169,7 @@ export type Task = {
   analysis?: TaskAnalysis;
   spec_status: string;
   clarifications?: ClarificationRound[];
-  execution_engine?: ExecutionEngine | null;
+  execution_engine?: string;
   created_at: string;
   updated_at: string;
 };
@@ -384,6 +382,7 @@ export type RoleTemplate = {
 export type Organization = {
   id: string;
   name: string;
+  default_execution_providers?: ExecutionProviderConfig[];
   created_at: string;
   updated_at: string;
 };
@@ -567,7 +566,7 @@ export type ProviderCredential = {
   provider: string;
   label: string;
   base_url?: string;
-  status: "active" | "rate_limited" | "disabled";
+  status: "active" | "rate_limited" | "disabled" | "needs_reauth";
   priority: number;
   configured: boolean;
   key_suffix?: string;

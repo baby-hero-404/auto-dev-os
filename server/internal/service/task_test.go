@@ -1,13 +1,139 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+// newTaskServiceTestDB wires a TaskService's projectRepo to a sqlmock-backed
+// gorm DB, mirroring internal/repository/project_test.go's pattern — no
+// live Postgres needed.
+func newTaskServiceTestDB(t *testing.T) (*TaskService, sqlmock.Sqlmock, func()) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: db}), &gorm.Config{})
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to open gorm db: %v", err)
+	}
+	svc := NewTaskService(nil, repository.NewProjectRepo(gormDB), nil, repository.NewOrganizationRepo(gormDB))
+	return svc, mock, func() { _ = db.Close() }
+}
+
+func expectProjectGetByID(mock sqlmock.Sqlmock, projectID string, cliEngineConfig, executionProviders string) {
+	expectProjectGetByIDWithEngine(mock, projectID, "", cliEngineConfig, executionProviders)
+}
+
+// expectProjectGetByIDWithEngine additionally sets execution_engine and a
+// fixed org_id ("org-1"), needed for tests exercising the org-default
+// fallback (which reads project.OrgID to look up the organization).
+func expectProjectGetByIDWithEngine(mock sqlmock.Sqlmock, projectID, executionEngine, cliEngineConfig, executionProviders string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "projects" WHERE id = $1 ORDER BY "projects"."id" LIMIT $2`)).
+		WithArgs(projectID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "org_id", "execution_engine", "cli_engine_config", "execution_providers"}).
+			AddRow(projectID, "org-1", executionEngine, []byte(cliEngineConfig), []byte(executionProviders)))
+}
+
+func expectOrgGetByID(mock sqlmock.Sqlmock, orgID, defaultExecutionProviders string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "organizations" WHERE id = $1 ORDER BY "organizations"."id" LIMIT $2`)).
+		WithArgs(orgID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "default_execution_providers"}).
+			AddRow(orgID, []byte(defaultExecutionProviders)))
+}
+
+func TestValidateTaskEngineOverride_ExecutionProvidersEnabledCLI(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceTestDB(t)
+	defer cleanup()
+	providers, _ := json.Marshal([]models.ExecutionProviderConfig{
+		{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+	})
+	expectProjectGetByID(mock, "proj-1", "{}", string(providers))
+
+	if err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI); err != nil {
+		t.Fatalf("expected override to be accepted when ExecutionProviders has an enabled cli entry, got: %v", err)
+	}
+}
+
+func TestValidateTaskEngineOverride_NothingConfiguredRejected(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceTestDB(t)
+	defer cleanup()
+	expectProjectGetByIDWithEngine(mock, "proj-1", models.ExecutionEngineAPINative, "{}", "[]")
+	expectOrgGetByID(mock, "org-1", "[]")
+
+	err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI)
+	if err == nil {
+		t.Fatal("expected override to be rejected when neither ExecutionProviders, org default, nor CLIEngineConfig is configured")
+	}
+}
+
+func TestValidateTaskEngineOverride_LegacyCLIEngineConfigStillWorks(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceTestDB(t)
+	defer cleanup()
+	cfg, _ := json.Marshal(models.CLIEngineConfig{Command: "claude"})
+	// ExecutionEngine="cli" here means the org-default lookup must be
+	// skipped entirely (precedence: legacy-if-explicitly-cli beats org
+	// default) — no expectOrgGetByID call means sqlmock fails the test if
+	// validateTaskEngineOverride tries to query it.
+	expectProjectGetByIDWithEngine(mock, "proj-1", models.ExecutionEngineCLI, string(cfg), "[]")
+
+	if err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI); err != nil {
+		t.Fatalf("expected legacy CLIEngineConfig alone to still satisfy the override, got: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet/unexpected sqlmock expectations: %v", err)
+	}
+}
+
+func TestValidateTaskEngineOverride_OrgDefaultEnabledCLI(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceTestDB(t)
+	defer cleanup()
+	orgProviders, _ := json.Marshal([]models.ExecutionProviderConfig{
+		{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+	})
+	expectProjectGetByIDWithEngine(mock, "proj-1", models.ExecutionEngineAPINative, "{}", "[]")
+	expectOrgGetByID(mock, "org-1", string(orgProviders))
+
+	if err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI); err != nil {
+		t.Fatalf("expected override to be accepted when the org default has an enabled cli entry, got: %v", err)
+	}
+}
+
+// TestValidateTaskEngineOverride_PaddedButAllDisabledFallsThrough guards the
+// same gate fix as execution_router_test.go's
+// TestResolveExecutionProvider_OnlyDisabledFallsThroughToDefault: a project
+// list with rows present but none enabled (the shape the UI always
+// persists on every save) must fall through to the org default, not be
+// treated as an explicit, exhausted configuration.
+func TestValidateTaskEngineOverride_PaddedButAllDisabledFallsThrough(t *testing.T) {
+	svc, mock, cleanup := newTaskServiceTestDB(t)
+	defer cleanup()
+	paddedProviders, _ := json.Marshal([]models.ExecutionProviderConfig{
+		{Type: "api", Ref: "anthropic", Priority: 0, Enabled: false},
+		{Type: "cli", Ref: "claude_code", Priority: 1, Enabled: false},
+	})
+	orgProviders, _ := json.Marshal([]models.ExecutionProviderConfig{
+		{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+	})
+	expectProjectGetByIDWithEngine(mock, "proj-1", models.ExecutionEngineAPINative, "{}", string(paddedProviders))
+	expectOrgGetByID(mock, "org-1", string(orgProviders))
+
+	if err := svc.validateTaskEngineOverride(context.Background(), "proj-1", models.ExecutionEngineCLI); err != nil {
+		t.Fatalf("expected override to fall through to the org default when the project list has rows but none enabled, got: %v", err)
+	}
+}
 
 func TestBuildTaskAnalysis_Easy(t *testing.T) {
 	task := &models.Task{

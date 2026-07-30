@@ -19,7 +19,7 @@ export function ReviewVerdictCard({ verdict }: ReviewVerdictCardProps) {
   const findings: ReviewFinding[] = verdict.code_quality?.findings || [];
 
   return (
-    <div className="mt-2 p-3 rounded-xl border border-stroke/10 bg-slate-500/[0.03] space-y-2.5">
+    <div className="mt-2 p-3 rounded-xl border border-stroke/10 bg-surface/20 space-y-2.5">
       <div className="text-[10px] font-bold uppercase tracking-wider text-content-muted">
         Structured Review Verdict
       </div>

@@ -54,7 +54,7 @@ export function ConfirmDialog({
             variant={variant === "danger" ? "danger" : "primary"}
             className={
               variant === "warning"
-                ? "bg-warning text-slate-950 hover:bg-warning/90 border-0"
+                ? "bg-warning text-background hover:bg-warning/90 border-0"
                 : variant === "info"
                 ? "bg-brand-primary text-brand-primary-fg hover:opacity-90 border-0"
                 : ""

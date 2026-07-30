@@ -5,7 +5,7 @@ import "testing"
 func TestValidateConfig_ValidPatchModeConfig(t *testing.T) {
 	raw := []byte(`{
 		"version": 1,
-		"pipeline": {"extends": "api_native", "steps": [{"id": "dor_check", "enabled": false}]},
+		"pipeline": {"extends": "default_workflow", "steps": [{"id": "dor_check", "enabled": false}]},
 		"policies": {"routing": {"analyze": "balanced"}, "max_review_fix_cycles": 5}
 	}`)
 	cfg, errs, err := ValidateConfig(raw)
@@ -73,7 +73,7 @@ func TestValidateConfig_FullCustomGraphRunsDAGChecks(t *testing.T) {
 func TestValidateConfig_PatchModeSkipsDAGChecks(t *testing.T) {
 	raw := []byte(`{
 		"version": 1,
-		"pipeline": {"extends": "api_native", "steps": [{"id": "review", "skip_when": {"label": "hotfix"}}]}
+		"pipeline": {"extends": "default_workflow", "steps": [{"id": "review", "skip_when": {"label": "hotfix"}}]}
 	}`)
 	_, errs, err := ValidateConfig(raw)
 	if err != nil {

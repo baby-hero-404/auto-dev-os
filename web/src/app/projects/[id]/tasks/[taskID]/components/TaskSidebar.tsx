@@ -1,11 +1,13 @@
-"use client";
-
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTaskDetail } from "./TaskDetailContext";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export function TaskSidebar() {
   const router = useRouter();
   const { projectID, task, workflow, cancel, deleteTask, workflowSteps, latest, implementationItems, stepDurations } = useTaskDetail();
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const st = task?.status || "todo";
   
   const jobStatus = workflow?.job?.status?.toLowerCase();
@@ -73,9 +75,13 @@ export function TaskSidebar() {
   });
 
   const handleDeleteConfirm = async () => {
-    if (confirm("Are you sure you want to delete this task?")) {
+    setIsDeleting(true);
+    try {
       const success = await deleteTask();
       if (success) router.push(`/projects/${projectID}`);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
     }
   };
 
@@ -113,7 +119,7 @@ export function TaskSidebar() {
                   <span className="text-[13px] font-semibold leading-snug truncate" style={{ color: ph.color }}>{ph.label}</span>
                   <div className="flex items-center ml-2 shrink-0 gap-1.5">
                     {ph.sub && <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" style={{ color: ph.subC, background: `${ph.subC}15` }}>{ph.sub}</span>}
-                    {ph.dur && <span className="text-[10px] text-content-muted font-medium bg-slate-500/5 px-1 py-0.5 rounded">{ph.dur}</span>}
+                    {ph.dur && <span className="text-[10px] text-content-muted font-medium bg-surface/50 px-1 py-0.5 rounded">{ph.dur}</span>}
                   </div>
                 </div>
                 {ph.desc && (
@@ -148,7 +154,7 @@ export function TaskSidebar() {
       <div className="bg-card border border-stroke/10 rounded-2xl p-5.5 shadow-sm hover:shadow-md transition-all duration-200">
         <div className="text-[10px] font-bold tracking-wider uppercase text-content-muted mb-3.5">Details</div>
         <div className="flex flex-col gap-3 text-xs">
-          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Status</span><span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-500/5" style={{ color: fg }}>{code}</span></div>
+          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Status</span><span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-surface/50" style={{ color: fg }}>{code}</span></div>
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Priority</span><span className="font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/25">P{task?.priority || 0}</span></div>
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Agent</span><span className="font-semibold text-foreground">{task?.agent_id ? "Agentic Autonomous" : "Auto Mode"}</span></div>
           {codedBy && (
@@ -180,7 +186,7 @@ export function TaskSidebar() {
               ⊘ Close Task
             </button>
           )}
-          <button onClick={handleDeleteConfirm} className="w-full px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-background/50 text-xs font-bold text-rose-600 cursor-pointer text-left hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
+          <button onClick={() => setShowDeleteModal(true)} className="w-full px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-background/50 text-xs font-bold text-rose-600 cursor-pointer text-left hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
             🗑 Delete Task
           </button>
         </div>

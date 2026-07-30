@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { CLIEngineConfig, ExecutionEngine, ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
+import type { ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -29,8 +29,6 @@ export function update(projectID: string, token: string, input: {
   max_retries?: number;
   max_review_fix_cycles?: number;
   default_branch?: string;
-  execution_engine?: ExecutionEngine;
-  cli_engine_config?: CLIEngineConfig;
   execution_providers?: ExecutionProviderConfig[];
 }) {
   return request<Project>(`/projects/${projectID}`, {
@@ -112,7 +110,7 @@ export const tasks = {
   create(
     projectID: string,
     token: string,
-    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string; execution_engine?: ExecutionEngine },
+    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string; execution_engine?: string },
   ) {
     return request<Task>(`/projects/${projectID}/tasks`, {
       method: "POST",

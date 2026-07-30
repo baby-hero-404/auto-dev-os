@@ -125,7 +125,7 @@ export function RuleListItem({
                 <button
                   onClick={handleUpdate}
                   disabled={isSaving || !editRuleContent.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-primary px-3 py-1.5 text-xs font-semibold text-brand-primary-fg transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
                   type="button"
                 >
                   {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}

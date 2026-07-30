@@ -58,7 +58,7 @@ export function DescriptionBody() {
             <button
               onClick={handleSaveDesc}
               disabled={isSaving}
-              className="px-3 py-1.5 text-xs font-semibold bg-brand-primary text-slate-950 hover:opacity-90 rounded transition cursor-pointer disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-semibold bg-brand-primary text-background hover:opacity-90 rounded transition cursor-pointer disabled:opacity-50"
             >
               {isSaving ? "Saving..." : "Save Description"}
             </button>

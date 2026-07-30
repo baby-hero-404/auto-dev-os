@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { useSession } from "@/lib/session";
+import { useSession, useIsHydrated } from "@/lib/session";
 import { HomeSidebar } from "@/components/dashboard/home/home-sidebar";
 import { HomeHeader } from "@/components/dashboard/home/home-header";
 import { LoginForm } from "@/components/auth/login-form";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = useSession();
+  const isHydrated = useIsHydrated();
   const [isNavOpen, setIsNavOpen] = useState(false);
 
   if (!session) {
+    if (!isHydrated) return null;
     return <LoginForm />;
   }
 

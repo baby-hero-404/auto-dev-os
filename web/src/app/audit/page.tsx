@@ -22,7 +22,7 @@ import { useAuthedSWR } from "@/lib/use-authed-swr";
 import type { AuditLog } from "@/lib/types";
 
 const SEVERITY_COLORS: Record<string, string> = {
-  "task.created": "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  "task.created": "bg-surface text-content-muted border-stroke",
   "task.status_changed": "bg-blue-500/10 text-blue-400 border-blue-500/20",
   "task.executed": "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   "pr.created": "bg-purple-500/10 text-purple-400 border-purple-500/20",
@@ -126,7 +126,7 @@ export default function AuditLogPage() {
             <button
               onClick={exportAuditCSV}
               disabled={filteredLogs.length === 0}
-              className="flex items-center gap-2 rounded-md border border-stroke bg-card px-3 py-2 text-sm text-slate-200 transition hover:bg-surface disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md border border-stroke bg-card px-3 py-2 text-sm text-foreground transition hover:bg-surface disabled:opacity-50"
             >
               <Download size={15} />
               Export CSV
@@ -269,7 +269,7 @@ export default function AuditLogPage() {
                             </>
                           ) : (
                             <>
-                              <Cpu size={15} className="text-slate-400" />
+                              <Cpu size={15} className="text-content-muted" />
                               <span className="font-mono text-xs">System</span>
                             </>
                           )}
@@ -277,7 +277,7 @@ export default function AuditLogPage() {
                       </td>
                       <td className="px-4 py-3.5">
                         <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-semibold font-mono ${
-                          SEVERITY_COLORS[log.action] ?? "bg-slate-800 text-slate-300 border-slate-700"
+                          SEVERITY_COLORS[log.action] ?? "bg-surface text-content-muted border-stroke"
                         }`}>
                           {log.action}
                         </span>
@@ -286,14 +286,14 @@ export default function AuditLogPage() {
                         <div className="flex items-center gap-1.5 font-mono text-xs">
                           <FileCode size={13} className="text-content-muted" />
                           <span className="text-content-muted">{log.entity_type}:</span>
-                          <span className="text-slate-300 truncate max-w-[100px]" title={log.entity_id}>
+                          <span className="text-content-muted truncate max-w-[100px]" title={log.entity_id}>
                             {log.entity_id || "global"}
                           </span>
                         </div>
                       </td>
                       <td className="px-4 py-3.5 font-mono text-xs text-content-muted">
                         <span className="flex items-center gap-1">
-                          <Globe size={12} className="text-slate-500" />
+                          <Globe size={12} className="text-content-muted/70" />
                           {log.ip_address || "local"}
                         </span>
                       </td>

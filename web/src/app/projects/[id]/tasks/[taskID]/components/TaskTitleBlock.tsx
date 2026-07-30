@@ -78,18 +78,13 @@ export function TaskTitleBlock() {
             <span className={`w-1.5 h-1.5 rounded-full ${running && !paused ? 'animate-pulse' : ''}`} style={{ background: paused && running ? '#795800' : fg }}></span>
             {paused && running ? 'Paused' : label}
           </span>
-          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-slate-500/5 text-content-muted border border-stroke/15 shadow-sm">
+          <span className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-surface/50 text-content-muted border border-stroke/15 shadow-sm">
             {group}
           </span>
           <span className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shadow-sm">
             P{task?.priority || 0}
           </span>
-          <span
-            className="inline-flex px-3 py-1 rounded-full text-xs font-medium bg-slate-500/5 text-content-muted border border-stroke/15 shadow-sm"
-            title={task?.execution_engine ? `Engine override: ${task.execution_engine}` : "Inherits the project's default execution engine"}
-          >
-            Engine: {task?.execution_engine === "cli" ? "CLI" : task?.execution_engine === "api_native" ? "API-native" : "Inherited"}
-          </span>
+
           {task?.spec_status === "ready_with_warnings" && (
             <span
               className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-sm"
@@ -103,7 +98,7 @@ export function TaskTitleBlock() {
           )}
           {task?.status === "merged" && (
             isLoadingAttestations ? (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/10 text-content-muted border border-stroke/20 shadow-sm">
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-surface text-content-muted border border-stroke/20 shadow-sm">
                 <Loader2 size={12} className="animate-spin" /> Verifying
               </span>
             ) : hasAttestations ? (
@@ -116,11 +111,11 @@ export function TaskTitleBlock() {
             ) : null
           )}
         </div>
-        <div className="mt-4 bg-slate-500/[0.02] dark:bg-slate-900/10 rounded-2xl border border-stroke/10 p-4 shadow-sm">
+        <div className="mt-4 bg-surface/20 dark:bg-surface/20 rounded-2xl border border-stroke/10 p-4 shadow-sm">
           <DescriptionBody />
         </div>
       </div>
-      <div className="md:text-right shrink-0 self-start md:self-center bg-slate-500/5 dark:bg-slate-900/30 border border-stroke/10 rounded-xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all duration-200">
+      <div className="md:text-right shrink-0 self-start md:self-center bg-surface/50 dark:bg-surface/50 border border-stroke/10 rounded-xl px-4 py-2.5 shadow-sm hover:shadow-md transition-all duration-200">
         <div className="text-[10px] uppercase font-bold tracking-wider text-content-muted mb-0.5">Elapsed</div>
         <div className="font-mono text-base font-bold text-foreground flex items-center md:justify-end gap-1.5">
           <span className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${running && !paused ? 'animate-ping' : ''}`}></span>

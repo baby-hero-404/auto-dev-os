@@ -32,8 +32,8 @@ export function RequestChangesModal() {
   const isSubmitDisabled = submittingPR || !specFeedbackText.trim();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
-      <div className="relative w-full max-w-lg rounded-xl border border-stroke bg-card p-6 shadow-2xl animate-scale-up space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="relative w-full max-w-2xl rounded-xl border border-stroke bg-card p-6 shadow-2xl animate-scale-up space-y-4">
         <div className="flex items-center gap-2.5 text-amber-500 border-b border-stroke pb-3">
           <MessageSquare size={20} />
           <h2 className="font-heading text-lg font-bold text-foreground">Request Specification Changes</h2>
@@ -65,7 +65,7 @@ export function RequestChangesModal() {
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitDisabled}
-            className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+            className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
           >
             {submittingPR ? (
               <span className="size-3.5 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />

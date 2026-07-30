@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
 import { LogConsole } from "@/components/dashboard/log-console";
 import { SpecPanel } from "./SpecPanel";
@@ -36,6 +36,9 @@ export function TaskHeroCards() {
     task,
     workflow,
     logs,
+    droppedLogCount,
+    reloadFullLogs,
+    isReloadingLogs,
     requestSpecChanges,
     approveSpec,
     rejectPR,
@@ -63,6 +66,23 @@ export function TaskHeroCards() {
   const heroMerged = st === 'merged';
   const heroFailed = st === 'failed';
 
+  const completedCheckpoints = useMemo(() => {
+    if (!workflow?.checkpoints) return [];
+    const seen = new Set<string>();
+    const list: typeof workflow.checkpoints = [];
+    const currentRunningStep = workflow?.job?.status === "running" ? workflow?.job?.step : undefined;
+    for (const cp of workflow.checkpoints) {
+      if (!cp.step || seen.has(cp.step)) continue;
+      if (cp.step === currentRunningStep || cp.state?.status === "running") continue;
+      const status = cp.state?.status;
+      if (status === "success" || status === "recorded" || status === "skipped" || !status) {
+        seen.add(cp.step);
+        list.push(cp);
+      }
+    }
+    return list;
+  }, [workflow]);
+
   const handleCancelRejection = () => {
     setIsRejectFormOpen(false);
     setFeedback("");
@@ -78,7 +98,7 @@ export function TaskHeroCards() {
       {heroTodo && (
         <div className="bg-linear-to-br from-slate-500/5 via-slate-500/[0.02] to-slate-500/10 border border-stroke/10 rounded-2xl p-5.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md hover:shadow-lg transition-all duration-200 animate-fade-in">
           <div className="flex items-center gap-3.5">
-            <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-slate-500/10 text-slate-600 dark:text-slate-300 border border-stroke/15 shrink-0 shadow-inner">
+            <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-surface/50 text-content-muted border border-stroke/15 shrink-0 shadow-inner">
               <Clock className="h-5.5 w-5.5" />
             </span>
             <div>
@@ -88,7 +108,7 @@ export function TaskHeroCards() {
           </div>
           <div className="self-end sm:self-center">
             {!isExecutionReady ? (
-              <button onClick={analyze} className="px-5 py-2.5 rounded-xl border-none bg-linear-to-r from-brand-primary/80 to-brand-primary hover:from-brand-primary hover:to-brand-primary text-slate-950 text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-brand-primary/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
+              <button onClick={analyze} className="px-5 py-2.5 rounded-xl border-none bg-linear-to-r from-brand-primary/80 to-brand-primary hover:from-brand-primary hover:to-brand-primary text-background text-xs font-extrabold transition-all duration-150 hover:shadow-md hover:shadow-brand-primary/20 hover:scale-[1.02] cursor-pointer whitespace-nowrap flex items-center gap-2">
                 <Sparkles className="h-4 w-4" /> Start Analysis
               </button>
             ) : (
@@ -110,7 +130,7 @@ export function TaskHeroCards() {
             </span>
           </div>
           <div className="flex flex-col gap-2 pl-1 z-10">
-            {workflow?.checkpoints?.map((cp, idx) => (
+            {completedCheckpoints.map((cp, idx) => (
               <div key={idx} className="flex items-center gap-2.5 py-1 text-xs font-mono text-emerald-800 dark:text-emerald-400/90">
                 <span className="w-4 h-4 flex items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20 shrink-0">
                   <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
@@ -136,7 +156,7 @@ export function TaskHeroCards() {
               </div>
             </div>
             <div className="flex items-center gap-2 z-10 self-end md:self-center">
-              <button onClick={requestSpecChanges} className="px-4 py-2 rounded-xl border border-stroke bg-background/50 text-content text-xs font-semibold hover:bg-slate-500/10 transition-all duration-150 cursor-pointer">
+              <button onClick={requestSpecChanges} className="px-4 py-2 rounded-xl border border-stroke bg-background/50 text-content text-xs font-semibold hover:bg-surface transition-all duration-150 cursor-pointer">
                 Request Changes
               </button>
               <button onClick={approveSpec} className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
@@ -150,17 +170,17 @@ export function TaskHeroCards() {
       )}
 
       {heroExec && (
-        <div className="rounded-2xl border border-stroke/10 bg-slate-950 shadow-lg overflow-hidden transition-all duration-300">
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-stroke/10 bg-slate-900/40">
+        <div className="rounded-2xl border border-stroke/10 bg-background shadow-lg overflow-hidden transition-all duration-300">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-stroke/10 bg-surface/20">
             <div className="flex items-center gap-2.5">
               <span className="relative flex h-2 w-2">
                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${st === 'fixing' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${st === 'fixing' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
               </span>
-              <span className="text-xs uppercase font-extrabold tracking-wider text-slate-300 capitalize">{st} in progress</span>
+              <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} in progress</span>
             </div>
           </div>
-          <LogConsole logs={logs} isExpanded={true} hideHeader={true} />
+          <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
         </div>
       )}
 
@@ -246,7 +266,7 @@ export function TaskHeroCards() {
             )}
  
             {isRejectFormOpen && (
-              <div className="p-5.5 border-b border-stroke/10 bg-slate-500/[0.02] flex flex-col gap-3.5 animate-fade-in">
+              <div className="p-5.5 border-b border-stroke/10 bg-surface/20 flex flex-col gap-3.5 animate-fade-in">
                 <div className="text-[10px] font-bold text-rose-600 dark:text-rose-500 uppercase tracking-wider">
                   Provide Rejection Feedback
                 </div>
@@ -264,7 +284,7 @@ export function TaskHeroCards() {
                   <button
                     onClick={handleCancelRejection}
                     disabled={submittingPR}
-                    className="px-4 py-2 rounded-xl border border-stroke bg-background/50 hover:bg-slate-500/10 text-xs font-semibold transition-all duration-150 cursor-pointer"
+                    className="px-4 py-2 rounded-xl border border-stroke bg-background/50 hover:bg-surface text-xs font-semibold transition-all duration-150 cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -407,13 +427,13 @@ export function TaskHeroCards() {
             </div>
           </div>
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} />
+            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
           )}
         </div>
       )}
 
       {heroFailed && (
-        <div className="rounded-2xl border border-rose-500/25 bg-slate-950 shadow-lg overflow-hidden flex flex-col transition-all duration-300 animate-fade-in">
+        <div className="rounded-2xl border border-rose-500/25 bg-background shadow-lg overflow-hidden flex flex-col transition-all duration-300 animate-fade-in">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5.5 py-5 bg-linear-to-br from-rose-500/10 via-rose-500/[0.02] to-red-500/5 border-b border-stroke/10">
             <div className="flex gap-3.5 items-start">
               <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-rose-500 text-white shrink-0 shadow-md shadow-rose-500/20">
@@ -431,7 +451,7 @@ export function TaskHeroCards() {
             </button>
           </div>
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} hideHeader={true} />
+            <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
           )}
         </div>
       )}
@@ -451,7 +471,7 @@ export function TaskHeroCards() {
             </div>
           </div>
           {logs.length > 0 && (
-            <LogConsole logs={logs} isExpanded={true} />
+            <LogConsole logs={logs} isExpanded={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} />
           )}
         </div>
       )}

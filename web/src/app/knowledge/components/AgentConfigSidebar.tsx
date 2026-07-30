@@ -37,8 +37,8 @@ export function AgentConfigSidebar({
                 onClick={() => onSelectAgent(agent.id)}
                 className={`w-full text-left rounded-md px-3 py-2 text-xs font-mono flex items-center justify-between transition cursor-pointer ${
                   activeAgentID === agent.id
-                    ? "bg-brand-primary text-slate-950 font-bold"
-                    : "text-slate-300 hover:bg-slate-800"
+                    ? "bg-brand-primary text-background font-bold"
+                    : "text-content-muted hover:bg-surface"
                 }`}
               >
                 <span>{agent.name}</span>
@@ -72,7 +72,7 @@ export function AgentConfigSidebar({
             </div>
             <div className="flex justify-between">
               <span className="text-content-muted">Autonomy:</span>
-              <span className="font-mono text-slate-200 capitalize">
+              <span className="font-mono text-foreground capitalize">
                 {selectedAgent.autonomy_level?.replace("_", " ")}
               </span>
             </div>

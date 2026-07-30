@@ -17,8 +17,16 @@ func TestValidateJobTransition(t *testing.T) {
 		{"queued to running", models.WorkflowJobStatusQueued, models.WorkflowJobStatusRunning, false},
 		{"queued to done", models.WorkflowJobStatusQueued, models.WorkflowJobStatusDone, true},
 		{"running to done", models.WorkflowJobStatusRunning, models.WorkflowJobStatusDone, false},
-		{"running to queued", models.WorkflowJobStatusRunning, models.WorkflowJobStatusQueued, true},
-		{"failed to queued", models.WorkflowJobStatusFailed, models.WorkflowJobStatusQueued, false},
+		// worker.go re-dispatches in place on ErrReviewFixLoop/ErrCrossReviewFixLoop/ErrGraphChanged
+		// by setting status back to queued on the same job row — a real, exercised transition.
+		{"running to queued", models.WorkflowJobStatusRunning, models.WorkflowJobStatusQueued, false},
+		{"paused to queued", models.WorkflowJobStatusPaused, models.WorkflowJobStatusQueued, false},
+		// pr_sync.go / orchestrator.go MergeTask transition a paused job straight to done
+		// when a PR is detected merged remotely without ever resuming it to running.
+		{"paused to done", models.WorkflowJobStatusPaused, models.WorkflowJobStatusDone, false},
+		// Retries always create a brand-new queued job via Enqueue rather than transitioning
+		// a failed job's status, so failed has no legal outgoing UpdateJob transition.
+		{"failed to queued", models.WorkflowJobStatusFailed, models.WorkflowJobStatusQueued, true},
 		{"done to running", models.WorkflowJobStatusDone, models.WorkflowJobStatusRunning, true},
 		{"unknown status", "unknown", models.WorkflowJobStatusRunning, true},
 	}

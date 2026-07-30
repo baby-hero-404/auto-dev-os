@@ -149,6 +149,31 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_QueryParamTokenRejected guards against reintroducing
+// the JWT-in-query-string fallback (removed — WS routes authenticate via a
+// single-use ticket now, see cli_auth.go, not a bearer token in the URL).
+func TestAuthMiddleware_QueryParamTokenRejected(t *testing.T) {
+	authSvc := service.NewAuthService(nil, "test-secret")
+	user := &models.User{ID: "u1", Email: "a@b.com", OrgID: "o1", Role: "admin"}
+	tokens, err := authSvc.IssueTokensForTest(user)
+	if err != nil {
+		t.Fatalf("issueTokens: %v", err)
+	}
+
+	mw := AuthMiddleware(authSvc)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/test?token="+tokens.AccessToken, nil)
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for a valid token supplied only as a query param, got %d", rr.Code)
+	}
+}
+
 func TestWriteJSON(t *testing.T) {
 	rr := httptest.NewRecorder()
 	writeJSON(rr, http.StatusOK, envelope{"status": "ok"})

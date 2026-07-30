@@ -17,6 +17,15 @@ const (
 	NetworkModeBridge  = "bridge"
 )
 
+// SandboxHomeDir is $HOME for the sandbox image's runtime user (the
+// auto-code-os-sandbox image runs as USER "agent", not root — confirmed via
+// `docker image inspect`). CLI credential injection (CredentialFiles) and
+// the host-session auto-mount fallback (docker.go's authDirs) must target
+// paths under here, not /root: mounting to /root succeeds silently, but a
+// CLI process running as "agent" has $HOME=/home/agent and never looks
+// there, so auth always appears missing even though the mount worked.
+const SandboxHomeDir = "/home/agent"
+
 type CommandRequest struct {
 	TaskID      string
 	AgentID     string
@@ -49,6 +58,15 @@ type CommandResult struct {
 	ExitCode int
 	Stdout   string
 	Stderr   string
+
+	// UpdatedCredentialFiles holds the post-run content of every path in
+	// CommandRequest.CredentialFiles whose content changed during the run
+	// (e.g. a CLI silently refreshing an OAuth token on use), keyed the same
+	// way as CredentialFiles (target container path -> content). Only
+	// populated by runtimes where the credential mount is a live bind (not a
+	// copy), so a write inside the container is visible on the host the
+	// moment the container stops — nil/empty otherwise.
+	UpdatedCredentialFiles map[string]string
 }
 
 type Runtime interface {

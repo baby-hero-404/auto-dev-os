@@ -44,13 +44,13 @@ export function AgentCard({
                 <h3 className="truncate font-semibold text-foreground">{agent.name}</h3>
                 <span className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide border ${
                   agent.status === "offline"
-                    ? "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                    ? "bg-surface text-content-muted border-stroke"
                     : ["busy", "assigned", "running"].includes(agent.status)
                     ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
                     : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
                 }`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${
-                    agent.status === "offline" ? "bg-slate-400" : ["busy", "assigned", "running"].includes(agent.status) ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                    agent.status === "offline" ? "bg-content-muted" : ["busy", "assigned", "running"].includes(agent.status) ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
                   }`} />
                   {agent.status === "offline" ? "Offline" : ["busy", "assigned", "running"].includes(agent.status) ? "Working" : "Free"}
                 </span>

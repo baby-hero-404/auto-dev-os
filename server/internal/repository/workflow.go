@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"hash/fnv"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -137,6 +138,15 @@ func (r *WorkflowRepo) LatestByTaskID(ctx context.Context, taskID string) (*mode
 }
 
 func (r *WorkflowRepo) UpdateJob(ctx context.Context, jobID string, updates map[string]any) (*models.WorkflowJob, error) {
+	if newStatus, ok := updates["status"].(string); ok {
+		var current models.WorkflowJob
+		if err := r.db.WithContext(ctx).Select("status").First(&current, "id = ?", jobID).Error; err != nil {
+			return nil, fmt.Errorf("load workflow job for status validation: %w", mapError(err))
+		}
+		if err := workflow.ValidateJobTransition(current.Status, newStatus); err != nil {
+			return nil, err
+		}
+	}
 	var job models.WorkflowJob
 	if err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).Where("id = ?", jobID).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update workflow job: %w", mapError(err))

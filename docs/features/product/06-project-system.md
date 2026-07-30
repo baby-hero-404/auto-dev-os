@@ -3,7 +3,7 @@ sources:
   - "server/**"
   - "web/src/components/projects/project-profile.tsx"
   - "web/src/components/projects/GovernanceConfigEditor.tsx"
-  - "web/src/components/projects/cli-engine-config-form.tsx"
+  - "web/src/components/projects/execution-providers-list.tsx"
   - "docs/schemas/pipeline.schema.json"
   - "docs/schemas/policies.schema.json"
 verified: 2026-07-23

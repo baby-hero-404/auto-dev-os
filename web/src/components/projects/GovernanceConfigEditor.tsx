@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Sliders, AlertCircle, FileJson } from "lucide-react";
+import { Sliders, AlertCircle, FileJson, Info } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -37,11 +37,14 @@ export function GovernanceConfigEditor({
   useEffect(() => {
     if (pipelineConfig) {
       try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setJsonText(JSON.stringify(pipelineConfig, null, 2));
       } catch {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setJsonText("");
       }
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setJsonText("");
     }
   }, [pipelineConfig]);
@@ -98,6 +101,23 @@ export function GovernanceConfigEditor({
         icon={<Sliders size={18} className="text-brand-primary" />}
       />
       <CardContent className="space-y-4">
+        <div className="rounded-md border border-brand-primary/20 bg-brand-primary/5 p-4 text-sm text-foreground space-y-3">
+          <div className="flex items-center gap-2 font-semibold text-brand-primary">
+            <Info size={16} />
+            <span>What is this for?</span>
+          </div>
+          <p className="text-content-muted leading-relaxed">
+            This config controls the <strong>safety, autonomy, and review policies</strong> for AI agents in this project.
+            Instead of hardcoding rules, you define them here via JSON.
+          </p>
+          <ul className="list-disc pl-5 text-content-muted space-y-1 text-xs">
+            <li><strong>dor_gates:</strong> Conditions (e.g., pass tests) required before code can be merged.</li>
+            <li><strong>review_skip:</strong> Allow the AI to skip human review for small, safe changes.</li>
+            <li><strong>cycle_limits:</strong> Max number of self-correction loops the AI can run.</li>
+            <li><strong>harness_policies:</strong> Restrictions on which tools or environments the AI can access.</li>
+          </ul>
+        </div>
+
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <Field
             label="Load Built-in Preset"
@@ -143,8 +163,8 @@ export function GovernanceConfigEditor({
             onChange={(e) => handleTextChange(e.target.value)}
             disabled={disabled}
             rows={10}
-            placeholder={`{\n  "version": "v1",\n  "extends": "api_native"\n}`}
-            className="w-full rounded-md border border-stroke/20 bg-slate-950 p-3 font-mono text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50 resize-y custom-scrollbar"
+            placeholder={`{\n  "version": "v1",\n  "extends": "default_workflow"\n}`}
+            className="w-full rounded-md border border-stroke/20 bg-background p-3 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-brand-primary disabled:opacity-50 resize-y custom-scrollbar"
           />
         </Field>
 

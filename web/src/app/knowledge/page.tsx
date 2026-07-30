@@ -109,7 +109,7 @@ export default function KnowledgePage() {
         <div className="flex gap-2">
           <Link
             href="/knowledge/suggestions"
-            className="flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
+            className="flex items-center gap-2 rounded-md bg-brand-primary px-4 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 cursor-pointer"
           >
             <Brain size={16} />
             Learning Loop Queue

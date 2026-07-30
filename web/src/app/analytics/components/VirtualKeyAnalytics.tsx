@@ -39,7 +39,7 @@ export function VirtualKeyAnalytics({ keyLabelUsage }: { keyLabelUsage: KeyLabel
             </thead>
             <tbody>
               {keyLabelUsage.map((key) => (
-                <tr key={key.key_label} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+                <tr key={key.key_label} className="border-b border-stroke/60 transition hover:bg-surface">
                   <td className="px-4 py-3">
                     <div className="font-medium font-mono text-xs flex items-center gap-1.5 text-white">
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-primary" />

@@ -29,6 +29,9 @@ func (s *OrganizationService) List(ctx context.Context) ([]models.Organization, 
 }
 
 func (s *OrganizationService) Update(ctx context.Context, id string, input models.UpdateOrganizationInput) (*models.Organization, error) {
+	if _, err := models.ValidateExecutionProviders(input.DefaultExecutionProviders); err != nil {
+		return nil, ErrValidation(err.Error())
+	}
 	return s.repo.Update(ctx, id, input)
 }
 

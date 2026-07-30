@@ -15,6 +15,7 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
   useEffect(() => {
     let isMounted = true;
     if (attestation.commit_hash && token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsVerifying(true);
       attestationsApi
         .getByCommit(attestation.commit_hash, token)
@@ -48,10 +49,10 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
 
   return (
     <>
-      <div className="p-3.5 text-xs flex flex-col gap-2 hover:bg-slate-500/5 transition-colors duration-150">
+      <div className="p-3.5 text-xs flex flex-col gap-2 hover:bg-surface/50 transition-colors duration-150">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="font-mono font-bold text-foreground bg-slate-500/10 px-2 py-0.5 rounded text-[11px]">
+            <span className="font-mono font-bold text-foreground bg-surface px-2 py-0.5 rounded text-[11px]">
               {shortCommit}
             </span>
             <span className="text-[10px] text-content-muted flex items-center gap-1 font-mono">
@@ -60,7 +61,7 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
           </div>
 
           {isVerifying ? (
-            <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-500/10 text-content-muted flex items-center gap-1">
+            <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-surface text-content-muted flex items-center gap-1">
               <Loader2 size={10} className="animate-spin" /> Verifying
             </span>
           ) : verifyResult ? (
@@ -74,7 +75,7 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
               </span>
             )
           ) : (
-            <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-500/10 text-content-muted">
+            <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-surface text-content-muted">
               Unverified
             </span>
           )}
@@ -112,7 +113,7 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-card border border-stroke/20 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-stroke/10 flex items-center justify-between bg-slate-500/5">
+            <div className="p-4 border-b border-stroke/10 flex items-center justify-between bg-surface/50">
               <div className="flex items-center gap-2">
                 <FileCode className="text-brand-primary" size={18} />
                 <h3 className="font-heading text-sm font-bold text-foreground">
@@ -122,17 +123,17 @@ function AttestationRow({ attestation, token }: { attestation: Attestation; toke
               <button
                 type="button"
                 onClick={() => setShowModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-500/10 text-content-muted hover:text-foreground transition cursor-pointer"
+                className="p-1 rounded-lg hover:bg-surface text-content-muted hover:text-foreground transition cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto font-mono text-xs bg-slate-950 text-slate-200 custom-scrollbar">
+            <div className="p-4 overflow-y-auto font-mono text-xs bg-background text-foreground custom-scrollbar">
               <pre className="whitespace-pre-wrap break-all">
                 {JSON.stringify(verifyResult?.envelope, null, 2)}
               </pre>
             </div>
-            <div className="p-3 border-t border-stroke/10 flex justify-end bg-slate-500/5">
+            <div className="p-3 border-t border-stroke/10 flex justify-end bg-surface/50">
               <button
                 type="button"
                 onClick={() => setShowModal(false)}
@@ -173,7 +174,7 @@ export function AuditPanel() {
   }
 
   return (
-    <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-slate-500/[0.02] divide-y divide-stroke/10 shadow-sm">
+    <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-surface/20 divide-y divide-stroke/10 shadow-sm">
       {attestations.map((attestation) => (
         <AttestationRow key={attestation.id} attestation={attestation} token={token} />
       ))}

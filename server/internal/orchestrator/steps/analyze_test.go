@@ -136,17 +136,6 @@ func TestOrchestrator_AnalyzeToolsUseSourceRootAndExcludeGeneratedDirs(t *testin
 	if strings.Contains(files, "logs/llm.txt") || strings.Contains(files, "repos") {
 		t.Fatalf("analyze list should not expose generated workspace paths, got: %s", files)
 	}
-
-	grepResult, err := step.grepAnalyzeFiles(context.Background(), "marker")
-	if err != nil {
-		t.Fatalf("grepAnalyzeFiles returned error: %v", err)
-	}
-	if !strings.Contains(grepResult, "src/main.go") {
-		t.Fatalf("expected grep to find source file, got: %s", grepResult)
-	}
-	if strings.Contains(grepResult, "logs/llm.txt") {
-		t.Fatalf("grep should not search generated logs, got: %s", grepResult)
-	}
 }
 
 func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
@@ -226,13 +215,5 @@ func TestOrchestrator_AnalyzeToolsPrefixMultiRepoPaths(t *testing.T) {
 	}
 	if !strings.Contains(files, "repo-a/src/main.go") || !strings.Contains(files, "repo-b/src/main.go") {
 		t.Fatalf("expected prefixed multi-repo files, got: %s", files)
-	}
-
-	content, err := step.readAnalyzeFile(context.Background(), "repo-b/src/main.go")
-	if err != nil {
-		t.Fatalf("readAnalyzeFile returned error: %v", err)
-	}
-	if !strings.Contains(content, "repo-b marker") {
-		t.Fatalf("unexpected repo-b content: %s", content)
 	}
 }

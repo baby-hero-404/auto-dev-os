@@ -15,8 +15,11 @@ export function useTaskWorkflow(taskID: string) {
   const [specFeedbackText, setSpecFeedbackText] = useState("");
 
   const realtimeLogs = useRealtimeLogStore((state) => state.logs);
+  const droppedLogCount = useRealtimeLogStore((state) => state.droppedCount);
   const appendLogs = useRealtimeLogStore((state) => state.appendLogs);
   const clearLogs = useRealtimeLogStore((state) => state.clearLogs);
+  const replaceLogs = useRealtimeLogStore((state) => state.replaceLogs);
+  const [isReloadingLogs, setIsReloadingLogs] = useState(false);
 
   const { data: workflow, mutate: mutateWorkflow, error: workflowError } = useAuthedSWR(
     taskID ? ["workflow", taskID] : null,
@@ -78,6 +81,19 @@ export function useTaskWorkflow(taskID: string) {
       flush();
     };
   }, [taskID, token, isTerminal, appendLogs]);
+
+  async function reloadFullLogs() {
+    if (!taskID || !token) return;
+    setIsReloadingLogs(true);
+    try {
+      const fullLogs = await api.taskLogs(taskID, token);
+      if (fullLogs) replaceLogs(taskID, fullLogs.map((log) => toRealtimeLog(taskID, log)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsReloadingLogs(false);
+    }
+  }
 
   const task = workflow?.task;
 
@@ -243,6 +259,9 @@ export function useTaskWorkflow(taskID: string) {
     task,
     workflow,
     logs,
+    droppedLogCount,
+    reloadFullLogs,
+    isReloadingLogs,
     error,
     setError,
     isLoading: !workflow && !workflowError && !!token,

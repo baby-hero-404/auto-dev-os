@@ -59,13 +59,13 @@ export function Markdown({ content }: MarkdownProps) {
             );
           }
           return (
-            <code className={`${className || ""} block text-slate-300 font-mono text-[11px]`} {...props}>
+            <code className={`${className || ""} block text-foreground/80 font-mono text-[11px]`} {...props}>
               {children}
             </code>
           );
         },
         pre: ({ ...props }: ComponentProps<"pre">) => (
-          <pre className="bg-slate-950 p-4 rounded-xl overflow-auto font-mono text-xs text-slate-300 border border-stroke my-4 shadow-inner" {...props} />
+          <pre className="bg-background p-4 rounded-xl overflow-auto font-mono text-xs text-foreground/80 border border-stroke my-4 shadow-inner" {...props} />
         ),
         a: ({ ...props }: ComponentProps<"a">) => (
           <a className="text-brand-primary hover:underline font-semibold" target="_blank" rel="noopener noreferrer" {...props} />

@@ -51,4 +51,14 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 # user can execute from.
 RUN bash -c 'set -o pipefail; curl -fsSL https://antigravity.google/cli/install.sh | bash'
 
+# Pre-create agy's own log/crash dirs, owned by `agent`, so they exist BEFORE
+# the per-org credential file gets bind-mounted at
+# .gemini/antigravity-cli/antigravity-oauth-token (see docker.go's
+# resolveCredentialFiles/CredentialFiles). Docker auto-creates missing bind
+# mount parent directories as root at container-create time, which agy (UID
+# 1000, non-root) then can't write into — causing
+# "opening log file: ... permission denied" for cli-*.log and
+# crash_*.log even though the run itself succeeds.
+RUN mkdir -p /home/agent/.gemini/antigravity-cli/log /home/agent/.gemini/antigravity-cli/crashes
+
 CMD ["bash", "-c", "pwd && ls -la"]

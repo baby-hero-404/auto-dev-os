@@ -58,14 +58,6 @@ func (a loggerAdapter) Log(ctx context.Context, taskID string, jobID *string, le
 	a.log(ctx, taskID, jobID, level, message)
 }
 
-type promptAssemblerAdapter struct {
-	assemble func(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
-}
-
-func (a promptAssemblerAdapter) AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error) {
-	return a.assemble(ctx, task, agent, history, tools)
-}
-
 type traceRecorderAdapter struct {
 	write func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, counters llmrunner.TraceCounters, latency time.Duration)
 }

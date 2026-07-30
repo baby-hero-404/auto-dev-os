@@ -183,9 +183,9 @@ export function TasksTab({
 // ─── Deterministic Avatar & Status helpers ───────────────────
 
 function getAgentAvatar(agentId?: string, agents: Agent[] = []) {
-  if (!agentId) return { initials: "AA", color: "bg-slate-100 dark:bg-slate-900 border-stroke text-content-muted", name: "Auto-assign" };
+  if (!agentId) return { initials: "AA", color: "bg-surface border-stroke text-content-muted", name: "Auto-assign" };
   const agent = agents.find((a) => a.id === agentId);
-  if (!agent) return { initials: "AG", color: "bg-slate-100 dark:bg-slate-900 border-stroke text-content-muted", name: "Agent" };
+  if (!agent) return { initials: "AG", color: "bg-surface border-stroke text-content-muted", name: "Agent" };
   const initials = agent.name
     .split(/\s+/)
     .map((n) => n[0])
@@ -209,7 +209,7 @@ function getStatusDot(task: Task) {
   if (isFailedTask(task)) return "bg-danger";
   if (needsReview(task)) return "bg-warning animate-pulse";
   if (isActiveTask(task)) return "bg-success animate-pulse-dot";
-  return "bg-slate-300 dark:bg-slate-700";
+  return "bg-stroke";
 }
 
 function getTaskStage(task: Task) {

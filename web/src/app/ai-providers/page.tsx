@@ -19,6 +19,7 @@ import { generatedCredentialLabel } from "./components/AddApiCredentialModal";
 import { AddModelModal } from "./components/AddModelModal";
 import { ModelRoutingRules } from "./components/ModelRoutingRules";
 import { TestCliModal } from "./components/TestCliModal";
+import { GlobalRoutingPanel } from "./components/GlobalRoutingPanel";
 
 type FormState = {
   provider: string;
@@ -41,7 +42,7 @@ export default function AIProvidersPage() {
   const token = session?.token ?? "";
   const orgID = session?.user.org_id ?? "";
 
-  const [activeTab, setActiveTab] = useState<"api" | "cli">("api");
+  const [activeTab, setActiveTab] = useState<"api" | "cli" | "global">("api");
   
   const [form, setForm] = useState<FormState>(initialForm);
   const [formError, setFormError] = useState("");
@@ -54,6 +55,7 @@ export default function AIProvidersPage() {
   
   const [isAddApiOpen, setIsAddApiOpen] = useState(false);
   const [selectedCliProvider, setSelectedCliProvider] = useState<string | null>(null);
+  const [reauthCliCredential, setReauthCliCredential] = useState<ProviderCredential | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>("openai");
   
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
@@ -169,6 +171,31 @@ export default function AIProvidersPage() {
     }
   }
 
+  async function handleReauthCliCredential(provider: string, label: string, apiKey: string) {
+    if (!token || !orgID || !reauthCliCredential) return "Missing required data.";
+    try {
+      await api.updateProviderCredential(orgID, reauthCliCredential.id, token, {
+        label,
+        api_key: apiKey.trim(),
+        priority: reauthCliCredential.priority,
+      });
+      setReauthCliCredential(null);
+      toast.success("CLI Profile updated successfully");
+      Promise.all([mutate(), mutateModels()]).catch(err => {
+        console.error("Failed to mutate after updating CLI profile:", err);
+      });
+      return null;
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to update CLI profile.";
+      if (err instanceof ApiError && err.status === 409) {
+        return message;
+      }
+      toast.error(message);
+      setReauthCliCredential(null);
+      return null;
+    }
+  }
+
   async function testDraftCredential() {
     if (!token || !orgID) return;
     if (!form.apiKey.trim()) {
@@ -196,7 +223,7 @@ export default function AIProvidersPage() {
     if (!token || !orgID) return;
     
     // Find the credential
-    const cred = credentials.find((c: any) => c.id === credentialID);
+    const cred = credentials.find((c: ProviderCredential) => c.id === credentialID);
     if (cred && cred.provider.startsWith("cli:")) {
       setTestingCliCredentialID(credentialID);
       setTestingCliProvider(cred.provider);
@@ -319,7 +346,7 @@ export default function AIProvidersPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {activeTab === "api" ? (
+          {activeTab === "global" ? null : activeTab === "api" ? (
             <button
               type="button"
               disabled={!token || !orgID}
@@ -385,8 +412,17 @@ export default function AIProvidersPage() {
         >
           CLI Profiles
         </button>
+        <button
+          onClick={() => setActiveTab("global")}
+          className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === "global" ? "border-brand-primary text-foreground" : "border-transparent text-content-muted hover:text-foreground"}`}
+        >
+          Global Routing
+        </button>
       </div>
 
+      {activeTab === "global" ? (
+        <GlobalRoutingPanel />
+      ) : (
       <div className="grid gap-6">
         <section className="space-y-4">
           {error && (
@@ -411,7 +447,7 @@ export default function AIProvidersPage() {
               <p className="mt-2 max-w-sm text-sm text-content-muted font-normal leading-relaxed">
                 {activeTab === "api" 
                   ? "Add an API key for OpenAI, Anthropic, Gemini, or a custom router to enable LLM access for your agents."
-                  : "Add CLI authentication profiles for Claude Code or Cursor to enable sandbox execution."}
+                  : "Add CLI authentication profiles for Claude CLI or Cursor to enable sandbox execution."}
               </p>
               <div className="mt-5 flex gap-3 justify-center">
                 {activeTab === "api" ? (
@@ -470,15 +506,18 @@ export default function AIProvidersPage() {
                 configuredProviderCount={configuredProviderCount}
                 totalCredentialCount={activeTabCredentials.length}
                 activeCredentialCount={activeCredentialCount}
+                activeTab={activeTab}
               />
               <ProviderCredentialsTable
                 credentials={activeTabCredentials}
                 testingMap={testingMap}
                 deleteConfirmID={deleteConfirmID}
                 onTest={testCredential}
+                onReauth={(cred) => setReauthCliCredential(cred)}
                 onAskDelete={setDeleteConfirmID}
                 onCancelDelete={() => setDeleteConfirmID(null)}
                 onDelete={deleteCredential}
+                activeTab={activeTab}
               />
             </>
           )}
@@ -501,6 +540,7 @@ export default function AIProvidersPage() {
           />
         )}
       </div>
+      )}
 
       {isAddApiOpen && (
         <AddApiCredentialModal
@@ -526,10 +566,25 @@ export default function AIProvidersPage() {
           token={token}
           orgID={orgID}
           existingLabels={credentials
-            .filter((c: any) => c.provider === selectedCliProvider)
-            .map((c: any) => c.label as string)}
+            .filter((c: ProviderCredential) => c.provider === selectedCliProvider)
+            .map((c: ProviderCredential) => c.label as string)}
           onClose={() => setSelectedCliProvider(null)}
           onSave={handleSaveCliCredential}
+        />
+      )}
+
+      {reauthCliCredential && (
+        <CliAuthModal
+          provider={reauthCliCredential.provider}
+          token={token}
+          orgID={orgID}
+          existingLabels={credentials
+            .filter((c: ProviderCredential) => c.provider === reauthCliCredential.provider && c.id !== reauthCliCredential.id)
+            .map((c: ProviderCredential) => c.label as string)}
+          defaultLabelOverride={reauthCliCredential.label}
+          isReauth={true}
+          onClose={() => setReauthCliCredential(null)}
+          onSave={handleReauthCliCredential}
         />
       )}
 

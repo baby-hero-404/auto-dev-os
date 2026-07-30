@@ -29,13 +29,13 @@ export function SearchBar({
             placeholder="Triple-Stream Search (BM25 + Vector + Graph)..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full rounded-md border border-stroke bg-slate-950 pl-9 pr-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary"
+            className="w-full rounded-md border border-stroke bg-background pl-9 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-brand-primary"
           />
         </div>
         <button
           type="submit"
           disabled={isSearching}
-          className="rounded-md bg-slate-900 border border-stroke px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition cursor-pointer flex items-center gap-1.5"
+          className="rounded-md bg-surface border border-stroke px-4 py-2 text-sm font-semibold text-foreground hover:bg-surface/80 transition cursor-pointer flex items-center gap-1.5"
         >
           {isSearching ? <Loader2 size={14} className="animate-spin" /> : "Search"}
         </button>
@@ -59,7 +59,7 @@ export function SearchBar({
               className={`rounded px-2.5 py-1 text-xs font-mono border transition cursor-pointer capitalize ${
                 selectedTier === tier
                   ? "bg-brand-primary/15 border-brand-primary text-brand-primary"
-                  : "bg-slate-950 border-stroke text-content-muted hover:text-slate-200"
+                  : "bg-background border-stroke text-content-muted hover:text-foreground"
               }`}
             >
               {tier || "All Tiers"}

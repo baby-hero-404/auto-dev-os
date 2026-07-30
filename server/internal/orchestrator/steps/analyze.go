@@ -96,6 +96,14 @@ func (s *AnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	localPath := sandbox.WorkspacePath(s.workspaceRoot, s.rt.Task.ID)
 	ctx = context.WithValue(ctx, provider.WorkspaceRootKey, localPath)
 
+	if s.status != nil && (s.rt.Task.Status == models.TaskStatusContextLoading || s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == "") {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusAnalyzing); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to update status to analyzing: %v", err))
+		} else {
+			s.rt.Task.Status = models.TaskStatusAnalyzing
+		}
+	}
+
 	if patch.TaskReadyForExecution(s.rt.Task) {
 		if s.status != nil {
 			currentStatus := s.rt.Task.Status

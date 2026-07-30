@@ -35,7 +35,7 @@ export function TaskSubtasks() {
         <span className="text-sm font-bold text-foreground tracking-wide">Subtasks</span>
         <span className="text-xs font-semibold text-content-muted">{completedTasks} of {totalTasks} completed</span>
       </div>
-      <div className="h-2 rounded-full bg-slate-500/10 overflow-hidden mb-4 shadow-inner">
+      <div className="h-2 rounded-full bg-surface overflow-hidden mb-4 shadow-inner">
         <div className="h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 transition-all duration-500" style={{ width: `${progressPct}%` }}></div>
       </div>
       <div className="flex flex-col gap-2">
@@ -43,7 +43,7 @@ export function TaskSubtasks() {
           const isDone = item.status === 'done';
           const isRunning = item.status === 'running';
           
-          let itemClass = "flex items-center gap-3 px-3.5 py-3 rounded-xl border border-stroke/10 bg-slate-500/[0.02] hover:bg-slate-500/5 text-slate-700 dark:text-slate-200 transition-all duration-150";
+          let itemClass = "flex items-center gap-3 px-3.5 py-3 rounded-xl border border-stroke/10 bg-surface/20 hover:bg-surface/50 text-foreground transition-all duration-150";
           let indicator = <span className="w-5 h-5 rounded-full border border-stroke/30 bg-background shrink-0 transition-colors"></span>;
           
           if (isDone) {

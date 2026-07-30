@@ -17,7 +17,7 @@ type mockCLIStepRunner struct {
 	gotInstr   string
 }
 
-func (m *mockCLIStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string) (CLIStepOutput, error) {
+func (m *mockCLIStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error) {
 	m.gotCapture = captureFiles
 	m.gotInstr = instruction
 	return m.output, m.err
@@ -30,6 +30,10 @@ type mockStepPromptLoader struct {
 
 func (m *mockStepPromptLoader) LoadStepPrompt(stepID string) (string, error) {
 	return m.prompt, m.err
+}
+
+func (m *mockStepPromptLoader) MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error) {
+	return nil, nil
 }
 
 type mockCLITaskUpdater struct {

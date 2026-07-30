@@ -15,16 +15,16 @@ type SpecTab = "proposal" | "specs" | "design" | "tasks";
  * unlike SpecPanel which renders the API-native flow's task.analysis JSON.
  */
 export function CLISpecPanel() {
-  const { taskID, task } = useTaskDetail();
+  const { taskID } = useTaskDetail();
   const [tab, setTab] = useState<SpecTab>("proposal");
   const [isOpen, setIsOpen] = useState(true);
 
   const { data: spec, error } = useAuthedSWR(
-    task?.execution_engine === "cli" ? ["task-spec", taskID] : null,
+    ["task-spec", taskID],
     (token) => tasksApi.getSpec(taskID, token),
   );
 
-  if (task?.execution_engine !== "cli" || error || !spec) {
+  if (error || !spec) {
     return null;
   }
 

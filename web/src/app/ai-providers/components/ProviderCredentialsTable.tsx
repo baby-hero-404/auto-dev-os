@@ -9,7 +9,13 @@ function statusClass(status: ProviderCredential["status"]) {
       return "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20";
     case "disabled":
       return "bg-surface text-content-muted border-stroke";
+    case "needs_reauth":
+      return "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20";
   }
+}
+
+function statusLabel(status: ProviderCredential["status"]) {
+  return status === "needs_reauth" ? "needs login" : status;
 }
 
 function testClass(state: "idle" | "testing" | "success" | "error") {
@@ -37,9 +43,11 @@ interface ProviderCredentialsTableProps {
   testingMap: Record<string, "idle" | "testing" | "success" | "error">;
   deleteConfirmID: string | null;
   onTest: (credentialID: string) => void;
+  onReauth?: (credential: ProviderCredential) => void;
   onAskDelete: (credentialID: string) => void;
   onCancelDelete: () => void;
   onDelete: (credentialID: string) => void;
+  activeTab?: "api" | "cli";
 }
 
 export function ProviderCredentialsTable({
@@ -47,9 +55,11 @@ export function ProviderCredentialsTable({
   testingMap,
   deleteConfirmID,
   onTest,
+  onReauth,
   onAskDelete,
   onCancelDelete,
   onDelete,
+  activeTab = "api",
 }: ProviderCredentialsTableProps) {
   return (
     <div className="glass-panel overflow-hidden rounded-lg animate-fade-in">
@@ -59,8 +69,8 @@ export function ProviderCredentialsTable({
             <tr>
               <th className="w-[18%] px-4 py-3">Provider</th>
               <th className="w-[20%] px-4 py-3">Label</th>
-              <th className="w-[16%] px-4 py-3">API Key</th>
-              <th className="w-[18%] px-4 py-3">Base URL</th>
+              <th className="w-[16%] px-4 py-3">{activeTab === "api" ? "API Key" : "Auth Data"}</th>
+              <th className="w-[18%] px-4 py-3">{activeTab === "api" ? "Base URL" : "Profile Config"}</th>
               <th className="w-[10%] px-4 py-3">Priority</th>
               <th className="w-[10%] px-4 py-3">Status</th>
               <th className="w-[18%] px-4 py-3 text-right">Actions</th>
@@ -78,7 +88,7 @@ export function ProviderCredentialsTable({
                       <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-primary/10 text-brand-primary">
                         <Server size={15} />
                       </div>
-                      <span className="font-semibold capitalize text-foreground">{credential.provider}</span>
+                      <span className="font-semibold capitalize text-foreground">{credential.provider.replace("cli:", "")}</span>
                     </div>
                   </td>
                   <td className="px-4 py-4 font-medium text-foreground truncate max-w-[160px]" title={credential.label}>
@@ -93,7 +103,7 @@ export function ProviderCredentialsTable({
                         {credential.base_url}
                       </span>
                     ) : (
-                      <span className="text-xs text-content-muted italic">Default</span>
+                      <span className="text-xs text-content-muted italic">{activeTab === "api" ? "Default" : "N/A"}</span>
                     )}
                   </td>
                   <td className="px-4 py-4">
@@ -118,8 +128,12 @@ export function ProviderCredentialsTable({
                       {testingState === "idle" && credential.status === "disabled" && (
                         <span className="size-1.5 rounded-full bg-content-muted" />
                       )}
-                      {testingState === "testing" ? "testing" : testingState === "success" ? "success" : testingState === "error" ? "failure" : credential.status}
+                      {testingState === "idle" && credential.status === "needs_reauth" && (
+                        <span className="size-1.5 rounded-full bg-red-500 dark:bg-red-400" />
+                      )}
+                      {testingState === "testing" ? "testing" : testingState === "success" ? "success" : testingState === "error" ? "failure" : statusLabel(credential.status)}
                     </span>
+
                     {credential.model_cooldowns && Object.keys(credential.model_cooldowns).length > 0 && (
                       <div className="mt-1.5 flex flex-col gap-1">
                         {Object.entries(credential.model_cooldowns).map(([model, until]) => (
@@ -146,17 +160,27 @@ export function ProviderCredentialsTable({
                       </div>
                     ) : (
                       <div className="flex justify-end gap-2">
-                        <button
-                          className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-bold transition-all duration-200 cursor-pointer ${testClass(testingState)}`}
-                          disabled={testingState === "testing"}
-                          onClick={() => onTest(credential.id)}
-                          type="button"
-                        >
-                          {testingState === "testing" && <Loader2 size={12} className="animate-spin" />}
-                          {testingState === "success" && <CheckCircle2 size={12} />}
-                          {testingState === "error" && <XCircle size={12} />}
-                          {testingState === "testing" ? "Testing" : testingState === "success" ? "OK" : testingState === "error" ? "Failed" : "Test"}
-                        </button>
+                        {credential.status === "needs_reauth" && activeTab === "cli" && onReauth ? (
+                          <button
+                            className="inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-700 dark:text-red-300 transition-all duration-200 hover:bg-red-500/20 cursor-pointer"
+                            onClick={() => onReauth(credential)}
+                            type="button"
+                          >
+                            Login
+                          </button>
+                        ) : (
+                          <button
+                            className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-bold transition-all duration-200 cursor-pointer ${testClass(testingState)}`}
+                            disabled={testingState === "testing"}
+                            onClick={() => onTest(credential.id)}
+                            type="button"
+                          >
+                            {testingState === "testing" && <Loader2 size={12} className="animate-spin" />}
+                            {testingState === "success" && <CheckCircle2 size={12} />}
+                            {testingState === "error" && <XCircle size={12} />}
+                            {testingState === "testing" ? "Testing" : testingState === "success" ? "OK" : testingState === "error" ? "Failed" : "Test"}
+                          </button>
+                        )}
                         <button
                           className="rounded p-1.5 text-content-muted transition-colors duration-150 hover:bg-danger/10 hover:text-danger cursor-pointer"
                           onClick={() => onAskDelete(credential.id)}

@@ -268,25 +268,20 @@ func (g *Gateway) levelGroupForComplexity(complexity string) string {
 	}
 }
 
+// checkBudget/checkActualUsage are thin wrappers resolving Gateway's own
+// configured limits (overridable per-call via RouteOptions) and delegating
+// to the shared CheckBudget/CheckActualUsage in budget.go — see that file's
+// doc comment for why this logic is package-level, not Gateway-only.
 func (g *Gateway) checkBudget(inputTokens, outputLimit int, opts RouteOptions, meta ProviderMetadata) error {
 	maxTokens := g.maxTokensPerCall
 	if opts.MaxInputTokens > 0 {
 		maxTokens = opts.MaxInputTokens
 	}
-	if maxTokens > 0 && inputTokens > maxTokens {
-		return fmt.Errorf("%w: estimated input tokens %d exceed limit %d", ErrCircuitOpen, inputTokens, maxTokens)
-	}
 	maxCost := g.maxCostUSDPerCall
 	if opts.MaxCostUSD > 0 {
 		maxCost = opts.MaxCostUSD
 	}
-	if maxCost > 0 {
-		cost := estimateCost(inputTokens, outputLimit, meta)
-		if cost > maxCost {
-			return fmt.Errorf("%w: estimated cost %.6f exceeds limit %.6f", ErrCircuitOpen, cost, maxCost)
-		}
-	}
-	return nil
+	return CheckBudget(inputTokens, outputLimit, maxTokens, maxCost, meta)
 }
 
 func (g *Gateway) checkActualUsage(resp *Response, cost float64, opts RouteOptions) error {
@@ -294,20 +289,11 @@ func (g *Gateway) checkActualUsage(resp *Response, cost float64, opts RouteOptio
 	if opts.MaxInputTokens > 0 {
 		maxTokens = opts.MaxInputTokens
 	}
-	if maxTokens > 0 && resp.PromptTokens > maxTokens {
-		return fmt.Errorf("%w: prompt tokens %d exceed limit %d", ErrCircuitOpen, resp.PromptTokens, maxTokens)
-	}
-	if opts.MaxOutputTokens > 0 && resp.OutputTokens > opts.MaxOutputTokens {
-		return fmt.Errorf("%w: output tokens %d exceed limit %d", ErrCircuitOpen, resp.OutputTokens, opts.MaxOutputTokens)
-	}
 	maxCost := g.maxCostUSDPerCall
 	if opts.MaxCostUSD > 0 {
 		maxCost = opts.MaxCostUSD
 	}
-	if maxCost > 0 && cost > maxCost {
-		return fmt.Errorf("%w: actual cost %.6f exceeds limit %.6f", ErrCircuitOpen, cost, maxCost)
-	}
-	return nil
+	return CheckActualUsage(resp, cost, maxTokens, opts.MaxOutputTokens, maxCost)
 }
 
 func (g *Gateway) record(ctx context.Context, opts RouteOptions, meta ProviderMetadata, resp *Response, latency int64, status, msg string) {

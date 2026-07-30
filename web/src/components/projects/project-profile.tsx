@@ -1,7 +1,8 @@
 import { FormEvent, useState } from "react";
+import useSWR from "swr";
 import { Save, Settings, Bot, RefreshCw, Terminal } from "lucide-react";
-import { ApiError } from "@/lib/api";
-import type { ExecutionEngine, ExecutionProviderConfig, Project } from "@/lib/types";
+import { api, ApiError } from "@/lib/api";
+import type { ExecutionProviderConfig, Project } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,8 +31,6 @@ interface ProjectProfileProps {
     max_retries?: number;
     max_review_fix_cycles?: number;
     default_branch?: string;
-    execution_engine?: ExecutionEngine;
-    cli_engine_config?: ReturnType<typeof formValueToCLIConfig>;
     execution_providers?: ExecutionProviderConfig[];
   }) => Promise<void>;
 }
@@ -53,6 +52,19 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
   const [executionProviders, setExecutionProviders] = useState<ExecutionProviderConfig[]>(
     project?.execution_providers ?? defaultExecutionProviders(),
   );
+
+  // Same cache key as organization/page.tsx and GlobalRoutingPanel.tsx's
+  // getOrganization calls, so they share one fetch/cache entry.
+  const { data: organization } = useSWR(
+    project?.org_id && token ? ["org", project.org_id] : null,
+    () => api.getOrganization(project!.org_id, token!),
+  );
+  const orgDefaultProviders = organization?.default_execution_providers ?? [];
+  // Mirrors the backend's models.HasEnabledProvider gate exactly: "not
+  // configured" means no row is enabled, not that the array is empty (the
+  // list below always persists the full padded row set on save).
+  const isInheritingGlobalDefault = !executionProviders.some((p) => p.enabled);
+  const hasGlobalDefault = orgDefaultProviders.some((p) => p.enabled);
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -292,10 +304,43 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
           />
           <CardContent className="space-y-2">
             <p className="text-xs text-content-muted">
-              Optional: enable and prioritize multiple providers for automatic failover (e.g. fall back from Claude Code to
-              the Anthropic API on quota exhaustion). Leave all disabled to use the legacy Execution Engine setting above.
+              Enable and prioritize multiple providers for automatic failover (e.g., fall back from Claude CLI to
+              the Anthropic API on quota exhaustion).
             </p>
-            <ExecutionProvidersList value={executionProviders} onChange={setExecutionProviders} disabled={isUpdating} />
+            {isInheritingGlobalDefault && hasGlobalDefault ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-brand-primary/20 bg-brand-primary/5 px-3 py-2 text-xs text-content-muted">
+                <span>
+                  Showing your organization&apos;s <span className="font-medium text-foreground">Global Routing</span> default (inherited).
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setExecutionProviders(orgDefaultProviders)}
+                  disabled={isUpdating}
+                  className="shrink-0 text-brand-primary hover:underline cursor-pointer font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Customize for this project
+                </button>
+              </div>
+            ) : !isInheritingGlobalDefault ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-stroke/50 bg-surface px-3 py-2 text-xs text-content-muted">
+                <span>
+                  This project is using <span className="font-medium text-foreground">Custom Execution Routing</span>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setExecutionProviders(defaultExecutionProviders())}
+                  disabled={isUpdating}
+                  className="shrink-0 text-content-muted hover:text-foreground hover:underline cursor-pointer font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reset to Global Routing
+                </button>
+              </div>
+            ) : null}
+            <ExecutionProvidersList
+              value={isInheritingGlobalDefault && hasGlobalDefault ? orgDefaultProviders : executionProviders}
+              onChange={setExecutionProviders}
+              disabled={isUpdating}
+            />
           </CardContent>
         </Card>
 

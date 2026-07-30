@@ -9,19 +9,23 @@ interface CliAuthModalProps {
   token: string;
   orgID: string;
   existingLabels?: string[];
+  defaultLabelOverride?: string;
+  isReauth?: boolean;
   onClose: () => void;
   onSave: (provider: string, label: string, apiKey: string) => Promise<string | null>;
 }
 
-export function CliAuthModal({ provider, token, orgID, existingLabels = [], onClose, onSave }: CliAuthModalProps) {
+export function CliAuthModal({ provider, token, orgID, existingLabels = [], defaultLabelOverride, isReauth, onClose, onSave }: CliAuthModalProps) {
   const providerName = provider.replace("cli:", "");
   
-  // Auto-generate a non-conflicting default label
-  let defaultLabel = `${providerName} key`;
-  let counter = 2;
-  while (existingLabels.some((l) => l.toLowerCase() === defaultLabel.toLowerCase())) {
-    defaultLabel = `${providerName} key ${counter}`;
-    counter++;
+  // Auto-generate a non-conflicting default label if not re-auth
+  let defaultLabel = defaultLabelOverride || `${providerName} key`;
+  if (!defaultLabelOverride) {
+    let counter = 2;
+    while (existingLabels.some((l) => l.toLowerCase() === defaultLabel.toLowerCase())) {
+      defaultLabel = `${providerName} key ${counter}`;
+      counter++;
+    }
   }
 
   const [label, setLabel] = useState(defaultLabel);
@@ -74,7 +78,7 @@ export function CliAuthModal({ provider, token, orgID, existingLabels = [], onCl
         <div className="mb-4 flex items-center justify-between">
           <h3 className="flex items-center gap-2 font-semibold text-foreground">
             <TerminalIcon size={18} className="text-brand-primary" />
-            {title}
+            {isReauth ? `Re-authenticate ${title.replace("Connect ", "")}` : title}
           </h3>
           <button
             type="button"
@@ -97,10 +101,13 @@ export function CliAuthModal({ provider, token, orgID, existingLabels = [], onCl
             value={label}
             onChange={(e) => handleLabelChange(e.target.value)}
             placeholder={defaultLabel}
+            disabled={isReauth}
             className={`w-full rounded-lg border px-3 py-2 text-sm text-foreground placeholder:text-content-muted focus:outline-none focus:ring-2 ${
               saveError
                 ? "border-red-500 bg-red-500/5 focus:ring-red-500/30"
-                : "border-stroke bg-background focus:ring-brand-primary/50"
+                : isReauth 
+                  ? "border-stroke bg-surface cursor-not-allowed text-content-muted" 
+                  : "border-stroke bg-background focus:ring-brand-primary/50"
             }`}
           />
           {saveError && (

@@ -12,7 +12,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/pkg/attest"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
-	"gorm.io/gorm"
 )
 
 // AttestationService signs per-commit attestations with the deployment's
@@ -35,7 +34,7 @@ func (s *AttestationService) EnsureActiveKey(ctx context.Context) (*models.Attes
 	if err == nil {
 		return key, nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if !errors.Is(err, repository.ErrNotFound) {
 		return nil, fmt.Errorf("load active attestation key: %w", err)
 	}
 

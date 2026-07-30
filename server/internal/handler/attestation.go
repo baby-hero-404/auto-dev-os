@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/go-chi/chi/v5"
-	"gorm.io/gorm"
 )
 
 type AttestationHandler struct {
@@ -26,7 +26,7 @@ func (h *AttestationHandler) GetByCommit(w http.ResponseWriter, r *http.Request)
 	}
 	result, err := h.svc.VerifyByCommitHash(r.Context(), commit)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "no attestation found for commit")
 			return
 		}

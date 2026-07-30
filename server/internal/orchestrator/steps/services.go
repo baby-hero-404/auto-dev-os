@@ -318,6 +318,17 @@ type CLIStepOutput struct {
 	ChangedFiles []string
 }
 
+const cliPlatformContextPointer = "## Platform Context\n\nPlatform context has been materialized for this task at `$AUTOCODE_CONTEXT_DIR`. Inspect `manifest.json` and `README.md` there, then read whatever is relevant before starting. Nothing there is mandatory — use your judgment."
+
+// cliWorkingDirNotice tells the CLI agent that its current working directory
+// already *is* the repository root, so it never re-derives that root from
+// its own absolute path and bakes a sandbox-internal prefix (e.g.
+// "code/repos/<repo>/main/...") into files it authors (OpenSpec docs,
+// generated code, etc). Without this, an agent that inspects its own cwd
+// sees the real host-mounted path and can reasonably (but wrongly) treat
+// that prefix as part of every file path it writes.
+const cliWorkingDirNotice = "## Working Directory\n\nYour current working directory is already the root of the target repository. Always write file paths relative to this directory (e.g. `src/main.py`, `README.md`) — never re-prefix paths with your working directory's own absolute path (e.g. anything resembling `code/repos/<name>/...`), even if you observe that prefix while exploring your environment."
+
 // CLIStepRunner dispatches a single spec-first CLI step (spawn the
 // configured CLI subprocess with the given instruction) and reports its
 // outcome. Distinct from LLMRunner: cli_analyze/cli_spec/cli_implement have
@@ -325,7 +336,7 @@ type CLIStepOutput struct {
 // each step decides pass/fail from its own file-based contract instead.
 // Used by: cli_analyze, cli_spec, cli_implement.
 type CLIStepRunner interface {
-	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string) (CLIStepOutput, error)
+	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error)
 }
 
 // WorktreeHostPathResolver resolves the host filesystem path of a task's
@@ -340,6 +351,7 @@ type WorktreeHostPathResolver interface {
 // Used by: cli_analyze, cli_spec, cli_implement.
 type StepPromptLoader interface {
 	LoadStepPrompt(stepID string) (string, error)
+	MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error)
 }
 
 // AttestationSignInput carries everything PRStep knows about one commit,

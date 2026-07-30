@@ -8,12 +8,10 @@ const (
 	PRRiskCritical = "critical"
 )
 
-// PR review statuses.
+// PR review statuses. Only "open" is ever set — approve/reject/merge
+// transitions live on Task.Status instead, not PRSummary.Status.
 const (
-	PRStatusOpen     = "open"
-	PRStatusApproved = "approved"
-	PRStatusRejected = "rejected"
-	PRStatusMerged   = "merged"
+	PRStatusOpen = "open"
 )
 
 // PRSummary represents AI-generated PR information attached to a task.

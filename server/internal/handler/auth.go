@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/middleware"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -67,11 +68,6 @@ func AuthMiddleware(authSvc AuthService) func(http.Handler) http.Handler {
 			authHeader := r.Header.Get("Authorization")
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-			} 
-			
-			if tokenString == "" {
-				// Fallback to query param for WebSocket connections
-				tokenString = r.URL.Query().Get("token")
 			}
 
 			if tokenString == "" {
@@ -85,6 +81,7 @@ func AuthMiddleware(authSvc AuthService) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), authClaimsKey, claims)
+			ctx = middleware.WithVerifiedClaims(ctx, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

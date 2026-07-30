@@ -3,13 +3,15 @@
 import { use, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useSession, useIsHydrated } from "@/lib/session";
 import useSWR from "swr";
 
 export default function TaskRedirectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: taskID } = use(params);
   const session = useSession();
+  const isHydrated = useIsHydrated();
   const router = useRouter();
+
   const token = session?.token ?? "";
 
   const { data: workflow } = useSWR(
@@ -27,16 +29,18 @@ export default function TaskRedirectPage({ params }: { params: Promise<{ id: str
     }
   }, [workflow, taskID, router, session]);
 
+  if (!isHydrated) return null;
+
   if (!session) {
     return (
-      <div className="grid min-h-screen place-items-center bg-slate-950 font-mono text-sm text-slate-400">
+      <div className="grid min-h-screen place-items-center bg-background font-mono text-sm text-content-muted">
         Redirecting to login...
       </div>
     );
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-slate-950 font-mono text-sm text-slate-400">
+    <div className="grid min-h-screen place-items-center bg-background font-mono text-sm text-content-muted">
       <div className="flex flex-col items-center gap-3">
         <span className="size-6 animate-spin rounded-full border-2 border-brand-primary border-t-transparent" />
         <span>Redirecting to project task dashboard...</span>

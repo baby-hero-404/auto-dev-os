@@ -124,6 +124,22 @@ func (r *ProviderCredentialRepo) SetCooldown(ctx context.Context, id string, unt
 	return nil
 }
 
+func (r *ProviderCredentialRepo) MarkNeedsReauth(ctx context.Context, id string) error {
+	result := r.db.WithContext(ctx).Model(&models.ProviderCredential{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":     models.ProviderCredentialStatusNeedsReauth,
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("mark provider credential needs reauth: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("mark provider credential needs reauth: %w", ErrNotFound)
+	}
+	return nil
+}
+
 func (r *ProviderCredentialRepo) ClearExpiredCooldowns(ctx context.Context) (int64, error) {
 	result := r.db.WithContext(ctx).Model(&models.ProviderCredential{}).
 		Where("status = ? AND cooldown_until < NOW()", models.ProviderCredentialStatusRateLimited).

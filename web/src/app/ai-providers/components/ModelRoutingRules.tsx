@@ -34,7 +34,7 @@ export function ModelRoutingRules({
 
       {/* Provider Tabs */}
       <div className="flex gap-2 border-b border-stroke pb-px">
-        {PROVIDERS.filter((provider) => provider !== "gateway").map((provider) => {
+        {PROVIDERS.filter((provider) => provider !== "gateway" && !provider.startsWith("cli:")).map((provider) => {
           const count = credentialsByProvider[provider]?.length || 0;
           const active = selectedProvider === provider;
           return (

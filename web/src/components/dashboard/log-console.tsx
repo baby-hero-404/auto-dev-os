@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { TerminalSquare, ChevronRight, ChevronDown, CheckCircle2, XCircle, Pause, Loader2 } from "lucide-react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { TerminalSquare, ChevronRight, ChevronDown, CheckCircle2, XCircle, Pause, Loader2, ArrowDownToLine } from "lucide-react";
 import type { RealtimeLog } from "@/lib/store/use-realtime-log-store";
 import { Virtuoso } from "react-virtuoso";
 
@@ -98,10 +98,10 @@ export interface MilestoneItem {
 
 export function parseMilestones(logs: RealtimeLog[]): MilestoneItem[] {
   const milestones: MilestoneItem[] = [];
-  
+
   for (const log of logs) {
     const msg = log.message;
-    
+
     const stepMatch = msg.match(/step ([\w-]+) (success|failed|running)/i);
     const checkpointMatch = msg.match(/checkpoint/i);
     const pauseResumeMatch = msg.match(/paused|resumed/i);
@@ -145,7 +145,7 @@ export function parseMilestones(logs: RealtimeLog[]): MilestoneItem[] {
       });
     }
   }
-  
+
   return milestones;
 }
 
@@ -155,19 +155,49 @@ interface LogConsoleProps {
   isExpanded?: boolean;
   onToggle?: () => void;
   hideHeader?: boolean;
+  /** Count of live-buffered log lines trimmed client-side; full history still exists in the DB. */
+  droppedLogCount?: number;
+  onReloadFullHistory?: () => void;
+  isReloadingHistory?: boolean;
 }
 
-export function LogConsole({ logs, isExpanded, onToggle, hideHeader = false }: LogConsoleProps) {
+export function LogConsole({
+  logs,
+  isExpanded,
+  onToggle,
+  hideHeader = false,
+  droppedLogCount = 0,
+  onReloadFullHistory,
+  isReloadingHistory = false,
+}: LogConsoleProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [viewMode, setViewMode] = useState<"milestones" | "all">("all");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const milestonesEndRef = useRef<HTMLDivElement>(null);
+
+  const milestones = useMemo(() => parseMilestones(logs), [logs]);
+
+  // Auto-scroll milestones when new ones arrive
+  useEffect(() => {
+    if (viewMode === "milestones" && autoScroll && milestonesEndRef.current) {
+      milestonesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [milestones, viewMode, autoScroll]);
+
+  const handleMilestonesScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!autoScroll) return;
+    const target = e.currentTarget;
+    const isAtBottom = Math.abs(target.scrollHeight - target.scrollTop - target.clientHeight) < 10;
+    if (!isAtBottom) {
+      setAutoScroll(false);
+    }
+  };
 
   // Collapse control: default-collapsed. Uncontrolled fallback when no props given.
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = isExpanded ?? internalOpen;
   const toggleOpen = onToggle ?? (() => setInternalOpen((v) => !v));
-
-  const milestones = useMemo(() => parseMilestones(logs), [logs]);
 
   // Latest event for the collapsed summary — recomputed every render so it stays
   // live while the workflow runs even when the console is closed (REQ-006).
@@ -226,7 +256,7 @@ export function LogConsole({ logs, isExpanded, onToggle, hideHeader = false }: L
     }
   };
 
-  const fullscreenClasses = isFullscreen 
+  const fullscreenClasses = isFullscreen
     ? "fixed inset-4 z-50 shadow-2xl rounded-xl border border-[#30363d] bg-[#0d1117] flex flex-col"
     : `${hideHeader ? "" : "rounded-lg border border-[#30363d]"} bg-[#0d1117] flex flex-col ${isOpen ? "h-full min-h-[400px]" : ""}`;
 
@@ -237,189 +267,225 @@ export function LogConsole({ logs, isExpanded, onToggle, hideHeader = false }: L
         {(!hideHeader || isFullscreen) && (
           <>
             <div className={`flex flex-wrap items-center justify-between gap-4 p-4 border-b border-[#30363d] bg-[#010409] rounded-t-lg ${isOpen ? "mb-0" : ""}`}>
-            <div className="flex items-center gap-2 text-left">
-              {!isFullscreen && (
-                <button type="button" onClick={toggleOpen} className="cursor-pointer" aria-expanded={isOpen}>
-                  {isOpen ? <ChevronDown size={16} className="text-[#8b949e]" /> : <ChevronRight size={16} className="text-[#8b949e]" />}
-                </button>
-              )}
-              <TerminalSquare size={16} className="text-[#58a6ff]" />
-              <h2 className="font-mono text-[13px] font-semibold text-[#e6edf3]">Execution Logs</h2>
-            </div>
-
-            {isOpen && logs.length > 0 && (
-              <div className="flex items-center gap-3">
-                <div className="flex rounded-md border border-[#30363d] bg-[#161b22] p-0.5 text-[10px] font-semibold font-mono">
-                  <button
-                    onClick={() => setViewMode("all")}
-                    className={`rounded px-2.5 py-1 cursor-pointer transition-all ${
-                      viewMode === "all"
-                        ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
-                        : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
-                    }`}
-                  >
-                    Terminal
+              <div className="flex items-center gap-2 text-left">
+                {!isFullscreen && (
+                  <button type="button" onClick={toggleOpen} className="cursor-pointer" aria-expanded={isOpen}>
+                    {isOpen ? <ChevronDown size={16} className="text-[#8b949e]" /> : <ChevronRight size={16} className="text-[#8b949e]" />}
                   </button>
+                )}
+                <TerminalSquare size={16} className="text-[#58a6ff]" />
+                <h2 className="font-mono text-[13px] font-semibold text-[#e6edf3]">Execution Logs</h2>
+              </div>
+
+              {isOpen && logs.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="flex rounded-md border border-[#30363d] bg-[#161b22] p-0.5 text-[10px] font-semibold font-mono">
+                    <button
+                      onClick={() => setViewMode("all")}
+                      className={`rounded px-2.5 py-1 cursor-pointer transition-all ${viewMode === "all"
+                          ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                          : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
+                        }`}
+                    >
+                      Terminal
+                    </button>
+                    <button
+                      onClick={() => setViewMode("milestones")}
+                      className={`rounded px-2.5 py-1 cursor-pointer transition-all ${viewMode === "milestones"
+                          ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
+                          : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
+                        }`}
+                    >
+                      Milestones
+                    </button>
+                  </div>
+
                   <button
-                    onClick={() => setViewMode("milestones")}
-                    className={`rounded px-2.5 py-1 cursor-pointer transition-all ${
-                      viewMode === "milestones"
-                        ? "bg-[#21262d] text-[#58a6ff] border border-[#30363d]"
-                        : "text-[#8b949e] hover:text-[#c9d1d9] border border-transparent"
-                    }`}
+                    onClick={() => setIsFullscreen(!isFullscreen)}
+                    className="text-[10px] font-mono font-semibold px-2 py-1.5 rounded-md border border-[#30363d] bg-[#21262d] text-[#c9d1d9] hover:bg-[#30363d] hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    Milestones
+                    {isFullscreen ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.22 9.78a.75.75 0 0 1 0 1.06l-2.5 2.5h2.03a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75v-3.5a.75.75 0 0 1 1.5 0v2.03l2.5-2.5a.75.75 0 0 1 1.06 0Zm5.56 0a.75.75 0 0 1 1.06 0l2.5 2.5v-2.03a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1 0-1.5h2.03l-2.5-2.5a.75.75 0 0 1 0-1.06ZM5.22 6.22a.75.75 0 0 1-1.06 0l-2.5-2.5v2.03a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5H2.38l2.5 2.5a.75.75 0 0 1 0 1.06Zm5.56 0a.75.75 0 0 1 0-1.06l2.5-2.5h-2.03a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.38l-2.5 2.5a.75.75 0 0 1-1.06 0Z" /></svg>
+                        Minimize
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 0 1 1.06 1.06L2.56 7h2.19a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22Zm8.56 0a.75.75 0 0 1 0 1.06l-2.22 2.22h2.19a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22ZM3.72 12.28a.75.75 0 0 1 0-1.06l2.22-2.22H3.75a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-2.19l-2.22 2.22a.75.75 0 0 1-1.06 0Zm8.56 0a.75.75 0 0 1-1.06 0l-2.22-2.22v2.19a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-2.19l2.22 2.22a.75.75 0 0 1 0 1.06Z" /></svg>
+                        Expand
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setAutoScroll(!autoScroll)}
+                    className={`text-[10px] font-mono font-semibold px-2.5 py-1.5 rounded-md border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      autoScroll
+                        ? "border-[#3fb950]/30 bg-[#238636]/10 text-[#3fb950] hover:bg-[#238636]/20"
+                        : "border-[#30363d] bg-[#21262d] text-[#8b949e] hover:bg-[#30363d] hover:text-[#c9d1d9]"
+                    }`}
+                    title={autoScroll ? "Auto-scroll is ON. Scroll up to disable." : "Auto-scroll is OFF. Click to enable."}
+                  >
+                    <ArrowDownToLine size={12} />
+                    Auto-scroll: {autoScroll ? "ON" : "OFF"}
                   </button>
                 </div>
-                
-                <button
-                  onClick={() => setIsFullscreen(!isFullscreen)}
-                  className="text-[10px] font-mono font-semibold px-2 py-1.5 rounded-md border border-[#30363d] bg-[#21262d] text-[#c9d1d9] hover:bg-[#30363d] hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  {isFullscreen ? (
-                    <>
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.22 9.78a.75.75 0 0 1 0 1.06l-2.5 2.5h2.03a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75v-3.5a.75.75 0 0 1 1.5 0v2.03l2.5-2.5a.75.75 0 0 1 1.06 0Zm5.56 0a.75.75 0 0 1 1.06 0l2.5 2.5v-2.03a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1 0-1.5h2.03l-2.5-2.5a.75.75 0 0 1 0-1.06ZM5.22 6.22a.75.75 0 0 1-1.06 0l-2.5-2.5v2.03a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5H2.38l2.5 2.5a.75.75 0 0 1 0 1.06Zm5.56 0a.75.75 0 0 1 0-1.06l2.5-2.5h-2.03a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V2.38l-2.5 2.5a.75.75 0 0 1-1.06 0Z"/></svg>
-                      Minimize
-                    </>
-                  ) : (
-                    <>
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 0 1 1.06 1.06L2.56 7h2.19a.75.75 0 0 1 0 1.5H1.25a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22Zm8.56 0a.75.75 0 0 1 0 1.06l-2.22 2.22h2.19a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 1.5 0v2.19l2.22-2.22ZM3.72 12.28a.75.75 0 0 1 0-1.06l2.22-2.22H3.75a.75.75 0 0 1 0-1.5h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-2.19l-2.22 2.22a.75.75 0 0 1-1.06 0Zm8.56 0a.75.75 0 0 1-1.06 0l-2.22-2.22v2.19a.75.75 0 0 1-1.5 0v-3.5a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-2.19l2.22 2.22a.75.75 0 0 1 0 1.06Z"/></svg>
-                      Expand
-                    </>
-                  )}
-                </button>
+              )}
+            </div>
+
+            {isOpen && droppedLogCount > 0 && (
+              <div className="mx-3 mt-2 flex items-center justify-between gap-3 rounded-md border border-[#d29922]/40 bg-[#d29922]/10 px-3 py-1.5 text-[11px] font-mono text-[#d29922]">
+                <span>{droppedLogCount} earlier log line{droppedLogCount === 1 ? "" : "s"} trimmed from this live view.</span>
+                {onReloadFullHistory && (
+                  <button
+                    type="button"
+                    onClick={onReloadFullHistory}
+                    disabled={isReloadingHistory}
+                    className="shrink-0 rounded border border-[#d29922]/40 px-2 py-0.5 font-semibold uppercase tracking-wide hover:bg-[#d29922]/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isReloadingHistory ? "Loading…" : "Reload full history"}
+                  </button>
+                )}
               </div>
             )}
-          </div>
 
-          {!isOpen && (
-            <button
-              type="button"
-              onClick={toggleOpen}
-              className="m-3 flex items-center gap-2.5 rounded-md border border-[#30363d] bg-[#161b22] px-3 py-2 text-left transition hover:bg-[#21262d] cursor-pointer"
+            {!isOpen && (
+              <button
+                type="button"
+                onClick={toggleOpen}
+                className="m-3 flex items-center gap-2.5 rounded-md border border-[#30363d] bg-[#161b22] px-3 py-2 text-left transition hover:bg-[#21262d] cursor-pointer"
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${latestDotColor}`} />
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#8b949e]">{latestEventText}</span>
+                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#58a6ff]">View full log</span>
+              </button>
+            )}
+          </>
+        )}
+
+        <div className={`relative flex-1 overflow-hidden rounded-b-lg bg-[#0d1117] min-h-[520px] ${isOpen ? "" : "hidden"}`}>
+          {logs.length === 0 ? (
+            <p className="text-[#8b949e] p-4 font-mono text-[11px]">No logs yet. Execute the workflow to start.</p>
+          ) : viewMode === "milestones" ? (
+            <div 
+              className="absolute inset-0 overflow-y-auto p-5 custom-scrollbar flex flex-col gap-4 font-mono"
+              onScroll={handleMilestonesScroll}
             >
-              <span className={`h-2 w-2 shrink-0 rounded-full ${latestDotColor}`} />
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#8b949e]">{latestEventText}</span>
-              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-[#58a6ff]">View full log</span>
-            </button>
-          )}
-        </>
-      )}
+              {milestones.length === 0 ? (
+                <p className="text-[#8b949e] text-[11px] text-center py-8">No milestones recorded yet.</p>
+              ) : (
+                <div className="relative border-l border-[#30363d] pl-6 space-y-5 ml-2 pt-2 text-left">
+                  {milestones.map((m) => {
+                    let dotBg = "bg-[#8b949e]";
+                    let borderStyle = "border-[#30363d]";
+                    let textColor = "text-[#c9d1d9]";
 
-      <div className={`relative flex-1 overflow-hidden rounded-b-lg bg-[#0d1117] min-h-[520px] ${isOpen ? "" : "hidden"}`}>
-        {logs.length === 0 ? (
-          <p className="text-[#8b949e] p-4 font-mono text-[11px]">No logs yet. Execute the workflow to start.</p>
-        ) : viewMode === "milestones" ? (
-          <div className="absolute inset-0 overflow-y-auto p-5 custom-scrollbar flex flex-col gap-4 font-mono">
-            {milestones.length === 0 ? (
-              <p className="text-[#8b949e] text-[11px] text-center py-8">No milestones recorded yet.</p>
-            ) : (
-              <div className="relative border-l border-[#30363d] pl-6 space-y-5 ml-2 pt-2 text-left">
-                {milestones.map((m) => {
-                  let dotBg = "bg-[#8b949e]";
-                  let borderStyle = "border-[#30363d]";
-                  let textColor = "text-[#c9d1d9]";
-                  
-                  if (m.type === "success") {
-                    dotBg = "bg-[#238636]";
-                    borderStyle = "border-[#238636]/30";
-                    textColor = "text-[#3fb950] font-semibold";
-                  } else if (m.type === "running") {
-                    dotBg = "bg-[#58a6ff] animate-pulse";
-                    borderStyle = "border-[#58a6ff]/30";
-                    textColor = "text-[#58a6ff] font-semibold";
-                  } else if (m.type === "failed") {
-                    dotBg = "bg-[#f85149]";
-                    borderStyle = "border-[#f85149]/30";
-                    textColor = "text-[#f85149] font-bold";
-                  } else if (m.type === "paused") {
-                    dotBg = "bg-[#d29922]";
-                    borderStyle = "border-[#d29922]/30";
-                    textColor = "text-[#d29922] font-semibold";
+                    if (m.type === "success") {
+                      dotBg = "bg-[#238636]";
+                      borderStyle = "border-[#238636]/30";
+                      textColor = "text-[#3fb950] font-semibold";
+                    } else if (m.type === "running") {
+                      dotBg = "bg-[#58a6ff] animate-pulse";
+                      borderStyle = "border-[#58a6ff]/30";
+                      textColor = "text-[#58a6ff] font-semibold";
+                    } else if (m.type === "failed") {
+                      dotBg = "bg-[#f85149]";
+                      borderStyle = "border-[#f85149]/30";
+                      textColor = "text-[#f85149] font-bold";
+                    } else if (m.type === "paused") {
+                      dotBg = "bg-[#d29922]";
+                      borderStyle = "border-[#d29922]/30";
+                      textColor = "text-[#d29922] font-semibold";
+                    }
+
+                    return (
+                      <div key={m.id} className="relative flex flex-col gap-1.5">
+                        {/* Dot */}
+                        <span className={`absolute -left-[31px] top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#0d1117] border-[1.5px] ${borderStyle}`}>
+                          <span className={`h-2 w-2 rounded-full ${dotBg}`} />
+                        </span>
+                        <div className="flex items-start justify-between gap-4">
+                          <span className={`text-[12px] leading-relaxed ${textColor}`}>{m.message}</span>
+                          <span className="text-[10px] text-[#8b949e] whitespace-nowrap mt-0.5">{m.timestamp}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div ref={milestonesEndRef} className="h-1 w-full" />
+            </div>
+          ) : (
+            <div className="absolute inset-0">
+              <Virtuoso
+                data={flattenedItems}
+                className="h-full w-full font-mono text-[11px]"
+                followOutput={autoScroll ? "smooth" : false}
+                atBottomStateChange={(atBottom) => {
+                  if (!atBottom && autoScroll) {
+                    setAutoScroll(false);
+                  }
+                }}
+                itemContent={(_, item) => {
+                  if (item.type === "group") {
+                    const Icon = item.isExpanded ? ChevronDown : ChevronRight;
+                    const statusColor =
+                      item.status === "running" ? "text-[#58a6ff]" :
+                        item.status === "success" ? "text-[#3fb950]" :
+                          item.status === "failed" ? "text-[#f85149]" : "text-[#d29922]";
+
+                    return (
+                      <div
+                        id={`log-group-${item.stepName}`}
+                        className="flex items-center gap-2 px-4 py-2 border-y border-[#30363d] bg-[#161b22] cursor-pointer hover:bg-[#21262d] transition-colors -mt-px first:mt-0"
+                        onClick={() => toggleGroup(item.key, item.defaultExpanded)}
+                      >
+                        <Icon size={14} className="text-[#8b949e]" />
+                        <span className="font-semibold text-[#e6edf3] uppercase tracking-wider text-[10px]">
+                          {(() => {
+                            if (item.stepName.startsWith("code_backend_")) {
+                              const parsedIdx = Number(item.stepName.substring("code_backend_".length));
+                              return `Backend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
+                            }
+                            if (item.stepName.startsWith("code_frontend_")) {
+                              const parsedIdx = Number(item.stepName.substring("code_frontend_".length));
+                              return `Frontend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
+                            }
+                            return item.stepName;
+                          })()}
+                        </span>
+                        <div className="ml-auto flex items-center gap-1.5">
+                          {getStatusIcon(item.status)}
+                          <span className={`font-bold uppercase text-[9px] ${statusColor}`}>{item.status}</span>
+                        </div>
+                      </div>
+                    );
                   }
 
+                  const log = item.log as RealtimeLog;
+                  const levelStyle =
+                    log.level === "error" ? "text-[#f85149]" :
+                      log.level === "warn" ? "text-[#d29922]" :
+                        log.level === "debug" ? "text-[#8b949e]" :
+                          "text-[#3fb950]";
+
                   return (
-                    <div key={m.id} className="relative flex flex-col gap-1.5">
-                      {/* Dot */}
-                      <span className={`absolute -left-[31px] top-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#0d1117] border-[1.5px] ${borderStyle}`}>
-                        <span className={`h-2 w-2 rounded-full ${dotBg}`} />
-                      </span>
-                      <div className="flex items-start justify-between gap-4">
-                        <span className={`text-[12px] leading-relaxed ${textColor}`}>{m.message}</span>
-                        <span className="text-[10px] text-[#8b949e] whitespace-nowrap mt-0.5">{m.timestamp}</span>
+                    <div className={`flex gap-3 border-b border-[#30363d]/50 py-1.5 px-4 hover:bg-[#161b22] transition-colors ${item.isGroupChild ? 'bg-[#0d1117] border-l-2 border-[#30363d] pl-8' : ''}`}>
+                      <span className="text-[#8b949e] select-none whitespace-nowrap shrink-0 mt-0.5">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>
+                      <div className="flex shrink-0 mt-0.5">
+                        <span className={`${levelStyle} select-none text-[10px] font-bold uppercase min-w-[40px]`}>{log.level}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <LogMessage message={log.message} />
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="absolute inset-0">
-            <Virtuoso
-              data={flattenedItems}
-              className="h-full w-full font-mono text-[11px]"
-              followOutput="smooth"
-              itemContent={(_, item) => {
-                if (item.type === "group") {
-                  const Icon = item.isExpanded ? ChevronDown : ChevronRight;
-                  const statusColor =
-                    item.status === "running" ? "text-[#58a6ff]" :
-                      item.status === "success" ? "text-[#3fb950]" :
-                        item.status === "failed" ? "text-[#f85149]" : "text-[#d29922]";
-
-                  return (
-                    <div
-                      id={`log-group-${item.stepName}`}
-                      className="flex items-center gap-2 px-4 py-2 border-y border-[#30363d] bg-[#161b22] cursor-pointer hover:bg-[#21262d] transition-colors -mt-px first:mt-0"
-                      onClick={() => toggleGroup(item.key, item.defaultExpanded)}
-                    >
-                      <Icon size={14} className="text-[#8b949e]" />
-                      <span className="font-semibold text-[#e6edf3] uppercase tracking-wider text-[10px]">
-                        {(() => {
-                          if (item.stepName.startsWith("code_backend_")) {
-                            const parsedIdx = Number(item.stepName.substring("code_backend_".length));
-                            return `Backend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
-                          }
-                          if (item.stepName.startsWith("code_frontend_")) {
-                            const parsedIdx = Number(item.stepName.substring("code_frontend_".length));
-                            return `Frontend Execution ${isNaN(parsedIdx) ? 1 : parsedIdx + 1}`;
-                          }
-                          return item.stepName;
-                        })()}
-                      </span>
-                      <div className="ml-auto flex items-center gap-1.5">
-                        {getStatusIcon(item.status)}
-                        <span className={`font-bold uppercase text-[9px] ${statusColor}`}>{item.status}</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const log = item.log as RealtimeLog;
-                const levelStyle =
-                  log.level === "error" ? "text-[#f85149]" :
-                    log.level === "warn" ? "text-[#d29922]" :
-                      log.level === "debug" ? "text-[#8b949e]" :
-                        "text-[#3fb950]";
-
-                return (
-                  <div className={`flex gap-3 border-b border-[#30363d]/50 py-1.5 px-4 hover:bg-[#161b22] transition-colors ${item.isGroupChild ? 'bg-[#0d1117] border-l-2 border-[#30363d] pl-8' : ''}`}>
-                    <span className="text-[#8b949e] select-none whitespace-nowrap shrink-0 mt-0.5">{new Date(log.createdAtEpoch).toLocaleTimeString()}</span>
-                    <div className="flex shrink-0 mt-0.5">
-                      <span className={`${levelStyle} select-none text-[10px] font-bold uppercase min-w-[40px]`}>{log.level}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <LogMessage message={log.message} />
-                    </div>
-                  </div>
-                );
-              }}
-            />
-          </div>
-        )}
+                }}
+              />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
     </>
   );
 }

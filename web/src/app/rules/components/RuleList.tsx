@@ -95,7 +95,7 @@ export function RuleList({
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <button
               onClick={onOpenAddModal}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:opacity-90 cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-brand-primary-fg shadow-sm transition hover:opacity-90 cursor-pointer"
               type="button"
             >
               <ShieldCheck size={15} />

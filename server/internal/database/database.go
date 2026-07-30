@@ -20,16 +20,6 @@ type PoolConfig struct {
 	ConnMaxIdleTimeSeconds int
 }
 
-// Connect opens a GORM connection to PostgreSQL.
-func Connect(databaseURL string) (*gorm.DB, error) {
-	return ConnectWithPool(databaseURL, PoolConfig{
-		MaxOpenConns:           20,
-		MaxIdleConns:           5,
-		ConnMaxLifetimeSeconds: 1800,
-		ConnMaxIdleTimeSeconds: 300,
-	})
-}
-
 // ConnectWithPool opens a GORM connection to PostgreSQL with explicit pool settings.
 func ConnectWithPool(databaseURL string, pool PoolConfig) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{

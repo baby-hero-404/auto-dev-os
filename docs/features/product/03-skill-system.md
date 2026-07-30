@@ -92,6 +92,10 @@ Hệ thống cung cấp cơ chế phân tầng kỹ năng để linh hoạt cho 
   - API duyệt thư mục (Tree Explorer): `GET /api/skills/sources/{sourceID}/files?path=...` (trả về danh sách thư mục con và files).
   - API xem nội dung (Content Viewer): `GET /api/skills/sources/{sourceID}/file-content?path=...` (trả về raw text của file).
 
+### 4.2. Orchestrator Integration (CLI vs API)
+- **API Mode:** Sử dụng `PromptAssembler` để quét, chấm điểm (JIT scoring) và inject full markdown nội dung của skill vào prompt LLM messages.
+- **CLI Mode (Agentic Discovery):** Orchestrator (`cliEngine.RunCodeStep`) tự động copy toàn bộ nội dung từ `.data/projects/{id}/skills/` sang không gian làm việc của CLI container tại `.autocode/skills/` trước khi spawn agent. Trong prompt chỉ cần thêm lệnh nhắc agent tự sử dụng tool bash/file-read của nó để khám phá thư mục này, đảm bảo zero token overhead và tính tự quyết của agent.
+
 ### 4.2. Frontend Web UI (`web/src/app/skills/page.tsx`)
 - **Quản Lý Nguồn (Source Management):** Hiển thị Form nhập Git URL, danh sách các nguồn đang có, và nút **Sync / Refresh**.
 - **Skill Explorer:**

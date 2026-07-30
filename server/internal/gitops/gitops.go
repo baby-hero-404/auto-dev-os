@@ -30,6 +30,8 @@ func NormalizeGitURLToHTTPS(rawURL string) (string, error) {
 	if rawURL == "" {
 		return "", fmt.Errorf("empty URL")
 	}
+	// Strip any trailing slashes from the URL (e.g. https://github.com/owner/repo.git/)
+	rawURL = strings.TrimRight(rawURL, "/")
 
 	// Case 1: SCP-like SSH format, e.g. git@github.com:owner/repo.git
 	if strings.Contains(rawURL, "@") && !strings.Contains(rawURL, "://") {

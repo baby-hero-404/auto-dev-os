@@ -6,13 +6,17 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-// ValidWorkflowJobTransitions defines allowed transitions for a workflow job.
+// ValidWorkflowJobTransitions defines allowed transitions for a workflow job,
+// covering every UpdateJob status write found in orchestrator/worker.go,
+// orchestrator.go, and pr_sync.go (audited exhaustively — retries create a
+// fresh queued job row via Enqueue rather than transitioning a failed one,
+// so "failed" has no outgoing UpdateJob transitions).
 var ValidWorkflowJobTransitions = map[string][]string{
-	models.WorkflowJobStatusQueued:  {models.WorkflowJobStatusRunning},
-	models.WorkflowJobStatusRunning: {models.WorkflowJobStatusPaused, models.WorkflowJobStatusDone, models.WorkflowJobStatusFailed},
-	models.WorkflowJobStatusPaused:  {models.WorkflowJobStatusRunning, models.WorkflowJobStatusFailed},
+	models.WorkflowJobStatusQueued:  {models.WorkflowJobStatusRunning, models.WorkflowJobStatusFailed},
+	models.WorkflowJobStatusRunning: {models.WorkflowJobStatusPaused, models.WorkflowJobStatusDone, models.WorkflowJobStatusFailed, models.WorkflowJobStatusQueued},
+	models.WorkflowJobStatusPaused:  {models.WorkflowJobStatusRunning, models.WorkflowJobStatusQueued, models.WorkflowJobStatusFailed, models.WorkflowJobStatusDone},
 	models.WorkflowJobStatusDone:    {},
-	models.WorkflowJobStatusFailed:  {models.WorkflowJobStatusQueued, models.WorkflowJobStatusRunning},
+	models.WorkflowJobStatusFailed:  {},
 }
 
 // ValidateJobTransition verifies if a workflow job status transition is allowed.

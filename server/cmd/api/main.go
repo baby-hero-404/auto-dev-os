@@ -88,7 +88,6 @@ func run() error {
 	authRepo := repository.NewAuthRepo(db)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowRepo.SetLogFileRoot(cfg.Logging.FileRoot)
-	secretRepo := repository.NewSecretRepo(db)
 	analyticsRepo := repository.NewAnalyticsRepo(db)
 	dashboardRepo := repository.NewAnalyticsDashboardRepo(db)
 	auditRepo := repository.NewAuditRepo(db)
@@ -103,12 +102,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if _, err := service.NewSecretService(secretRepo, cfg.Auth.JWTSecret); err != nil {
-		return err
-	}
 	auditSvc := service.NewAuditService(auditRepo)
 	providerModelSvc := service.NewProviderModelService(providerModelRepo)
-	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc).WithProviderModelSeeder(providerModelSvc)
+	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc).WithProviderModelSeeder(providerModelSvc).WithOrgs(orgRepo)
 	sandboxRuntime, err := buildSandboxRuntime(cfg)
 	if err != nil {
 		return err
@@ -145,13 +141,15 @@ func run() error {
 	}
 	defer ctxEngine.Close()
 
+	learnedSkillRepo := repository.NewLearnedSkillRepo(db)
+
 	promptAssembler := prompts.NewPromptAssemblerWithRules(
 		ruleRepo,
 		nil,
 		pathRegistry.Prompt,
 		pathRegistry.FS,
 		ctxEngine,
-	).WithSkillLister(skillSvc).WithDataRoot(cfg.AutoCodeOS.DataRoot)
+	).WithSkillLister(skillSvc).WithLearnedSkillsLister(learnedSkillRepo).WithDataRoot(cfg.AutoCodeOS.DataRoot)
 	artifactRepo := repository.NewArtifactRepo(db)
 	gitProvider := gitops.NewGitHubProvider("")
 	gitOpsAdapter := gitops.NewGitOpsAdapter(gitProvider, repoRepo, cfg.Sandbox.WorkspaceRoot, secretCipher)
@@ -163,6 +161,7 @@ func run() error {
 		orchestrator.WithGitOpsClient(gitOpsAdapter),
 		orchestrator.WithRepositoryRepository(repoRepo),
 		orchestrator.WithProjectRepository(projRepo),
+		orchestrator.WithOrganizationRepository(orgRepo),
 		orchestrator.WithWorkspaceRoot(cfg.Sandbox.WorkspaceRoot),
 		orchestrator.WithDataRoot(cfg.AutoCodeOS.DataRoot),
 		orchestrator.WithWorkspaceRetention(
@@ -190,10 +189,8 @@ func run() error {
 		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured or is a placeholder")
 	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
-	learningSvc.SetSkillService(skillSvc)
 	learningSvc.SetPromptRoot(filepath.Clean(promptsRoot))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
-	learnedSkillRepo := repository.NewLearnedSkillRepo(db)
 	learningEngine := learning.NewLearningEngine(memorySvc, learningSvc, taskRepo, learnedSkillRepo)
 
 	opts = append(opts, orchestrator.WithMemoryHooks(memoryHooks), orchestrator.WithLearningEngine(learningEngine), orchestrator.WithLearnedSkills(learnedSkillRepo))
@@ -209,6 +206,7 @@ func run() error {
 	opts = append(opts, orchestrator.WithCredentials(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithCredentialAvailability(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithCooldownSetter(credentialPoolSvc))
+	opts = append(opts, orchestrator.WithCredentialStatusSetter(credentialPoolSvc))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
@@ -221,7 +219,7 @@ func run() error {
 		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo), cfg.AutoCodeOS.DataRoot),
 		RepoSvc:            repoSvc,
 		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo),
-		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo),
+		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo, orgRepo),
 		RuleSvc:            service.NewRuleService(ruleRepo),
 		SkillSvc:           skillSvc,
 		LearnedSkillSvc:    learnedSkillRepo,
@@ -353,14 +351,14 @@ func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPool
 
 	if cfg.LLM.Provider != "gateway" && cfg.LLM.Provider != "" {
 		if cfg.LLM.APIKey != "" || cfg.LLM.LLMAPIKey != "" {
-			fallback, err = llm.NewProvider(cfg)
+			fallback, err = llm.NewProviderWithRecorder(cfg, recorder)
 			if err != nil {
 				return nil, err
 			}
 		}
 	} else {
 		if cfg.LLM.OpenAIAPIKey != "" || cfg.LLM.AnthropicAPIKey != "" || cfg.LLM.GeminiAPIKey != "" {
-			fallback, err = llm.NewProvider(cfg)
+			fallback, err = llm.NewProviderWithRecorder(cfg, recorder)
 			if err != nil {
 				return nil, err
 			}

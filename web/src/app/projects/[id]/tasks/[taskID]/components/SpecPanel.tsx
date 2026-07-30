@@ -288,8 +288,7 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
                           onChange={() => togglePlanStep(idx)}
                           className="hidden"
                         />
-                        <div className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-[6px] border transition-all duration-300 ${isDone ? "bg-emerald-500 border-emerald-500 text-slate-950 scale-110" : "border-stroke/80 bg-background group-hover:border-brand-primary group-hover:bg-brand-primary/10"
-                          }`}>
+                        <div className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-[6px] border transition-all duration-300 ${isDone ? "bg-emerald-500 border-emerald-500 text-background scale-110" : "border-stroke/80 bg-background group-hover:border-brand-primary group-hover:bg-brand-primary/10"}`}>
                           {isDone && <Check size={14} strokeWidth={3.5} />}
                         </div>
                         <div className={`flex-1 text-sm leading-relaxed transition-all duration-300 [&_p]:mb-0 ${isDone ? "line-through opacity-70" : ""}`}>

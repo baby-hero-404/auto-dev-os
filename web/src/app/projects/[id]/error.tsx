@@ -40,14 +40,14 @@ export default function ProjectDetailError({
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
           <button
             onClick={() => reset()}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 font-semibold text-slate-950 transition hover:opacity-90 cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-primary px-4 py-2 font-semibold text-background transition hover:opacity-90 cursor-pointer"
           >
             <RefreshCw size={16} />
             Try again
           </button>
           <Link
             href="/"
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-stroke bg-slate-50 dark:bg-slate-900 px-4 py-2 font-semibold text-foreground transition hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-stroke bg-surface px-4 py-2 font-semibold text-foreground transition hover:bg-surface/50"
           >
             <ArrowLeft size={16} />
             Return to Dashboard

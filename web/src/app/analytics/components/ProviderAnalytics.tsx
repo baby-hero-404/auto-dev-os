@@ -24,7 +24,7 @@ export function ProviderAnalytics({ providerUsage }: { providerUsage: TokenUsage
           </thead>
           <tbody>
             {providerUsage.map((item) => (
-              <tr key={`${item.provider}:${item.model}:${item.key_label || "No Label"}:${item.level_group}`} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+              <tr key={`${item.provider}:${item.model}:${item.key_label || "No Label"}:${item.level_group}`} className="border-b border-stroke/60 transition hover:bg-surface">
                 <td className="px-4 py-3 font-medium capitalize">{item.provider}</td>
                 <td className="px-4 py-3 font-mono text-xs text-content-muted">{item.model}</td>
                 <td className="px-4 py-3">

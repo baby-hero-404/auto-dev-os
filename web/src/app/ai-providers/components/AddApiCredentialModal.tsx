@@ -119,7 +119,7 @@ export function AddApiCredentialModal({
       onMouseDown={onClose}
     >
       <div
-        className="glass-panel animate-modal-in w-full max-w-md rounded-lg p-5 shadow-2xl"
+        className="glass-panel animate-modal-in w-full max-w-xl sm:max-w-2xl rounded-xl p-6 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">

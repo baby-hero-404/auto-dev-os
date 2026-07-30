@@ -94,7 +94,7 @@ export function TaskClarificationForm({
           type="button"
           onClick={handleAnswerSubmit}
           disabled={submittingAnswers || Object.values(answers).every((a) => !a.trim())}
-          className="rounded-md bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2 text-xs font-bold disabled:opacity-50 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+          className="rounded-md bg-amber-500 hover:bg-amber-600 text-background px-4 py-2 text-xs font-bold disabled:opacity-50 transition cursor-pointer flex items-center gap-1.5 shadow-sm"
         >
           {submittingAnswers ? (
             <span className="size-3.5 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />

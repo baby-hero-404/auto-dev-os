@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/lib/pq"
@@ -37,7 +38,7 @@ func (r *LearnedSkillRepo) Create(ctx context.Context, input models.CreateLearne
 func (r *LearnedSkillRepo) GetByID(ctx context.Context, id string) (*models.LearnedSkill, error) {
 	var skill models.LearnedSkill
 	if err := r.db.WithContext(ctx).First(&skill, "id = ?", id).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get learned skill: %w", mapError(err))
 	}
 	return &skill, nil
 }

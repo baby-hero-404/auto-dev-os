@@ -17,6 +17,7 @@ import (
 type PromptAssembler struct {
 	rules            *repository.RuleRepo
 	skills           SkillLister
+	learnedSkills    LearnedSkillsLister
 	baseTools        []llm.ToolDefinition
 	promptPaths      paths.PromptPaths
 	fs               paths.FileSystem
@@ -78,6 +79,11 @@ func NewPromptAssemblerWithRules(rules *repository.RuleRepo, baseTools []llm.Too
 
 func (a *PromptAssembler) WithSkillLister(skills SkillLister) *PromptAssembler {
 	a.skills = skills
+	return a
+}
+
+func (a *PromptAssembler) WithLearnedSkillsLister(ls LearnedSkillsLister) *PromptAssembler {
+	a.learnedSkills = ls
 	return a
 }
 

@@ -197,6 +197,14 @@ func MapLegacyPhasesToUnits(analysis *models.TaskAnalysis) {
 }
 
 func (s *PlanStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	if s.status != nil && (s.rt.Task.Status == models.TaskStatusContextLoading || s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == "") {
+		if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusAnalyzing); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to update status to analyzing: %v", err))
+		} else {
+			s.rt.Task.Status = models.TaskStatusAnalyzing
+		}
+	}
+
 	t, err := s.tasks.GetByID(ctx, s.rt.Task.ID)
 	if err == nil && t.Complexity == models.TaskComplexityEasy {
 		return StepResult{"status": "skipped", "info": "skipped plan step for easy task"}, nil

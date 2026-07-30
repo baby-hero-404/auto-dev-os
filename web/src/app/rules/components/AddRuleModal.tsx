@@ -55,7 +55,7 @@ export function AddRuleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-xs">
       <div className="relative w-full max-w-lg rounded-xl border border-stroke bg-card p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
         <button
           onClick={onClose}
@@ -112,7 +112,7 @@ export function AddRuleModal({
             <button
               type="submit"
               disabled={isAddingRule || !ruleContent.trim()}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-brand-primary-fg transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
             >
               {isAddingRule ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
               Add Rule

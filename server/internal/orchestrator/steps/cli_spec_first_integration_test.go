@@ -20,7 +20,7 @@ type fakeCLIEngineRunner struct {
 	slug string
 }
 
-func (f *fakeCLIEngineRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string) (CLIStepOutput, error) {
+func (f *fakeCLIEngineRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error) {
 	switch stepID {
 	case workflow.StepCLIAnalyze:
 		return CLIStepOutput{

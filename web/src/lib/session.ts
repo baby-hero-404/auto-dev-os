@@ -17,6 +17,9 @@ export function useSession() {
 
   return session;
 }
+export function useIsHydrated() {
+  return useAuthStore((state) => state.isHydrated);
+}
 
 export function saveSession(session: Session) {
   useAuthStore.getState().setSession(session);

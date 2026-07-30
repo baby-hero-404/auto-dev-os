@@ -6,6 +6,7 @@ import Link from "next/link";
 import { GraduationCap, CheckCircle, Ban, Trash2, ExternalLink, Loader2, Sparkles, Edit3, X } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { learnedSkills as learnedSkillsApi } from "@/lib/api";
 import type { LearnedSkill } from "@/lib/types";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ interface LearnedSkillsPanelProps {
 export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps) {
   const [filterStatus, setFilterStatus] = useState<"all" | "draft" | "active" | "disabled">("all");
   const [actionID, setActionID] = useState<string | null>(null);
+  const [pendingDeleteID, setPendingDeleteID] = useState<string | null>(null);
 
   const [editingSkill, setEditingSkill] = useState<LearnedSkill | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -61,10 +63,9 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
     }
   }
 
-  async function handleDelete(skillID: string) {
-    if (!confirm("Are you sure you want to delete this learned skill? This action cannot be undone.")) {
-      return;
-    }
+  async function confirmDeleteSkill() {
+    if (!pendingDeleteID) return;
+    const skillID = pendingDeleteID;
     setActionID(skillID);
     try {
       await learnedSkillsApi.remove(skillID, token);
@@ -74,6 +75,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
       toast.error("Failed to delete skill: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setActionID(null);
+      setPendingDeleteID(null);
     }
   }
 
@@ -122,7 +124,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
               className={`px-3 py-1 text-xs font-semibold rounded-lg capitalize transition cursor-pointer ${
                 filterStatus === st
                   ? "bg-brand-primary text-brand-primary-fg shadow-sm"
-                  : "bg-slate-500/10 text-content-muted hover:text-foreground"
+                  : "bg-surface text-content-muted hover:text-foreground"
               }`}
             >
               {st}
@@ -135,14 +137,14 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
             <Loader2 size={14} className="animate-spin text-brand-primary" /> Loading learned skills...
           </div>
         ) : filteredSkills.length === 0 ? (
-          <div className="p-6 text-center text-xs text-content-muted italic bg-slate-500/[0.02] rounded-xl border border-stroke/10">
+          <div className="p-6 text-center text-xs text-content-muted italic bg-surface/20 rounded-xl border border-stroke/10">
             <Sparkles size={24} className="mx-auto mb-2 opacity-40 text-brand-primary" />
             No learned skills found in status &quot;{filterStatus}&quot;.
           </div>
         ) : (
-          <div className="divide-y divide-stroke/10 border border-stroke/10 rounded-xl overflow-hidden bg-slate-500/[0.02]">
+          <div className="divide-y divide-stroke/10 border border-stroke/10 rounded-xl overflow-hidden bg-surface/20">
             {filteredSkills.map((skill) => (
-              <div key={skill.id} className="p-4 space-y-2 hover:bg-slate-500/5 transition">
+              <div key={skill.id} className="p-4 space-y-2 hover:bg-surface/50 transition">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <h4 className="font-heading text-xs font-bold text-foreground">{skill.title}</h4>
@@ -152,7 +154,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
                           : skill.status === "draft"
                           ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
-                          : "bg-slate-500/10 text-content-muted"
+                          : "bg-surface text-content-muted"
                       }`}
                     >
                       {skill.status}
@@ -199,7 +201,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleDelete(skill.id)}
+                      onClick={() => setPendingDeleteID(skill.id)}
                       disabled={actionID === skill.id}
                       className="h-7 px-2 text-[11px] text-danger hover:bg-danger/10"
                     >
@@ -225,7 +227,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
 
                 {/* Content snippet */}
                 {skill.content && (
-                  <p className="text-xs font-mono bg-slate-950 text-slate-300 p-2.5 rounded-lg whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar border border-stroke/10">
+                  <p className="text-xs font-mono bg-background text-content-muted p-2.5 rounded-lg whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar border border-stroke/10">
                     {skill.content}
                   </p>
                 )}
@@ -254,7 +256,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
       {editingSkill && (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-card border border-stroke/20 rounded-2xl max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden animate-fade-in">
-            <div className="p-4 border-b border-stroke/10 flex items-center justify-between bg-slate-500/5">
+            <div className="p-4 border-b border-stroke/10 flex items-center justify-between bg-surface/50">
               <div className="flex items-center gap-2">
                 <Edit3 className="text-brand-primary" size={18} />
                 <h3 className="font-heading text-sm font-bold text-foreground">
@@ -264,7 +266,7 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
               <button
                 type="button"
                 onClick={() => setEditingSkill(null)}
-                className="p-1 rounded-lg hover:bg-slate-500/10 text-content-muted hover:text-foreground transition cursor-pointer"
+                className="p-1 rounded-lg hover:bg-surface text-content-muted hover:text-foreground transition cursor-pointer"
                 disabled={isSaving}
               >
                 <X size={16} />
@@ -314,6 +316,18 @@ export function LearnedSkillsPanel({ projectID, token }: LearnedSkillsPanelProps
           </div>
         </div>
       )}
+      {/* Confirm Delete Modal */}
+      <ConfirmDialog
+        isOpen={!!pendingDeleteID}
+        title="Delete Learned Skill"
+        description="Are you sure you want to delete this learned skill? This action cannot be undone."
+        confirmText="Delete Skill"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={actionID === pendingDeleteID}
+        onConfirm={confirmDeleteSkill}
+        onClose={() => setPendingDeleteID(null)}
+      />
     </Card>
   );
 }

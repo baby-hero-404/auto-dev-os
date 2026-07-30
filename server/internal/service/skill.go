@@ -92,9 +92,6 @@ func (s *SkillService) getActiveRepoNames(ctx context.Context) (map[string]bool,
 }
 
 func (s *SkillService) isSkillActive(ctx context.Context, skillSchema []byte, activeRepos map[string]bool) bool {
-	if len(activeRepos) == 0 {
-		return false
-	}
 	if len(skillSchema) == 0 {
 		return false
 	}
@@ -105,7 +102,13 @@ func (s *SkillService) isSkillActive(ctx context.Context, skillSchema []byte, ac
 	if err := json.Unmarshal(skillSchema, &meta); err != nil {
 		return false
 	}
-	return meta.Source == "git" && activeRepos[strings.ToLower(meta.Repo)]
+	if meta.Source != "git" {
+		return true // Custom or local skills are always active
+	}
+	if len(activeRepos) == 0 {
+		return false
+	}
+	return activeRepos[strings.ToLower(meta.Repo)]
 }
 
 func (s *SkillService) GetByID(ctx context.Context, id string) (*models.Skill, error) {
@@ -143,9 +146,6 @@ func (s *SkillService) List(ctx context.Context) ([]models.Skill, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get active repos: %w", err)
 	}
-	if len(activeRepos) == 0 {
-		return []models.Skill{}, nil
-	}
 
 	reg, err := s.loadRegistry()
 	if err != nil {
@@ -153,11 +153,16 @@ func (s *SkillService) List(ctx context.Context) ([]models.Skill, error) {
 	}
 
 	var list []models.Skill
+	seen := make(map[string]bool)
 	for _, skills := range reg.Skills {
 		for _, sk := range skills {
 			if !s.isSkillActive(ctx, sk.Schema, activeRepos) {
 				continue
 			}
+			if seen[sk.ID] {
+				continue
+			}
+			seen[sk.ID] = true
 			list = append(list, models.Skill{
 				ID:          sk.ID,
 				Name:        sk.Name,

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 )
 
 func TestRateLimiter_Allow(t *testing.T) {
@@ -87,7 +89,7 @@ func TestRequireRole_Allowed(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := context.WithValue(req.Context(), authClaimsKey, &tokenClaims{Subject: "u1", Role: "admin"})
+	ctx := context.WithValue(req.Context(), authClaimsKey, &service.TokenClaims{Subject: "u1", Role: "admin"})
 	handler.ServeHTTP(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusOK {
 		t.Errorf("expected 200 for admin role, got %d", rr.Code)
@@ -101,7 +103,7 @@ func TestRequireRole_Forbidden(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := context.WithValue(req.Context(), authClaimsKey, &tokenClaims{Subject: "u1", Role: "member"})
+	ctx := context.WithValue(req.Context(), authClaimsKey, &service.TokenClaims{Subject: "u1", Role: "member"})
 	handler.ServeHTTP(rr, req.WithContext(ctx))
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for member role, got %d", rr.Code)

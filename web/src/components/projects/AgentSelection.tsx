@@ -64,7 +64,7 @@ export function AgentSelection({ agents, agentID, setAgentID, isSubmitting }: Ag
                   <span
                     className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide border ${
                       isOffline
-                        ? "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                        ? "bg-surface text-content-muted border-stroke"
                         : isBusy
                         ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
                         : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
@@ -72,7 +72,7 @@ export function AgentSelection({ agents, agentID, setAgentID, isSubmitting }: Ag
                   >
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        isOffline ? "bg-slate-400" : isBusy ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                        isOffline ? "bg-content-muted" : isBusy ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
                       }`}
                     />
                     {isOffline ? "Offline" : isBusy ? "Working" : "Free"}

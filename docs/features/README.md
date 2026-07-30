@@ -37,7 +37,7 @@ Each doc states its own status once in its header (`**Status:**` line) — this 
 | 08 | [Workflow Engine](product/08-workflow-engine.md) | 🟡 In Progress |
 | 09 | [PR & Human Review](product/09-pr-human-review.md) | 🟡 In Progress |
 | 10 | [Dashboard & Analytics](product/10-dashboard-analytics.md) | 🟡 In Progress |
-| 11 | [Multi-Channel Interaction (Remote Coding Sessions)](product/11-multi-channel-interaction.md) | ⚪ Deferred |
+| 11 | [Multi-Channel Interaction (Remote Coding Sessions)](product/11-multi-channel-interaction.md) | 🟡 In Progress |
 | 12 | [Repository Profile Cache](product/12-repository-profile-cache.md) | 🔵 Proposed |
 | 13 | [Patch Engine Abstraction](product/13-patch-engine-abstraction.md) | 🟢 Implemented |
 | 14 | [Execution Engine (Pluggable API-Native / CLI)](product/14-execution-engine.md) | 🟢 Implemented |
@@ -102,8 +102,8 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 | [product/08-workflow-engine.md](./product/08-workflow-engine.md) | 2026-07-23 | ✅ Fresh |
 | [product/09-pr-human-review.md](./product/09-pr-human-review.md) | 2026-07-23 | ✅ Fresh |
 | [product/10-dashboard-analytics.md](./product/10-dashboard-analytics.md) | 2026-07-23 | ✅ Fresh |
-| [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-12 | ✅ Fresh |
+| [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-30 | ✅ Fresh |
 | [product/12-repository-profile-cache.md](./product/12-repository-profile-cache.md) | 2026-07-12 | ✅ Fresh |
 | [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-23 | ✅ Fresh |
-| [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-07-23 | ✅ Fresh |
+| [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-07-30 | ✅ Fresh |
 <!-- freshness:end -->

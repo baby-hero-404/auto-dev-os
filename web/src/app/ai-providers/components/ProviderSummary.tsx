@@ -1,4 +1,6 @@
 import { Cpu, KeyRound, Server } from "lucide-react";
+import { PROVIDERS } from "@/lib/model-options";
+import { CLI_PROFILES } from "@/lib/cliProfiles";
 
 interface SummaryCardProps {
   icon: React.ReactNode;
@@ -31,32 +33,64 @@ interface ProviderSummaryProps {
   configuredProviderCount: number;
   totalCredentialCount: number;
   activeCredentialCount: number;
+  activeTab: "api" | "cli";
 }
 
 export function ProviderSummary({
   configuredProviderCount,
   totalCredentialCount,
   activeCredentialCount,
+  activeTab,
 }: ProviderSummaryProps) {
+  const apiProviders = PROVIDERS.filter((p) => p !== "gateway" && !p.startsWith("cli:"));
+  const cliProviders = PROVIDERS.filter((p) => p.startsWith("cli:"));
+
+  const getProviderLabel = (p: string) => {
+    if (p.startsWith("cli:")) {
+      const ref = Object.keys(CLI_PROFILES).find(k => CLI_PROFILES[k].credentialProvider === p);
+      return ref ? CLI_PROFILES[ref].label : p;
+    }
+    return p === "9router" ? "9Router" : p.charAt(0).toUpperCase() + p.slice(1);
+  };
+
+  const config = {
+    api: {
+      totalProviders: apiProviders.length,
+      providerListText: apiProviders.map(getProviderLabel).join(", "),
+      credentialLabel: "Credential pool",
+      credentialEntity: "key",
+      readinessLabel: "Gateway readiness",
+      readinessDetail: "Agents route through the gateway pool",
+    },
+    cli: {
+      totalProviders: cliProviders.length,
+      providerListText: cliProviders.map(getProviderLabel).join(", "),
+      credentialLabel: "Auth profiles",
+      credentialEntity: "profile",
+      readinessLabel: "Execution readiness",
+      readinessDetail: "Sandboxed CLIs ready for execution",
+    },
+  }[activeTab];
+
   return (
     <div className="grid gap-3 md:grid-cols-3">
       <SummaryCard
         icon={<Server size={18} />}
         label="Configured providers"
-        value={`${configuredProviderCount}/4`}
-        detail="OpenAI, Anthropic, Gemini, 9router"
+        value={`${configuredProviderCount}/${config.totalProviders}`}
+        detail={config.providerListText}
       />
       <SummaryCard
         icon={<KeyRound size={18} />}
-        label="Credential pool"
+        label={config.credentialLabel}
         value={`${totalCredentialCount}`}
-        detail={`${activeCredentialCount} active key${activeCredentialCount === 1 ? "" : "s"}`}
+        detail={`${activeCredentialCount} active ${config.credentialEntity}${activeCredentialCount === 1 ? "" : "s"}`}
       />
       <SummaryCard
         icon={<Cpu size={18} />}
-        label="Gateway readiness"
+        label={config.readinessLabel}
         value={activeCredentialCount > 0 ? "Ready" : "Waiting"}
-        detail="Agents route through the gateway pool"
+        detail={config.readinessDetail}
         tone={activeCredentialCount > 0 ? "success" : "muted"}
       />
     </div>

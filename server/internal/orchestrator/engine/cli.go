@@ -81,6 +81,12 @@ func extractCapturedFiles(combined string) (string, map[string]string) {
 // login, e.g. ".claude.json" or ".config/codex/auth.json") to file content.
 type CredentialGetter interface {
 	GetDecryptedCredential(ctx context.Context, orgID, id string) (provider string, payload map[string]string, err error)
+
+	// UpdateCredentialPayload re-encrypts and persists an updated credential
+	// payload — best-effort write-back after a CLI run refreshes a token
+	// on-disk (e.g. OAuth rotation), so the next run doesn't replay a stale
+	// one. Callers must not fail the run itself if this errors.
+	UpdateCredentialPayload(ctx context.Context, orgID, id string, payload map[string]string) error
 }
 
 // cliEngine spawns a generic, configurable CLI subprocess inside the
@@ -105,17 +111,17 @@ func NewCLIEngine(runtime sandbox.Runtime, credentials CredentialGetter) Executi
 // /root, matching the layout the interactive CLI auth flow captured it in
 // (see cli_auth.go's Terminal handler, which runs with HOME=/workspace
 // during capture) and the container's runtime HOME of /root.
-func (e *cliEngine) resolveCredentialFiles(ctx context.Context, req CodeStepRequest) (map[string]string, error) {
+func (e *cliEngine) resolveCredentialFiles(ctx context.Context, req CodeStepRequest) (map[string]string, map[string]string, error) {
 	cfg := req.CLIConfig
 	if cfg == nil || strings.TrimSpace(cfg.CredentialID) == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if e.credentials == nil {
-		return nil, fmt.Errorf("cli engine: cli_engine_config.credential_id is set but no credential service is configured: %w", ErrConfigInvalid)
+		return nil, nil, fmt.Errorf("cli engine: cli_engine_config.credential_id is set but no credential service is configured: %w", ErrConfigInvalid)
 	}
 	_, payload, err := e.credentials.GetDecryptedCredential(ctx, req.OrgID, cfg.CredentialID)
 	if err != nil {
-		return nil, fmt.Errorf("cli engine: failed to load linked credential: %w", err)
+		return nil, nil, fmt.Errorf("cli engine: failed to load linked credential: %w", err)
 	}
 	files := make(map[string]string, len(payload))
 	for relPath, content := range payload {
@@ -123,9 +129,9 @@ func (e *cliEngine) resolveCredentialFiles(ctx context.Context, req CodeStepRequ
 		if clean == "/" || strings.Contains(clean, "..") {
 			continue
 		}
-		files["/root"+clean] = content
+		files[sandbox.SandboxHomeDir+clean] = content
 	}
-	return files, nil
+	return files, payload, nil
 }
 
 func (e *cliEngine) Name() string { return models.ExecutionEngineCLI }
@@ -141,7 +147,7 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 		return "", fmt.Errorf("cli engine: cli_engine_config.command is required: %w", ErrConfigInvalid)
 	}
 
-	credentialFiles, err := e.resolveCredentialFiles(ctx, req)
+	credentialFiles, _, err := e.resolveCredentialFiles(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +158,7 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 		AgentID:         agentID(req.Agent),
 		Workspace:       req.HostWorkspace,
 		Command:         []string{"bash", "-lc", checkCmd},
-		Env:             map[string]string{"CI": "1"},
+		Env:             map[string]string{"CI": "1", "HOME": sandbox.SandboxHomeDir},
 		NetworkMode:     req.NetworkMode,
 		Timeout:         binaryCheckTimeout,
 		CredentialFiles: credentialFiles,
@@ -173,6 +179,9 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
+	if _, ok := env["HOME"]; !ok {
+		env["HOME"] = sandbox.SandboxHomeDir
+	}
 	authRes, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
 		AgentID:         agentID(req.Agent),
@@ -246,6 +255,25 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	if err := os.MkdirAll(hostAutocodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cli engine: create prompt dir: %w", err)
 	}
+
+	contextRoot := filepath.Join(hostAutocodeDir, "context")
+	for relPath, content := range req.ContextFiles {
+		target := filepath.Join(contextRoot, filepath.FromSlash(relPath))
+		// Defense in depth: relPath is derived from platform-scored data
+		// (e.g. skill names sourced from third-party git repos) that isn't
+		// guaranteed to be traversal-free upstream. Refuse anything that
+		// would resolve outside contextRoot rather than trusting the caller.
+		rel, err := filepath.Rel(contextRoot, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("cli engine: context file path %q escapes context dir", relPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, fmt.Errorf("cli engine: create context dir for %s: %w", relPath, err)
+		}
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			return nil, fmt.Errorf("cli engine: write context file %s: %w", relPath, err)
+		}
+	}
 	// Backup cleanup in case the sandbox never runs the in-script rm -rf
 	// (e.g. container create fails); idempotent when the script already
 	// removed the container-side copy.
@@ -288,8 +316,14 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
+	if _, ok := env["HOME"]; !ok {
+		env["HOME"] = sandbox.SandboxHomeDir
+	}
+	if len(req.ContextFiles) > 0 {
+		env["AUTOCODE_CONTEXT_DIR"] = autocodeDir + "/context"
+	}
 
-	credentialFiles, err := e.resolveCredentialFiles(ctx, req)
+	credentialFiles, _, err := e.resolveCredentialFiles(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +342,32 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		return nil, fmt.Errorf("cli engine: run failed: %w", err)
 	}
 
+	if cfg.CredentialID != "" && len(result.UpdatedCredentialFiles) > 0 && e.credentials != nil {
+		// Merge onto the credential's current DB state, fetched fresh right
+		// here rather than reusing the pre-run snapshot from
+		// resolveCredentialFiles: another step/task sharing this credential
+		// may have refreshed a different file in between, and merging onto a
+		// stale base would silently revert that update. Only the specific
+		// relPaths the run actually changed are touched — never a full
+		// overwrite, so a file that got added or removed in the DB by
+		// someone else concurrently is left alone.
+		if _, fresh, err := e.credentials.GetDecryptedCredential(ctx, req.OrgID, cfg.CredentialID); err == nil {
+			merged := make(map[string]string, len(fresh))
+			maps.Copy(merged, fresh)
+			for targetPath, newContent := range result.UpdatedCredentialFiles {
+				relPath, ok := strings.CutPrefix(targetPath, sandbox.SandboxHomeDir+"/")
+				if !ok {
+					continue
+				}
+				merged[relPath] = newContent
+			}
+			// Best-effort: a refreshed-token write-back failing must never
+			// fail the step itself (the run already succeeded/failed on its
+			// own terms) — only the *next* run would see a stale token.
+			_ = e.credentials.UpdateCredentialPayload(ctx, req.OrgID, cfg.CredentialID, merged)
+		}
+	}
+
 	combined := result.Stdout
 	if strings.TrimSpace(result.Stderr) != "" {
 		if combined != "" {
@@ -318,13 +378,23 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	combined, capturedFiles := extractCapturedFiles(combined)
 	killed := detectLoop(combined)
 	quotaExceeded := detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
+	authFailed := !quotaExceeded && result.ExitCode != 0 && detectAuthFailure(cfg.ProfileRef, combined)
 
+	credID := ""
+	if cfg != nil {
+		credID = cfg.CredentialID
+	}
 	res := &CodeStepResult{
-		Success:       result.ExitCode == 0 && !killed,
-		Output:        redactSecrets(combined),
-		LoopKilled:    killed,
-		QuotaExceeded: quotaExceeded,
-		Files:         capturedFiles,
+		Success:                 result.ExitCode == 0 && !killed,
+		Output:                  redactSecrets(combined),
+		LoopKilled:              killed,
+		QuotaExceeded:           quotaExceeded,
+		AuthFailed:              authFailed,
+		Files:                   capturedFiles,
+		ExitCode:                result.ExitCode,
+		Command:                 redactSecrets(strings.Join(quotedInvocation, " ")),
+		CredentialID:            credID,
+		CredentialFilesResolved: len(credentialFiles),
 	}
 	switch {
 	case killed:

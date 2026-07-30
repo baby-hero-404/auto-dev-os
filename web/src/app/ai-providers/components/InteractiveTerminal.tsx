@@ -161,7 +161,19 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
       }
     }, 10);
 
-    (async () => {
+    // Reconnecting here can't just resume a stream like log-tailing does —
+    // each WS ticket is single-use and reconnecting spawns a brand-new PTY
+    // session in the sandbox, discarding any in-progress login state (e.g.
+    // mid-OAuth-device-code). So unlike streamLogs' unbounded backoff loop,
+    // this retries a small, bounded number of times (transient network
+    // blips only) before surfacing the drop via onError so the caller can
+    // offer the user an explicit restart instead of silently respawning
+    // CLI processes forever.
+    const MAX_RECONNECT_ATTEMPTS = 3;
+    let reconnectAttempt = 0;
+    let retryDelay = 1000;
+
+    const connect = async () => {
       try {
         let ticket = "";
         if (mode === "auth") {
@@ -280,11 +292,22 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
 
         ws.onerror = (e) => {
           console.error("WebSocket Error", e);
-          if (!cancelled) onErrorRef.current?.("WebSocket connection error");
         };
 
         ws.onclose = () => {
-          if (!cancelled) setIsConnected(false);
+          if (cancelled) return;
+          setIsConnected(false);
+          if (hasExited) return;
+          if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+            onErrorRef.current?.("WebSocket connection lost");
+            return;
+          }
+          reconnectAttempt += 1;
+          const delay = retryDelay;
+          retryDelay = Math.min(retryDelay * 2, 5000);
+          setTimeout(() => {
+            if (!cancelled) connect();
+          }, delay);
         };
 
         term.current?.onData((data) => {
@@ -293,11 +316,21 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
           }
         });
       } catch (err) {
-        if (!cancelled) {
-          onErrorRef.current?.(err instanceof Error ? err.message : "Failed to start terminal session");
+        if (cancelled) return;
+        if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttempt += 1;
+          const delay = retryDelay;
+          retryDelay = Math.min(retryDelay * 2, 5000);
+          setTimeout(() => {
+            if (!cancelled) connect();
+          }, delay);
+          return;
         }
+        onErrorRef.current?.(err instanceof Error ? err.message : "Failed to start terminal session");
       }
-    })();
+    };
+
+    connect();
 
     return () => {
       cancelled = true;
@@ -315,7 +348,8 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
         term.current.dispose();
       }
     };
-  }, [orgID, token, provider]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-black rounded-md border border-stroke">

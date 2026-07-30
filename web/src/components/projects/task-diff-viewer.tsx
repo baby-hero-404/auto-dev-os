@@ -152,12 +152,12 @@ export function TaskDiffViewer({
           </span>
         </div>
 
-        <div className="flex-1 min-h-[350px] overflow-auto rounded-lg border border-stroke bg-slate-950 dark:bg-black p-4 font-mono text-xs leading-relaxed shadow-inner">
+        <div className="flex-1 min-h-[350px] overflow-auto rounded-lg border border-stroke bg-background dark:bg-black p-4 font-mono text-xs leading-relaxed shadow-inner">
           {activeSelectedFile ? (
             activeFileDiff ? (
-              <div className="space-y-0.5 font-mono text-[11px] text-slate-300 select-text">
+              <div className="space-y-0.5 font-mono text-[11px] text-content-muted select-text">
                 {activeFileDiff.diffLines.map((line, idx) => {
-                  let lineClass = "text-slate-400";
+                  let lineClass = "text-content-muted/70";
                   if (line.startsWith("+") && !line.startsWith("+++")) {
                     lineClass = "bg-emerald-500/15 text-emerald-400 px-1 border-l-2 border-emerald-500";
                   } else if (line.startsWith("-") && !line.startsWith("---")) {
@@ -165,11 +165,11 @@ export function TaskDiffViewer({
                   } else if (line.startsWith("@@")) {
                     lineClass = "text-purple-400 bg-purple-500/10 font-semibold py-0.5";
                   } else if (line.startsWith("diff ") || line.startsWith("index ")) {
-                    lineClass = "text-slate-500/80 italic";
+                    lineClass = "text-content-muted/50 italic";
                   } else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
-                    lineClass = "text-slate-400 font-semibold";
+                    lineClass = "text-content-muted font-semibold";
                   } else {
-                    lineClass = "text-slate-300 pl-1.5";
+                    lineClass = "text-foreground pl-1.5";
                   }
                   return (
                     <div key={idx} className={`font-mono whitespace-pre-wrap ${lineClass}`}>

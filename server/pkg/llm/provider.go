@@ -151,6 +151,15 @@ type Provider interface {
 
 // NewProvider creates the appropriate LLM provider based on configuration.
 func NewProvider(cfg *config.Config) (Provider, error) {
+	return NewProviderWithRecorder(cfg, nil)
+}
+
+// NewProviderWithRecorder is NewProvider with usage telemetry threaded
+// through to the "gateway" case — without this, a caller building a
+// Provider with cfg.LLM.Provider=="gateway" silently lost cost/usage
+// tracking for every call through it (recorder was previously hardcoded
+// nil here regardless of what the caller had available).
+func NewProviderWithRecorder(cfg *config.Config, recorder UsageRecorder) (Provider, error) {
 	switch cfg.LLM.Provider {
 	case models.ProviderOpenAI:
 		return NewOpenAI(cfg.LLM.APIKey, cfg.LLM.Model), nil
@@ -161,7 +170,7 @@ func NewProvider(cfg *config.Config) (Provider, error) {
 	case models.Provider9Router:
 		return NewNineRouter(cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.BaseURL), nil
 	case models.ProviderGateway:
-		return NewGatewayFromConfig(cfg)
+		return NewGatewayFromConfigWithRecorder(cfg, recorder)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", cfg.LLM.Provider)
 	}

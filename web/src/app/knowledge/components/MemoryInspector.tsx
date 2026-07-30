@@ -14,7 +14,7 @@ export function MemoryInspector({
   onClose,
 }: MemoryInspectorProps) {
   return (
-    <div className="rounded-lg border border-stroke bg-slate-950 p-5 mt-4">
+    <div className="rounded-lg border border-stroke bg-background p-5 mt-4">
       <div className="mb-4 flex items-center justify-between border-b border-stroke pb-3">
         <h3 className="font-mono font-semibold flex items-center gap-2 text-white">
           <Network size={16} className="text-brand-primary" />
@@ -37,11 +37,11 @@ export function MemoryInspector({
           <div className="flex flex-col gap-3">
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-content-muted">Summary</span>
-              <p className="text-sm text-slate-100 font-medium">{detailData.memory.summary}</p>
+              <p className="text-sm text-foreground font-medium">{detailData.memory.summary}</p>
             </div>
             <div>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-content-muted">Content Details</span>
-              <pre className="mt-1 rounded bg-slate-900 border border-stroke p-3 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+              <pre className="mt-1 rounded bg-surface border border-stroke p-3 font-mono text-xs text-content-muted overflow-x-auto whitespace-pre-wrap">
                 {detailData.memory.content}
               </pre>
             </div>
@@ -50,7 +50,7 @@ export function MemoryInspector({
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-content-muted block mb-1">Tags</span>
                 <div className="flex flex-wrap gap-1">
                   {detailData.memory.tags.map((t: string) => (
-                    <span key={t} className="rounded bg-slate-800 border border-stroke px-1.5 py-0.5 text-[10px] text-slate-300 font-mono">
+                    <span key={t} className="rounded bg-surface border border-stroke px-1.5 py-0.5 text-[10px] text-content-muted font-mono">
                       #{t}
                     </span>
                   ))}
@@ -69,7 +69,7 @@ export function MemoryInspector({
               ) : (
                 <div className="space-y-2">
                   {detailData.edges.map((edge: KnowledgeEdge) => (
-                    <div key={edge.id} className="rounded border border-stroke bg-slate-900/60 p-2 text-xs">
+                    <div key={edge.id} className="rounded border border-stroke bg-surface/60 p-2 text-xs">
                       <div className="font-mono font-semibold text-brand-primary">{edge.relation}</div>
                       <div className="text-[10px] text-content-muted mt-0.5">
                         Weight: {edge.weight.toFixed(2)}
@@ -83,11 +83,11 @@ export function MemoryInspector({
             <div className="space-y-2 text-xs border-t border-stroke pt-3">
               <div className="flex justify-between">
                 <span className="text-content-muted">Importance:</span>
-                <span className="font-mono text-slate-300 font-semibold">{detailData.memory.access_count}</span>
+                <span className="font-mono text-content-muted font-semibold">{detailData.memory.access_count}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-content-muted">Decay math:</span>
-                <span className="font-mono text-slate-300 font-semibold flex items-center gap-1">
+                <span className="font-mono text-content-muted font-semibold flex items-center gap-1">
                   <TrendingDown size={12} className="text-amber-400" />
                   {detailData.memory.decay_score.toFixed(3)}
                 </span>

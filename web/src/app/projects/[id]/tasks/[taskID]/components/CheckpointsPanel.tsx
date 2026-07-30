@@ -9,17 +9,18 @@ import type { ReviewVerdict, WorkflowArtifact } from "@/lib/types";
 // Artifacts for retried steps are saved with a "_cycle_N" suffix appended to
 // the step name (see checkpoint.Store.SaveArtifact), so a checkpoint's own
 // step name only matches artifacts by prefix, not exact equality.
-function artifactsForStep(artifacts: WorkflowArtifact[] | undefined, step: string, type: string): WorkflowArtifact[] {
+function artifactsForStep(artifacts: WorkflowArtifact[] | undefined, step: string, type: string, attempt?: number): WorkflowArtifact[] {
   if (!artifacts) return [];
+  const targetStep = attempt && attempt > 1 ? `${step}_cycle_${attempt}` : step;
   return artifacts.filter(
-    (a) => a.type === type && (a.step === step || a.step.startsWith(`${step}_cycle_`))
+    (a) => a.type === type && a.step === targetStep
   );
 }
 
 function CliOutputViewer({ output }: { output: string }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="mt-1.5 rounded-lg border border-stroke/10 bg-slate-950/[0.03] dark:bg-slate-950/40 overflow-hidden">
+    <div className="mt-1.5 rounded-lg border border-stroke/10 bg-surface/20 dark:bg-surface/50 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -70,7 +71,7 @@ export function CheckpointsPanel() {
     <div className="space-y-4 text-left">
       {/* Agent details */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-stroke/10 bg-slate-500/5 p-4 flex items-center gap-3.5 shadow-sm">
+        <div className="rounded-2xl border border-stroke/10 bg-surface/50 p-4 flex items-center gap-3.5 shadow-sm">
           <Bot className="text-brand-primary shrink-0" size={18} />
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-content-muted">Assigned Agent</div>
@@ -78,7 +79,7 @@ export function CheckpointsPanel() {
           </div>
         </div>
  
-        <div className="rounded-2xl border border-stroke/10 bg-slate-500/5 p-4 flex items-center gap-3.5 shadow-sm">
+        <div className="rounded-2xl border border-stroke/10 bg-surface/50 p-4 flex items-center gap-3.5 shadow-sm">
           <Milestone className="text-brand-primary shrink-0" size={18} />
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-content-muted">Execution Attempts</div>
@@ -124,13 +125,13 @@ export function CheckpointsPanel() {
         {reversedCheckpoints.length === 0 ? (
           <p className="text-xs text-content-muted italic px-0.5">No checkpoints recorded yet.</p>
         ) : (
-          <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-slate-500/[0.02] divide-y divide-stroke/10 shadow-sm">
+          <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-surface/20 divide-y divide-stroke/10 shadow-sm">
             {reversedCheckpoints.map((cp, idx) => {
               const status = typeof cp.state?.status === "string" ? cp.state.status : "recorded";
               const error = typeof cp.state?.error === "string" ? cp.state.error : undefined;
               
               // status styles
-              let statusBadge = "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-400";
+              let statusBadge = "bg-surface/50 text-foreground dark:bg-surface dark:text-content-muted";
               if (status === "success" || status === "recorded" || status === "skipped" || status === "waiting_approval") {
                 statusBadge = "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
               } else if (status === "running") {
@@ -143,10 +144,11 @@ export function CheckpointsPanel() {
               /* eslint-disable @typescript-eslint/no-explicit-any */
               const reviewVerdict = (cp.state?.output as any)?.review_verdict as ReviewVerdict | undefined;
               /* eslint-enable @typescript-eslint/no-explicit-any */
-              const cliOutputArtifacts = artifactsForStep(artifacts, cp.step, "cli_output");
+              const attempt = typeof cp.state?.attempt === "number" ? cp.state.attempt : undefined;
+              const cliOutputArtifacts = artifactsForStep(artifacts, cp.step, "cli_output", attempt);
 
               return (
-                <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-slate-500/5 transition-colors duration-150">
+                <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-surface/50 transition-colors duration-150">
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-mono font-bold text-foreground truncate">{friendlyStepName(cp.step)}</span>
                     <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge}`}>

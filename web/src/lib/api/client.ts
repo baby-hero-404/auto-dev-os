@@ -84,6 +84,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
                 });
                 isRefreshing = false;
                 onRefreshed(data.tokens.access_token);
+                return request<T>(path, {
+                  ...options,
+                  token: data.tokens.access_token,
+                });
               } else {
                 isRefreshing = false;
                 useAuthStore.getState().clearSession();
@@ -97,20 +101,20 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
               if (err instanceof ApiError) throw err;
               throw new ApiError(response.status, message);
             }
+          } else {
+            const newToken = await new Promise<string | null>((resolve) => {
+              subscribeTokenRefresh((token) => resolve(token));
+            });
+
+            if (!newToken) {
+              throw new ApiError(401, "Session expired");
+            }
+
+            return request<T>(path, {
+              ...options,
+              token: newToken,
+            });
           }
-
-          const newToken = await new Promise<string | null>((resolve) => {
-            subscribeTokenRefresh((token) => resolve(token));
-          });
-
-          if (!newToken) {
-            throw new ApiError(401, "Session expired");
-          }
-
-          return request<T>(path, {
-            ...options,
-            token: newToken,
-          });
         } else {
           useAuthStore.getState().clearSession();
         }

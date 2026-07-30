@@ -51,8 +51,17 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 	if feedback := crossReviewFeedback(ctx, s.checkpoints, s.rt.Task.ID); feedback != "" {
 		instruction += "\n\n## Reviewer feedback\n\n" + feedback
 	}
+	instruction += "\n" + cliWorkingDirNotice + "\n"
 
-	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil)
+	contextFiles, err := s.prompts.MaterializeCLIContext(ctx, *s.rt.Task, s.rt.Agent, s.ID())
+	if err != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to materialize context: %v", err))
+	}
+	if len(contextFiles) > 0 {
+		instruction += "\n" + cliPlatformContextPointer + "\n"
+	}
+
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles)
 	if err != nil {
 		return nil, fmt.Errorf("cli_implement: %w", err)
 	}

@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "pipeline": {
-    "extends": "cli_spec_first"
-  },
-  "policies": {}
-}

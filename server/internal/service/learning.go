@@ -18,16 +18,11 @@ import (
 type LearningService struct {
 	suggestions *repository.LearningSuggestionRepo
 	rules       *repository.RuleRepo
-	skills      *SkillService
 	promptRoot  string
 }
 
 func NewLearningService(suggestions *repository.LearningSuggestionRepo, rules *repository.RuleRepo) *LearningService {
 	return &LearningService{suggestions: suggestions, rules: rules}
-}
-
-func (s *LearningService) SetSkillService(skills *SkillService) {
-	s.skills = skills
 }
 
 func (s *LearningService) SetPromptRoot(promptRoot string) {

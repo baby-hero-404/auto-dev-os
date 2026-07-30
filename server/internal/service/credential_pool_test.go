@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +32,93 @@ func (s *fakeProviderModelSeeder) ListByOrg(_ context.Context, _ string, _ model
 func (s *fakeProviderModelSeeder) Create(_ context.Context, _ string, input models.CreateProviderModelInput) (*models.ProviderModel, error) {
 	s.createCalls = append(s.createCalls, input)
 	return &models.ProviderModel{ID: "pm-seeded", Provider: input.Provider, LevelGroup: input.LevelGroup, ModelName: input.ModelName, Priority: input.Priority, IsActive: input.IsActive == nil || *input.IsActive}, nil
+}
+
+type fakeOrgExecutionProvidersRepo struct {
+	mu          sync.Mutex
+	org         *models.Organization
+	swapResults []json.RawMessage
+	// conflictOnce, if >0, makes the next N CompareAndSwap calls report a lost
+	// race (ok=false) without applying the write, to exercise the retry loop.
+	conflictOnce int
+}
+
+func (f *fakeOrgExecutionProvidersRepo) GetByID(_ context.Context, _ string) (*models.Organization, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Return a copy so the caller's ValidateExecutionProviders/mutation can't
+	// alias the fake's stored state.
+	cp := *f.org
+	return &cp, nil
+}
+
+func (f *fakeOrgExecutionProvidersRepo) CompareAndSwapDefaultExecutionProviders(_ context.Context, _ string, oldVal, newVal json.RawMessage) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.conflictOnce > 0 {
+		f.conflictOnce--
+		return false, nil
+	}
+	if string(f.org.DefaultExecutionProviders) != string(oldVal) {
+		return false, nil
+	}
+	f.org.DefaultExecutionProviders = newVal
+	f.swapResults = append(f.swapResults, newVal)
+	return true, nil
+}
+
+func TestCredentialPoolService_Create_AutoEnablesGlobalRouting(t *testing.T) {
+	svc, mock, encryptedKey, cleanup := newCredentialPoolServiceForTest(t, "plain-key")
+	defer cleanup()
+
+	orgs := &fakeOrgExecutionProvidersRepo{org: &models.Organization{ID: "org-1", DefaultExecutionProviders: json.RawMessage(`[]`)}}
+	svc.WithOrgs(orgs)
+
+	expectCreateCredential(mock, "cred-1", "openai", encryptedKey)
+
+	if _, err := svc.Create(context.Background(), "org-1", models.CreateProviderCredentialInput{
+		Provider: "OPENAI",
+		APIKey:   "plain-key",
+	}); err != nil {
+		t.Fatalf("create credential failed: %v", err)
+	}
+
+	if len(orgs.swapResults) != 1 {
+		t.Fatalf("expected exactly 1 successful compare-and-swap, got %d", len(orgs.swapResults))
+	}
+	providers, err := models.ValidateExecutionProviders(orgs.swapResults[0])
+	if err != nil {
+		t.Fatalf("invalid persisted providers: %v", err)
+	}
+	found := false
+	for _, p := range providers {
+		if p.Type == "api" && p.Ref == "openai" {
+			if !p.Enabled {
+				t.Errorf("expected openai row enabled, got %+v", p)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an openai row in persisted providers, got %+v", providers)
+	}
+}
+
+func TestCredentialPoolService_Create_NoOrgsWiredSkipsAutoEnable(t *testing.T) {
+	svc, mock, encryptedKey, cleanup := newCredentialPoolServiceForTest(t, "plain-key")
+	defer cleanup()
+
+	expectCreateCredential(mock, "cred-1", "openai", encryptedKey)
+
+	if _, err := svc.Create(context.Background(), "org-1", models.CreateProviderCredentialInput{
+		Provider: "OPENAI",
+		APIKey:   "plain-key",
+	}); err != nil {
+		t.Fatalf("create credential failed: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
 }
 
 func TestCredentialPoolService_TestConnectionCallsProviderWithDecryptedKey(t *testing.T) {

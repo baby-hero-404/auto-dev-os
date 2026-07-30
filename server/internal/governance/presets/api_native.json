@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "pipeline": {
-    "extends": "api_native"
-  },
-  "policies": {}
-}

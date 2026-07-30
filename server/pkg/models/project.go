@@ -47,7 +47,7 @@ func ValidateReviewHarnessPolicy(policy string) error {
 // CLIEngineConfig configures the generic subprocess-CLI execution engine.
 type CLIEngineConfig struct {
 	Command          string            `json:"command"`                      // e.g. "claude"
-	Args             []string          `json:"args"`                         // e.g. ["-p", "--dangerously-skip-permissions", "{prompt_file}"]
+	Args             []string          `json:"args"`                         // e.g. ["-p", "--dangerously-skip-permissions", "Read and follow the complete task instructions in the file {prompt_file}, then carry them out."]
 	CredentialID     string            `json:"credential_id,omitempty"`      // Link to ProviderCredential for CLI auth state
 	Env              map[string]string `json:"env,omitempty"`                // masked as "***" in GET responses
 	TimeoutMinutes   int               `json:"timeout_minutes"`              // default 30, max 120
@@ -76,6 +76,79 @@ type ExecutionProviderConfig struct {
 	Priority     int              `json:"priority"`
 	Enabled      bool             `json:"enabled"`
 	CLIConfig    *CLIEngineConfig `json:"cli_config,omitempty"` // only when ref=="custom"
+}
+
+// DefaultExecutionProviderRows returns the fixed 7-row scaffold (type, ref,
+// priority) shown in the Execution Providers / Global Routing UI, all
+// disabled. Mirrors web/src/components/projects/execution-providers-list.tsx's
+// ROWS/defaultExecutionProviders() — the two must stay in the same order.
+func DefaultExecutionProviderRows() []ExecutionProviderConfig {
+	rows := []struct{ Type, Ref string }{
+		{"cli", "claude_code"},
+		{"cli", "antigravity"},
+		{"cli", "openai_codex"},
+		{"cli", "custom"},
+		{"api", "anthropic"},
+		{"api", "openai"},
+		{"api", "gemini"},
+	}
+	out := make([]ExecutionProviderConfig, len(rows))
+	for i, r := range rows {
+		out[i] = ExecutionProviderConfig{Type: r.Type, Ref: r.Ref, Priority: i, Enabled: false}
+	}
+	return out
+}
+
+// executionProviderRowForCredential maps a ProviderCredential.Provider value
+// to the (type, ref) row it auto-enables, or ok=false if the provider isn't
+// one of the well-known rows. "custom" CLI credentials are deliberately
+// excluded: that row requires a hand-configured command/args (see
+// ValidateExecutionProviders), which cannot be safely auto-populated from a
+// credential alone.
+func executionProviderRowForCredential(credentialProvider string) (rowType, rowRef string, ok bool) {
+	switch credentialProvider {
+	case "anthropic":
+		return "api", "anthropic", true
+	case "openai":
+		return "api", "openai", true
+	case "gemini":
+		return "api", "gemini", true
+	case "cli:claude":
+		return "cli", "claude_code", true
+	case "cli:codex":
+		return "cli", "openai_codex", true
+	case "cli:antigravity":
+		return "cli", "antigravity", true
+	default:
+		return "", "", false
+	}
+}
+
+// AutoEnableExecutionProviderRow enables the Execution Providers row matching
+// credentialProvider within list, scaffolding the full fixed row set first if
+// list is empty — so the very first credential an org ever adds auto-enables
+// its row instead of requiring the Global Routing UI to be saved once first.
+// Priority is never changed, only Enabled flips to true. Returns the
+// (possibly unchanged) list and whether it actually changed, so callers can
+// skip a no-op persist.
+func AutoEnableExecutionProviderRow(list []ExecutionProviderConfig, credentialProvider string) ([]ExecutionProviderConfig, bool) {
+	rowType, rowRef, ok := executionProviderRowForCredential(credentialProvider)
+	if !ok {
+		return list, false
+	}
+	if len(list) == 0 {
+		list = DefaultExecutionProviderRows()
+	}
+	for i := range list {
+		if list[i].Type == rowType && list[i].Ref == rowRef {
+			if list[i].Enabled {
+				return list, false
+			}
+			list[i].Enabled = true
+			return list, true
+		}
+	}
+	return append(list, ExecutionProviderConfig{Type: rowType, Ref: rowRef, Priority: len(list), Enabled: true}), true
 }
 
 var validExecutionProviderTypes = map[string]bool{"api": true, "cli": true}
@@ -117,6 +190,22 @@ func ValidateExecutionProviders(raw json.RawMessage) ([]ExecutionProviderConfig,
 		}
 	}
 	return list, nil
+}
+
+// HasEnabledProvider reports whether any row in providers is enabled.
+// "Configured" for precedence purposes (execution_router.go,
+// TaskService.validateTaskEngineOverride) means at least one row is
+// enabled, not merely that the list is non-empty — the Execution Providers
+// UI always persists the full set of known provider rows on every save
+// (each defaulting to enabled:false), so a project's ExecutionProviders is
+// essentially never byte-empty once its settings have been saved even once.
+func HasEnabledProvider(providers []ExecutionProviderConfig) bool {
+	for _, p := range providers {
+		if p.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 // MaskedEnv returns a copy of the config with env values redacted, preserving keys.

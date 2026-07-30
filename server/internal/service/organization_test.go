@@ -31,3 +31,32 @@ func TestOrganizationService_Create_NilRepo(t *testing.T) {
 	}()
 	_, _ = svc.Create(context.Background(), models.CreateOrganizationInput{Name: "valid-org"})
 }
+
+func TestOrganizationService_Update_InvalidDefaultExecutionProviders(t *testing.T) {
+	svc := NewOrganizationService(nil)
+
+	_, err := svc.Update(context.Background(), "org-1", models.UpdateOrganizationInput{
+		DefaultExecutionProviders: []byte(`[{"type":"bogus","ref":"x"}]`),
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid default_execution_providers")
+	}
+	if !isValidationErr(err) {
+		t.Errorf("expected validation error, got: %v", err)
+	}
+}
+
+func TestOrganizationService_Update_EmptyDefaultExecutionProvidersIsNoop(t *testing.T) {
+	// Validation must pass through an absent/empty field without reaching the
+	// repo call with something it can't handle — nil repo panicking here
+	// (same technique as TestOrganizationService_Create_NilRepo) proves
+	// validation didn't reject it and let execution continue to s.repo.Update.
+	svc := NewOrganizationService(nil)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic reaching the nil repo, meaning validation passed through")
+		}
+	}()
+	_, _ = svc.Update(context.Background(), "org-1", models.UpdateOrganizationInput{})
+}

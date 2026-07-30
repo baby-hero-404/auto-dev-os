@@ -32,10 +32,37 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
 	localPath := sandbox.WorkspacePath(m.WorkspaceRoot, task.ID)
+	ws, err := m.LoadTaskWorkspace(ctx, task)
 	if task.RepositoryID == nil {
+		// RepositoryID is an optional CreateTaskInput field (see
+		// TaskService.Create) — a task can legitimately have a repo checked
+		// out (single-repo project) without one ever being assigned. Falling
+		// straight back to localPath here made every CLI-mode step (cwd,
+		// docs/openspecs read-back) operate on the bare task workspace root
+		// instead of the actual repo checkout, silently diverging from
+		// where the CLI agent itself resolves and writes files (it explores
+		// and finds the real repo regardless), which is what produced
+		// "missing required spec file(s)" even though the files existed on
+		// disk. Only resolve automatically when there's exactly one checked
+		// -out repo; with more than one, resolveContextRepoPaths' prefix-
+		// disambiguation shows this function has no way to pick one, so keep
+		// the existing bare-localPath behavior for that ambiguous case.
+		if err == nil && ws != nil {
+			var onlyRepo *models.RepoWorkspace
+			count := 0
+			for i := range ws.Repos {
+				if ws.Repos[i].Paths.Main == "" {
+					continue
+				}
+				count++
+				onlyRepo = &ws.Repos[i]
+			}
+			if count == 1 {
+				return filepath.Join(ws.Root, onlyRepo.Paths.Main), nil
+			}
+		}
 		return localPath, nil
 	}
-	ws, err := m.LoadTaskWorkspace(ctx, task)
 	if err == nil && ws != nil {
 		for _, r := range ws.Repos {
 			if r.RepoID == *task.RepositoryID {

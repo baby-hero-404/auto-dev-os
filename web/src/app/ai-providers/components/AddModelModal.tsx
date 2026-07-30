@@ -40,7 +40,7 @@ export function AddModelModal({
       onMouseDown={onClose}
     >
       <div
-        className="glass-panel animate-modal-in w-full max-w-sm rounded-lg p-5 shadow-2xl"
+        className="glass-panel animate-modal-in w-full max-w-lg rounded-xl p-6 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between gap-4">

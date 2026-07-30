@@ -4,15 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 )
-
-var goCompilerErrorRegex = regexp.MustCompile(`^([^:\s]+):(\d+):(?:\d+:)?\s*(.*)$`)
 
 // RunBuildTool implements tool.Tool to run build command and parse errors.
 type RunBuildTool struct {
@@ -69,28 +64,7 @@ func (t *RunBuildTool) Execute(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, fmt.Errorf("failed to run build: %w", err)
 	}
 
-	var diagnostics []tool.Diagnostic
-
-	// Parse stdout and stderr for compiler errors
-	outputLines := strings.Split(res.Stdout+"\n"+res.Stderr, "\n")
-	for _, line := range outputLines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		matches := goCompilerErrorRegex.FindStringSubmatch(line)
-		if len(matches) == 4 {
-			file := matches[1]
-			lineNum, _ := strconv.Atoi(matches[2])
-			message := matches[3]
-			diagnostics = append(diagnostics, tool.Diagnostic{
-				Severity: "error",
-				File:     file,
-				Line:     lineNum,
-				Message:  message,
-			})
-		}
-	}
+	diagnostics := tool.ParseGoBuildOutput(res.Stdout, res.Stderr)
 
 	if res.ExitCode != 0 && len(diagnostics) == 0 {
 		diagnostics = append(diagnostics, tool.Diagnostic{

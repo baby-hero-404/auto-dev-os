@@ -42,7 +42,7 @@ export function CLISpecReviewControls({ taskID, token, onReviewed, setError }: C
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-3.5 sm:flex-row sm:items-stretch border-t border-amber-500/15 pt-4 text-slate-800 dark:text-slate-100">
+    <div className="mt-3 flex flex-col gap-3.5 sm:flex-row sm:items-stretch border-t border-amber-500/15 pt-4 text-foreground">
       <div className="flex-1 flex flex-col justify-between rounded-xl border border-amber-500/10 bg-amber-500/5 p-4 shadow-sm">
         <div className="mb-2">
           <h4 className="text-xs font-bold text-amber-800 dark:text-amber-400">Approve Spec</h4>

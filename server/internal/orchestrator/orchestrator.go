@@ -42,6 +42,7 @@ type Orchestrator struct {
 	artifacts           ArtifactRepository
 	repositories        RepositoryRepository
 	projects            ProjectRepository
+	orgs                OrganizationRepository
 	sandboxGit          gitops.SandboxGitClient
 	workspaceRoot       string
 	dataRoot            string
@@ -69,6 +70,7 @@ type Orchestrator struct {
 	credentials         engine.CredentialGetter
 	credentialPool      CredentialAvailability
 	cooldownSetter      CooldownSetter
+	credStatusSetter    CredentialStatusSetter
 }
 
 func (o *Orchestrator) wake() {
@@ -156,6 +158,16 @@ func WithCooldownSetter(setter CooldownSetter) Option {
 	}
 }
 
+// WithCredentialStatusSetter wires the credential pool used to mark a CLI
+// credential as needing re-login when RunCodeStep's output matches a known
+// "session/token invalid" signature (see engine.CodeStepResult.AuthFailed,
+// cli_auth_failure.go).
+func WithCredentialStatusSetter(setter CredentialStatusSetter) Option {
+	return func(o *Orchestrator) {
+		o.credStatusSetter = setter
+	}
+}
+
 func WithArtifactRepository(repo ArtifactRepository) Option {
 	return func(o *Orchestrator) {
 		o.artifacts = repo
@@ -171,6 +183,12 @@ func WithRepositoryRepository(repo RepositoryRepository) Option {
 func WithProjectRepository(repo ProjectRepository) Option {
 	return func(o *Orchestrator) {
 		o.projects = repo
+	}
+}
+
+func WithOrganizationRepository(repo OrganizationRepository) Option {
+	return func(o *Orchestrator) {
+		o.orgs = repo
 	}
 }
 

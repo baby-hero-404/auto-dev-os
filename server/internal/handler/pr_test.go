@@ -164,10 +164,16 @@ func (m *mockTaskSvc) Update(ctx context.Context, id string, input models.Update
 type mockAuditSvc struct {
 	AuditService
 	recordedActions []string
+	recordedLogs    []models.AuditLog
 }
 
 func (m *mockAuditSvc) RecordAction(ctx context.Context, action, resource, resourceID string, opts ...service.AuditOption) {
 	m.recordedActions = append(m.recordedActions, action)
+	log := models.AuditLog{Action: action, EntityType: resource, EntityID: resourceID}
+	for _, opt := range opts {
+		opt(&log)
+	}
+	m.recordedLogs = append(m.recordedLogs, log)
 }
 
 func TestPRHandler_Reject_TriggersRepair(t *testing.T) {
@@ -223,6 +229,13 @@ func TestPRHandler_Reject_TriggersRepair(t *testing.T) {
 	}
 	if !foundRejectAction {
 		t.Errorf("expected audit action %s, got %v", models.AuditActionPRRejected, auditSvc.recordedActions)
+	}
+
+	// 2b. Verify the audit log captured the requester's IP address (was
+	// silently always empty before — the audit UI has an IP column that
+	// showed nothing for every entry).
+	if len(auditSvc.recordedLogs) == 0 || auditSvc.recordedLogs[len(auditSvc.recordedLogs)-1].IPAddress == "" {
+		t.Errorf("expected the recorded audit log to have a non-empty IPAddress, got %+v", auditSvc.recordedLogs)
 	}
 
 	// 3. Verify checkpoints for review, fix, test, and pr were deleted

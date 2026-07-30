@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,7 +49,7 @@ func newCLIEngineRunner(o *Orchestrator, cfg *models.CLIEngineConfig, orgID, cre
 	return &cliEngineRunner{o: o, cfg: cfg, orgID: orgID, credID: credID, eng: engine.NewCLIEngine(o.runtime, o.credentials)}
 }
 
-func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (engine.CodeStepRequest, string) {
+func (r *cliEngineRunner) buildRequest(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (engine.CodeStepRequest, string, error) {
 	r.o.initRepoutil()
 
 	agentRole := ""
@@ -59,7 +60,20 @@ func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, j
 	worktreeSuffix := worktreeSuffixForRole(resolvedRole)
 
 	hostWorkspace := sandbox.WorkspacePath(r.o.workspaceRoot, task.ID)
-	containerWorkDir := r.o.containerPathForHostPath(task, hostWorkspace, worktreeSuffix)
+
+	// The CLI must run from the actual repo checkout (or its role worktree),
+	// not the bare task workspace root: hostWorkspace only bind-mounts to
+	// /workspace, but the repo itself lives at a subpath under it
+	// (code/repos/<name>/main, see repoutil.RepoHostPath). Passing
+	// hostWorkspace straight into containerPathForHostPath used to always
+	// collapse to "/workspace" (rel(localPath, hostWorkspace) == "."),
+	// leaving the CLI cwd'd into a directory with no git repo in it.
+	repoHostPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task)
+	if err != nil {
+		return engine.CodeStepRequest{}, "", fmt.Errorf("cli engine: resolve repo path: %w", err)
+	}
+	worktreeHostPath := r.o.repoutil.HostWorktreePath(task, repoHostPath, worktreeSuffix)
+	containerWorkDir := r.o.containerPathForHostPath(task, worktreeHostPath, "")
 
 	networkMode := sandbox.NetworkModeNone
 	if !r.o.disableNetworking {
@@ -81,7 +95,7 @@ func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, j
 	if r.cfg != nil && r.cfg.TimeoutMinutes > 0 {
 		req.Timeout = time.Duration(r.cfg.TimeoutMinutes) * time.Minute
 	}
-	return req, worktreeSuffix
+	return req, worktreeSuffix, nil
 }
 
 // RunLLMStep implements steps.LLMRunner. Its return shape mirrors the
@@ -91,7 +105,10 @@ func (r *cliEngineRunner) buildRequest(task *models.Task, agent *models.Agent, j
 // targeted-test verification gate then applies regardless of which engine
 // produced the edits.
 func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string) (map[string]any, error) {
-	req, worktreeSuffix := r.buildRequest(task, agent, jobID, stepID, instruction)
+	req, worktreeSuffix, err := r.buildRequest(ctx, task, agent, jobID, stepID, instruction)
+	if err != nil {
+		return nil, fmt.Errorf("cli engine: %w", err)
+	}
 
 	r.once.Do(func() {
 		warning, err := r.eng.Preflight(ctx, req)
@@ -106,6 +123,7 @@ func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, age
 
 	res, err := r.eng.RunCodeStep(ctx, req)
 	if err != nil {
+		r.o.log(ctx, task.ID, &jobID, "error", fmt.Sprintf("%s: cli engine run failed before producing a result: %v", stepID, err))
 		return nil, fmt.Errorf("cli engine: %w", err)
 	}
 
@@ -118,11 +136,22 @@ func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, age
 		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cliCooldownDuration))
 	}
 
-	r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf("%s: cli engine finished (success=%v)", stepID, res.Success))
-	if res.Output != "" {
-		r.o.initCheckpoints()
-		_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", res.Output)
+	// Auth-failure write-side: see cli_spec_step.go's mirrored block.
+	if res.AuthFailed && r.credID != "" && r.o.credStatusSetter != nil {
+		_ = r.o.credStatusSetter.MarkNeedsReauth(ctx, r.credID)
 	}
+
+	r.o.log(ctx, task.ID, &jobID, "info", fmt.Sprintf(
+		"%s: cli engine finished (success=%v, exit_code=%d, output_bytes=%d)",
+		stepID, res.Success, res.ExitCode, len(res.Output),
+	))
+
+	r.o.initCheckpoints()
+	artifactBody := res.Output
+	if artifactBody == "" {
+		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
+	}
+	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
 
 	if !res.Success {
 		if res.Error != "" {
@@ -166,6 +195,16 @@ func (o *Orchestrator) resolveCLIEngineRunner(ctx context.Context, task *models.
 	resolved, err := o.ResolveExecutionProvider(ctx, task, project)
 	if err != nil || resolved.Type != "cli" {
 		return nil
+	}
+	if o.workflows != nil {
+		cmdStr := resolved.CLIConfig.Command
+		if len(resolved.CLIConfig.Args) > 0 {
+			cmdStr += " " + strings.Join(resolved.CLIConfig.Args, " ")
+		}
+		o.log(ctx, task.ID, nil, "info", fmt.Sprintf(
+			"cli engine runner: execution provider resolved (ref=%q, credential_id=%q, cmd=%q)",
+			resolved.Ref, resolved.CredentialID, cmdStr,
+		))
 	}
 	return newCLIEngineRunner(o, resolved.CLIConfig, project.OrgID, resolved.CredentialID)
 }

@@ -36,7 +36,7 @@ func (r *AttestationRepo) Create(ctx context.Context, input models.CreateAttesta
 func (r *AttestationRepo) GetByCommitHash(ctx context.Context, commitHash string) (*models.Attestation, error) {
 	var a models.Attestation
 	if err := r.db.WithContext(ctx).Where("commit_hash = ?", commitHash).First(&a).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get attestation by commit hash: %w", mapError(err))
 	}
 	return &a, nil
 }
@@ -66,7 +66,7 @@ func (r *AttestationKeyRepo) Create(ctx context.Context, key *models.Attestation
 func (r *AttestationKeyRepo) GetActive(ctx context.Context) (*models.AttestationKey, error) {
 	var k models.AttestationKey
 	if err := r.db.WithContext(ctx).Where("status = ?", models.AttestationKeyActive).Order("created_at DESC").First(&k).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get active attestation key: %w", mapError(err))
 	}
 	return &k, nil
 }
@@ -74,7 +74,7 @@ func (r *AttestationKeyRepo) GetActive(ctx context.Context) (*models.Attestation
 func (r *AttestationKeyRepo) GetByKeyID(ctx context.Context, keyID string) (*models.AttestationKey, error) {
 	var k models.AttestationKey
 	if err := r.db.WithContext(ctx).Where("key_id = ?", keyID).First(&k).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get attestation key by id: %w", mapError(err))
 	}
 	return &k, nil
 }

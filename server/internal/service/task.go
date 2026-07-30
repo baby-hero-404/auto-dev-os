@@ -17,10 +17,11 @@ type TaskService struct {
 	repo        *repository.TaskRepo
 	projectRepo *repository.ProjectRepo
 	repoRepo    *repository.RepositoryRepo
+	orgRepo     *repository.OrganizationRepo
 }
 
-func NewTaskService(repo *repository.TaskRepo, projectRepo *repository.ProjectRepo, repoRepo *repository.RepositoryRepo) *TaskService {
-	return &TaskService{repo: repo, projectRepo: projectRepo, repoRepo: repoRepo}
+func NewTaskService(repo *repository.TaskRepo, projectRepo *repository.ProjectRepo, repoRepo *repository.RepositoryRepo, orgRepo *repository.OrganizationRepo) *TaskService {
+	return &TaskService{repo: repo, projectRepo: projectRepo, repoRepo: repoRepo, orgRepo: orgRepo}
 }
 
 func (s *TaskService) Create(ctx context.Context, projectID string, input models.CreateTaskInput) (*models.Task, error) {
@@ -98,6 +99,45 @@ func (s *TaskService) validateTaskEngineOverride(ctx context.Context, projectID,
 	project, err := s.projectRepo.GetByID(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("get project: %w", err)
+	}
+	// A project can satisfy a cli override either through the newer
+	// ExecutionProviders list or the legacy CLIEngineConfig — check the
+	// former first (mirroring legacyResolveExecutionProvider's "empty
+	// providers -> use legacy field" fallback), otherwise a project that
+	// only adopted ExecutionProviders gets rejected here even though the
+	// Router would resolve it fine at Task run time.
+	providers, err := models.ValidateExecutionProviders(project.ExecutionProviders)
+	if err != nil {
+		return ErrValidation(err.Error())
+	}
+	// See models.HasEnabledProvider's doc comment: "configured" means at
+	// least one row enabled, not merely a non-empty list — must match
+	// ResolveExecutionProvider's gate exactly, or this validation rejects
+	// overrides the orchestrator would actually satisfy at Task run time.
+	if models.HasEnabledProvider(providers) {
+		for _, p := range providers {
+			if p.Type == "cli" && p.Enabled {
+				return nil
+			}
+		}
+		return ErrValidation("task execution_engine cannot be set to \"cli\": project has no enabled cli execution provider")
+	}
+	// Same precedence as the orchestrator's ResolveExecutionProvider
+	// (docs/openspecs/global-execution-providers): a project already
+	// explicitly on the legacy cli path is validated against its own
+	// CLIEngineConfig only, never the org default — so a project
+	// deliberately configured this way behaves identically whether or not
+	// an org default happens to exist.
+	if project.ExecutionEngine != models.ExecutionEngineCLI && s.orgRepo != nil {
+		if org, err := s.orgRepo.GetByID(ctx, project.OrgID); err == nil {
+			if orgProviders, err := models.ValidateExecutionProviders(org.DefaultExecutionProviders); err == nil {
+				for _, p := range orgProviders {
+					if p.Type == "cli" && p.Enabled {
+						return nil
+					}
+				}
+			}
+		}
 	}
 	var cfg models.CLIEngineConfig
 	if len(project.CLIEngineConfig) > 0 {

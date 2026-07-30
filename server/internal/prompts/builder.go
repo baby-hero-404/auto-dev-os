@@ -369,50 +369,6 @@ func (a *PromptAssembler) loadAllSkills(ctx context.Context, task models.Task) (
 		}
 	}
 
-	// 4. Query a.skills database-backed list to support unit tests and database lister
-	if a.skills != nil {
-		if dbSkills, err := a.skills.List(ctx); err == nil {
-			for _, s := range dbSkills {
-				if seenNames[strings.ToLower(s.Name)] {
-					continue
-				}
-				var allowedTools []string
-				if len(s.Schema) > 0 && json.Valid(s.Schema) {
-					var schema map[string]any
-					if err := json.Unmarshal(s.Schema, &schema); err == nil {
-						for _, key := range []string{"tool", "tools", "default_tools", "allowed_tools"} {
-							if val, ok := schema[key]; ok {
-								switch v := val.(type) {
-								case string:
-									for _, t := range strings.Split(v, ",") {
-										allowedTools = append(allowedTools, strings.TrimSpace(t))
-									}
-								case []any:
-									for _, item := range v {
-										if name, ok := item.(string); ok {
-											allowedTools = append(allowedTools, strings.TrimSpace(name))
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-
-				ps := ParsedSkill{
-					ID:           s.Name,
-					Name:         s.Name,
-					Description:  s.Description,
-					AllowedTools: allowedTools,
-					Content:      s.Description, // Fallback content
-					Source:       "database",
-				}
-				mergedSkills = append(mergedSkills, ps)
-				seenNames[strings.ToLower(ps.Name)] = true
-			}
-		}
-	}
-
 	return mergedSkills, nil
 }
 

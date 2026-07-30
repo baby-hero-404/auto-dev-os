@@ -98,6 +98,43 @@ func NewAIGateway(opts Options) *AIGateway {
 	}
 }
 
+// defaultBudgetOutputLimit is the output-token ceiling assumed for the
+// pre-call cost estimate when the caller didn't set MaxOutputTokens —
+// matches pkg/llm.Gateway's own default (router.go's defaultOutputLimit).
+const defaultBudgetOutputLimit = 2048
+
+// checkActualUsage re-checks the budget circuit breaker against a
+// successful response's real token counts/cost, mirroring
+// pkg/llm.Gateway.checkActualUsage. Checked once against the final
+// response, after the retry/cooldown machinery in attempt() has already
+// settled on it — not per-credential-attempt, so an interim failed attempt
+// with a different (possibly cheaper) model never blocks unrelated to the
+// response actually being returned.
+func (g *AIGateway) checkActualUsage(resp *llm.Response, opts llm.RouteOptions) error {
+	maxTokens, maxCostUSD := g.budgetLimits(opts)
+	meta := llm.MetadataForModel(resp.Provider, resp.Model)
+	cost := llm.EstimateCost(resp.PromptTokens, resp.OutputTokens, meta)
+	return llm.CheckActualUsage(resp, cost, maxTokens, opts.MaxOutputTokens, maxCostUSD)
+}
+
+// budgetLimits resolves the effective circuit-breaker limits: the org-wide
+// config default (LLM_CIRCUIT_MAX_TOKENS/LLM_CIRCUIT_MAX_COST_USD), unless
+// this call's RouteOptions override one or both — same override semantics
+// as pkg/llm.Gateway.checkBudget/checkActualUsage.
+func (g *AIGateway) budgetLimits(opts llm.RouteOptions) (maxTokens int, maxCostUSD float64) {
+	if g.cfg != nil {
+		maxTokens = g.cfg.LLM.CircuitMaxTokens
+		maxCostUSD = g.cfg.LLM.CircuitMaxCostUSD
+	}
+	if opts.MaxInputTokens > 0 {
+		maxTokens = opts.MaxInputTokens
+	}
+	if opts.MaxCostUSD > 0 {
+		maxCostUSD = opts.MaxCostUSD
+	}
+	return maxTokens, maxCostUSD
+}
+
 func (g *AIGateway) Name() string { return "ai_gateway" }
 
 func (g *AIGateway) Chat(ctx context.Context, messages []llm.Message) (resp *llm.Response, err error) {
@@ -118,6 +155,24 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 	}
 	if len(entries) == 0 {
 		err = fmt.Errorf("no active models configured for organization %s and level %s", opts.OrgID, getLevelGroup(opts))
+		return nil, err
+	}
+
+	// Budget circuit breaker (REQ-001, llm-gateway-budget-and-consolidation):
+	// this is the primary org-scoped call path, so this is the only place
+	// LLM_CIRCUIT_MAX_TOKENS/LLM_CIRCUIT_MAX_COST_USD actually protect real
+	// traffic — pkg/llm.Gateway's equivalent check only guards the rare
+	// org-less chatFallback path below. Estimated against the first
+	// candidate's metadata, same approximation pkg/llm.Gateway uses (the
+	// exact provider/model isn't picked yet at this point).
+	maxTokens, maxCostUSD := g.budgetLimits(opts)
+	inputTokens := llm.EstimateMessageTokens(messages)
+	outputLimit := opts.MaxOutputTokens
+	if outputLimit == 0 {
+		outputLimit = defaultBudgetOutputLimit
+	}
+	meta := llm.MetadataForModel(entries[0].Provider, entries[0].Model)
+	if err := llm.CheckBudget(inputTokens, outputLimit, maxTokens, maxCostUSD, meta); err != nil {
 		return nil, err
 	}
 
@@ -261,6 +316,9 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 
 	if len(eligibleEntries) > 0 {
 		if resp, respErr := attempt(eligibleEntries); respErr == nil {
+			if budgetErr := g.checkActualUsage(resp, opts); budgetErr != nil {
+				return nil, budgetErr
+			}
 			return resp, nil
 		} else if errors.Is(respErr, context.Canceled) || errors.Is(respErr, context.DeadlineExceeded) {
 			err = respErr
@@ -274,6 +332,9 @@ func (g *AIGateway) ChatWithOptions(ctx context.Context, messages []llm.Message,
 	if len(excludedEntries) > 0 {
 		log.Printf("[AIGateway] Harness Independence fallback: forcing review using the original coder model (%s)", opts.ExcludeModelID)
 		if resp, respErr := attempt(excludedEntries); respErr == nil {
+			if budgetErr := g.checkActualUsage(resp, opts); budgetErr != nil {
+				return nil, budgetErr
+			}
 			if trace := llm.RouteTraceFromCtx(ctx); trace != nil {
 				trace.SelfReviewFallback = true
 				trace.ExcludedModel = opts.ExcludeModelID

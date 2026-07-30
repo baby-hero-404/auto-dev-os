@@ -333,11 +333,11 @@ export function getSemanticStatusColor(status: string): { bg: string; text: stri
     };
   }
   return {
-    bg: "bg-slate-500/10",
+    bg: "bg-surface",
     text: "text-content-muted",
     border: "border-stroke",
     ring: "ring-transparent",
-    dot: "bg-slate-400"
+    dot: "bg-content-muted"
   };
 }
 
@@ -366,6 +366,9 @@ interface TaskDetailContextType {
   task: Task | undefined;
   workflow: WorkflowStatus | undefined;
   logs: RealtimeLog[];
+  droppedLogCount: number;
+  reloadFullLogs: () => Promise<void>;
+  isReloadingLogs: boolean;
   submittingPR: boolean;
   error: string | null;
   setError: (err: string) => void;
@@ -473,6 +476,9 @@ export function TaskDetailProvider({
     mutateWorkflow,
     isLoading: isTaskLoading,
     workflowError,
+    droppedLogCount,
+    reloadFullLogs,
+    isReloadingLogs,
   } = useTaskWorkflow(taskID);
 
   // Fetch checkpoint artifacts (diffs, cli_output, ...) across the task's
@@ -779,6 +785,9 @@ export function TaskDetailProvider({
         task,
         workflow,
         logs,
+        droppedLogCount,
+        reloadFullLogs,
+        isReloadingLogs,
         error,
         setError,
         submittingPR,

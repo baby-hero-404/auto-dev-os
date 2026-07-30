@@ -59,7 +59,9 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 		return s.markSyncFailed(ctx, id, fmt.Errorf("read git manifest: %w", err))
 	}
 
-	var gitReg skillRegistry
+	var gitReg struct {
+		Skills []registrySkill `json:"skills"`
+	}
 	if err := json.Unmarshal(raw, &gitReg); err != nil {
 		return s.markSyncFailed(ctx, id, fmt.Errorf("unmarshal git manifest: %w", err))
 	}
@@ -74,36 +76,31 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 		customNames[strings.ToLower(sk.Name)] = true
 	}
 
-	for cat, skills := range gitReg.Skills {
-		if cat == "custom" {
+	var mergedSkills []registrySkill
+	for _, sk := range gitReg.Skills {
+		if customNames[strings.ToLower(sk.Name)] {
 			continue
 		}
-		var mergedSkills []registrySkill
-		for _, sk := range skills {
-			if customNames[strings.ToLower(sk.Name)] {
-				continue
-			}
 
-			mappedPath := s.skillPaths.GitSkillPathRelative(repoName, sk.Path)
-			schemaMap := map[string]any{
-				"source":   "git",
-				"repo":     repoName,
-				"category": cat,
-				"registry": sk.ID,
-				"path":     mappedPath,
-			}
-			schemaRaw, _ := json.Marshal(schemaMap)
-
-			mergedSkills = append(mergedSkills, registrySkill{
-				ID:          sk.ID,
-				Name:        sk.Name,
-				Description: sk.Description,
-				Path:        mappedPath,
-				Schema:      schemaRaw,
-			})
+		mappedPath := s.skillPaths.GitSkillPathRelative(repoName, sk.Path)
+		schemaMap := map[string]any{
+			"source":   "git",
+			"repo":     repoName,
+			"category": repoName,
+			"registry": sk.ID,
+			"path":     mappedPath,
 		}
-		reg.Skills[cat] = mergedSkills
+		schemaRaw, _ := json.Marshal(schemaMap)
+
+		mergedSkills = append(mergedSkills, registrySkill{
+			ID:          sk.ID,
+			Name:        sk.Name,
+			Description: sk.Description,
+			Path:        mappedPath,
+			Schema:      schemaRaw,
+		})
 	}
+	reg.Skills[repoName] = mergedSkills
 
 	if err := s.saveRegistry(reg); err != nil {
 		return s.markSyncFailed(ctx, id, fmt.Errorf("save merged registry: %w", err))

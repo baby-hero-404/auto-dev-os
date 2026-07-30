@@ -41,6 +41,13 @@ type ProviderModelFilter struct {
 	LevelGroup *string `json:"level_group"`
 }
 
+// ComboEntry is one provider/model candidate the AI Gateway may route a
+// call to, in the order ProviderModelRepo already returned them (query is
+// `ORDER BY priority ASC, created_at DESC` — see internal/repository/
+// provider_model.go). Priority is carried here for observability/debugging
+// only; the gateway itself never re-reads or re-sorts by it, so it must
+// not be treated as a routing-relevant field on this struct — the actual
+// priority ordering lives entirely in the SQL query.
 type ComboEntry struct {
 	Provider   string `json:"provider"`
 	Model      string `json:"model"`

@@ -161,9 +161,6 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			if event.Status == workflow.StepStatusFailed {
 				updates["last_error"] = event.Error
 			}
-			if _, err := o.workflows.UpdateJob(ctx, job.ID, updates); err != nil {
-				return err
-			}
 			state := map[string]any{"status": event.Status}
 			if event.Output != nil {
 				state["output"] = event.Output
@@ -178,6 +175,11 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				if json.Unmarshal(task.Analysis, &analysis) == nil && analysis.SpecHash != "" {
 					state["spec_hash"] = analysis.SpecHash
 				}
+			}
+
+			// Expose attempt counter to frontend UI for grouping artifacts correctly
+			if attempt, ok := ctx.Value("workflow_attempt").(int); ok {
+				state["attempt"] = attempt
 			}
 
 			isCodeStep := strings.HasPrefix(event.StepID, workflow.StepCodeBackend) ||
@@ -211,7 +213,17 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				}
 			}
 
+			// Persist the checkpoint before advancing job.Step: if the process
+			// crashes between the two writes, a job.Step that lags behind an
+			// already-durable checkpoint is the safe failure mode (resume
+			// treats checkpoints as the source of truth for "completed"),
+			// whereas the reverse order could leave job.Step reporting a step
+			// as done with no checkpoint to back it up, risking re-execution
+			// of side effects like git checkpoint commits or PR creation.
 			if err := o.checkpoint(ctx, task.ID, &job.ID, event.StepID, state); err != nil {
+				return err
+			}
+			if _, err := o.workflows.UpdateJob(ctx, job.ID, updates); err != nil {
 				return err
 			}
 			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("step %s %s", event.StepID, event.Status))
@@ -298,15 +310,15 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	runners := o.stepRunners(task, agent, job.ID, job.Step)
 	var def workflow.Definition
 
-	var projectEngine string
+	var project *models.Project
 	includeCrossReview := false
 	if o.projects != nil {
 		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil {
-			projectEngine = p.ExecutionEngine
+			project = p
 			includeCrossReview = p.ReviewHarnessPolicy != models.ReviewHarnessSame
 		}
 	}
-	if cliengine.ResolveEngine(task.ExecutionEngine, projectEngine) == models.ExecutionEngineCLI {
+	if o.shouldUseCLISpecFirstWorkflow(ctx, task, project) {
 		def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
 	}
 

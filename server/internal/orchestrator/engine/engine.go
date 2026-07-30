@@ -56,6 +56,12 @@ type CodeStepRequest struct {
 	// anything the caller needs to read back (e.g. an analysis report) must
 	// be captured before that cleanup, not read from the host afterward.
 	CaptureFiles []string
+
+	// ContextFiles maps a path relative to .autocode/context/ to its content.
+	// Written by RunCodeStep alongside prompt.md, before the CLI subprocess
+	// spawns; torn down by the same .autocode/ cleanup. Nil/empty means no
+	// context/ directory is created at all (identical to today's behavior).
+	ContextFiles map[string]string
 }
 
 // CodeStepResult is the outcome of running one coding step through an engine.
@@ -63,6 +69,17 @@ type CodeStepResult struct {
 	Success bool
 	Output  string
 	Error   string
+
+	// ExitCode is the subprocess's exit status. Always populated when the
+	// sandbox run itself succeeded (i.e. Run didn't return an error), even
+	// when Success is true, so callers can log it unconditionally.
+	ExitCode int
+
+	// Command is the fully-resolved, redacted invocation the CLI engine
+	// executed (command + args, placeholders substituted) — kept separate
+	// from Output so callers can log/persist it even when the subprocess
+	// produced no stdout/stderr at all.
+	Command string
 
 	// LoopKilled is true when the CLI engine terminated the subprocess early
 	// because its output was judged to be looping (see loopDetector).
@@ -76,9 +93,32 @@ type CodeStepResult struct {
 	// detection.
 	QuotaExceeded bool
 
+	// AuthFailed is true when the captured output matched a known
+	// "session/token invalid" signature for this CLI (see cli_auth_failure.go).
+	// The caller marks the linked credential as needing re-login (a new
+	// non-Active status) so SelectCredential stops auto-picking it until a
+	// human re-authenticates — mirrors QuotaExceeded's cooldown write-side but
+	// for a failure that won't self-resolve with time.
+	AuthFailed bool
+
 	// Files holds the content of paths requested via CaptureFiles that were
 	// present after the run (missing files are simply absent from the map).
 	Files map[string]string
+
+	// CredentialID is the resolved req.CLIConfig.CredentialID this run
+	// actually attempted to use (may be empty — a misconfiguration/resolution
+	// gap, not necessarily an error), surfaced so callers can log it
+	// alongside Command/ExitCode when tracing "which credential ran this".
+	CredentialID string
+
+	// CredentialFilesResolved is the number of files resolveCredentialFiles
+	// produced from the linked credential's payload (0 when CredentialID is
+	// empty, credential lookup failed loudly, or the saved payload itself was
+	// empty). A run with CredentialID set but CredentialFilesResolved==0
+	// means the linked credential exists but mounted nothing — the CLI then
+	// falls back to whatever host-session auto-mount (authDirs) is available,
+	// which is the "Not logged in" failure mode this field is meant to catch.
+	CredentialFilesResolved int
 }
 
 // ExecutionEngine abstracts over how a coding step actually gets executed.

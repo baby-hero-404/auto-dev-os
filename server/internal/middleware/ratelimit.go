@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 )
 
 // RateLimiter implements a per-key token bucket rate limiter.
@@ -85,7 +87,7 @@ func RateLimit(limiter *RateLimiter) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Use user ID from JWT claims if available, otherwise use remote IP.
 			key := r.RemoteAddr
-			if claims, ok := r.Context().Value(authClaimsKey).(*tokenClaims); ok && claims != nil {
+			if claims, ok := r.Context().Value(authClaimsKey).(*service.TokenClaims); ok && claims != nil {
 				key = claims.Subject
 			}
 			if !limiter.Allow(key) {

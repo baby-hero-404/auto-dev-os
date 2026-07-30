@@ -61,11 +61,34 @@ type CredentialPoolService struct {
 	audit            *AuditService
 	connectionTester credentialConnectionTester
 	seeder           providerModelSeeder
+	orgs             orgExecutionProvidersRepo
 	mu               sync.Mutex
 	rrCounters       map[string]int
 	modelCooldowns   map[string]cooldownCacheEntry
 	recoveryCounter  int64
 }
+
+// orgExecutionProvidersRepo is the narrow slice of *repository.OrganizationRepo
+// that Create needs to auto-enable a newly-added credential's row in Global
+// Routing (organization.default_execution_providers). Optional — nil unless
+// wired via WithOrgs, matching every other optional dependency on this
+// service (seeder, audit). CompareAndSwap (not GetByID+Update) is
+// deliberate: two credentials created back-to-back (e.g. an org adding both
+// an Anthropic key and a Claude CLI login within the same request burst)
+// would otherwise race — both read the same starting list, and whichever
+// Update lands second silently drops the first credential's auto-enable.
+type orgExecutionProvidersRepo interface {
+	GetByID(ctx context.Context, id string) (*models.Organization, error)
+	CompareAndSwapDefaultExecutionProviders(ctx context.Context, id string, oldVal, newVal json.RawMessage) (bool, error)
+}
+
+// autoEnableGlobalRoutingMaxAttempts bounds the compare-and-swap retry loop
+// in autoEnableGlobalRouting. Each retry only happens when a concurrent
+// writer won the race in between our read and write, so a handful of
+// attempts comfortably covers realistic contention (a few credentials
+// created within the same request burst) without risking a long stall if
+// something is persistently hammering the same org row.
+const autoEnableGlobalRoutingMaxAttempts = 5
 
 type credentialConnectionTester func(context.Context, models.ProviderCredential, string) error
 
@@ -87,6 +110,57 @@ func (s *CredentialPoolService) WithProviderModelSeeder(seeder providerModelSeed
 func (s *CredentialPoolService) WithAudit(audit *AuditService) *CredentialPoolService {
 	s.audit = audit
 	return s
+}
+
+func (s *CredentialPoolService) WithOrgs(orgs orgExecutionProvidersRepo) *CredentialPoolService {
+	s.orgs = orgs
+	return s
+}
+
+// autoEnableGlobalRouting enables provider's row in the org's Global Routing
+// default list after a credential for it is created (REQ: adding a key
+// should turn Global Routing "on" for that provider without a separate trip
+// to Organization Settings). Best-effort: any failure here must never fail
+// credential creation itself, only get logged.
+func (s *CredentialPoolService) autoEnableGlobalRouting(ctx context.Context, orgID, provider string) {
+	if s.orgs == nil {
+		return
+	}
+	for attempt := 0; attempt < autoEnableGlobalRoutingMaxAttempts; attempt++ {
+		org, err := s.orgs.GetByID(ctx, orgID)
+		if err != nil {
+			slog.Error("auto-enable global routing: load organization failed", "org_id", orgID, "error", err)
+			return
+		}
+		oldRaw := org.DefaultExecutionProviders
+		existing, err := models.ValidateExecutionProviders(oldRaw)
+		if err != nil {
+			slog.Error("auto-enable global routing: invalid default_execution_providers", "org_id", orgID, "error", err)
+			return
+		}
+		updated, changed := models.AutoEnableExecutionProviderRow(existing, provider)
+		if !changed {
+			return
+		}
+		newRaw, err := json.Marshal(updated)
+		if err != nil {
+			slog.Error("auto-enable global routing: marshal failed", "org_id", orgID, "error", err)
+			return
+		}
+		ok, err := s.orgs.CompareAndSwapDefaultExecutionProviders(ctx, orgID, oldRaw, newRaw)
+		if err != nil {
+			slog.Error("auto-enable global routing: persist failed", "org_id", orgID, "error", err)
+			return
+		}
+		if ok {
+			return
+		}
+		// Another writer changed default_execution_providers between our read
+		// and write (e.g. a second credential's own auto-enable, or an admin
+		// saving Global Routing concurrently) — re-read and recompute against
+		// the new value instead of clobbering it.
+	}
+	slog.Warn("auto-enable global routing: gave up after repeated compare-and-swap conflicts", "org_id", orgID, "provider", provider, "attempts", autoEnableGlobalRoutingMaxAttempts)
 }
 
 func (s *CredentialPoolService) withConnectionTester(tester credentialConnectionTester) *CredentialPoolService {
@@ -152,6 +226,7 @@ func (s *CredentialPoolService) Create(ctx context.Context, orgID string, input 
 	if s.seeder != nil {
 		s.seedDefaultModels(ctx, orgID, cred.Provider)
 	}
+	s.autoEnableGlobalRouting(ctx, orgID, cred.Provider)
 	resp := cred.ToResponse(suffix)
 	return &resp, nil
 }
@@ -320,7 +395,7 @@ func isAllowedProvider(provider string) bool {
 
 func isAllowedCredentialStatus(status string) bool {
 	switch status {
-	case models.ProviderCredentialStatusActive, models.ProviderCredentialStatusRateLimited, models.ProviderCredentialStatusDisabled:
+	case models.ProviderCredentialStatusActive, models.ProviderCredentialStatusRateLimited, models.ProviderCredentialStatusDisabled, models.ProviderCredentialStatusNeedsReauth:
 		return true
 	default:
 		return false
@@ -336,6 +411,30 @@ func keySuffix(key string) string {
 
 func (s *CredentialPoolService) GetRecoveryCount() int64 {
 	return atomic.LoadInt64(&s.recoveryCounter)
+}
+
+// UpdateCredentialPayload re-encrypts and persists an updated multi-file
+// credential payload (e.g. a CLI token refreshed on disk during a run),
+// reusing Update's existing encrypt-and-store path so it stays byte-
+// identical to how GetDecryptedCredential expects to decrypt it back.
+func (s *CredentialPoolService) UpdateCredentialPayload(ctx context.Context, orgID, id string, payload map[string]string) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal credential payload: %w", err)
+	}
+	payloadStr := string(raw)
+	_, err = s.Update(ctx, orgID, id, models.UpdateProviderCredentialInput{APIKey: &payloadStr})
+	return err
+}
+
+// MarkNeedsReauth flips a credential to ProviderCredentialStatusNeedsReauth,
+// excluding it from SelectCredential (like any non-Active status) until a
+// human re-authenticates it via the CLI auth flow. Called when a real CLI
+// run's output matched a known "session/token invalid" signature — mirrors
+// SetCooldown's write-side (id-only, no orgID) but for a failure that time
+// alone won't fix.
+func (s *CredentialPoolService) MarkNeedsReauth(ctx context.Context, id string) error {
+	return s.repo.MarkNeedsReauth(ctx, id)
 }
 
 func (s *CredentialPoolService) GetDecryptedCredential(ctx context.Context, orgID, id string) (string, map[string]string, error) {

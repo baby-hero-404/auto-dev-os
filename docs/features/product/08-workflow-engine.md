@@ -117,7 +117,7 @@ Step 12: Merge & Complete
 
 ## Engine Selection (API-native vs CLI)
 
-`BuildWorkflow` chọn DAG theo `execution_engine` đã resolve của task (§14 Execution Engine):
+`worker.go` (`shouldUseCLISpecFirstWorkflow`, delegate sang Execution Router) chọn DAG theo `execution_engine` đã resolve của task (§14 Execution Engine):
 - `api_native` (mặc định) → DAG 10 bước mô tả ở trên, không đổi.
 - `cli` → workflow definition thứ hai, `cli_spec_first`: `cli_analyze → cli_spec → cli_implement → cli_mr`. Vì CLI coding agent (Claude Code, Codex CLI…) đã tự có tool-loop/planning/self-review, server chỉ cần đảm bảo agent hiểu đúng project, có bản OpenSpec được duyệt làm hợp đồng, implement bám spec, và ra PR. Xem chi tiết tại §14.
 
@@ -143,7 +143,7 @@ Pipeline/policy của project không còn hoàn toàn hard-code. Hai JSON Schema
 - `docs/schemas/pipeline.schema.json` — steps, `dependsOn`, điều kiện bật/tắt node (vd skip `dor_check` cho hotfix), engine bindings.
 - `docs/schemas/policies.schema.json` — DoR criteria, review harness policy (§01/§09), routing matrix override (§01 Smart LLM Router), retry/cycle limits.
 
-Cột `projects.pipeline_config` (jsonb, nullable) lưu override per-project — `null` nghĩa là dùng built-in defaults (đúng hành vi hard-code mô tả ở tài liệu này). `BuildWorkflow` đọc config này để dựng DAG data-driven thay vì switch cứng; 2 definitions hiện có (`api_native`, `cli_spec_first`) trở thành 2 preset ship sẵn (`presets/api_native.json`, `presets/cli_spec_first.json`). Khi save config mới: validate schema + kiểm tra DAG hợp lệ (acyclic, steps tồn tại trong registry, `dependsOn` resolve được). UI: Project Settings có editor chọn preset hoặc sửa JSON trực tiếp (validate lỗi inline; chưa có visual DAG editor).
+Cột `projects.pipeline_config` (jsonb, nullable, `server/pkg/models/project.go`) đã tồn tại và được validate (`governance/validate.go`), nhưng **chưa được đọc để dựng DAG**: workflow selection hiện tại vẫn là switch cứng trong `worker.go` (`shouldUseCLISpecFirstWorkflow` → `workflow.CLISpecFirstWorkflow` / DAG API-native mặc định), không có hàm `BuildWorkflow` data-driven và không có `presets/*.json` nào được ship. Phần data-driven DAG (đọc `pipeline_config` để dựng DAG thay vì switch cứng, 2 preset JSON, validate acyclic/`dependsOn`, UI editor chọn preset) là **kế hoạch chưa triển khai** — không mô tả hành vi hiện tại.
 
 ---
 

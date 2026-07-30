@@ -135,27 +135,3 @@ func WorkspaceToRepoRelative(path string) string {
 	return repoName
 }
 
-// RepoRelativeToWorkspace converts a repo-relative path (e.g. "readme.md") into a workspace-relative path (e.g. "code/repos/repoName/main/readme.md").
-func RepoRelativeToWorkspace(repoName, repoPath string) string {
-	repoPath = filepath.ToSlash(filepath.Clean(repoPath))
-	repoPrefix := repoName + "/"
-	if strings.HasPrefix(repoPath, repoPrefix) {
-		repoPath = repoPath[len(repoPrefix):]
-	} else if repoPath == repoName {
-		repoPath = ""
-	}
-	return filepath.ToSlash(filepath.Join(ReposDirName, repoName, "main", repoPath))
-}
-
-// IsWorkspaceInternalPath returns true if the path points to a workspace meta-directory (artifacts, logs, specs, openspec, context, pr).
-func IsWorkspaceInternalPath(path string) bool {
-	path = filepath.ToSlash(filepath.Clean(path))
-	for _, dir := range []string{
-		"artifacts/", "logs/", "specs/", "openspec/", "context/", "pr/",
-	} {
-		if strings.HasPrefix(path, dir) || path == strings.TrimSuffix(dir, "/") {
-			return true
-		}
-	}
-	return false
-}

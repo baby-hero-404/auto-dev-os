@@ -37,10 +37,10 @@ func TestGovernanceHandler_ListPresets(t *testing.T) {
 		presetMap[p.Name] = p.Config
 	}
 
-	if _, ok := presetMap["api_native"]; !ok {
-		t.Errorf("missing api_native preset")
+	if _, ok := presetMap["default_workflow"]; !ok {
+		t.Errorf("missing default_workflow preset")
 	}
-	if _, ok := presetMap["cli_spec_first"]; !ok {
-		t.Errorf("missing cli_spec_first preset")
+	if _, ok := presetMap["strict_review"]; !ok {
+		t.Errorf("missing strict_review preset")
 	}
 }

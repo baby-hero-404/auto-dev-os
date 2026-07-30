@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState, Suspense, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AlertCircle, X } from "lucide-react";
-import { useSession } from "@/lib/session";
+import { useSession, useIsHydrated } from "@/lib/session";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 import { CreateTaskPanel } from "@/components/projects/create-task-panel";
@@ -25,8 +25,10 @@ type ProjectView = "tasks" | "agents" | "repositories" | "rules" | "settings";
 export default function ProjectDetailRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectID } = use(params);
   const session = useSession();
+  const isHydrated = useIsHydrated();
 
   if (!session) {
+    if (!isHydrated) return null;
     return (
       <main className="grid min-h-screen place-items-center p-6">
         <div className="rounded-lg border border-stroke bg-card p-6">
@@ -291,7 +293,7 @@ function ProjectDetailContent() {
       <CreateTaskPanel
         agents={projectAgents}
         repositories={repositories}
-        project={project}
+
         isOpen={isTaskPanelOpen}
         isSubmitting={taskActions.isCreatingTask}
         error={taskActions.taskError}

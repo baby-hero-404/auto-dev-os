@@ -43,6 +43,7 @@ export function AddCliCredentialModal({
   useEffect(() => {
     if (autoSubmit && form.apiKey) {
       formRef.current?.requestSubmit();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAutoSubmit(false);
     }
   }, [autoSubmit, form.apiKey]);

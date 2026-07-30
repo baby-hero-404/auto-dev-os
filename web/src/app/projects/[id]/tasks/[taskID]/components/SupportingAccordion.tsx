@@ -27,12 +27,12 @@ function AccordionItem({ title, summary, isOpen, onToggle, children, keepMounted
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between gap-4 p-4.5 text-left hover:bg-slate-500/5 transition-colors cursor-pointer select-none"
+        className="w-full flex items-center justify-between gap-4 p-4.5 text-left hover:bg-surface/50 transition-colors cursor-pointer select-none"
         aria-expanded={isOpen}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <Icon size={16} className="text-content-muted shrink-0" />
-          <h3 className="font-heading text-xs font-extrabold tracking-wide uppercase text-slate-800 dark:text-slate-200 shrink-0">{title}</h3>
+          <h3 className="font-heading text-xs font-extrabold tracking-wide uppercase text-foreground shrink-0">{title}</h3>
           {!isOpen && (
             <div className="flex-1 min-w-0 truncate text-xs text-content-muted flex items-center gap-1.5 ml-2 border-l border-stroke/15 pl-3">
               {summary}
@@ -48,12 +48,12 @@ function AccordionItem({ title, summary, isOpen, onToggle, children, keepMounted
 
       {/* Accordion Body */}
       {keepMounted ? (
-        <div className={isOpen ? "border-t border-stroke/10 p-5 bg-slate-500/[0.02]" : "hidden"}>
+        <div className={isOpen ? "border-t border-stroke/10 p-5 bg-surface/20" : "hidden"}>
           {children}
         </div>
       ) : (
         isOpen && (
-          <div className="border-t border-stroke/10 p-5 bg-slate-500/[0.02]">
+          <div className="border-t border-stroke/10 p-5 bg-surface/20">
             {children}
           </div>
         )
@@ -72,6 +72,9 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
     task,
     workflow,
     logs,
+    droppedLogCount,
+    reloadFullLogs,
+    isReloadingLogs,
     analysisData,
   } = useTaskDetail();
 
@@ -158,6 +161,9 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
           <LogConsole
             logs={logs}
             isExpanded={true}
+            droppedLogCount={droppedLogCount}
+            onReloadFullHistory={reloadFullLogs}
+            isReloadingHistory={isReloadingLogs}
             onToggle={() => {}}
           />
         </AccordionItem>

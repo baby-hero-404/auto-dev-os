@@ -46,13 +46,29 @@ func (s *CLIAnalyzeStep) ID() string { return workflow.StepCLIAnalyze }
 func (s *CLIAnalyzeStep) StatusOnResume(_ StepResult) string { return models.TaskStatusAnalyzing }
 
 func (s *CLIAnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	if s.tasks != nil && (s.rt.Task.Status == models.TaskStatusContextLoading || s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == "") {
+		status := models.TaskStatusAnalyzing
+		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{Status: &status}); err == nil {
+			s.rt.Task.Status = status
+		}
+	}
+
 	base, err := s.prompts.LoadStepPrompt(workflow.StepCLIAnalyze)
 	if err != nil {
 		return nil, fmt.Errorf("cli_analyze: load prompt: %w", err)
 	}
 	instruction := fmt.Sprintf("%s\n\n## Task\n\n### %s\n\n%s\n", base, s.rt.Task.Title, s.rt.Task.Description)
+	instruction += "\n" + cliWorkingDirNotice + "\n"
 
-	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, []string{cliAnalysisCapturePath})
+	contextFiles, err := s.prompts.MaterializeCLIContext(ctx, *s.rt.Task, s.rt.Agent, s.ID())
+	if err != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to materialize context: %v", err))
+	}
+	if len(contextFiles) > 0 {
+		instruction += "\n" + cliPlatformContextPointer + "\n"
+	}
+
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, []string{cliAnalysisCapturePath}, contextFiles)
 	if err != nil {
 		return nil, fmt.Errorf("cli_analyze: %w", err)
 	}

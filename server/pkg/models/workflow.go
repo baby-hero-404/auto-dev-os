@@ -24,7 +24,6 @@ const (
 	WorkflowStepFix          = "fix"
 	WorkflowStepTest         = "test"
 	WorkflowStepPR           = "pr"
-	WorkflowStepSandbox      = "sandbox"
 	WorkflowStepDone         = "done"
 )
 

@@ -25,10 +25,10 @@ export function Dialog({
   footer,
 }: DialogProps) {
   const sizeClasses = {
-    sm: "max-w-sm",
-    md: "max-w-md",
-    lg: "max-w-lg",
-    xl: "max-w-4xl",
+    sm: "max-w-md",
+    md: "max-w-xl",
+    lg: "max-w-3xl",
+    xl: "max-w-5xl",
   };
 
   return (
@@ -40,7 +40,7 @@ export function Dialog({
       <DialogPrimitive.Portal>
         {/* Overlay */}
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-30 bg-slate-950/80 backdrop-blur-sm animate-fade-in"
+          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm animate-fade-in"
         />
         {/* Content Container */}
         <div className="fixed inset-0 z-30 overflow-y-auto flex items-center justify-center p-4">

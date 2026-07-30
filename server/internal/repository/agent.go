@@ -162,61 +162,12 @@ func (r *AgentRepo) UpdateStatus(ctx context.Context, id string, status string) 
 	return nil
 }
 
-func (r *AgentRepo) FindAvailableByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
-	var agent models.Agent
-	err := r.db.WithContext(ctx).
-		Table("agents").
-		Joins("JOIN projects ON projects.org_id = agents.org_id").
-		Where("projects.id = ?", projectID).
-		Where("agents.role = ?", role).
-		Where("agents.status IN ?", []string{models.AgentStatusIdle, ""}).
-		Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
-		Order("agents.created_at ASC").
-		First(&agent).Error
-	if err != nil {
-		return nil, fmt.Errorf("find available agent by role: %w", mapError(err))
-	}
-	return &agent, nil
-}
-
 func (r *AgentRepo) ClaimAvailableByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
 	agent, err := r.claimAvailable(ctx, projectID, &role)
 	if err != nil {
 		return nil, fmt.Errorf("claim available agent by role: %w", err)
 	}
 	return agent, nil
-}
-
-func (r *AgentRepo) FindByRole(ctx context.Context, projectID, role string) (*models.Agent, error) {
-	var agent models.Agent
-	err := r.db.WithContext(ctx).
-		Table("agents").
-		Joins("JOIN projects ON projects.org_id = agents.org_id").
-		Where("projects.id = ?", projectID).
-		Where("agents.role = ?", role).
-		Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
-		Order("agents.created_at ASC").
-		First(&agent).Error
-	if err != nil {
-		return nil, fmt.Errorf("find agent by role: %w", mapError(err))
-	}
-	return &agent, nil
-}
-
-func (r *AgentRepo) FindAnyAvailable(ctx context.Context, projectID string) (*models.Agent, error) {
-	var agent models.Agent
-	err := r.db.WithContext(ctx).
-		Table("agents").
-		Joins("JOIN projects ON projects.org_id = agents.org_id").
-		Where("projects.id = ?", projectID).
-		Where("agents.status IN ?", []string{models.AgentStatusIdle, ""}).
-		Where("agents.assignment_strategy = ? OR EXISTS (SELECT 1 FROM project_agents pa WHERE pa.agent_id = agents.id AND pa.project_id = ?)", models.AgentAssignmentAutoJoin, projectID).
-		Order("agents.created_at ASC").
-		First(&agent).Error
-	if err != nil {
-		return nil, fmt.Errorf("find any available agent: %w", mapError(err))
-	}
-	return &agent, nil
 }
 
 func (r *AgentRepo) ClaimAnyAvailable(ctx context.Context, projectID string) (*models.Agent, error) {

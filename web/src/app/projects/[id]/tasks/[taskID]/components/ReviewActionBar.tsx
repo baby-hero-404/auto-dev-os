@@ -96,7 +96,7 @@ export function ReviewActionBar() {
                     ? "Please answer all clarification questions before approving"
                     : undefined
                 }
-                className="inline-flex items-center justify-center gap-2 rounded-md bg-amber-500 px-3.5 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-amber-500 px-3.5 py-2 text-sm font-semibold text-background shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
               >
                 <Check size={15} />
                 Approve Spec

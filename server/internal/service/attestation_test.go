@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -180,5 +181,51 @@ func TestAttestationService_RotateKey_OldRecordsStillVerify(t *testing.T) {
 	}
 	if !result.Verified {
 		t.Fatal("expected a retired key to still verify records it originally signed")
+	}
+}
+
+// TestAttestationService_EnsureActiveKey_GeneratesWhenNoneExist guards the
+// repository.ErrNotFound check in EnsureActiveKey: AttestationKeyRepo.GetActive
+// now returns repository.ErrNotFound (via mapError), not a raw gorm error —
+// EnsureActiveKey must still recognize "no active key" and generate one
+// instead of treating it as an unexpected failure.
+func TestAttestationService_EnsureActiveKey_GeneratesWhenNoneExist(t *testing.T) {
+	svc, mock, cleanup := newAttestationServiceTest(t)
+	defer cleanup()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "attestation_keys" WHERE status = $1`)).
+		WithArgs("active", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"key_id"}))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO "attestation_keys"`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	key, err := svc.EnsureActiveKey(context.Background())
+	if err != nil {
+		t.Fatalf("expected EnsureActiveKey to generate a new key when none is active, got error: %v", err)
+	}
+	if key == nil || key.KeyID == "" {
+		t.Fatal("expected a newly generated key with a non-empty KeyID")
+	}
+}
+
+// TestAttestationService_VerifyByCommitHash_NotFound guards the handler-level
+// 404 mapping (internal/handler/attestation.go checks repository.ErrNotFound,
+// not a raw gorm error).
+func TestAttestationService_VerifyByCommitHash_NotFound(t *testing.T) {
+	svc, mock, cleanup := newAttestationServiceTest(t)
+	defer cleanup()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "attestations" WHERE commit_hash = $1`)).
+		WithArgs("missing", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err := svc.VerifyByCommitHash(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected an error for a missing commit hash")
+	}
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected the error to satisfy repository.ErrNotFound, got: %v", err)
 	}
 }

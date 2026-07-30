@@ -6,9 +6,9 @@ export interface CLIProfileMeta {
 }
 
 export const CLI_PROFILES: Record<string, CLIProfileMeta> = {
-  claude_code: { label: "Claude Code", credentialProvider: "cli:claude" },
-  openai_codex: { label: "OpenAI Codex", credentialProvider: "cli:codex" },
-  antigravity: { label: "Antigravity", credentialProvider: "cli:antigravity" },
+  claude_code: { label: "Claude CLI", credentialProvider: "cli:claude" },
+  openai_codex: { label: "Codex CLI", credentialProvider: "cli:codex" },
+  antigravity: { label: "Antigravity CLI", credentialProvider: "cli:antigravity" },
 };
 
 export const CUSTOM_CLI_REF = "custom";

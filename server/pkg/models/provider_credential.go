@@ -9,6 +9,11 @@ const (
 	ProviderCredentialStatusActive      = "active"
 	ProviderCredentialStatusRateLimited = "rate_limited"
 	ProviderCredentialStatusDisabled    = "disabled"
+	// ProviderCredentialStatusNeedsReauth marks a credential whose CLI
+	// session/token was detected as invalid during a real run (not merely
+	// rate-limited) — excluded from SelectCredential like any non-Active
+	// status until a human re-authenticates it.
+	ProviderCredentialStatusNeedsReauth = "needs_reauth"
 )
 
 const (

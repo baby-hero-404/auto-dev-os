@@ -50,6 +50,13 @@ func TaskSpecSlug(task *models.Task) string {
 }
 
 func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
+	if s.tasks != nil && (s.rt.Task.Status == models.TaskStatusContextLoading || s.rt.Task.Status == models.TaskStatusTodo || s.rt.Task.Status == "") {
+		status := models.TaskStatusAnalyzing
+		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{Status: &status}); err == nil {
+			s.rt.Task.Status = status
+		}
+	}
+
 	root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task)
 	if err != nil {
 		return nil, fmt.Errorf("cli_spec: resolve worktree: %w", err)
@@ -91,8 +98,17 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	if s.rt.Task.SpecStatus == models.TaskSpecStatusChangesRequested {
 		instruction += fmt.Sprintf("\n## Reviewer feedback\n\n%s\n\nAddress this feedback and rewrite the 4 spec files accordingly.\n", s.rt.Task.Description)
 	}
+	instruction += "\n" + cliWorkingDirNotice + "\n"
 
-	if _, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil); err != nil {
+	contextFiles, err := s.prompts.MaterializeCLIContext(ctx, *s.rt.Task, s.rt.Agent, s.ID())
+	if err != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to materialize context: %v", err))
+	}
+	if len(contextFiles) > 0 {
+		instruction += "\n" + cliPlatformContextPointer + "\n"
+	}
+
+	if _, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles); err != nil {
 		return nil, fmt.Errorf("cli_spec: %w", err)
 	}
 

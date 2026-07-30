@@ -25,7 +25,7 @@ export function RecentFailures({ recentFailures }: { recentFailures: RecentFailu
           </thead>
           <tbody>
             {(recentFailures || []).map((failure) => (
-              <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-slate-900/50">
+              <tr key={failure.task_id} className="border-b border-stroke/60 transition hover:bg-surface">
                 <td className="px-4 py-3">
                   <Link href={`/projects/${failure.project_id}/tasks/${failure.task_id}`} className="font-medium text-white hover:text-brand-primary">
                     {failure.title}

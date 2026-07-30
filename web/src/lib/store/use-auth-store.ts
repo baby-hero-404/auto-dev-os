@@ -19,6 +19,7 @@ function readStoredSession(): Session | null {
 
 type AuthState = {
   session: Session | null;
+  isHydrated: boolean;
   setSession: (session: Session) => void;
   clearSession: () => void;
   syncFromStorage: () => void;
@@ -26,16 +27,17 @@ type AuthState = {
 
 export const useAuthStore = create<AuthState>((set) => ({
   session: null,
+  isHydrated: false,
   setSession: (session) => {
     localStorage.setItem(sessionKey, JSON.stringify(session));
-    set({ session });
+    set({ session, isHydrated: true });
   },
   clearSession: () => {
     localStorage.removeItem(sessionKey);
-    set({ session: null });
+    set({ session: null, isHydrated: true });
   },
   syncFromStorage: () => {
-    set({ session: readStoredSession() });
+    set({ session: readStoredSession(), isHydrated: true });
   },
 }));
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
+	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -821,5 +822,87 @@ func TestParseRetryDelay(t *testing.T) {
 				t.Errorf("parseRetryDelay() gotD = %v, want = %v", gotD, tc.wantD)
 			}
 		})
+	}
+}
+
+func TestAIGatewayChatWithOptions_BudgetBlocksLargePromptBeforeCall(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	attempts := 0
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Config:                &config.Config{LLM: config.LLMConfig{CircuitMaxTokens: 5}},
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			attempts++
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", Model: "gpt-4o"}}, nil
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: strings.Repeat("word ", 200)}})
+	if err == nil {
+		t.Fatal("expected the budget circuit breaker to block an oversized prompt before ever calling a provider")
+	}
+	if !errors.Is(err, llm.ErrCircuitOpen) {
+		t.Fatalf("expected ErrCircuitOpen, got: %v", err)
+	}
+	if attempts != 0 {
+		t.Fatalf("expected the provider factory to never be called once the budget check blocks, got %d attempts", attempts)
+	}
+}
+
+func TestAIGatewayChatWithOptions_BudgetBlocksOverBudgetResponse(t *testing.T) {
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		Config:                &config.Config{LLM: config.LLMConfig{CircuitMaxTokens: 1000000}},
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			// The estimate at call time is small (short prompt), but the
+			// real response reports a huge prompt token count — this must
+			// still be caught by the post-call actual-usage check.
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", Model: "gpt-4o", PromptTokens: 2000000}}, nil
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	_, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: "short prompt"}})
+	if err == nil {
+		t.Fatal("expected the post-call actual-usage check to block an oversized response")
+	}
+	if !errors.Is(err, llm.ErrCircuitOpen) {
+		t.Fatalf("expected ErrCircuitOpen, got: %v", err)
+	}
+}
+
+func TestAIGatewayChatWithOptions_NoConfigMeansNoBudgetLimit(t *testing.T) {
+	// Regression guard: an org that never configured LLM_CIRCUIT_MAX_TOKENS/
+	// LLM_CIRCUIT_MAX_COST_USD (g.cfg is nil, as in most existing tests in
+	// this file) must see identical behavior to before this feature existed.
+	pool := &fakePool{credentials: []*service.DecryptedCredential{
+		{ID: "cred-1", Provider: "openai", APIKey: "sk-1"},
+	}}
+	resolver := &fakeResolver{models: []models.ProviderModel{{Provider: "openai", ModelName: "gpt-4o", Priority: 0, LevelGroup: "balanced", IsActive: true}}}
+	g := NewAIGateway(Options{
+		CredentialPool:        pool,
+		ProviderModelResolver: resolver,
+		ProviderFactory: func(cred *service.DecryptedCredential, model string) (llm.Provider, error) {
+			return &fakeProvider{name: "openai", resp: &llm.Response{Content: "ok", Model: "gpt-4o", PromptTokens: 999999999}}, nil
+		},
+	})
+	ctx := llm.WithRouteOptions(context.Background(), llm.RouteOptions{OrgID: "org-1"})
+
+	resp, err := g.Chat(ctx, []llm.Message{{Role: "user", Content: strings.Repeat("word ", 200)}})
+	if err != nil {
+		t.Fatalf("expected no budget error when no limits are configured, got: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }

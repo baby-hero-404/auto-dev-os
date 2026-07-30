@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "pipeline": {
+    "extends": "default_workflow"
+  },
+  "policies": {}
+}

@@ -20,6 +20,19 @@ func NewPRHandler(taskSvc TaskService, auditSvc AuditService, orch *orchestrator
 	return &PRHandler{taskSvc: taskSvc, auditSvc: auditSvc, orch: orch}
 }
 
+// requireTaskStatus writes a 400 and returns false if task.Status isn't one
+// of allowed — shared by Approve/Reject, which both gate on "awaiting PR
+// review".
+func requireTaskStatus(w http.ResponseWriter, task *models.Task, allowed ...string) bool {
+	for _, s := range allowed {
+		if task.Status == s {
+			return true
+		}
+	}
+	writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
+	return false
+}
+
 // Approve approves a PR and transitions the task to merged status.
 // POST /api/v1/tasks/:taskID/pr/approve
 func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
@@ -32,8 +45,7 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate task is in a reviewable state.
-	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
-		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
+	if !requireTaskStatus(w, task, models.TaskStatusHumanReview, models.TaskStatusPrReady) {
 		return
 	}
 
@@ -57,6 +69,7 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	// Record audit log.
 	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRApproved, "task", taskID,
 		service.WithTaskID(taskID),
+		service.WithIPAddress(clientIP(r)),
 	)
 
 	writeJSON(w, http.StatusOK, updated)
@@ -74,8 +87,7 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate task is in a reviewable state.
-	if task.Status != models.TaskStatusHumanReview && task.Status != models.TaskStatusPrReady {
-		writeError(w, http.StatusBadRequest, "task is not awaiting PR review (status: "+task.Status+")")
+	if !requireTaskStatus(w, task, models.TaskStatusHumanReview, models.TaskStatusPrReady) {
 		return
 	}
 
@@ -108,6 +120,7 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRRejected, "task", taskID,
 		service.WithTaskID(taskID),
 		service.WithDetails(map[string]string{"feedback": input.Feedback}),
+		service.WithIPAddress(clientIP(r)),
 	)
 
 	if h.orch != nil {
@@ -162,6 +175,7 @@ func (h *PRHandler) StartReview(w http.ResponseWriter, r *http.Request) {
 
 	h.auditSvc.RecordAction(r.Context(), models.AuditActionPRReviewStarted, "task", taskID,
 		service.WithTaskID(taskID),
+		service.WithIPAddress(clientIP(r)),
 	)
 
 	writeJSON(w, http.StatusOK, updated)

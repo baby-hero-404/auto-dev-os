@@ -28,6 +28,7 @@ export const api = {
   register: auth.register,
   login: auth.login,
   getOrganization: auth.getOrganization,
+  updateOrganization: auth.updateOrganization,
 
   listProjects: projects.list,
   createProject: projects.create,

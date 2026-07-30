@@ -20,7 +20,7 @@ export function MemoryCard({
   const isSuccess = memory.category === "success";
 
   const tierColors = {
-    working: "border-slate-800 text-slate-300 bg-slate-900/40",
+    working: "border-stroke text-content-muted bg-surface/40",
     episodic: "border-cyan-500/20 text-cyan-300 bg-cyan-950/10",
     semantic: "border-amber-500/20 text-amber-300 bg-amber-950/10",
     procedural: "border-emerald-500/20 text-emerald-300 bg-emerald-950/10",
@@ -30,7 +30,7 @@ export function MemoryCard({
     <article
       className={`group rounded-lg border p-4 transition flex flex-col justify-between cursor-pointer ${
         isInspecting
-          ? "border-brand-primary bg-slate-950/80 shadow-[0_0_12px_rgba(235,166,90,0.15)]"
+          ? "border-brand-primary bg-background/80 shadow-[0_0_12px_rgba(235,166,90,0.15)]"
           : "border-stroke bg-panel hover:border-brand-primary/40"
       }`}
       onClick={() => onInspect(memory.id)}
@@ -38,7 +38,7 @@ export function MemoryCard({
       <div>
         <div className="mb-2 flex items-start justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`rounded px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider border ${tierColors[memory.tier as keyof typeof tierColors] || "border-slate-800"}`}>
+            <span className={`rounded px-1.5 py-0.5 text-[9px] font-mono font-bold uppercase tracking-wider border ${tierColors[memory.tier as keyof typeof tierColors] || "border-stroke"}`}>
               {memory.tier}
             </span>
             <span className={`rounded-full px-2 py-0.5 text-[9px] font-mono ${
@@ -46,7 +46,7 @@ export function MemoryCard({
                 ? "bg-red-400/10 text-red-300 border border-red-500/20"
                 : isSuccess
                 ? "bg-emerald-400/10 text-emerald-300 border border-emerald-500/20"
-                : "bg-slate-800 text-slate-300 border border-slate-700/50"
+                : "bg-surface text-content-muted border border-stroke"
             }`}>
               {memory.category}
             </span>
@@ -62,7 +62,7 @@ export function MemoryCard({
                 e.stopPropagation();
                 onDelete(memory.id);
               }}
-              className="rounded-md p-1 text-slate-500 opacity-0 transition hover:bg-red-950/40 hover:text-red-300 group-hover:opacity-100 cursor-pointer"
+              className="rounded-md p-1 text-content-muted/70 opacity-0 transition hover:bg-red-950/40 hover:text-red-300 group-hover:opacity-100 cursor-pointer"
               title="Prune memory"
             >
               <Trash2 size={13} />
@@ -70,7 +70,7 @@ export function MemoryCard({
           )}
         </div>
 
-        <h4 className="font-mono text-xs font-semibold text-slate-100 line-clamp-2 mt-1">{memory.summary}</h4>
+        <h4 className="font-mono text-xs font-semibold text-foreground line-clamp-2 mt-1">{memory.summary}</h4>
         <p className="mt-2 text-xs text-content-muted line-clamp-3 leading-relaxed">{memory.content}</p>
       </div>
 

@@ -7,15 +7,17 @@ sources:
   - "server/internal/workflow/step.go"
   - "server/pkg/models/project.go"
   - "server/pkg/models/task.go"
-  - "web/src/components/projects/cli-engine-config-form.tsx"
-verified: 2026-07-23
+  - "server/internal/service/credential_pool.go"
+  - "web/src/components/projects/execution-providers-list.tsx"
+  - "web/src/app/ai-providers/components/GlobalRoutingPanel.tsx"
+verified: 2026-07-30
 ---
 
 # 14. Execution Engine (Pluggable API-Native / CLI)
 
 **Status:** 🟢 Implemented
 **Owner docs:** `docs/ARCHITECTURE.md`; `docs/features/product/08-workflow-engine.md` for DAG selection
-**Code areas:** `server/internal/orchestrator/engine/` (`engine.go`, `api_native.go`, `cli.go`, `preflight.go`), `server/internal/orchestrator/worker.go`, `server/internal/orchestrator/sandbox.go`, `server/pkg/models/project.go`, `server/pkg/models/task.go`, `web/src/components/projects/cli-engine-config-form.tsx`
+**Code areas:** `server/internal/orchestrator/engine/` (`engine.go`, `cli.go`, `preflight.go`) for the CLI engine implementation; API-native tool-loop lives in `server/internal/orchestrator/llmrunner/toolloop.go` driven per-step from `server/internal/orchestrator/steps/*.go`, `server/internal/orchestrator/worker.go`, `server/internal/orchestrator/execution_router.go`, `server/internal/orchestrator/sandbox.go`, `server/pkg/models/project.go`, `server/pkg/models/task.go`, `web/src/components/projects/execution-providers-list.tsx` (exports `CLIEngineConfigForm`)
 **Acceptance criteria:** Project/task can select `api_native` or `cli` execution engine; CLI engine spawns a configured coding-agent binary as a subprocess in the task worktree, preflight-checks its availability, and evaluates results by git diff instead of parsing stdout.
 
 **Mục tiêu:** Cho phép Auto Code OS chạy task bằng một trong hai cơ chế thực thi: **API-native** (server tự giữ tool-loop, gọi LLM trực tiếp qua Gateway — §01) hoặc **CLI (Subprocess)** — spawn một CLI coding agent có sẵn của người dùng (Claude Code, Codex CLI, aider…) như tiến trình con trong worktree cô lập. Mục tiêu chính: cho phép user tận dụng subscription CLI sẵn có thay vì trả token qua API key riêng, đồng thời giảm gánh nặng bảo trì tool-loop cho path này.
@@ -37,6 +39,8 @@ Interface `ExecutionEngine` (`server/internal/orchestrator/engine/engine.go`) c�
 - **Preflight step** (`preflight.go`): `command -v <cli>` trong container trước khi chạy; fail rõ ràng nếu CLI chưa cài trong image.
 - Timeout dài hơn API-native (configurable, mặc định 30 phút) và network bridge bắt buộc (CLI cần tự gọi provider của nó).
 - Full stdout/stderr được capture thành step logs; kết quả được đánh giá bằng **git diff của worktree**, không parse output CLI.
+- **Per-Run Auth Directory & Context Injection:** Thông tin đăng nhập CLI (sandbox CLI credentials) được staging vào một thư mục auth riêng biệt (per-run auth directory) trong mỗi lần chạy. Hệ thống cũng tự động inject các context file trực tiếp vào CLI runtime environment.
+- **Artifact Versioning & Re-authentication:** Các artifact do CLI tạo ra được versioning theo từng attempt. Hỗ trợ theo dõi trạng thái re-authentication của credential.
 
 ## B. Settings Model
 
@@ -48,7 +52,7 @@ Interface `ExecutionEngine` (`server/internal/orchestrator/engine/engine.go`) c�
 
 Biến môi trường trong `cli_engine_config.env` được mã hoá/lưu như credential hiện có (§05) — không bao giờ ghi log giá trị.
 
-**UI:** Project Settings có section "Execution Engine" (radio API-native/CLI, hiện form command/args/env/timeout khi chọn CLI — `cli-engine-config-form.tsx`). Task creation dialog có dropdown Engine (Inherit/API-native/CLI, mặc định Inherit). Task detail hiển thị badge engine đã dùng.
+**UI:** Project Settings có section "Execution Engine" (radio API-native/CLI, hiện form command/args/env/timeout khi chọn CLI — `CLIEngineConfigForm` trong `execution-providers-list.tsx`). Task creation dialog không có selector riêng — task luôn kế thừa routing từ `Project.execution_providers`/`execution_engine` (xem B2). Task detail hiển thị badge engine đã dùng.
 
 ## B2. Execution Provider Routing (ưu tiên hơn Execution Engine)
 
@@ -58,7 +62,9 @@ Biến môi trường trong `cli_engine_config.env` được mã hoá/lưu như 
 
 **Quota detection (write-side):** Do CLI chạy blocking trong sandbox, phát hiện quota/rate-limit dựa trên pattern-matching stdout+stderr đã capture sau khi tiến trình kết thúc (`server/internal/orchestrator/engine/cli_quota.go`, bảng `CLIQuotaRules` keyed theo `ProfileRef`, có fallback `"*"`). Khi khớp, `CredentialPoolService.SetCooldown` ghi `cooldown_until` (mặc định 1 phút) lên `ProviderCredential` tương ứng, để lần resolve tiếp theo tự động fallthrough qua candidate priority thấp hơn.
 
-**UI:** Project Settings có thêm section "Execution Providers" (`execution-providers-list.tsx`) — danh sách cố định 7 hàng (Anthropic/OpenAI/Gemini API + Claude Code/OpenAI Codex/Antigravity/Custom CLI), mỗi hàng có checkbox Enabled, nút ▲/▼ đổi priority, và dropdown "CLI Authentication Profile" (bắt buộc cho Custom CLI, mặc định "Auto" cho 3 preset CLI).
+**UI:** Project Settings có thêm section "Execution Providers" (`execution-providers-list.tsx`) — danh sách cố định 7 hàng (Anthropic/OpenAI/Gemini API + Claude Code/OpenAI Codex/Antigravity/Custom CLI), mỗi hàng có checkbox Enabled, nút ▲/▼ đổi priority, và dropdown "CLI Authentication Profile" (bắt buộc cho Custom CLI, mặc định "Auto" cho 3 preset CLI). Nếu org chưa có credential `cli:*` nào, dropdown hiện link "Authenticate a CLI provider" trỏ sang trang AI Providers. Credential đang cooldown (do quota exceeded) được đánh dấu "— on cooldown" trong dropdown, và nếu credential đang chọn đang cooldown thì hiện cảnh báo kèm thời điểm hết cooldown (`cooldown_until`).
+
+**Global Routing (`Organization.default_execution_providers`):** cùng cấu trúc/UI với Execution Providers (`GlobalRoutingPanel.tsx` trên trang AI Providers, admin-only), nhưng là fallback priority list ở **org-wide**, dùng cho project chưa tự cấu hình `execution_providers` riêng (xem thứ tự ưu tiên ở `execution_router.go`). **Auto-enable:** mỗi khi org thêm một `ProviderCredential` mới cho Anthropic/OpenAI/Gemini/Claude CLI/Codex CLI/Antigravity CLI, `CredentialPoolService.Create` (`server/internal/service/credential_pool.go`) tự động bật `enabled=true` cho row tương ứng trong `default_execution_providers` — không cần admin vào Global Routing bấm Save thủ công. Priority của row giữ nguyên vị trí cố định sẵn có (không reorder); nếu org chưa từng lưu Global Routing lần nào, credential đầu tiên sẽ tự scaffold đủ 7 row (theo đúng thứ tự UI) rồi chỉ bật row đó. Custom CLI (`ref=custom`) không bao giờ được auto-enable vì cần `command`/`credential_id` cấu hình tay (`models.AutoEnableExecutionProviderRow`, `server/pkg/models/project.go`).
 
 ## C. CLI Spec-First Pipeline
 

@@ -6,25 +6,28 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 )
 
 type contextKey string
 
 const authClaimsKey contextKey = "auth_claims"
 
-type tokenClaims struct {
-	Subject string `json:"sub"`
-	Email   string `json:"email"`
-	OrgID   string `json:"org_id"`
-	Role    string `json:"role"`
-	Type    string `json:"typ"`
-	Expires int64  `json:"exp"`
+// ClaimsFromContext extracts JWT claims injected by the auth middleware.
+func ClaimsFromContext(ctx context.Context) *service.TokenClaims {
+	claims, _ := ctx.Value(authClaimsKey).(*service.TokenClaims)
+	return claims
 }
 
-// ClaimsFromContext extracts JWT claims injected by the auth middleware.
-func ClaimsFromContext(ctx context.Context) *tokenClaims {
-	claims, _ := ctx.Value(authClaimsKey).(*tokenClaims)
-	return claims
+// WithVerifiedClaims stores signature-verified claims under the same context
+// key ClaimsFromContext reads. handler.AuthMiddleware calls this after
+// authSvc.VerifyToken succeeds, so RequireRole (and anything else using
+// ClaimsFromContext downstream of AuthMiddleware) makes its decision on the
+// verified claims rather than the optimistic, unverified ones
+// InjectClaimsFromJWT sets early in the chain for rate-limiting purposes.
+func WithVerifiedClaims(ctx context.Context, claims *service.TokenClaims) context.Context {
+	return context.WithValue(ctx, authClaimsKey, claims)
 }
 
 // RequireRole returns middleware that rejects requests from users whose role
@@ -62,7 +65,7 @@ func InjectClaimsFromJWT(next http.Handler) http.Handler {
 			parts := strings.Split(token, ".")
 			if len(parts) == 3 {
 				if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-					var claims tokenClaims
+					var claims service.TokenClaims
 					if json.Unmarshal(payload, &claims) == nil {
 						ctx := context.WithValue(r.Context(), authClaimsKey, &claims)
 						r = r.WithContext(ctx)

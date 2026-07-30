@@ -139,7 +139,7 @@ export function BoundaryResolutionControls({
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-4 border-t border-amber-500/15 pt-4 text-slate-800 dark:text-slate-100">
+    <div className="mt-3 flex flex-col gap-4 border-t border-amber-500/15 pt-4 text-foreground">
       {violatedFiles.length > 0 && (
         <div className="mb-1">
           <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500/80 mb-2">

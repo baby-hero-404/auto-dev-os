@@ -52,7 +52,7 @@ export function SuggestionCard({
         <div className="flex flex-col items-center sm:items-end justify-center min-w-[100px]">
           <span className="text-[10px] font-mono text-content-muted uppercase">Confidence</span>
           <div className="mt-1 flex items-center gap-2">
-            <div className="h-2 w-16 bg-slate-900 border border-stroke rounded-full overflow-hidden">
+            <div className="h-2 w-16 bg-surface border border-stroke rounded-full overflow-hidden">
               <div
                 className="h-full bg-emerald-400 rounded-full"
                 style={{ width: `${confidencePct}%` }}
@@ -69,7 +69,7 @@ export function SuggestionCard({
           <FileCode size={12} />
           Proposed Content
         </div>
-        <pre className="rounded bg-slate-950 border border-stroke p-3.5 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap">
+        <pre className="rounded bg-background border border-stroke p-3.5 font-mono text-xs text-content-muted overflow-x-auto whitespace-pre-wrap">
           {suggestion.content}
         </pre>
       </div>
@@ -106,7 +106,7 @@ export function SuggestionCard({
           </button>
           <button
             onClick={() => onApproveClick(suggestion.id)}
-            className="rounded-md bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition cursor-pointer flex items-center gap-1"
+            className="rounded-md bg-emerald-400 px-4 py-2 text-xs font-semibold text-background hover:bg-emerald-300 transition cursor-pointer flex items-center gap-1"
             disabled={actioningID === suggestion.id}
           >
             {actioningID === suggestion.id ? (
@@ -133,7 +133,7 @@ export function SuggestionCard({
               value={rejectionFeedback}
               onChange={(e) => setRejectionFeedback(e.target.value)}
               placeholder="Why is this suggestion invalid? (e.g. incorrect pattern, conflicts with rule X)"
-              className="rounded border border-stroke bg-slate-950 px-3 py-2 text-xs text-white h-20 focus:outline-none focus:border-red-500"
+              className="rounded border border-stroke bg-background px-3 py-2 text-xs text-foreground h-20 focus:outline-none focus:border-red-500"
               required
             />
           </div>
@@ -144,7 +144,7 @@ export function SuggestionCard({
                 setRejectionID(null);
                 setRejectionFeedback("");
               }}
-              className="rounded border border-stroke bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:text-white cursor-pointer"
+              className="rounded border border-stroke bg-surface px-3 py-1.5 text-xs text-content-muted hover:text-foreground cursor-pointer"
             >
               Cancel
             </button>

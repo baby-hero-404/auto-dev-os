@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTaskDetail } from "./TaskDetailContext";
 import { TaskHeader } from "./TaskHeader";
@@ -14,7 +14,7 @@ import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
 import { SupportingAccordion } from "./SupportingAccordion";
 
 export function TaskDetailLayout() {
-  const { task, taskID, token, workflow, updateTask, execute, mutateWorkflow, setError, isTaskLoading, workflowError } = useTaskDetail();
+  const { task, workflow, updateTask, execute, setError, isTaskLoading, workflowError } = useTaskDetail();
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     specification: false,
@@ -88,7 +88,7 @@ export function TaskDetailLayout() {
           <AlertCircle className="h-10 w-10 text-danger mx-auto mb-4" />
           <p className="font-sans text-base font-semibold text-danger">Failed to load task workflow.</p>
           <div className="flex justify-center gap-3 mt-4">
-            <button onClick={() => window.location.reload()} className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-slate-950 hover:opacity-90 transition">
+            <button onClick={() => window.location.reload()} className="rounded-md bg-brand-primary px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition">
               Retry Load
             </button>
           </div>

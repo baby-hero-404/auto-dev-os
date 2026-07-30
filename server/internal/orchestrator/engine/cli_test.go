@@ -292,6 +292,75 @@ func TestCLIEngine_RunCodeStep_WritesPromptFileOnHost(t *testing.T) {
 	}
 }
 
+func TestCLIEngine_RunCodeStep_WritesContextFilesAndEnv(t *testing.T) {
+	seen := make(chan struct {
+		content string
+		env     string
+	}, 1)
+	rt := &mockRuntime{onRun: func(req sandbox.CommandRequest) {
+		data, err := os.ReadFile(filepath.Join(hostWorkspaceForTest, "backend", ".autocode", "context", "relevant", "skills", "foo.md"))
+		content := string(data)
+		if err != nil {
+			content = "READ_ERROR: " + err.Error()
+		}
+		seen <- struct {
+			content string
+			env     string
+		}{content, req.Env["AUTOCODE_CONTEXT_DIR"]}
+	}}
+	e := NewCLIEngine(rt, nil)
+	req := baseReq(&models.CLIEngineConfig{Command: "claude"})
+	req.ContextFiles = map[string]string{"relevant/skills/foo.md": "skill body"}
+
+	if _, err := e.RunCodeStep(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := <-seen
+	if got.content != "skill body" {
+		t.Errorf("expected context file to contain %q, got %q", "skill body", got.content)
+	}
+	if got.env != "/workspace/backend/.autocode/context" {
+		t.Errorf("expected AUTOCODE_CONTEXT_DIR to be set, got %q", got.env)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_NoContextFilesMeansNoEnvVar(t *testing.T) {
+	seen := make(chan string, 1)
+	rt := &mockRuntime{onRun: func(req sandbox.CommandRequest) {
+		seen <- req.Env["AUTOCODE_CONTEXT_DIR"]
+	}}
+	e := NewCLIEngine(rt, nil)
+	req := baseReq(&models.CLIEngineConfig{Command: "claude"})
+
+	if _, err := e.RunCodeStep(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := <-seen; got != "" {
+		t.Errorf("expected no AUTOCODE_CONTEXT_DIR when ContextFiles is empty, got %q", got)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_RejectsContextFilePathEscapingContextDir(t *testing.T) {
+	e := NewCLIEngine(&mockRuntime{}, nil)
+	req := baseReq(&models.CLIEngineConfig{Command: "claude"})
+	req.ContextFiles = map[string]string{
+		"../../../../etc/cron.d/evil": "malicious",
+	}
+
+	_, err := e.RunCodeStep(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected an error for a context file path that escapes the context dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes context dir") {
+		t.Errorf("expected escape-detection error, got: %v", err)
+	}
+
+	escapedPath := filepath.Join(hostWorkspaceForTest, "..", "..", "etc", "cron.d", "evil")
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Fatal("context file was written outside the workspace despite the traversal guard")
+	}
+}
+
 func TestExtractCapturedFiles(t *testing.T) {
 	content := "hello world"
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))

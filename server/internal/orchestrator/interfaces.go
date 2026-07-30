@@ -35,6 +35,10 @@ type PromptBuilder interface {
 	// which build one full instruction per spawn rather than assembling a
 	// multi-section tool-loop prompt.
 	LoadStepPrompt(stepID string) (string, error)
+	// MaterializeCLIContext builds the platform-knowledge file set (relevant
+	// skills, learned skills, task rules) written into a CLI task's
+	// .autocode/context/ directory. Used by the CLI spec-first steps.
+	MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error)
 }
 
 // GitOpsClient handles git operations (clone, branch, push, PR).
@@ -87,6 +91,14 @@ type RepositoryRepository interface {
 // ProjectRepository retrieves project configuration.
 type ProjectRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Project, error)
+}
+
+// OrganizationRepository retrieves organization configuration — currently
+// only used for DefaultExecutionProviders, the org-wide routing fallback
+// consulted when a project has no execution_providers of its own (see
+// execution_router.go's precedence chain).
+type OrganizationRepository interface {
+	GetByID(ctx context.Context, id string) (*models.Organization, error)
 }
 
 // LearnedSkillReader looks up active learned skills matching a query, for

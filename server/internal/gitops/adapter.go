@@ -76,6 +76,22 @@ func (a *GitOpsAdapter) CloneForTask(ctx context.Context, repoURL, branch, local
 	return provider.CloneRepo(ctx, repoURL, token, branch, localPath)
 }
 
+// TokenForRepoURL resolves the decrypted read credential for a repo without
+// performing any git operation, so callers (e.g. wkspace's read-only git
+// credential helper wiring) can reuse the same GitAccount/repo.Token
+// resolution CloneForTask uses instead of duplicating it.
+func (a *GitOpsAdapter) TokenForRepoURL(ctx context.Context, repoURL string) (string, error) {
+	_, repo, err := a.lookupRepository(ctx, repoURL)
+	if err != nil {
+		return "", fmt.Errorf("lookup repo %s: %w", repoURL, err)
+	}
+	_, token, err := a.providerAndTokenForRepo(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
 func (a *GitOpsAdapter) CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error {
 	_, repo, err := a.lookupRepository(ctx, repoURL)
 	if err != nil {

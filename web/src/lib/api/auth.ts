@@ -22,7 +22,12 @@ export function getOrganization(orgID: string, token: string) {
 export function updateOrganization(
   orgID: string,
   token: string,
-  input: { name?: string; description?: string; default_execution_providers?: ExecutionProviderConfig[] },
+  input: {
+    name?: string;
+    description?: string;
+    default_execution_providers?: ExecutionProviderConfig[];
+    allow_agent_web_search?: boolean;
+  },
 ) {
   return request<Organization>(`/organizations/${orgID}`, {
     method: "PATCH",

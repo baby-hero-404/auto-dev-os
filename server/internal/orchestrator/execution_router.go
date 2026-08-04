@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
@@ -265,6 +266,10 @@ func (o *Orchestrator) resolveCLICandidate(ctx context.Context, orgID string, p 
 	}
 	cfg.ProfileRef = p.Ref
 
+	if p.Ref == "claude_code" && o.orgAllowsAgentWebSearch(ctx, orgID) {
+		cfg.Args = appendClaudeAllowedTools(cfg.Args, "WebSearch", "WebFetch")
+	}
+
 	credID := p.CredentialID
 	if credID != "" {
 		if !o.hasAvailableCredential(ctx, orgID, credentialProvider, credID) {
@@ -287,4 +292,36 @@ func (o *Orchestrator) resolveCLICandidate(ctx context.Context, orgID string, p 
 	}
 	cfg.CredentialID = cred.ID
 	return &cfg, cred.ID, true
+}
+
+// orgAllowsAgentWebSearch reports the org's AllowAgentWebSearch flag,
+// defaulting to false (deny) for any lookup failure — same fail-closed
+// convention as the rest of this file's org-lookup helpers
+// (resolveFromOrgDefault).
+func (o *Orchestrator) orgAllowsAgentWebSearch(ctx context.Context, orgID string) bool {
+	if o.orgs == nil {
+		return false
+	}
+	org, err := o.orgs.GetByID(ctx, orgID)
+	if err != nil {
+		return false
+	}
+	return org.AllowAgentWebSearch
+}
+
+// appendClaudeAllowedTools adds tools to the value that follows
+// "--allowedTools" in a claude_code profile's Args (a single
+// comma-separated string, e.g. "Read,Edit,Write,Bash" — see
+// cli_profiles.go), without mutating the CLIProfiles registry's backing
+// array in place (Args is copied into a new slice/string first).
+func appendClaudeAllowedTools(args []string, tools ...string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i, a := range out {
+		if a == "--allowedTools" && i+1 < len(out) {
+			out[i+1] = strings.Join(append(strings.Split(out[i+1], ","), tools...), ",")
+			break
+		}
+	}
+	return out
 }

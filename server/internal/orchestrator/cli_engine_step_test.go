@@ -214,7 +214,7 @@ func TestFinishCLIRun_AuthInvalidConfirmed_MarksReauth(t *testing.T) {
 	orch := New(nil, &mockWorkflowRepo{job: &models.WorkflowJob{}}, nil, nil,
 		WithCredentialStatusSetter(credStatus),
 	)
-	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", &engine.CodeStepResult{
+	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", "", &engine.CodeStepResult{
 		Success: false, AuthInvalid: true, AuthInvalidConfirmed: true, Error: "credential not authenticated",
 	})
 	if len(credStatus.ids) != 1 || credStatus.ids[0] != "cred-1" {
@@ -232,7 +232,7 @@ func TestFinishCLIRun_AuthInvalidSuspected_DoesNotMarkReauth(t *testing.T) {
 	orch := New(nil, workflows, nil, nil,
 		WithCredentialStatusSetter(credStatus),
 	)
-	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", &engine.CodeStepResult{
+	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", "", &engine.CodeStepResult{
 		Success: false, AuthInvalid: true, AuthInvalidConfirmed: false, Error: "possible auth failure, unconfirmed signature",
 	})
 	if len(credStatus.ids) != 0 {

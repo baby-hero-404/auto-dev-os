@@ -16,6 +16,10 @@ type RepositoryRepository interface {
 
 type GitOpsClient interface {
 	CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error)
+	// TokenForRepoURL resolves the same read credential CloneForTask uses,
+	// without cloning. Used to provision the read-only git credential
+	// helper agents call mid-task (see writeGitCredentialHelper).
+	TokenForRepoURL(ctx context.Context, repoURL string) (string, error)
 }
 
 type ArtifactRepository interface {

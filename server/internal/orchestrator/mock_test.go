@@ -328,6 +328,10 @@ func (m *mockGitOpsClient) CloneForTask(ctx context.Context, repoURL, branch, lo
 	return branch, nil
 }
 
+func (m *mockGitOpsClient) TokenForRepoURL(ctx context.Context, repoURL string) (string, error) {
+	return "", nil
+}
+
 func (m *mockGitOpsClient) CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error {
 	m.createdBranch = branchName
 	return nil

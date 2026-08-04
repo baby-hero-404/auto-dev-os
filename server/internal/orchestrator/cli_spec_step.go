@@ -201,6 +201,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
 	}
 	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
+	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_prompt", buildCLIPromptArtifact(res.Command, instruction, contextFiles))
 
 	out := steps.CLIStepOutput{Output: res.Output, Files: res.Files, AwaitingInput: res.AwaitingInput}
 	if res.AwaitingInput {

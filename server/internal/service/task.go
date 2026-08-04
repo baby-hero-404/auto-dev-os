@@ -286,7 +286,7 @@ func (s *TaskService) RequestAnalysisChanges(ctx context.Context, id string, inp
 		return nil, err
 	}
 	specStatus := models.TaskSpecStatusChangesRequested
-	status := models.TaskStatusSpecReview
+	status := models.TaskStatusAnalyzing
 	if err := workflow.ValidateTaskTransition(task.Status, status); err != nil {
 		return nil, ErrValidation(err.Error())
 	}

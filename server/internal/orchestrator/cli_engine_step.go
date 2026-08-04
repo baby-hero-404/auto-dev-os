@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,7 @@ const cliCooldownDuration = 1 * time.Minute
 // (cli_analyze/cli_spec/cli_implement) inlines the equivalent logic itself
 // instead (see cli_spec_step.go) since it needs differentiated success/
 // failure log levels (REQ-001) that this shared helper doesn't provide.
-func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, credID string, res *engine.CodeStepResult) {
+func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, credID, instruction string, res *engine.CodeStepResult) {
 	// Write-side of REQ-006: only affects the *next* ResolveExecutionProvider
 	// call, not this step's own outcome (REQ-005, no mid-task switch).
 	if res.QuotaExceeded && credID != "" && o.cooldownSetter != nil {
@@ -61,6 +62,34 @@ func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, 
 		artifactBody = fmt.Sprintf("(cli produced no stdout/stderr; exit_code=%d)\ncommand: %s", res.ExitCode, res.Command)
 	}
 	_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_output", artifactBody)
+	_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_prompt", buildCLIPromptArtifact(res.Command, instruction, nil))
+}
+
+// buildCLIPromptArtifact formats the exact input the CLI agent received —
+// the resolved shell invocation, the full instruction text (what
+// engine/cli.go writes to .autocode/prompt.md, which is wiped when the
+// workspace is cleaned up post-task), and any materialized context files
+// (skills/rules injected via PromptBuilder.MaterializeCLIContext) — so it
+// can be inspected after the fact the same way the API path's "prompt"
+// artifact lets you verify what was actually sent, not just what came back.
+func buildCLIPromptArtifact(command, instruction string, contextFiles map[string]string) string {
+	var b strings.Builder
+	b.WriteString("=== Command ===\n")
+	b.WriteString(command)
+	b.WriteString("\n\n=== Instruction (prompt.md) ===\n")
+	b.WriteString(instruction)
+	if len(contextFiles) > 0 {
+		paths := make([]string, 0, len(contextFiles))
+		for p := range contextFiles {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		for _, p := range paths {
+			b.WriteString(fmt.Sprintf("\n\n=== Context File: %s ===\n", p))
+			b.WriteString(contextFiles[p])
+		}
+	}
+	return b.String()
 }
 
 func worktreeSuffixForRole(role string) string {
@@ -171,7 +200,7 @@ func (r *cliEngineRunner) RunLLMStep(ctx context.Context, task *models.Task, age
 		return nil, fmt.Errorf("cli engine: %w", err)
 	}
 
-	r.o.finishCLIRun(ctx, task.ID, jobID, stepID, r.credID, res)
+	r.o.finishCLIRun(ctx, task.ID, jobID, stepID, r.credID, instruction, res)
 
 	if !res.Success {
 		if res.Error != "" {

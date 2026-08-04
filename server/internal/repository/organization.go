@@ -54,6 +54,9 @@ func (r *OrganizationRepo) Update(ctx context.Context, id string, input models.U
 	if len(input.DefaultExecutionProviders) > 0 {
 		updates["default_execution_providers"] = input.DefaultExecutionProviders
 	}
+	if input.AllowAgentWebSearch != nil {
+		updates["allow_agent_web_search"] = *input.AllowAgentWebSearch
+	}
 	if err := r.db.WithContext(ctx).Model(org).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update organization: %w", err)
 	}

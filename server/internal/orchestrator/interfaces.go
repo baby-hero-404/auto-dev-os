@@ -48,6 +48,10 @@ type GitOpsClient interface {
 	// Use this instead of CloneRepo inside the orchestrator so the git account token
 	// is never stored in the task/repo model and is always resolved at clone time.
 	CloneForTask(ctx context.Context, repoURL, branch, localPath string) (string, error)
+	// TokenForRepoURL resolves the same read credential CloneForTask uses,
+	// without cloning. Used to provision the read-only git credential
+	// helper agents call mid-task (wkspace.writeGitCredentialHelper).
+	TokenForRepoURL(ctx context.Context, repoURL string) (string, error)
 	CreateBranch(ctx context.Context, localPath, repoURL, branchName string) error
 	CommitAndPush(ctx context.Context, localPath, repoURL, branchName, message string, files map[string]string, agentRole string) error
 	CreatePullRequest(ctx context.Context, repoURL, branchName, title, body string) (string, error)

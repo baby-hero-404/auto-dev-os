@@ -209,6 +209,10 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 
 		m.populateGoModulesCache(ctx, task.ID, repoAbsPath)
 
+		if err := m.writeGitCredentialHelper(ctx, ws.Root, repoAbsPath, rWS.Name, rWS.URL); err != nil {
+			m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to provision git credential helper for %s: %v", rWS.Name, err))
+		}
+
 		ws.Repos[i].Branches.Integration = paths.DeriveBranchName(task.ID, task.Title)
 	}
 
@@ -237,6 +241,91 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 		}
 	}
 
+	return nil
+}
+
+// gitCredsContainerRoot mirrors engine/cli.go's hardcoded sandbox mount
+// point: the CLI container always bind-mounts the task's host workspace
+// root (ws.Root here) at this path, so a path under ws.Root and its
+// container-side equivalent differ only by this prefix.
+const gitCredsContainerRoot = "/workspace"
+
+// writeGitCredentialHelper provisions a read-only git credential helper for
+// repoAbsPath so a CLI agent running inside the sandbox container can itself
+// run `git fetch`/`git pull`/`git log origin/...` against private repos
+// mid-task (the agent has Bash access — see cli_profiles.go's
+// --allowedTools Read,Edit,Write,Bash — but until now had no git credentials
+// of its own; only the orchestrator's own gitops.CommitAndPush call, made
+// directly from Go with its own token, could authenticate).
+//
+// Deliberately read-only: the helper only ever answers `git credential get`
+// (see the script written below), and remote.origin.pushurl is pointed at a
+// bogus scheme so `git push` fails fast even if attempted — write access
+// stays exclusively on the orchestrator's pr.go CommitAndPush path, which is
+// the one place a PR/commit is actually meant to be produced. The token file
+// itself lives only as long as the job is actually running: ReleaseWorkspaceLock
+// (locking.go) deletes ws.Root/.git-creds on every job-run exit (pause,
+// success, failure, cancel), and this function re-provisions it fresh on
+// each resume via EnsureWorkspaceCloned.
+func (m *Manager) writeGitCredentialHelper(ctx context.Context, wsRoot, repoAbsPath, repoName, repoURL string) error {
+	if m.GitOps == nil || repoURL == "" {
+		return nil
+	}
+	token, err := m.GitOps.TokenForRepoURL(ctx, repoURL)
+	if err != nil {
+		return fmt.Errorf("resolve token: %w", err)
+	}
+
+	// Always block push, even for public repos with no token — agents
+	// should never push directly regardless of whether auth is needed to.
+	blockPush := exec.CommandContext(ctx, "git", "-C", repoAbsPath, "config", "--local",
+		"remote.origin.pushurl", "denied://push-disabled-by-policy-use-pr-flow")
+	if out, err := blockPush.CombinedOutput(); err != nil {
+		return fmt.Errorf("block push url: %w: %s", err, string(out))
+	}
+
+	if token == "" {
+		// Public repo / no credential on file: fetch already works
+		// unauthenticated, nothing further to provision.
+		return nil
+	}
+
+	credsDir := filepath.Join(wsRoot, ".git-creds")
+	if err := os.MkdirAll(credsDir, 0o700); err != nil {
+		return fmt.Errorf("create creds dir: %w", err)
+	}
+
+	safeName := strings.ReplaceAll(repoName, string(filepath.Separator), "_")
+	tokenFile := filepath.Join(credsDir, safeName+".token")
+	if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
+		return fmt.Errorf("write token file: %w", err)
+	}
+
+	relCredsDir, err := filepath.Rel(wsRoot, credsDir)
+	if err != nil {
+		return fmt.Errorf("resolve creds dir relative path: %w", err)
+	}
+	containerTokenPath := filepath.ToSlash(filepath.Join(gitCredsContainerRoot, relCredsDir, safeName+".token"))
+
+	helperFile := filepath.Join(credsDir, safeName+"-credential-helper.sh")
+	helperScript := fmt.Sprintf(`#!/bin/sh
+# Auto-generated read-only git credential helper. Only answers "get" (fetch/
+# pull/log); the "store"/"erase" verbs git may also invoke are no-ops here.
+if [ "$1" = "get" ]; then
+  echo "username=x-access-token"
+  echo "password=$(cat '%s' 2>/dev/null)"
+fi
+`, containerTokenPath)
+	if err := os.WriteFile(helperFile, []byte(helperScript), 0o700); err != nil {
+		return fmt.Errorf("write credential helper script: %w", err)
+	}
+	containerHelperPath := filepath.ToSlash(filepath.Join(gitCredsContainerRoot, relCredsDir, safeName+"-credential-helper.sh"))
+
+	setHelper := exec.CommandContext(ctx, "git", "-C", repoAbsPath, "config", "--local",
+		"credential.helper", containerHelperPath)
+	if out, err := setHelper.CombinedOutput(); err != nil {
+		return fmt.Errorf("set credential helper: %w: %s", err, string(out))
+	}
 	return nil
 }
 

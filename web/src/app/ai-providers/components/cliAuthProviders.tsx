@@ -25,18 +25,21 @@ function hasCommonSuccessPhrase(cleanBuf: string): boolean {
   return (
     s.includes("loginsuccessful") ||
     s.includes("loggedinas") ||
+    s.includes("successfullyloggedin") ||
+    s.includes("authenticated") ||
+    s.includes("successfullyauthenticated") ||
     s.includes("authenticationcomplete") ||
-    s.includes("authenticationsuccessful") ||
-    s.includes("successfullyloggedin")
+    s.includes("authenticationsuccessful")
   );
 }
 
 export const CLI_AUTH_PROVIDERS: Record<string, CliAuthProviderConfig> = {
   "cli:claude": {
     title: "Connect Claude CLI",
+    initialCommand: "claude auth login\n",
     description: (
       <>
-        The system will automatically run <code>claude login</code> for you, and automatically capture the session once authentication is successful.
+        The system will automatically run <code>claude auth login</code> for you, and automatically capture the session once authentication is successful.
       </>
     ),
     steps: [

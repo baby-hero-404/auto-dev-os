@@ -127,7 +127,7 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
 
       {/* Accordion 1: Specification */}
       {isCliFlow ? (
-        <CLISpecPanel />
+        task?.status !== 'spec_review' && <CLISpecPanel />
       ) : (
         task?.status !== 'spec_review' && (
           <AccordionItem

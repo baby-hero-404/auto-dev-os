@@ -39,6 +39,28 @@ function CliOutputViewer({ output }: { output: string }) {
   );
 }
 
+function CliPromptViewer({ prompt }: { prompt: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-1.5 rounded-lg border border-stroke/10 bg-surface/20 dark:bg-surface/50 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-content-muted hover:text-foreground transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Terminal size={11} />
+        CLI Input (command, prompt, skills/rules)
+      </button>
+      {expanded && (
+        <pre className="text-[10px] font-mono whitespace-pre-wrap break-all p-2.5 pt-0 max-h-[320px] overflow-y-auto custom-scrollbar text-foreground/80">
+          {prompt}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 const STEP_LABELS: Record<string, string> = {
   cli_analyze: "Analyze (CLI)",
   cli_spec: "Author Spec (CLI)",
@@ -147,6 +169,7 @@ export function CheckpointsPanel() {
               /* eslint-enable @typescript-eslint/no-explicit-any */
               const attempt = typeof cp.state?.attempt === "number" ? cp.state.attempt : undefined;
               const cliOutputArtifacts = artifactsForStep(artifacts, cp.step, "cli_output", attempt);
+              const cliPromptArtifacts = artifactsForStep(artifacts, cp.step, "cli_prompt", attempt);
 
               return (
                 <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-surface/50 transition-colors duration-150">
@@ -166,6 +189,15 @@ export function CheckpointsPanel() {
                       {error}
                     </p>
                   )}
+                  {cliPromptArtifacts.map((art) => {
+                    let prompt = "";
+                    try {
+                      prompt = typeof art.payload === "string" ? art.payload : JSON.stringify(art.payload, null, 2);
+                    } catch {
+                      prompt = String(art.payload);
+                    }
+                    return <CliPromptViewer key={art.id} prompt={prompt} />;
+                  })}
                   {cliOutputArtifacts.map((art) => {
                     let output = "";
                     try {

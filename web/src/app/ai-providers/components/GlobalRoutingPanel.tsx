@@ -9,6 +9,7 @@ import { useAuthedSWR } from "@/lib/use-authed-swr";
 import type { ExecutionProviderConfig } from "@/lib/types";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { ExecutionProvidersList } from "@/components/projects/execution-providers-list";
 
 // GlobalRoutingPanel configures Organization.default_execution_providers —
@@ -36,6 +37,7 @@ export function GlobalRoutingPanel() {
   const [providers, setProviders] = useState<ExecutionProviderConfig[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [isSavingWebSearch, setIsSavingWebSearch] = useState(false);
 
   // Render-phase prop synchronization (matches project-profile.tsx's
   // pattern) to avoid cascading renders from a useEffect setState.
@@ -64,6 +66,24 @@ export function GlobalRoutingPanel() {
       toast.error(message);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  // Web search access is its own immediate toggle (not batched with the
+  // routing-list save above) since it's a single independent org setting,
+  // not part of the provider priority list.
+  async function handleToggleWebSearch(checked: boolean) {
+    if (!token || !orgID) return;
+    setIsSavingWebSearch(true);
+    try {
+      await api.updateOrganization(orgID, token, { allow_agent_web_search: checked });
+      await mutate();
+      toast.success(checked ? "Web search enabled for CLI agents." : "Web search disabled for CLI agents.");
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Failed to update web search access.";
+      toast.error(message);
+    } finally {
+      setIsSavingWebSearch(false);
     }
   }
 
@@ -101,6 +121,32 @@ export function GlobalRoutingPanel() {
           </CardContent>
         </Card>
       </form>
+
+      <Card>
+        <CardHeader
+          title="Agent Web Search"
+          icon={<Terminal size={18} className="text-brand-primary" />}
+        />
+        <CardContent className="space-y-3">
+          <p className="text-xs text-content-muted">
+            Grants the Claude Code CLI agent the WebSearch and WebFetch tools, letting it look up documentation and
+            fetch page content mid-task. Applies to every project in your organization using the Claude Code
+            profile; Antigravity and Codex are unaffected.
+          </p>
+          {!isAdmin && (
+            <p className="text-xs text-warning">
+              Only organization admins can change this — showing the current configuration read-only.
+            </p>
+          )}
+          <Switch
+            id="allow-agent-web-search"
+            checked={organization?.allow_agent_web_search ?? false}
+            onChange={handleToggleWebSearch}
+            disabled={isSavingWebSearch || !isAdmin}
+            label="Allow Claude Code agents to search and fetch web pages"
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

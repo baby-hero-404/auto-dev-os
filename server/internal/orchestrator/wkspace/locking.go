@@ -187,5 +187,17 @@ func (m *Manager) ReleaseWorkspaceLock(taskID string) {
 		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
 			m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to remove workspace lock file: %v", err))
 		}
+
+		// The read-only git credential helper (writeGitCredentialHelper,
+		// create.go) is only valid while a job for this task is actually
+		// running: wipe the token files the moment the run stops (paused,
+		// completed, failed, or cancelled — every exit path releases the
+		// lock, see worker.go's deferred releaseWorkspaceLock), so a paused
+		// task sitting in spec_review doesn't leave a live repo credential
+		// on disk. EnsureWorkspaceCloned re-provisions it on the next resume.
+		credsDir := filepath.Join(root, ".git-creds")
+		if err := os.RemoveAll(credsDir); err != nil {
+			m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to remove git credential helper dir: %v", err))
+		}
 	}
 }

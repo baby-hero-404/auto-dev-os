@@ -392,6 +392,7 @@ export type Organization = {
   id: string;
   name: string;
   default_execution_providers?: ExecutionProviderConfig[];
+  allow_agent_web_search?: boolean;
   created_at: string;
   updated_at: string;
 };

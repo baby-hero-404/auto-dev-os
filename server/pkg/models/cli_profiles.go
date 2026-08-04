@@ -31,7 +31,7 @@ const promptFileInstruction = "Read and follow the complete task instructions in
 var CLIProfiles = map[string]CLIProfile{
 	"claude_code": {
 		Command: "claude",
-		Args:    []string{"--allowedTools", "Read,Edit,Bash", "-p", promptFileInstruction},
+		Args:    []string{"--allowedTools", "Read,Edit,Write,Bash", "-p", promptFileInstruction},
 		// "claude auth status" is read-only (no side effects) and always
 		// exits 0 regardless of login state, reporting it instead via a
 		// `"loggedIn": bool` JSON field (verified against the real binary,

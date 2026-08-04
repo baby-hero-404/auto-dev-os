@@ -178,6 +178,7 @@ export default function AIProvidersPage() {
         label,
         api_key: apiKey.trim(),
         priority: reauthCliCredential.priority,
+        status: "active",
       });
       setReauthCliCredential(null);
       toast.success("CLI Profile updated successfully");

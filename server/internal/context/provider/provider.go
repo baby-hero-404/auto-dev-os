@@ -265,50 +265,10 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 		}
 	}
 
-	// 1. Source Discovery
-	filesMeta, err := source.ScanRepository(scanDir)
+	// 1+2. Source Discovery + Extract/Load Tags via mtime SQLite Cache
+	allTags, err := p.loadCachedTags(ctx, scanDir, rootDir, pathCtx, true)
 	if err != nil {
 		return "", err
-	}
-
-	cache, cleanup, err := p.getCache(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer cleanup()
-
-	// 2. Extract or Load Tags via mtime SQLite Cache
-	var allTags []source.Tag
-	for _, f := range filesMeta {
-		tags, fresh := cache.GetTagsIfFresh(f.Filepath, f.Mtime)
-		if !fresh {
-			extractedTags, err := symbol.ExtractTags(f.Filepath)
-			if err == nil {
-				tags = extractedTags
-				_ = cache.SaveTags(f.Filepath, f.Mtime, tags)
-			}
-		}
-
-		// Rewrite filepath to be relative to the task rootDir so that the returned repo map
-		// references files clean and relative (e.g. 'code/repos/my_repo/main/main.go')
-		var relPath string
-		var relErr error
-		if pathCtx != nil {
-			relPath, relErr = pathCtx.ToLogical(f.Filepath)
-		} else {
-			relPath, relErr = filepath.Rel(rootDir, f.Filepath)
-			if relErr == nil {
-				relPath = filepath.ToSlash(relPath)
-			}
-		}
-
-		if relErr == nil {
-			for i := range tags {
-				tags[i].Filepath = relPath
-			}
-		}
-
-		allTags = append(allTags, tags...)
 	}
 
 	// 3. Mathematical Modeling
@@ -323,6 +283,102 @@ func (p *Provider) GetRepoMap(ctx context.Context, activeFiles []string, maxToke
 	result := repomap.PruneTags(allTags, pageRank, maxTokens, repomap.FormatSkeleton, repomap.CountTokens)
 
 	return result, nil
+}
+
+// loadCachedTags scans scanDir and returns every file's tags, resolving each
+// through the mtime-checked SQLite cache (re-parsing via symbol.ExtractTags
+// only on a cache miss) and rewriting Filepath to be relative to rootDir.
+// Shared by GetRepoMap and GetAllTags so a full re-parse of every file only
+// ever happens on first index or after a file actually changed, never on
+// every call (see dependencyImpact's fix in mcpcontext/handlers.go, which
+// used to bypass this cache entirely).
+func (p *Provider) loadCachedTags(ctx context.Context, scanDir, rootDir string, pathCtx *paths.AgentPathContext, rewritePaths bool) ([]source.Tag, error) {
+	filesMeta, err := source.ScanRepository(scanDir)
+	if err != nil {
+		return nil, err
+	}
+
+	cache, cleanup, err := p.getCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	var allTags []source.Tag
+	for _, f := range filesMeta {
+		tags, fresh := cache.GetTagsIfFresh(f.Filepath, f.Mtime)
+		if !fresh {
+			extractedTags, err := symbol.ExtractTags(f.Filepath)
+			if err == nil {
+				tags = extractedTags
+				_ = cache.SaveTags(f.Filepath, f.Mtime, tags)
+			}
+		}
+
+		if rewritePaths {
+			var relPath string
+			var relErr error
+			if pathCtx != nil {
+				relPath, relErr = pathCtx.ToLogical(f.Filepath)
+			} else {
+				relPath, relErr = filepath.Rel(rootDir, f.Filepath)
+				if relErr == nil {
+					relPath = filepath.ToSlash(relPath)
+				}
+			}
+
+			if relErr == nil {
+				for i := range tags {
+					tags[i].Filepath = relPath
+				}
+			}
+		}
+
+		allTags = append(allTags, tags...)
+	}
+	return allTags, nil
+}
+
+// GetAllTags returns every cached tag under rootDir, resolved through the
+// same mtime cache loadCachedTags/GetRepoMap use — for callers (e.g.
+// dependency.impact) that need the raw tag/call-graph data for one file
+// rather than a ranked, token-pruned repo map.
+func (p *Provider) GetAllTags(ctx context.Context, rootDir string) ([]source.Tag, error) {
+	var pathCtx *paths.AgentPathContext
+	if actx, ok := ctx.Value(paths.AgentPathContextKey).(*paths.AgentPathContext); ok {
+		pathCtx = actx
+	}
+	scanDir := rootDir
+	if pathCtx != nil {
+		scanDir = pathCtx.PhysicalRoot()
+	} else {
+		wp := paths.NewOSWorkspacePaths(filepath.Dir(rootDir))
+		reposDir := wp.CodeRoot(filepath.Base(rootDir)).String()
+		if stat, err := os.Stat(reposDir); err == nil && stat.IsDir() {
+			scanDir = reposDir
+		}
+	}
+	return p.loadCachedTags(ctx, scanDir, rootDir, pathCtx, false)
+}
+
+// FindExactSymbol looks up a symbol by exact name in the cached tag index
+// (mtime-checked SQLite cache, populated by IndexAll) and returns matching
+// definitions as snippets. Unlike RetrieveContext (a fuzzy, multi-term
+// relevance search meant for natural-language queries), this is an exact
+// name match — the correct semantics for a tool like ast.query, whose
+// "symbol" argument names one definition rather than describing intent.
+func (p *Provider) FindExactSymbol(ctx context.Context, symbolName string, limit int) ([]models.ContextSnippet, error) {
+	cache, cleanup, err := p.getCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	matches, err := cache.FindExactSymbol(symbolName, limit)
+	if err != nil {
+		return nil, err
+	}
+	return p.snippetsFromScoredTags(ctx, matches), nil
 }
 
 // IndexWorkspace loads AST tags into SQLite.
@@ -384,6 +440,29 @@ func (p *Provider) IndexWorkspace(ctx context.Context) error {
 	return nil
 }
 
+// IndexAll scans rootDir and (re-)populates p.cache directly, keyed by mtime
+// freshness (source.Cache.GetTagsIfFresh), for callers with no separate
+// global/per-task-workspace cache tier — i.e. a single Provider serving a
+// single fixed root for its whole lifetime. IndexWorkspace's rootDir ==
+// p.rootDir guard makes it a no-op for exactly this case, since it only ever
+// indexes when a *different* WorkspaceRootKey is supplied via ctx.
+func (p *Provider) IndexAll(ctx context.Context) error {
+	filesMeta, err := source.ScanRepository(p.rootDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range filesMeta {
+		_, fresh := p.cache.GetTagsIfFresh(f.Filepath, f.Mtime)
+		if !fresh {
+			extractedTags, err := symbol.ExtractTags(f.Filepath)
+			if err == nil {
+				_ = p.cache.SaveTags(f.Filepath, f.Mtime, extractedTags)
+			}
+		}
+	}
+	return nil
+}
+
 // RetrieveContext reads AST definitions matching the query and returns their source code bodies.
 func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit int) ([]models.ContextSnippet, error) {
 	if err := p.IndexWorkspace(ctx); err != nil {
@@ -401,6 +480,15 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 		return nil, err
 	}
 
+	return p.snippetsFromScoredTags(ctx, tags), nil
+}
+
+// snippetsFromScoredTags reads each tag's source lines off disk and builds
+// the ContextSnippet shape both RetrieveContext (fuzzy search) and
+// FindExactSymbol (exact-name lookup) return, resolving each tag's absolute
+// Filepath back to a path relative to the caller's rootDir/pathCtx the same
+// way GetRepoMap/loadCachedTags do.
+func (p *Provider) snippetsFromScoredTags(ctx context.Context, tags []source.ScoredTag) []models.ContextSnippet {
 	rootDir := p.rootDir
 	if wsRoot, ok := ctx.Value(WorkspaceRootKey).(string); ok && wsRoot != "" {
 		rootDir = wsRoot
@@ -458,7 +546,7 @@ func (p *Provider) RetrieveContext(ctx context.Context, taskQuery string, limit 
 		})
 	}
 
-	return snippets, nil
+	return snippets
 }
 
 func readLines(path string) ([]string, error) {

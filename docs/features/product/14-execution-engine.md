@@ -4,13 +4,21 @@ sources:
   - "server/internal/orchestrator/steps/cli_analyze.go"
   - "server/internal/orchestrator/steps/cli_spec.go"
   - "server/internal/orchestrator/steps/cli_implement.go"
+  - "server/internal/orchestrator/steps/cli_implement_track.go"
+  - "server/internal/orchestrator/steps/cross_review.go"
+  - "server/internal/mcpcontext/**"
+  - "server/cmd/mcp-context/main.go"
+  - "server/internal/sandbox/activity.go"
+  - "server/internal/sandbox/docker.go"
+  - "server/internal/sandbox/sandbox.go"
   - "server/internal/workflow/step.go"
   - "server/pkg/models/project.go"
   - "server/pkg/models/task.go"
+  - "server/pkg/models/cli_profiles.go"
   - "server/internal/service/credential_pool.go"
   - "web/src/components/projects/execution-providers-list.tsx"
   - "web/src/app/ai-providers/components/GlobalRoutingPanel.tsx"
-verified: 2026-07-30
+verified: 2026-08-04
 ---
 
 # 14. Execution Engine (Pluggable API-Native / CLI)
@@ -66,22 +74,44 @@ Biến môi trường trong `cli_engine_config.env` được mã hoá/lưu như 
 
 **Global Routing (`Organization.default_execution_providers`):** cùng cấu trúc/UI với Execution Providers (`GlobalRoutingPanel.tsx` trên trang AI Providers, admin-only), nhưng là fallback priority list ở **org-wide**, dùng cho project chưa tự cấu hình `execution_providers` riêng (xem thứ tự ưu tiên ở `execution_router.go`). **Auto-enable:** mỗi khi org thêm một `ProviderCredential` mới cho Anthropic/OpenAI/Gemini/Claude CLI/Codex CLI/Antigravity CLI, `CredentialPoolService.Create` (`server/internal/service/credential_pool.go`) tự động bật `enabled=true` cho row tương ứng trong `default_execution_providers` — không cần admin vào Global Routing bấm Save thủ công. Priority của row giữ nguyên vị trí cố định sẵn có (không reorder); nếu org chưa từng lưu Global Routing lần nào, credential đầu tiên sẽ tự scaffold đủ 7 row (theo đúng thứ tự UI) rồi chỉ bật row đó. Custom CLI (`ref=custom`) không bao giờ được auto-enable vì cần `command`/`credential_id` cấu hình tay (`models.AutoEnableExecutionProviderRow`, `server/pkg/models/project.go`).
 
-## C. CLI Spec-First Pipeline
+## C. CLI Orchestrator Pipeline
 
-Vì CLI agent đã tự có tool-loop, context loading, planning và self-review bên trong nó, DAG API-native (context_load → analyze → plan → code → merge → review → fix → test → pr) không phù hợp khi `execution_engine = cli`. Thay vào đó, `BuildWorkflow` chọn workflow definition thứ hai — `cli_spec_first` (`server/internal/workflow/step.go`) — theo engine đã resolve của task:
+Vì CLI agent đã tự có tool-loop, context loading, planning và self-review bên trong nó, DAG API-native không phù hợp khi `execution_engine = cli`. `BuildWorkflow` chọn một trong hai DAG definitions dựa trên kết quả phân tích của `cli_analyze` (populated qua `workflow.ErrGraphChanged` re-dispatch):
 
+**Single-track:**
 ```
-cli_analyze → cli_spec → cli_implement → cli_mr
+cli_analyze → cli_spec → cli_implement → cross_review → cli_mr
+```
+
+**Parallel-track (FE+BE detected by `CLIAnalysisNeedsParallelTracks`):**
+```
+cli_analyze → cli_spec → cli_implement_backend ┐
+                        → cli_implement_frontend ┘ → merge → cross_review → cli_mr
 ```
 
 | Step | Vai trò |
 |:-----|:--------|
-| **cli_analyze** | CLI được prompt phân tích repo + task description, ghi `.autocode/analysis.md` (tech stack, files liên quan, risks). Server đọc file này lưu vào `task.Analysis`. |
-| **cli_spec** | CLI authoring một OpenSpec set vào `docs/openspecs/<task-slug>/` trong worktree (4 files theo đúng convention của chính Auto Code OS). Server parse `proposal.md` + `tasks.md` để hiển thị UI; gate approve (tuỳ autonomy setting của project) trước khi sang implement. |
-| **cli_implement** | CLI được prompt implement theo spec set, tick checkbox trong `tasks.md` khi xong. Kết quả đánh giá bằng git diff. |
-| **cli_mr** | Tái dùng PR step hiện có (`orchestrator/steps/pr.go`) — push branch + tạo PR; spec set nằm trong diff nên reviewer thấy cả spec lẫn code. |
+| **cli_analyze** | CLI phân tích repo + task description, ghi `.autocode/analysis.md` (captured qua `CaptureFiles` sentinel encoding). Xác định single- vs dual-track. |
+| **cli_spec** | CLI authoring 4 OpenSpec files vào `docs/openspecs/<task-slug>/`. Human approval gate theo autonomy setting. |
+| **cli_implement (/ _backend / _frontend)** | CLI implement theo spec. Role-specific prompt qua `PromptBuilder.LoadRolePrompt` (cùng `AgentRole` resolution với API-native flow). BE/FE tracks chạy trong worktree riêng (`feature/<task-id>-be` / `-fe`). |
+| **cross_review** | LLM-based reviewer (`AgentRoleReviewer`) độc lập harness (Harness Independence — loại trừ provider của coder). Fail → `ErrCrossReviewFixLoop` re-dispatch `cli_implement` với violations prepended. Cycle limit + repeat-violation → escalate `human_review`. |
+| **merge** | Reuse `MergeStep` để merge `be`/`fe` branches vào integration branch. |
+| **cli_mr** | Tái dùng `PRStep` push/PR logic verbatim. |
 
-Task detail có tab/panel "Spec" render `proposal.md` + checkbox `tasks.md` (đọc từ worktree qua endpoint riêng). Khi autonomy = supervised, nút Approve/Request-changes hiện trên spec trước khi `cli_implement` được dispatch.
+**Context MCP Server (`server/cmd/mcp-context`):**
+Stdio-only MCP server bundled trong sandbox image. Expose 6 tools — `repo.search`, `ast.query`, `dependency.impact`, `skill.search`, `architecture.query`, `quality.check` — là thin wrappers over `internal/context/*`. Auto-wired per CLI profile (`claude --mcp-config`, Codex `config.toml`, Antigravity `mcp_config.json`). Dynamic context invalidation: `Provider.IndexAll` (mtime-respecting) đảm bảo mid-session edits được reflect ngay.
+
+**Observability:**
+- Real-time log streaming (`Follow:true` concurrent với `ContainerWait`), logs → `server/.data/workspaces/<task-id>/logs/cli_<step_id>_run.log`.
+- MCP server: `mcp-server.log` + `mcp-trace.jsonl` (JSON-RPC request/response pairs per round-trip, gated bởi `--trace` flag hoặc `AUTOCODE_MCP_TRACE=1`).
+- Telemetry (cost/duration/tokens) parse từ `--output-format json` CLI output, accumulated vào `workflow_jobs.total_cost_usd`/`total_duration_ms`/`total_tokens_used` (migration 000023, additive `gorm.Expr` update).
+
+**Resilience & Security:**
+- Smart idle timeout (15 min default, `AUTOCODE_CLI_IDLE_TIMEOUT_MINUTES`) + streaming loop detector (200-line ring buffer, 10× repetition) → `ContainerKill(SIGKILL)` ngay khi phát hiện.
+- Sandbox cache mounts fixed sang `/home/agent/` (non-root UID 1000).
+- Credentials injected qua `container.Config.Env`, không bao giờ interpolated vào `cmd.Args`. `redactSecrets` scrub toàn bộ log/checkpoint output (4 credential shapes: Anthropic/OpenAI/Gemini/GitHub).
+- Context cancellation: `ContainerKill(SIGKILL)` ngay lập tức khi job bị cancel, không cần chờ 5s SIGTERM grace.
+- Partial retry: backend track checkpoint survive → chỉ frontend track bị re-run (Phase 5 checkpoint resume).
 
 ---
 

@@ -312,6 +312,12 @@ export type WorkflowJob = {
   last_error: string;
   created_at: string;
   updated_at: string;
+  // Accumulated CLI telemetry (Phase 6) across every cli_* step this job runs.
+  // Zero for API-native jobs and for CLI runs whose output had no parseable
+  // telemetry block.
+  total_cost_usd: number;
+  total_duration_ms: number;
+  total_tokens_used: number;
 };
 
 export type WorkflowCheckpoint = {

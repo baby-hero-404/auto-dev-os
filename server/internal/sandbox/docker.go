@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -209,6 +210,17 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		},
 	}
 
+	if req.LogsHostDir != "" {
+		if err := os.MkdirAll(req.LogsHostDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create sandbox logs dir: %w", err)
+		}
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: req.LogsHostDir,
+			Target: LogsContainerDir,
+		})
+	}
+
 	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
 		goModCachePath := filepath.Join(homeDir, "go", "pkg", "mod")
 		if gopath := os.Getenv("GOPATH"); gopath != "" {
@@ -228,11 +240,11 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		// Define common language cache mappings: host absolute path -> container target path
 		cacheDirs := map[string]string{
 			goModCachePath:                               "/go/pkg/mod",
-			filepath.Join(homeDir, ".npm"):               "/root/.npm",
-			filepath.Join(homeDir, ".cache", "pip"):      "/root/.cache/pip",
-			filepath.Join(homeDir, ".m2"):                "/root/.m2",
-			filepath.Join(homeDir, ".gradle"):            "/root/.gradle",
-			filepath.Join(homeDir, ".cargo", "registry"): "/root/.cargo/registry",
+			filepath.Join(homeDir, ".npm"):               "/home/agent/.npm",
+			filepath.Join(homeDir, ".cache", "pip"):      "/home/agent/.cache/pip",
+			filepath.Join(homeDir, ".m2"):                "/home/agent/.m2",
+			filepath.Join(homeDir, ".gradle"):            "/home/agent/.gradle",
+			filepath.Join(homeDir, ".cargo", "registry"): "/home/agent/.cargo/registry",
 		}
 
 		for absHostPath, targetContainerPath := range cacheDirs {
@@ -385,6 +397,43 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		return nil, fmt.Errorf("start docker container: %w", err)
 	}
 
+	// Stream logs with Follow:true starting right after the container
+	// starts, rather than fetching the whole buffer with ContainerLogs after
+	// ContainerWait returns (the old behavior): a container killed mid-run
+	// (OOM, host restart, context cancellation) left no trace at all under
+	// the old approach, since ContainerWait never resolved and the
+	// after-the-fact ContainerLogs call was never reached. Streaming
+	// concurrently with the wait means a real-time on-disk copy (via
+	// req.LogFilePath, Phase 6 "Real-time Log Streaming") survives up to the
+	// point of failure even when the container itself never exits cleanly.
+	stdout, stderr, logsErrCh, logCloser, activity, loopDet, err := r.streamContainerLogs(ctx, containerID, req.LogFilePath)
+	if err != nil {
+		return nil, err
+	}
+	defer logCloser()
+
+	// watchForStall (Phase 7, "Smart Idle Timeout & Loop Detection") polls
+	// the same activity/loop trackers streamContainerLogs just wired up and
+	// force-kills the container the first time either condition trips,
+	// independent of — and normally well before — req.Timeout's absolute
+	// cap. watchdogDone stops it once the container has exited on its own
+	// (success, normal failure, or ctx cancellation below) so it never
+	// races a kill against an already-finished run.
+	idleTimeout := req.IdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = DefaultIdleTimeout
+	}
+	watchdogDone := make(chan struct{})
+	defer close(watchdogDone)
+	var stallMu sync.Mutex
+	var stallReason string
+	go watchForStall(watchdogDone, activity, loopDet, idleTimeout, 5*time.Second, func(reason string) {
+		stallMu.Lock()
+		stallReason = reason
+		stallMu.Unlock()
+		_ = r.client.ContainerKill(context.Background(), containerID, "SIGKILL")
+	})
+
 	waitCh, errCh := r.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
 	var statusCode int64
 	select {
@@ -395,21 +444,30 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	case waitResp := <-waitCh:
 		statusCode = waitResp.StatusCode
 	case <-ctx.Done():
+		// Context cancellation (Phase 7, "Context Cancellation SIGKILL
+		// cascade" — e.g. a user clicking Cancel in the UI, whose handler
+		// calls the CancelFunc stored in Orchestrator.jobCancels) must reach
+		// and kill the container immediately, not just stop polling it: the
+		// deferred ContainerStop below still runs, but it's a graceful
+		// SIGTERM-then-wait-5s-then-SIGKILL — an explicit SIGKILL here skips
+		// that grace period so a stuck/looping agent dies instantly instead
+		// of continuing to run (and burn tokens/cost) for another 5s after
+		// the user asked it to stop. Best-effort: ContainerKill errors are
+		// swallowed since ctx.Err() is already the error being returned, and
+		// the deferred ContainerStop/ContainerRemove are the backstop either
+		// way.
+		_ = r.client.ContainerKill(context.Background(), containerID, "SIGKILL")
 		return nil, ctx.Err()
 	}
 
-	logReader, err := r.client.ContainerLogs(ctx, containerID, container.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("read docker container logs: %w", err)
-	}
-	defer logReader.Close()
-
-	stdout, stderr, err := splitDockerLogs(logReader)
-	if err != nil {
-		return nil, err
+	// The container has stopped; the log stream should reach EOF on its own
+	// shortly after (Follow:true ends once the container's output is fully
+	// drained). Give it a bounded grace period rather than blocking forever
+	// on a stream that, in principle, could hang.
+	select {
+	case <-logsErrCh:
+	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 	}
 
 	var updatedCredentialFiles map[string]string
@@ -426,12 +484,87 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 	}
 
+	stallMu.Lock()
+	killed := stallReason != ""
+	killReason := stallReason
+	stallMu.Unlock()
+
 	return &CommandResult{
 		ExitCode:               int(statusCode),
-		Stdout:                 stdout,
-		Stderr:                 stderr,
+		Stdout:                 strings.TrimSpace(stdout.String()),
+		Stderr:                 strings.TrimSpace(stderr.String()),
 		UpdatedCredentialFiles: updatedCredentialFiles,
+		Killed:                 killed,
+		KillReason:             killReason,
 	}, nil
+}
+
+// streamContainerLogs attaches to containerID's log stream with Follow:true
+// and copies it into in-memory stdout/stderr buffers as it arrives — plus,
+// if logFilePath is non-empty, into a real-time combined on-disk copy via
+// io.MultiWriter (Phase 6, "Real-time Log Streaming"). The returned error
+// channel receives the copy goroutine's terminal error (nil on clean EOF)
+// exactly once; the returned closer must be deferred by the caller to stop
+// the stream and release the log file handle.
+// streamContainerLogs additionally returns the activityWriter/lineLoopDetector
+// (Phase 7, "Smart Idle Timeout & Loop Detection") that observed every byte
+// written to either stream, so Run's watchdog can poll them without a second
+// pass over the output.
+func (r *DockerRuntime) streamContainerLogs(ctx context.Context, containerID, logFilePath string) (*bytes.Buffer, *bytes.Buffer, chan error, func(), *activityWriter, *lineLoopDetector, error) {
+	logReader, err := r.client.ContainerLogs(ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("read docker container logs: %w", err)
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var stdoutW, stderrW io.Writer = &stdoutBuf, &stderrBuf
+
+	var logFile *os.File
+	if logFilePath != "" {
+		if err := os.MkdirAll(filepath.Dir(logFilePath), 0o755); err != nil {
+			logReader.Close()
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("create run log dir: %w", err)
+		}
+		// O_APPEND, not O_TRUNC: a retried run reusing the same log file
+		// path (e.g. task retry re-running the same step) should not erase
+		// the previous attempt's trace, matching the checkpoint/artifact
+		// append conventions used elsewhere in this package.
+		logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			logReader.Close()
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("open run log file: %w", err)
+		}
+		stdoutW = io.MultiWriter(&stdoutBuf, logFile)
+		stderrW = io.MultiWriter(&stderrBuf, logFile)
+	}
+
+	// activityWriter/lineLoopDetector both wrap the already-composed
+	// stdout/stderr writers so they observe exactly what's buffered/logged,
+	// then feed watchForStall in Run — a single shared pair across stdout
+	// and stderr, since a hallucinating agent's repeated error can land on
+	// either stream depending on the CLI.
+	activity := newActivityWriter(io.Discard)
+	loopDet := newLineLoopDetector(io.Discard)
+	stdoutW = io.MultiWriter(stdoutW, activity, loopDet)
+	stderrW = io.MultiWriter(stderrW, activity, loopDet)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, copyErr := stdcopy.StdCopy(stdoutW, stderrW, logReader)
+		errCh <- copyErr
+	}()
+
+	closer := func() {
+		_ = logReader.Close()
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+	}
+	return &stdoutBuf, &stderrBuf, errCh, closer, activity, loopDet, nil
 }
 
 func (r *DockerRuntime) RunInteractive(ctx context.Context, req CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -567,13 +700,4 @@ func (r *DockerRuntime) RunInteractive(ctx context.Context, req CommandRequest, 
 	}
 
 	return waitErr
-}
-
-func splitDockerLogs(reader io.Reader) (string, string, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, reader); err != nil {
-		return "", "", fmt.Errorf("copy docker logs: %w", err)
-	}
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), nil
 }

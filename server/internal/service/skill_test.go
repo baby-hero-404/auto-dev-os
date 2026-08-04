@@ -110,7 +110,7 @@ func TestSkillService_GitSync(t *testing.T) {
 	}
 
 	if syncedSource.Status != "synced" {
-		t.Errorf("expected synced status, got '%s'", syncedSource.Status)
+		t.Errorf("expected synced status, got '%s', err: %s", syncedSource.Status, syncedSource.Error)
 	}
 
 	// 3. Verify registry

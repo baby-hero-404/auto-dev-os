@@ -12,15 +12,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-type mockWorktreeHostPathResolver struct {
-	root string
-	err  error
-}
-
-func (m *mockWorktreeHostPathResolver) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task) (string, error) {
-	return m.root, m.err
-}
-
 func writeSpecFiles(t *testing.T, root, slug string, files map[string]string) {
 	t.Helper()
 	dir := filepath.Join(root, "docs", "openspecs", slug)

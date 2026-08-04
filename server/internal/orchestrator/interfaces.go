@@ -39,6 +39,11 @@ type PromptBuilder interface {
 	// skills, learned skills, task rules) written into a CLI task's
 	// .autocode/context/ directory. Used by the CLI spec-first steps.
 	MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error)
+	// LoadRolePrompt resolves the agent's role prompt exactly as the
+	// API-native tool-loop assembler does. Used by cli_implement so a CLI
+	// agent spawned under AgentRoleFrontend/AgentRoleBackend gets the same
+	// role-specific instructions the API-native flow would produce.
+	LoadRolePrompt(agent *models.Agent, task models.Task, stepID string) (string, error)
 }
 
 // GitOpsClient handles git operations (clone, branch, push, PR).
@@ -124,6 +129,7 @@ type WorkflowRepository interface {
 	ClaimNext(ctx context.Context) (*models.WorkflowJob, error)
 	LatestByTaskID(ctx context.Context, taskID string) (*models.WorkflowJob, error)
 	UpdateJob(ctx context.Context, jobID string, updates map[string]any) (*models.WorkflowJob, error)
+	AccumulateJobTelemetry(ctx context.Context, jobID string, costUSD float64, durationMS, tokensUsed int64) error
 	CreateCheckpoint(ctx context.Context, checkpoint models.WorkflowCheckpoint) error
 	ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error)
 	DeleteCheckpoints(ctx context.Context, taskID string, steps []string) error

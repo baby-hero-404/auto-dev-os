@@ -89,6 +89,15 @@ func (m *mockWorkflowRepo) UpdateJob(ctx context.Context, id string, updates map
 	return m.job, nil
 }
 
+func (m *mockWorkflowRepo) AccumulateJobTelemetry(ctx context.Context, jobID string, costUSD float64, durationMS, tokensUsed int64) error {
+	if m.job != nil {
+		m.job.TotalCostUSD += costUSD
+		m.job.TotalDurationMS += durationMS
+		m.job.TotalTokensUsed += tokensUsed
+	}
+	return nil
+}
+
 func (m *mockWorkflowRepo) CreateCheckpoint(ctx context.Context, cp models.WorkflowCheckpoint) error {
 	m.checkpoint = &cp
 	m.checkpoints = append(m.checkpoints, cp)

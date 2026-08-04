@@ -1,3 +1,14 @@
+# mcp-context: local stdio MCP server bridging internal/context/* (AST,
+# dependency graph, RepoMap) and materialized skills to CLI agents running
+# inside this sandbox. Built in its own stage so the final image doesn't need
+# the full server module cache. See docs/openspecs/cli-orchestrator-update/.
+FROM golang:1.26-bookworm AS mcpbuilder
+WORKDIR /src
+COPY server/go.mod server/go.sum ./
+RUN go mod download
+COPY server/ ./
+RUN CGO_ENABLED=1 go build -o /usr/local/bin/mcp-context ./cmd/mcp-context
+
 FROM golang:1.26-bookworm
 
 # Allow host to pass a custom UID/GID to avoid permission issues when mounting volumes
@@ -36,6 +47,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g @anthropic-ai/claude-code @openai/codex \
     && npm cache clean --force
+
+COPY --from=mcpbuilder /usr/local/bin/mcp-context /usr/local/bin/mcp-context
 
 RUN groupadd --gid ${USER_GID} agent \
     && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash agent

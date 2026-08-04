@@ -185,7 +185,7 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 	slug := TaskSpecSlug(s.rt.Task)
 	var specsText string
 	if s.worktree != nil {
-		if root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task); err == nil {
+		if root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task, ""); err == nil {
 			specDir := filepath.Join(root, "docs", "openspecs", slug)
 			for _, name := range []string{"specs.md", "tasks.md"} {
 				if b, err := os.ReadFile(filepath.Join(specDir, name)); err == nil {

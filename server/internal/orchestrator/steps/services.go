@@ -342,7 +342,11 @@ const cliWorkingDirNotice = "## Working Directory\n\nYour current working direct
 // each step decides pass/fail from its own file-based contract instead.
 // Used by: cli_analyze, cli_spec, cli_implement.
 type CLIStepRunner interface {
-	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error)
+	// worktreeSuffix routes the run into a role worktree (models.
+	// WorktreeSuffixBackend/Frontend) instead of the main checkout — used by
+	// the parallel CLI implement tracks (Phase 4); "" preserves the original
+	// single-track behavior.
+	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (CLIStepOutput, error)
 }
 
 // WorktreeHostPathResolver resolves the host filesystem path of a task's
@@ -350,7 +354,7 @@ type CLIStepRunner interface {
 // opposed to ephemeral .autocode/ output, which goes through CLIStepRunner's
 // captureFiles instead). Used by: cli_spec, cli_implement.
 type WorktreeHostPathResolver interface {
-	ResolveHostWorktreeRoot(ctx context.Context, task *models.Task) (string, error)
+	ResolveHostWorktreeRoot(ctx context.Context, task *models.Task, worktreeSuffix string) (string, error)
 }
 
 // StepPromptLoader loads a step's standalone instruction template from disk.
@@ -358,6 +362,13 @@ type WorktreeHostPathResolver interface {
 type StepPromptLoader interface {
 	LoadStepPrompt(stepID string) (string, error)
 	MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error)
+	// LoadRolePrompt resolves the agent's role prompt exactly as the
+	// API-native tool-loop assembler does (agent.Role -> EffectiveRoleForStep
+	// -> role prompt file), so a CLI agent spawned under AgentRoleFrontend/
+	// AgentRoleBackend gets the same role-specific instructions instead of a
+	// separate profile format. Returns ("", nil) if unresolvable — never a
+	// new validation error path.
+	LoadRolePrompt(agent *models.Agent, task models.Task, stepID string) (string, error)
 }
 
 // AttestationSignInput carries everything PRStep knows about one commit,

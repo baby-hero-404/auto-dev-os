@@ -175,7 +175,7 @@ func TestCLIStepRunner_RunCLIStep_LogsErrorLevelOnFailure(t *testing.T) {
 	runner := newCLIStepRunner(orch)
 	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
 
-	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil, "")
 	if err == nil {
 		t.Fatal("expected an error since the mocked cli invocation exits non-zero")
 	}
@@ -251,7 +251,7 @@ func TestCLIStepRunner_RunCLIStep_AwaitingInputLogsAtInfoNotError(t *testing.T) 
 	runner := newCLIStepRunner(orch)
 	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
 
-	out, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	out, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil, "")
 	if err != nil {
 		t.Fatalf("expected no error for an awaiting-input pause, got: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestCLIStepRunner_RunCLIStep_AuthInvalidSkipsRetry(t *testing.T) {
 	credStatus := &fakeCredStatusSetter{}
 	orch.credStatusSetter = credStatus
 
-	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil, "")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -348,7 +348,7 @@ func TestCLIStepRunner_RunCLIStep_SuspectedAuthInvalidRetriesNormally(t *testing
 	runner := newCLIStepRunner(orch)
 	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
 
-	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil, "")
 	if err == nil {
 		t.Fatal("expected an error since the mocked cli invocation exits non-zero")
 	}
@@ -390,7 +390,7 @@ func TestCLIStepRunner_RunCLIStep_QuotaExceededSetsCooldown(t *testing.T) {
 	runner := newCLIStepRunner(orch)
 	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
 
-	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil)
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_analyze", "analyze the repo", nil, nil, "")
 	if err == nil {
 		t.Fatal("expected an error since the mocked cli invocation exits non-zero")
 	}

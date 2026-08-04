@@ -529,11 +529,55 @@ export function TaskDetailProvider({
 
   const workflowSteps = useMemo(() => {
     if (isCliFlow) {
+      // The dual-agent parallel-track CLI workflow (workflow.CLISpecFirstParallelWorkflow)
+      // joins cli_implement_backend/cli_implement_frontend via the shared "merge" step
+      // (workflow.StepMerge, also used by the API-native flow) — it doesn't carry a
+      // "cli_" prefix, so it must be allow-listed explicitly or its checkpoint gets
+      // silently dropped from the sidebar's progress list.
+      const isParallelTracks = (() => {
+        // Primary: a parallel-track checkpoint already exists — most reliable.
+        if ((workflow?.checkpoints ?? []).some(
+          cp => cp.step === "cli_implement_backend" || cp.step === "cli_implement_frontend"
+        )) {
+          return true;
+        }
+        // Early-detection: cli_analyze persists task.analysis as a cliAnalysisPayload
+        // JSON {files:[...]} after its step completes, before any implement checkpoint
+        // exists. Parse it to decide the workflow shape immediately so the sidebar
+        // doesn't jump from single-track to parallel-track layout mid-run.
+        try {
+          const raw = task?.analysis;
+          if (raw) {
+            const payload = typeof raw === "string" ? JSON.parse(raw) : raw;
+            const files: string[] = payload?.files ?? [];
+            if (files.length > 0) {
+              const frontendExts = [".tsx", ".jsx", ".css", ".html", ".vue", ".scss", ".sass", ".svelte"];
+              const frontendPrefixes = ["web/", "frontend/", "src/"];
+              const hasFE = files.some(f =>
+                frontendPrefixes.some(p => f.startsWith(p)) ||
+                frontendExts.some(ext => f.endsWith(ext))
+              );
+              const hasBE = files.some(f =>
+                !frontendPrefixes.some(p => f.startsWith(p)) &&
+                !frontendExts.some(ext => f.endsWith(ext))
+              );
+              if (hasFE && hasBE) return true;
+            }
+          }
+        } catch { /* non-CLI task or unparseable analysis — fall through */ }
+        return false;
+      })();
+      // Pick the expected-step shape matching the workflow actually running for this
+      // task, so padding-in-not-yet-reached steps doesn't inject phantom placeholders
+      // from the other shape (e.g. a "Merge"/"Implement (Frontend)" row on a
+      // single-track task that will never produce that checkpoint).
+      const expectedCli: string[] = isParallelTracks
+        ? CLI_STEPS.filter(s => s !== "cli_implement")
+        : CLI_STEPS.filter(s => s !== "cli_implement_backend" && s !== "cli_implement_frontend" && s !== "merge");
       const steps = Array.from(new Set((workflow?.checkpoints ?? [])
         .map(cp => cp.step)
-        .filter(step => step.startsWith("cli_"))));
+        .filter(step => step.startsWith("cli_") || expectedCli.includes(step))));
       // Ensure expected CLI flow steps are present and ordered roughly correctly
-      const expectedCli: string[] = [...CLI_STEPS];
       for (const s of expectedCli) {
         if (!steps.includes(s)) steps.push(s);
       }

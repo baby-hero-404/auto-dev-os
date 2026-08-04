@@ -18,7 +18,7 @@ import (
 // its output matches a quota/rate-limit signature (REQ-006 write-side).
 // Matches gateway.go's capped transient-error cooldown for consistency; not
 // configurable in this phase.
-const cliCooldownDuration = 1 * time.Minute
+const cliCooldownDuration = 5 * time.Minute
 
 // finishCLIRun performs the bookkeeping for the code_backend/code_frontend/
 // fix dispatch path once RunCodeStep returns without a transport-level
@@ -33,7 +33,11 @@ func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, 
 	// Write-side of REQ-006: only affects the *next* ResolveExecutionProvider
 	// call, not this step's own outcome (REQ-005, no mid-task switch).
 	if res.QuotaExceeded && credID != "" && o.cooldownSetter != nil {
-		_ = o.cooldownSetter.SetCooldown(ctx, credID, "", time.Now().Add(cliCooldownDuration))
+		cd := cliCooldownDuration
+		if res.QuotaCooldown > 0 {
+			cd = res.QuotaCooldown
+		}
+		_ = o.cooldownSetter.SetCooldown(ctx, credID, "", time.Now().Add(cd))
 	}
 
 	// Auth-failure write-side: a bad session/token won't self-resolve like a

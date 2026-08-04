@@ -61,15 +61,20 @@ agy --dangerously-skip-permissions -p "Review this repository and explain archit
 
 | Flag | Usage |
 |------|-------|
-| `-p` / `--print` | Chạy 1 prompt non-interactive và in kết quả (flag `-p` phải đặt cuối cùng trước prompt) |
-| `--mode plan` | Chỉ lập kế hoạch |
-| `--mode accept-edits` | Tự động sửa file |
-| `--sandbox` | Giới hạn quyền |
-| `--dangerously-skip-permissions` | Bỏ confirm |
-| `--effort high\|medium\|low` | Điều chỉnh reasoning effort |
-| `-c` / `--continue` | Tiếp tục conversation gần nhất |
-| `--conversation <id>` | Resume 1 conversation theo ID |
-| `--add-dir <path>` | Thêm thư mục vào workspace (repeatable) |
+| `-p` / `--print` | Chạy 1 prompt non-interactive và in kết quả (với v1.1.8+, có hỗ trợ output stream) |
+| `--output-format <fmt>` | Format cho kết quả in (vd: `text`, `json`, `stream-json`) |
+| `--json-schema <path>` | Ép output trả về dạng JSON theo schema (hữu ích cho CI/CD) |
+| `--mode plan` | Chỉ lập kế hoạch (`PLAN.md`) |
+| `--mode accept-edits` | Tự động sửa file không hỏi line-by-line review |
+| `--sandbox` | Giới hạn quyền terminal (chặn các lệnh nguy hiểm) |
+| `--dangerously-skip-permissions` | Bỏ confirm (BẮT BUỘC dùng cho automation/CI) |
+| `--effort high\|medium\|low` | Điều chỉnh reasoning effort của agent |
+| `-c` / `--continue` | Tiếp tục conversation gần nhất (Dùng kèm `-p` để chạy multi-turn headless) |
+| `--conversation <id>` | Resume 1 session cụ thể (thay thế cờ `--resume` cũ) |
+| `--add-dir <path>` | Kéo thư mục cụ thể vào context của session |
+| `--agent <agent>` | Dùng profile agent cụ thể (e.g. `frontend`, `reviewer`) |
+| `--print-timeout <dur>` | Thay đổi timeout cho `-p` (mặc định 5m0s). Tăng lên `30m` cho task dài. |
+| `--project <id>` | Bắt ép chạy trên context project ID cụ thể |
 
 ## Recommended Headless Modes
 
@@ -87,30 +92,47 @@ agy \
 -p "Implement API authentication"
 ```
 
-**Automation**
+**Automation (JSON Output)**
 ```bash
 agy \
 --dangerously-skip-permissions \
--p "Fix tests and run CI checks"
+--output-format json \
+--json-schema ./schema.json \
+-p "Analyze project health and return JSON report"
 ```
 
-## Skills Structure
+## Advanced Automation Patterns
 
-Project structure:
-```text
-.agy/
-└── skills/
-    ├── architect/
-    │   └── SKILL.md
-    ├── developer/
-    │   └── SKILL.md
-    ├── reviewer/
-    │   └── SKILL.md
-    ├── tester/
-    │   └── SKILL.md
-    └── devops/
-        └── SKILL.md
+### 1. Multi-turn Continuity (Chaining headless turns)
+Bạn có thể kết hợp `-c` và `-p` để agent làm việc liên tiếp nhiều turn mà không cần TUI:
+```bash
+# Turn 1: Khởi tạo
+agy -p "Initialize project" --dangerously-skip-permissions
+
+# Turn 2: Tiếp tục với context từ Turn 1 (Chỉ in ra kết quả mới, không in lại lịch sử)
+agy -c -p "Now add index.html" --dangerously-skip-permissions
 ```
+
+### 2. Explicit Content Injection
+Vì Agent duy trì context session độc lập, việc `cd` vào folder không làm thay đổi focus. Để đảm bảo agent đọc đúng file trong CI/CD:
+```bash
+agy -p "$(cat README.md)\n\nSummarize this file." --dangerously-skip-permissions
+```
+
+### 3. Workspace Scoping
+Nếu agent bị kẹt ở context project cũ, hãy dùng `--add-dir` để ép nạp thư mục hiện tại:
+```bash
+agy -p "Review code" --add-dir ./src --dangerously-skip-permissions
+```
+
+## Custom Agents & Plugins
+
+Từ bản v1.1.6, Subagents/Skills được cấu trúc dưới dạng file Markdown (`agent.md`) chứa YAML Frontmatter thay vì `agent.json` như trước. Agent được hệ thống tự động nhận diện nếu đặt ở `~/.gemini/config/`.
+
+**Quản lý Plugin (Thay thế Gemini CLI Extensions):**
+- Import CLI cũ: `agy plugin import gemini`
+- Cài plugin: `agy plugin install <target>`
+- Bật/Tắt: `agy plugin enable/disable <name>`
 
 ## Common Headless Workflows
 
@@ -138,9 +160,12 @@ agy --dangerously-skip-permissions -p "Load devops skill. Create Docker and CI c
 ```bash
 #!/bin/bash
 
+# Dùng G1 Credits nếu hết AI credits, và kéo dài timeout cho build task.
 agy \
 --dangerously-skip-permissions \
 --effort high \
+--print-timeout 15m \
+--output-format stream-json \
 -p "Analyze failures, fix code, run tests"
 ```
 

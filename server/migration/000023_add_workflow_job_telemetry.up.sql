@@ -1,0 +1,3 @@
+ALTER TABLE workflow_jobs ADD COLUMN total_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE workflow_jobs ADD COLUMN total_duration_ms BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE workflow_jobs ADD COLUMN total_tokens_used BIGINT NOT NULL DEFAULT 0;

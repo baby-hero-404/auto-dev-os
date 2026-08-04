@@ -120,9 +120,13 @@ Step 12: Merge & Complete
 
 ## Engine Selection (API-native vs CLI)
 
-`worker.go` (`shouldUseCLISpecFirstWorkflow`, delegate sang Execution Router) chọn DAG theo `execution_engine` đã resolve của task (§14 Execution Engine):
+`worker.go` (delegate sang Execution Router) chọn DAG theo `execution_engine` đã resolve của task (§14 Execution Engine):
 - `api_native` (mặc định) → DAG 10 bước mô tả ở trên, không đổi.
-- `cli` → workflow definition thứ hai, `cli_spec_first`: `cli_analyze → cli_spec → cli_implement → cli_mr`. Vì CLI coding agent (Claude Code, Codex CLI…) đã tự có tool-loop/planning/self-review, server chỉ cần đảm bảo agent hiểu đúng project, có bản OpenSpec được duyệt làm hợp đồng, implement bám spec, và ra PR. Xem chi tiết tại §14.
+- `cli` → **CLI Orchestrator Pipeline** (implemented) — single-track hoặc parallel-track DAG tùy theo kết quả `cli_analyze`:
+  - **Single-track:** `cli_analyze → cli_spec → cli_implement → cross_review → cli_mr`
+  - **Parallel-track** (FE+BE detected): `cli_analyze → cli_spec → {cli_implement_backend + cli_implement_frontend} → merge → cross_review → cli_mr`
+
+  Vì CLI coding agent (Claude Code, Codex CLI…) đã tự có tool-loop/planning/self-review, server chỉ cần: đảm bảo agent hiểu đúng project (qua MCP Context Server), có bản OpenSpec được duyệt làm hợp đồng, implement bám spec, và ra PR. `cross_review` cung cấp independent LLM reviewer (Harness Independence) trước khi tạo PR. Xem chi tiết tại §14.
 
 ## Review Verdict Split
 

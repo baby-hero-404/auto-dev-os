@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
-import { AlertTriangle, Bot, Milestone, Calendar, Info, Terminal, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, Bot, Milestone, Calendar, Info, Terminal, ChevronDown, ChevronRight, DollarSign } from "lucide-react";
 import { ReviewVerdictCard } from "./ReviewVerdictCard";
 import type { ReviewVerdict, WorkflowArtifact } from "@/lib/types";
 
@@ -65,6 +65,9 @@ const STEP_LABELS: Record<string, string> = {
   cli_analyze: "Analyze (CLI)",
   cli_spec: "Author Spec (CLI)",
   cli_implement: "Implement (CLI)",
+  cli_implement_backend: "Implement Backend (CLI)",
+  cli_implement_frontend: "Implement Frontend (CLI)",
+  merge: "Merge",
   cross_review: "Cross Review",
   cli_mr: "Merge Request (CLI)",
 };
@@ -109,8 +112,22 @@ export function CheckpointsPanel() {
             <div className="text-xs font-bold font-mono text-foreground mt-1">{attempts}</div>
           </div>
         </div>
+
+        {!!workflow.job?.total_cost_usd && (
+          <div className="rounded-2xl border border-stroke/10 bg-surface/50 p-4 flex items-center gap-3.5 shadow-sm">
+            <DollarSign className="text-brand-primary shrink-0" size={18} />
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-content-muted">CLI Cost / Tokens</div>
+              <div className="text-xs font-bold font-mono text-foreground mt-1">
+                ${workflow.job.total_cost_usd.toFixed(4)}
+                {workflow.job.total_tokens_used ? ` · ${workflow.job.total_tokens_used.toLocaleString()} tok` : ""}
+                {workflow.job.total_duration_ms ? ` · ${(workflow.job.total_duration_ms / 1000).toFixed(1)}s` : ""}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-  
+
       {lastError && (
         <div className={`rounded-2xl border p-4 flex items-start gap-3 shadow-sm ${
           isPauseReason

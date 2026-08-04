@@ -31,7 +31,12 @@ const promptFileInstruction = "Read and follow the complete task instructions in
 var CLIProfiles = map[string]CLIProfile{
 	"claude_code": {
 		Command: "claude",
-		Args:    []string{"--allowedTools", "Read,Edit,Write,Bash", "-p", promptFileInstruction},
+		// --output-format json is appended last (confirmed valid ordering
+		// against docs/guides/claude-cli-headless.md's own example:
+		// `claude -p "..." --output-format json`) so RunCodeStep's telemetry
+		// parser (Phase 6) can extract total_cost_usd/duration_ms/usage from
+		// the trailing JSON summary object claude prints on exit.
+		Args: []string{"--allowedTools", "Read,Edit,Write,Bash", "-p", promptFileInstruction, "--output-format", "json"},
 		// "claude auth status" is read-only (no side effects) and always
 		// exits 0 regardless of login state, reporting it instead via a
 		// `"loggedIn": bool` JSON field (verified against the real binary,
@@ -45,7 +50,17 @@ var CLIProfiles = map[string]CLIProfile{
 	},
 	"openai_codex": {
 		Command: "codex",
-		Args:    []string{"exec", "--full-auto", promptFileInstruction},
+		// NOTE: --output-format json (or equivalent) is intentionally absent here.
+		// Unlike claude_code and antigravity (both confirmed against live binaries),
+		// codex's structured-output flag name and JSON schema have not been verified
+		// against a real `codex exec --help` / live run — guessing the wrong flag
+		// would break codex exec's existing text-output parsing (auth/quota/loop
+		// detection all regex over raw text). Until confirmed, telemetry will be
+		// zero for Codex runs (parseCLITelemetry returns ok=false).
+		// TODO: run `codex exec --help` against a live binary, confirm the flag
+		// (likely `--output-format json` or `--json`), add it here, and add a
+		// matching test case in engine/telemetry_test.go.
+		Args: []string{"exec", "--full-auto", promptFileInstruction},
 		// "codex login status" is read-only and prints "Logged in using
 		// ChatGPT" on success (verified against the real binary, same
 		// REQ-003 investigation as claude_code above).
@@ -68,7 +83,10 @@ var CLIProfiles = map[string]CLIProfile{
 		// docs/guides/antigravity-cli-headless.md, which independently
 		// confirms the real binary is `agy` (not `antigravity`) and that
 		// `-p` must sit immediately before the prompt.
-		Args:               []string{"--dangerously-skip-permissions", "-p", promptFileInstruction},
+		// --output-format json appended last, same rationale/placement as
+		// claude_code above (confirmed valid against
+		// docs/guides/antigravity-cli-headless.md's own example).
+		Args:               []string{"--dangerously-skip-permissions", "-p", promptFileInstruction, "--output-format", "json"},
 		AuthCheckCommand:   "agy --version",
 		TimeoutMinutes:     30,
 		CredentialProvider: "cli:antigravity",

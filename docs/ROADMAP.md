@@ -147,6 +147,7 @@ Roadmap này mô tả trạng thái sản phẩm hiện tại và các mục ti�
 *   Dashboard, analytics, audit/PR baseline.
 *   Role-Based Capability Agents migration (migration 000012).
 *   UI Onboarding: Setup checklist, AI Providers page, Git Accounts page, Members panel, Hire Agent Wizard.
+*   **CLI Orchestrator Pipeline:** CLI flow nâng cấp thành Orchestration platform — MCP Context Server (6 tools), parallel FE/BE DAG, independent cross-harness Review/Fix loop, specialized agent profiles, real-time log streaming, telemetry accumulation (migration 000023), smart idle timeout + loop detection, credential redaction. Chi tiết: `docs/openspecs/cli-orchestrator-update/`, `docs/ARCHITECTURE.md` §4.2, `docs/features/product/14-execution-engine.md` §C.
 
 ### 4.2 In Progress
 

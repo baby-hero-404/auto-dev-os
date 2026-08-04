@@ -67,7 +67,10 @@ build: ## Build the API binary
 
 sandbox-build: ## Build the Docker sandbox image for agents
 	@echo "==> Building agent Docker sandbox image..."
-	docker build -t auto-code-os-sandbox:latest -f docker/Dockerfile.sandbox . --network host
+	docker build -t auto-code-os-sandbox:latest \
+		--build-arg USER_UID=$(shell id -u) \
+		--build-arg USER_GID=$(shell id -g) \
+		-f docker/Dockerfile.sandbox . --network host
 
 # ── Running Development Servers (Host-Direct + Docker DB) ────────────────
 

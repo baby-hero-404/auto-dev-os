@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"testing"
 	"time"
+
+	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 )
 
 // TestDueForLearningNudge_FiresEveryIntervalSteps simulates 8 successful
@@ -59,5 +61,41 @@ func TestOrchestrator_CalculateBackoff(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("calculateBackoff(%d) = %v; want %v", tc.attempt, got, tc.expected)
 		}
+	}
+}
+
+// TestIsCLIImplementFixLoopCheckpoint_StripsParallelTrackCheckpoints guards
+// against the cross-review fix-loop infinite-loop bug: workflow.
+// ErrCrossReviewFixLoop's handler always re-queues the job at the
+// single-track workflow.StepCLIImplement, regardless of whether
+// workflow.CLISpecFirstWorkflow or workflow.CLISpecFirstParallelWorkflow
+// produced the task's checkpoints. If the checkpoint-cleanup filter only
+// recognized the single-track step id, a successful parallel-track
+// implement/merge checkpoint from before the fix-loop trigger would survive
+// into engine.CompletedSteps, the engine would skip straight back to
+// cross_review with unmodified code, review would fail again, and the job
+// would cycle forever without ever re-running the fix agent.
+func TestIsCLIImplementFixLoopCheckpoint_StripsParallelTrackCheckpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		jobStep  string
+		cpStep   string
+		expected bool
+	}{
+		{"single-track implement checkpoint stripped", workflow.StepCLIImplement, workflow.StepCLIImplement, true},
+		{"single-track cross_review checkpoint stripped", workflow.StepCLIImplement, workflow.StepCrossReview, true},
+		{"parallel backend checkpoint stripped", workflow.StepCLIImplement, workflow.StepCLIImplementBackend, true},
+		{"parallel frontend checkpoint stripped", workflow.StepCLIImplement, workflow.StepCLIImplementFrontend, true},
+		{"parallel merge checkpoint stripped", workflow.StepCLIImplement, workflow.StepMerge, true},
+		{"unrelated step not stripped", workflow.StepCLIImplement, workflow.StepCLISpec, false},
+		{"api-native fix loop untouched by this filter", workflow.StepReview, workflow.StepCLIImplementBackend, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCLIImplementFixLoopCheckpoint(tc.jobStep, tc.cpStep); got != tc.expected {
+				t.Errorf("isCLIImplementFixLoopCheckpoint(%q, %q) = %v; want %v", tc.jobStep, tc.cpStep, got, tc.expected)
+			}
+		})
 	}
 }

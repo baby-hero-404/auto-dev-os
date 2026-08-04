@@ -1,0 +1,133 @@
+package engine
+
+import "encoding/json"
+
+// cliTelemetry is a permissive superset of the trailing JSON summary object
+// claude/codex/agy's `--output-format json` (or equivalent) prints on exit —
+// see docs/guides/claude-cli-headless.md and antigravity-cli-headless.md for
+// the confirmed field names each CLI actually emits. Every field is optional
+// since not every CLI/version reports every metric; parseCLITelemetry
+// tolerates whichever subset is present and leaves the rest zero.
+type cliTelemetry struct {
+	TotalCostUSD *float64 `json:"total_cost_usd"`
+	CostUSD      *float64 `json:"cost_usd"`
+	DurationMS   *int64   `json:"duration_ms"`
+	DurationAPI  *int64   `json:"duration_api_ms"`
+	TokensUsed   *int64   `json:"tokens_used"`
+	Usage        *struct {
+		InputTokens  int64  `json:"input_tokens"`
+		OutputTokens int64  `json:"output_tokens"`
+		TotalTokens  *int64 `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// CLITelemetry is the normalized outcome parseCLITelemetry extracts from a
+// CLI subprocess's combined output, ready to persist onto workflow_jobs (see
+// repository.WorkflowRepo.AccumulateJobTelemetry).
+type CLITelemetry struct {
+	CostUSD    float64
+	DurationMS int64
+	TokensUsed int64
+}
+
+// parseCLITelemetry scans combined subprocess output for the last
+// syntactically valid top-level JSON object and extracts cost/duration/token
+// metrics from it, tolerating surrounding plain-text output (agentic CLIs
+// print progress/tool-call lines before the final structured summary, even
+// with --output-format json). Returns ok=false if no JSON object in the
+// output parses into any recognized telemetry field, so callers don't record
+// a spurious all-zero row for CLIs/providers that don't emit one yet (e.g.
+// codex, until --output-format json's exact schema is confirmed against a
+// live run — see tasks.md Phase 6 deviation note).
+func parseCLITelemetry(output string) (CLITelemetry, bool) {
+	var best CLITelemetry
+	found := false
+
+	for _, blob := range topLevelJSONObjects(output) {
+		var t cliTelemetry
+		if err := json.Unmarshal([]byte(blob), &t); err != nil {
+			continue
+		}
+		var candidate CLITelemetry
+		matched := false
+		switch {
+		case t.TotalCostUSD != nil:
+			candidate.CostUSD = *t.TotalCostUSD
+			matched = true
+		case t.CostUSD != nil:
+			candidate.CostUSD = *t.CostUSD
+			matched = true
+		}
+		switch {
+		case t.DurationMS != nil:
+			candidate.DurationMS = *t.DurationMS
+			matched = true
+		case t.DurationAPI != nil:
+			candidate.DurationMS = *t.DurationAPI
+			matched = true
+		}
+		switch {
+		case t.TokensUsed != nil:
+			candidate.TokensUsed = *t.TokensUsed
+			matched = true
+		case t.Usage != nil:
+			if t.Usage.TotalTokens != nil {
+				candidate.TokensUsed = *t.Usage.TotalTokens
+			} else {
+				candidate.TokensUsed = t.Usage.InputTokens + t.Usage.OutputTokens
+			}
+			matched = true
+		}
+		if matched {
+			best = candidate
+			found = true
+		}
+	}
+	return best, found
+}
+
+// topLevelJSONObjects returns every substring of s that is a balanced,
+// top-level `{...}` object (brace-depth tracked, ignoring braces inside
+// string literals), in the order they appear. Cheaper and more robust than a
+// regex against arbitrary CLI chatter — output is scanned once, byte by
+// byte, with no assumption about where the JSON starts (front, middle, or
+// end of the combined stream).
+func topLevelJSONObjects(s string) []string {
+	var objs []string
+	depth := 0
+	start := -1
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 && start >= 0 {
+					objs = append(objs, s[start:i+1])
+					start = -1
+				}
+			}
+		}
+	}
+	return objs
+}

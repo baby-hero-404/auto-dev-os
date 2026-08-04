@@ -111,7 +111,7 @@ One root-cause investigation (`docs/reports/git_parse_debug_report.md`, gaps A�
 | [product/11-multi-channel-interaction.md](./product/11-multi-channel-interaction.md) | 2026-07-30 | ✅ Fresh |
 | [product/12-repository-profile-cache.md](./product/12-repository-profile-cache.md) | 2026-07-12 | ✅ Fresh |
 | [product/13-patch-engine-abstraction.md](./product/13-patch-engine-abstraction.md) | 2026-07-23 | ✅ Fresh |
-| [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-07-30 | ✅ Fresh |
+| [product/14-execution-engine.md](./product/14-execution-engine.md) | 2026-08-04 | ✅ Fresh |
 | [product/15-knowledge-learning-engine.md](./product/15-knowledge-learning-engine.md) | 2026-07-30 | ✅ Fresh |
 | [product/16-attestation-provenance.md](./product/16-attestation-provenance.md) | 2026-07-30 | ✅ Fresh |
 <!-- freshness:end -->

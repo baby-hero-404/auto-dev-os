@@ -84,7 +84,7 @@ func (r *cliStepRunner) resolveConfig(ctx context.Context, task *models.Task) (*
 	return resolved.CLIConfig, project.OrgID, nil
 }
 
-func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (steps.CLIStepOutput, error) {
+func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (steps.CLIStepOutput, error) {
 	cfg, orgID, err := r.resolveConfig(ctx, task)
 	if err != nil {
 		return steps.CLIStepOutput{}, err
@@ -102,7 +102,14 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	if err != nil {
 		return steps.CLIStepOutput{}, fmt.Errorf("cli step runner: resolve repo path: %w", err)
 	}
-	containerWorkDir := r.o.containerPathForHostPath(task, repoHostPath, "")
+	// worktreeSuffix routes a parallel implement track (Phase 4) into its own
+	// role worktree instead of the main checkout — same resolution
+	// cliEngineRunner.buildRequest uses for code_backend/code_frontend.
+	worktreeHostPath := repoHostPath
+	if worktreeSuffix != "" {
+		worktreeHostPath = r.o.repoutil.HostWorktreePath(task, repoHostPath, worktreeSuffix)
+	}
+	containerWorkDir := r.o.containerPathForHostPath(task, worktreeHostPath, "")
 
 	networkMode := sandbox.NetworkModeNone
 	if !r.o.disableNetworking {
@@ -154,7 +161,11 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	// affects the *next* ResolveExecutionProvider call, not this step's
 	// own outcome.
 	if res.QuotaExceeded && r.credID != "" && r.o.cooldownSetter != nil {
-		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cliCooldownDuration))
+		cd := cliCooldownDuration
+		if res.QuotaCooldown > 0 {
+			cd = res.QuotaCooldown
+		}
+		_ = r.o.cooldownSetter.SetCooldown(ctx, r.credID, "", time.Now().Add(cd))
 	}
 
 	// Auth-failure write-side: a bad session/token won't self-resolve like a
@@ -203,6 +214,16 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
 	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_prompt", buildCLIPromptArtifact(res.Command, instruction, contextFiles))
 
+	// Phase 6 "Telemetry Parsing": accumulate onto the job's running totals
+	// (one workflow_jobs row spans every cli_* step of this run). Best-effort
+	// — a telemetry write-back failure must never fail the step itself, only
+	// leave that step's contribution unrecorded.
+	if res.TelemetryOK && r.o.workflows != nil {
+		if err := r.o.workflows.AccumulateJobTelemetry(ctx, jobID, res.CostUSD, res.DurationMS, res.TokensUsed); err != nil {
+			r.o.log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("%s: failed to persist cli telemetry: %v", stepID, err))
+		}
+	}
+
 	out := steps.CLIStepOutput{Output: res.Output, Files: res.Files, AwaitingInput: res.AwaitingInput}
 	if res.AwaitingInput {
 		// Not a failure in the usual sense — the caller step decides
@@ -230,13 +251,13 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	}
 
 	if repoHostPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task); err == nil {
-		if changed, cErr := r.o.repoutil.GetChangedFiles(ctx, task, agent, repoHostPath, ""); cErr == nil {
+		if changed, cErr := r.o.repoutil.GetChangedFiles(ctx, task, agent, repoHostPath, worktreeSuffix); cErr == nil {
 			out.ChangedFiles = changed
 		}
 
 		if stepID == "cli_spec" && r.o.workspaceRoot != "" {
 			slug := steps.TaskSpecSlug(task)
-			worktreeRoot := r.o.repoutil.HostWorktreePath(task, repoHostPath, "")
+			worktreeRoot := r.o.repoutil.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 			srcDir := filepath.Join(worktreeRoot, "docs", "openspecs", slug)
 			dstDir := filepath.Join(sandbox.WorkspacePath(r.o.workspaceRoot, task.ID), "specs")
 
@@ -255,13 +276,13 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 // repo-root host path a cli_spec/cli_implement step should read committed
 // files back from (docs/openspecs/<slug>/*.md), as opposed to the ephemeral
 // .autocode/ output that goes through CaptureFiles instead.
-func (r *cliStepRunner) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task) (string, error) {
+func (r *cliStepRunner) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task, worktreeSuffix string) (string, error) {
 	r.o.initRepoutil()
 	repoPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task)
 	if err != nil {
 		return "", err
 	}
-	return r.o.repoutil.HostWorktreePath(task, repoPath, ""), nil
+	return r.o.repoutil.HostWorktreePath(task, repoPath, worktreeSuffix), nil
 }
 
 // lastN returns the last n characters of s, or s unchanged if it's shorter.

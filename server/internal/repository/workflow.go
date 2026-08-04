@@ -157,6 +157,23 @@ func (r *WorkflowRepo) UpdateJob(ctx context.Context, jobID string, updates map[
 	return &job, nil
 }
 
+// AccumulateJobTelemetry adds costUSD/durationMS/tokensUsed onto the job's
+// running totals (see models.WorkflowJob) instead of overwriting them — one
+// workflow_jobs row spans every cli_* step of a task run, so each step's
+// parsed telemetry (Phase 6) must add to, not replace, the previous step's.
+// Best-effort by convention (mirrors ClaimNext's attempts+1 pattern): callers
+// must not fail the run itself if this errors.
+func (r *WorkflowRepo) AccumulateJobTelemetry(ctx context.Context, jobID string, costUSD float64, durationMS, tokensUsed int64) error {
+	if err := r.db.WithContext(ctx).Model(&models.WorkflowJob{}).Where("id = ?", jobID).Updates(map[string]any{
+		"total_cost_usd":    gorm.Expr("total_cost_usd + ?", costUSD),
+		"total_duration_ms": gorm.Expr("total_duration_ms + ?", durationMS),
+		"total_tokens_used": gorm.Expr("total_tokens_used + ?", tokensUsed),
+	}).Error; err != nil {
+		return fmt.Errorf("accumulate workflow job telemetry: %w", mapError(err))
+	}
+	return nil
+}
+
 func (r *WorkflowRepo) CreateCheckpoint(ctx context.Context, checkpoint models.WorkflowCheckpoint) error {
 	if err := r.db.WithContext(ctx).Create(&checkpoint).Error; err != nil {
 		return fmt.Errorf("create workflow checkpoint: %w", err)

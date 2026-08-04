@@ -78,6 +78,10 @@ func (m *testWorkflowRepo) UpdateJob(ctx context.Context, id string, updates map
 	return nil, errors.New("job not found")
 }
 
+func (m *testWorkflowRepo) AccumulateJobTelemetry(ctx context.Context, jobID string, costUSD float64, durationMS, tokensUsed int64) error {
+	return nil
+}
+
 func (m *testWorkflowRepo) CreateCheckpoint(ctx context.Context, cp models.WorkflowCheckpoint) error {
 	m.checkpoints = append(m.checkpoints, cp)
 	return nil
@@ -271,6 +275,7 @@ func TestPRHandler_StartReview_And_Approve(t *testing.T) {
 		ID:         "task-456",
 		Status:     models.TaskStatusPrReady,
 		SpecStatus: models.TaskSpecStatusApproved,
+		PRURLs:     []string{"https://github.com/example/repo/pull/1"},
 	}
 
 	taskRepo := &testTaskRepo{task: task}

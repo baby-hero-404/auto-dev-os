@@ -122,6 +122,25 @@ func (g *DependencyGraph) BuildGraph(tags []source.Tag) {
 	}
 }
 
+// Neighbors returns the files filepath calls into (dependsOn) and the files
+// that call into filepath (dependents), per the directed call graph built by
+// BuildGraph. Used by the mcp-context dependency.impact tool.
+func (g *DependencyGraph) Neighbors(filepath string) (dependsOn []string, dependents []string) {
+	node, ok := g.nodes[filepath]
+	if !ok {
+		return nil, nil
+	}
+	to := g.Graph.From(node.ID())
+	for to.Next() {
+		dependsOn = append(dependsOn, g.idToFn[to.Node().ID()])
+	}
+	from := g.Graph.To(node.ID())
+	for from.Next() {
+		dependents = append(dependents, g.idToFn[from.Node().ID()])
+	}
+	return dependsOn, dependents
+}
+
 // commonPrefixLength calculates the number of shared directory segments between two file paths.
 func commonPrefixLength(p1, p2 string) int {
 	s1 := strings.Split(filepath.Dir(p1), string(filepath.Separator))

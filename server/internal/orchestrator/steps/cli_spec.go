@@ -57,7 +57,7 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		}
 	}
 
-	root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task)
+	root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task, "")
 	if err != nil {
 		return nil, fmt.Errorf("cli_spec: resolve worktree: %w", err)
 	}
@@ -108,7 +108,7 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		instruction += "\n" + cliPlatformContextPointer + "\n"
 	}
 
-	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles)
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles, "")
 	if err != nil {
 		return nil, fmt.Errorf("cli_spec: %w", err)
 	}

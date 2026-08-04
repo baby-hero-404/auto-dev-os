@@ -43,6 +43,14 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		return nil, fmt.Errorf("cli_implement: load prompt: %w", err)
 	}
 
+	rolePrompt, err := s.prompts.LoadRolePrompt(s.rt.Agent, *s.rt.Task, s.ID())
+	if err != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("failed to load role prompt: %v", err))
+	}
+	if rolePrompt != "" {
+		base = rolePrompt + "\n\n" + base
+	}
+
 	slug := TaskSpecSlug(s.rt.Task)
 	specDir := fmt.Sprintf("docs/openspecs/%s", slug)
 	instruction := fmt.Sprintf(
@@ -62,7 +70,7 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		instruction += "\n" + cliPlatformContextPointer + "\n"
 	}
 
-	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles)
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, nil, contextFiles, "")
 	if err != nil {
 		return nil, fmt.Errorf("cli_implement: %w", err)
 	}
@@ -74,7 +82,7 @@ func (s *CLIImplementStep) Execute(ctx context.Context, stepCtx workflow.StepCon
 		return nil, fmt.Errorf("cli_implement: run completed but produced no file changes")
 	}
 
-	root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task)
+	root, err := s.worktree.ResolveHostWorktreeRoot(ctx, s.rt.Task, "")
 	if err != nil {
 		return nil, fmt.Errorf("cli_implement: resolve worktree: %w", err)
 	}

@@ -59,8 +59,10 @@ export function AddRepositoryForm({
     if (!gitAccountID && gitAccounts.length > 0) {
       const matchingAccount = gitAccounts.find((acc: { provider: string }) => acc.provider === provider);
       if (matchingAccount) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setGitAccountID(matchingAccount.id);
       } else if (gitAccounts.length === 1) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setGitAccountID(gitAccounts[0].id);
       }
     }

@@ -59,11 +59,25 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 		return s.markSyncFailed(ctx, id, fmt.Errorf("read git manifest: %w", err))
 	}
 
-	var gitReg struct {
-		Skills []registrySkill `json:"skills"`
+	var rawGitReg struct {
+		Skills json.RawMessage `json:"skills"`
 	}
-	if err := json.Unmarshal(raw, &gitReg); err != nil {
+	if err := json.Unmarshal(raw, &rawGitReg); err != nil {
 		return s.markSyncFailed(ctx, id, fmt.Errorf("unmarshal git manifest: %w", err))
+	}
+
+	var gitSkills []registrySkill
+	if len(rawGitReg.Skills) > 0 {
+		if err := json.Unmarshal(rawGitReg.Skills, &gitSkills); err != nil {
+			var skillsMap map[string][]registrySkill
+			if errMap := json.Unmarshal(rawGitReg.Skills, &skillsMap); errMap == nil {
+				for _, list := range skillsMap {
+					gitSkills = append(gitSkills, list...)
+				}
+			} else {
+				return s.markSyncFailed(ctx, id, fmt.Errorf("unmarshal git manifest skills: %w", err))
+			}
+		}
 	}
 
 	reg, _ := s.loadRegistry()
@@ -77,7 +91,7 @@ func (s *SkillService) SyncSource(ctx context.Context, id string) (*models.Skill
 	}
 
 	var mergedSkills []registrySkill
-	for _, sk := range gitReg.Skills {
+	for _, sk := range gitSkills {
 		if customNames[strings.ToLower(sk.Name)] {
 			continue
 		}

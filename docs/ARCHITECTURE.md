@@ -224,22 +224,36 @@ auto_code_os/
 | `APPROVED` | Spec finalized, ready to execute |
 | `AUTO_APPROVED` | Easy + low-risk task — auto-validated by agent |
 
-## 4.2 CLI Spec-First Flow (engine = `cli`)
+## 4.2 CLI Orchestrator Pipeline (engine = `cli`)
 
-> Full spec: `docs/openspecs/cli-spec-first-flow/`. Backend core (sections 1-3, 6.1) implemented; approval gate, spec-read API, and frontend UI are a follow-up pass.
+> Full spec: `docs/openspecs/cli-orchestrator-update/` (implemented). Original spec-first baseline: `docs/openspecs/cli-spec-first-flow/`.
 
-When a task/project resolves execution engine to `cli` (via `engine.ResolveEngine`), `worker.go` builds `workflow.CLISpecFirstWorkflow` instead of the `api_native` complexity-based DAG:
+When a task/project resolves execution engine to `cli` (via `engine.ResolveEngine`), `worker.go` selects either a single-track or parallel-track DAG depending on the analysis result of `cli_analyze`:
 
+**Single-track (default / no clear FE+BE split):**
 ```
-cli_analyze → cli_spec → cli_implement → cli_mr
+cli_analyze → cli_spec → cli_implement → cross_review → cli_mr
 ```
 
-- **cli_analyze**: spawns the CLI agent to analyze the repo/task, requires it to write `.autocode/analysis.md`. Since the CLI engine deletes `.autocode/` right after the subprocess exits, this file is captured via `engine.CodeStepRequest.CaptureFiles` (base64-encoded to stdout behind sentinel markers before cleanup runs) rather than read from disk afterward.
-- **cli_spec**: spawns the CLI agent to author the 4 OpenSpec files (`proposal.md`, `specs.md`, `design.md`, `tasks.md`) under `docs/openspecs/<task-slug>/` in the real worktree — these survive the run (unlike `.autocode/`), so the step reads them straight off the host filesystem via `WorktreeHostPathResolver`.
-- **cli_implement**: spawns the CLI agent to implement against the spec set; validated by git diff (changes outside `docs/openspecs/` required, unless the task carries the `docs-only` label or `proposal.md` declares `type: documentation` in YAML frontmatter).
-- **cli_mr**: a thin wrapper (`CLIMRStep{ *PRStep }`) reusing the existing PR step's push/merge-request logic verbatim.
+**Parallel-track (FE+BE detected by `CLIAnalysisNeedsParallelTracks`):**
+```
+cli_analyze → cli_spec → cli_implement_backend ┐
+                        → cli_implement_frontend ┘ → merge → cross_review → cli_mr
+```
 
-Prompt templates for these 3 steps live in `server/internal/prompts/steps/cli_*.md` and are loaded via the lightweight `PromptBuilder.LoadStepPrompt` (not the full multi-turn `Assemble`/`AssembleForAgent` machinery, since each CLI step builds one standalone instruction string per spawn).
+**Step descriptions:**
+- **cli_analyze**: spawns the CLI agent to analyze the repo/task, writes `.autocode/analysis.md` (captured via `CaptureFiles` sentinel encoding). Inspects the resulting `cliAnalysisPayload.Files` to decide single- vs dual-track (re-dispatches via `workflow.ErrGraphChanged` if parallel tracks are needed).
+- **cli_spec**: spawns the CLI agent to author the 4 OpenSpec files (`proposal.md`, `specs.md`, `design.md`, `tasks.md`) under `docs/openspecs/<task-slug>/` — human approval gate applies per project autonomy setting.
+- **cli_implement / cli_implement_backend / cli_implement_frontend**: spawn the CLI agent in the task worktree (role-scoped worktree + branch for BE/FE tracks). Role-specific prompts assembled via `PromptBuilder.LoadRolePrompt` (same `AgentRole` resolution used by the API-native flow). MCP Context Server (`mcp-context`) is auto-wired per CLI profile: `claude --mcp-config`, Codex `config.toml`, Antigravity `mcp_config.json`.
+- **cross_review**: LLM-based cross-harness reviewer (`AgentRoleReviewer`, excluding the coder's provider — Harness Independence). Returns `ErrCrossReviewFixLoop` → re-dispatches `cli_implement` with prior violations prepended as "## Reviewer feedback". Cycle limit + repeat-violation escalation to `human_review` both apply.
+- **merge**: reuses existing `MergeStep` to merge `be`/`fe` role branches into the integration branch.
+- **cli_mr**: thin wrapper reusing the existing `PRStep` push/PR logic verbatim.
+
+**Context MCP Server (`server/cmd/mcp-context`):** A stdio-only MCP server bundled into the sandbox image. Exposes 6 tools — `repo.search`, `ast.query`, `dependency.impact`, `skill.search`, `architecture.query`, `quality.check` — all thin wrappers over existing `internal/context/*` packages. Dynamic context invalidation: `repo.search`/`ast.query` use `Provider.IndexAll` (mtime-respecting) so mid-session file edits are reflected without a full restart.
+
+**Observability:** Real-time log streaming (`Follow:true` concurrent with `ContainerWait`), logs written to `server/.data/workspaces/<task-id>/logs/cli_<step_id>_run.log`. MCP server logs to `mcp-server.log` and JSON-RPC trace to `mcp-trace.jsonl` in the same directory. Telemetry (cost/duration/tokens) parsed from `--output-format json` CLI output and accumulated into `workflow_jobs.total_cost_usd`/`total_duration_ms`/`total_tokens_used` (migration 000023).
+
+**Resilience:** Smart idle timeout (15 min default, configurable via `AUTOCODE_CLI_IDLE_TIMEOUT_MINUTES`) + streaming loop detector (200-line ring buffer, 10× repetition threshold) — both signal via `ContainerKill(SIGKILL)` rather than waiting for the absolute step timeout. Sandbox cache mounts fixed to `/home/agent/` (non-root user). Credentials injected as env vars, never interpolated into `cmd.Args`; `redactSecrets` scrubs all log/checkpoint output.
 
 ## 5. Rule Engine Architecture (Strict Layered Context)
 
@@ -274,7 +288,6 @@ Prompt templates for these 3 steps live in `server/internal/prompts/steps/cli_*.
 
 | File/Package                    | Depends On                                            |
 | :------------------------------ | :---------------------------------------------------- |
-| `server/cmd/cli/main.go`       | `server/pkg/llm`, `server/pkg/config`                 |
 | `server/cmd/api/main.go`       | `server/internal/*`, `server/pkg/*`, `server/migration/` |
 | `server/internal/handler`      | `server/internal/service`                             |
 | `server/internal/service`      | `server/internal/repository`, `server/pkg/llm`        |

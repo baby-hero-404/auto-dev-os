@@ -16,6 +16,7 @@ import (
 	cliengine "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
+	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -29,6 +30,33 @@ import (
 // full workflow engine.
 func dueForLearningNudge(successStepCount, interval int) bool {
 	return interval > 0 && successStepCount > 0 && successStepCount%interval == 0
+}
+
+// isCLIImplementFixLoopCheckpoint reports whether cp.Step is one this job's
+// cross-review fix loop must discard so the engine re-runs it, given the job
+// was just re-queued at workflow.StepCLIImplement by the
+// workflow.ErrCrossReviewFixLoop handler below. That handler always resets
+// job.Step to the single-track StepCLIImplement constant regardless of
+// whether workflow.CLISpecFirstWorkflow (single cli_implement step) or
+// workflow.CLISpecFirstParallelWorkflow (cli_implement_backend/frontend +
+// merge) actually produced the task's checkpoints, so this must recognize
+// checkpoints from both shapes — a task's checkpoints only ever populate one
+// shape, so the extra names are harmless no-ops for the other. Without this,
+// a successful parallel-track implement/merge checkpoint from before the
+// fix-loop trigger survives into engine.CompletedSteps, the engine skips
+// straight to cross_review with the unmodified code, review fails again, and
+// the job cycles forever until maxCycles burns out (never actually re-runs
+// the fix agent).
+func isCLIImplementFixLoopCheckpoint(jobStep, cpStep string) bool {
+	if jobStep != workflow.StepCLIImplement {
+		return false
+	}
+	switch cpStep {
+	case workflow.StepCLIImplement, workflow.StepCLIImplementBackend, workflow.StepCLIImplementFrontend, workflow.StepMerge, workflow.StepCrossReview:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *Orchestrator) run(ctx context.Context, jobID string) {
@@ -295,6 +323,12 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				}
 			}
 
+			if event.StepID == workflow.StepCLIAnalyze && event.Status == workflow.StepStatusSuccess {
+				if steps.CLIAnalysisNeedsParallelTracks(task) {
+					return workflow.ErrGraphChanged
+				}
+			}
+
 			return nil
 		},
 	}
@@ -319,7 +353,11 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		}
 	}
 	if o.shouldUseCLISpecFirstWorkflow(ctx, task, project) {
-		def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
+		if steps.CLIAnalysisNeedsParallelTracks(task) {
+			def = workflow.CLISpecFirstParallelWorkflow(runners, includeCrossReview)
+		} else {
+			def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
+		}
 	}
 
 	if def.Name == "" && len(task.Analysis) > 0 {
@@ -369,7 +407,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 					if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
 						continue
 					}
-					if job.Step == workflow.StepCLIImplement && (cp.Step == workflow.StepCLIImplement || cp.Step == workflow.StepCrossReview) {
+					if isCLIImplementFixLoopCheckpoint(job.Step, cp.Step) {
 						continue
 					}
 					output, _ := state["output"].(map[string]any)
@@ -407,7 +445,12 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				} else if strings.HasPrefix(latestCompletedStep, workflow.StepPlan) ||
 					strings.HasPrefix(latestCompletedStep, workflow.StepCodeBackend) ||
 					strings.HasPrefix(latestCompletedStep, workflow.StepCodeFrontend) ||
-					strings.HasPrefix(latestCompletedStep, workflow.StepFix) {
+					strings.HasPrefix(latestCompletedStep, workflow.StepFix) ||
+					// StepCLIImplement ("cli_implement") is a prefix of both
+					// StepCLIImplementBackend ("cli_implement_backend") and
+					// StepCLIImplementFrontend ("cli_implement_frontend"), so this one check
+					// covers the single-track and both parallel-track CLI implement steps.
+					strings.HasPrefix(latestCompletedStep, workflow.StepCLIImplement) {
 					resumeStatus = models.TaskStatusCoding
 				} else if strings.HasPrefix(latestCompletedStep, workflow.StepMerge) {
 					resumeStatus = models.TaskStatusReviewing
@@ -433,9 +476,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 						if cpHash, ok := state["commit_hash"].(string); ok && cpHash != "" {
 							worktreeSuffix := ""
-							if strings.HasPrefix(cp.Step, workflow.StepCodeBackend) {
+							if strings.HasPrefix(cp.Step, workflow.StepCodeBackend) || strings.HasPrefix(cp.Step, workflow.StepCLIImplementBackend) {
 								worktreeSuffix = models.WorktreeSuffixBackend
-							} else if strings.HasPrefix(cp.Step, workflow.StepCodeFrontend) {
+							} else if strings.HasPrefix(cp.Step, workflow.StepCodeFrontend) || strings.HasPrefix(cp.Step, workflow.StepCLIImplementFrontend) {
 								worktreeSuffix = models.WorktreeSuffixFrontend
 							}
 							latestCheckpoints[worktreeSuffix] = struct{ Hash, Step string }{cpHash, cp.Step}
@@ -506,9 +549,9 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 					if status, _ := state["status"].(string); status == workflow.StepStatusSuccess {
 						if job.Step == workflow.StepReview && (cp.Step == workflow.StepReview || cp.Step == workflow.StepFix) {
-						continue
-					}
-					if job.Step == workflow.StepCLIImplement && (cp.Step == workflow.StepCLIImplement || cp.Step == workflow.StepCrossReview) {
+							continue
+						}
+						if isCLIImplementFixLoopCheckpoint(job.Step, cp.Step) {
 							continue
 						}
 						output, _ := state["output"].(map[string]any)

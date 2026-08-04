@@ -68,7 +68,7 @@ func (s *CLIAnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepConte
 		instruction += "\n" + cliPlatformContextPointer + "\n"
 	}
 
-	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, []string{cliAnalysisCapturePath}, contextFiles)
+	out, err := s.runner.RunCLIStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, s.ID(), instruction, []string{cliAnalysisCapturePath}, contextFiles, "")
 	if err != nil {
 		return nil, fmt.Errorf("cli_analyze: %w", err)
 	}
@@ -99,6 +99,33 @@ func (s *CLIAnalyzeStep) Execute(ctx context.Context, stepCtx workflow.StepConte
 	s.rt.Task.Analysis = analysisJSON
 
 	return StepResult{"status": "success"}, nil
+}
+
+// CLIAnalysisNeedsParallelTracks reports whether the CLI agent's persisted
+// analysis (task.Analysis, written by CLIAnalyzeStep) touches both frontend
+// and backend files — the signal the orchestrator uses to decide whether to
+// run the dual-track parallel implement DAG (CLISpecFirstParallelWorkflow)
+// instead of the single-track one.
+func CLIAnalysisNeedsParallelTracks(task *models.Task) bool {
+	if task == nil || len(task.Analysis) == 0 {
+		return false
+	}
+	var payload cliAnalysisPayload
+	if err := json.Unmarshal(task.Analysis, &payload); err != nil {
+		return false
+	}
+	hasFrontend, hasBackend := false, false
+	for _, f := range payload.Files {
+		if isFrontendFile(f) {
+			hasFrontend = true
+		} else {
+			hasBackend = true
+		}
+		if hasFrontend && hasBackend {
+			return true
+		}
+	}
+	return false
 }
 
 // extractMDSection returns the trimmed body text of a "## <heading>" section

@@ -194,6 +194,30 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.workflows,               // CheckpointLister
 			o.tasks,                   // TaskUpdater
 		),
+		steps.NewCLIImplementBackendStep(
+			rt,
+			cliSpecRunner,             // WorktreeHostPathResolver
+			o.repoutil,                // WorktreeManager
+			o.wkspace,                 // WorkspaceLoader
+			o.agents,                  // BackendAgentAssigner
+			cliSpecRunner,             // CLIStepRunner
+			o.prompts,                 // StepPromptLoader
+			loggerAdapter{log: o.log}, // Logger
+			o.workflows,               // CheckpointLister
+			o.tasks,                   // TaskUpdater
+		),
+		steps.NewCLIImplementFrontendStep(
+			rt,
+			cliSpecRunner,             // WorktreeHostPathResolver
+			o.repoutil,                // WorktreeManager
+			o.wkspace,                 // WorkspaceLoader
+			o.agents,                  // FrontendAgentAssigner
+			cliSpecRunner,             // CLIStepRunner
+			o.prompts,                 // StepPromptLoader
+			loggerAdapter{log: o.log}, // Logger
+			o.workflows,               // CheckpointLister
+			o.tasks,                   // TaskUpdater
+		),
 		steps.NewCrossReviewStep(
 			rt,
 			o.tasks,                             // TaskReader

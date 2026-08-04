@@ -15,6 +15,11 @@ import (
 type mockCLIWorktreeManager struct {
 	checkpointErr error
 	checkpointed  bool
+
+	gotSetupRoleName   string
+	gotSetupRoleLabel  string
+	gotCommitRoleName  string
+	gotCommitRoleLabel string
 }
 
 func (m *mockCLIWorktreeManager) LoadTargetRepositories(ctx context.Context, task *models.Task) ([]models.Repository, error) {
@@ -23,9 +28,13 @@ func (m *mockCLIWorktreeManager) LoadTargetRepositories(ctx context.Context, tas
 func (m *mockCLIWorktreeManager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
 }
 func (m *mockCLIWorktreeManager) SetupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
+	m.gotSetupRoleName = roleName
+	m.gotSetupRoleLabel = roleLabel
 	return nil
 }
 func (m *mockCLIWorktreeManager) CommitRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
+	m.gotCommitRoleName = roleName
+	m.gotCommitRoleLabel = roleLabel
 	return nil
 }
 func (m *mockCLIWorktreeManager) ResetRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, worktreeSuffix string) error {

@@ -153,3 +153,11 @@ grep -c "ccr:" server/.data/logs/<task-id>.jsonl
 
 If it's zero, the marker was never persisted — it's an artifact of how the
 content was displayed to you, not a bug in this codebase.
+
+## 9. Tracing CLI Agent and MCP Context Server Logs
+
+With the introduction of the CLI Orchestrator wrapper, debugging agent failures requires checking the specialized sidecar logs generated in the task's dedicated workspace logs directory (`server/.data/workspaces/<task-id>/logs/`):
+
+1. **Agent Crashes or Loops:** Check `server/.data/workspaces/<task-id>/logs/cli_{role}_run.log` (e.g. `cli_frontend_run.log`). This contains the raw, real-time `stdout`/`stderr` multiplexed from the headless CLI tool (`agy`, `claude`, or `codex`). If the agent gets stuck in a bash loop or exhausts its context window, the evidence is here.
+2. **JSON-RPC Protocol Errors:** If the orchestrator reports the agent disconnected or crashed due to JSON parsing errors, check `server/.data/workspaces/<task-id>/logs/mcp-server.log`. The MCP Server isolates all internal Go logs (`Info`/`Error`/`Debug`) here to avoid corrupting `stdout`.
+3. **Context Hallucinations:** If the agent implements something wildly incorrect, don't assume the model is at fault. Check `server/.data/workspaces/<task-id>/logs/mcp-trace.jsonl`. This file dumps every JSON-RPC request and response payload. Grep it for `ast.query` or `repo.search` to see exactly what codebase context was fed to the agent at that exact moment.

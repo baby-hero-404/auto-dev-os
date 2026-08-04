@@ -37,6 +37,19 @@ type WorkflowJob struct {
 	LastError string    `json:"last_error" gorm:"default:''"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// TotalCostUSD/TotalDurationMS/TotalTokensUsed accumulate CLI telemetry
+	// (Phase 6, "Telemetry Parsing") across every cli_* step this job runs —
+	// one workflow_jobs row spans the whole task run (cli_analyze -> cli_spec
+	// -> cli_implement* -> ...), not one row per step, so these are running
+	// totals updated additively (see repository.WorkflowRepo.
+	// AccumulateJobTelemetry) rather than overwritten. Zero for API-native
+	// (non-CLI) jobs and for CLI runs whose output didn't include a parseable
+	// telemetry block (e.g. --output-format json unsupported/not enforced
+	// yet for that provider).
+	TotalCostUSD    float64 `json:"total_cost_usd" gorm:"default:0"`
+	TotalDurationMS int64   `json:"total_duration_ms" gorm:"default:0"`
+	TotalTokensUsed int64   `json:"total_tokens_used" gorm:"default:0"`
 }
 
 type WorkflowCheckpoint struct {

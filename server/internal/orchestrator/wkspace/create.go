@@ -157,12 +157,15 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 						hasWorkToPreserve = true
 					}
 				}
-				// cli_spec/cli_implement write directly to the worktree (docs/openspecs/*.md,
-				// application code) and deliberately leave it uncommitted while paused for human
-				// review — resuming after approval must not wipe that work. Their checkpoint is
-				// "paused"/"waiting_approval" (not "success") at the moment of resume, since the
-				// step itself hasn't completed yet, so success-only detection above misses them.
-				if (cp.Step == workflow.StepCLISpec || cp.Step == workflow.StepCLIImplement) &&
+				// cli_spec/cli_implement (and their parallel-track counterparts
+				// cli_implement_backend/cli_implement_frontend) write directly to the worktree
+				// (docs/openspecs/*.md, application code) and deliberately leave it uncommitted
+				// while paused for human review — resuming after approval must not wipe that
+				// work. Their checkpoint is "paused"/"waiting_approval" (not "success") at the
+				// moment of resume, since the step itself hasn't completed yet, so success-only
+				// detection above misses them.
+				if (cp.Step == workflow.StepCLISpec || cp.Step == workflow.StepCLIImplement ||
+					cp.Step == workflow.StepCLIImplementBackend || cp.Step == workflow.StepCLIImplementFrontend) &&
 					(status == workflow.StepStatusSuccess || status == workflow.StepStatusPaused || status == workflow.StepStatusWaitingApproval) {
 					hasWorkToPreserve = true
 				}

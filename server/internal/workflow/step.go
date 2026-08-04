@@ -24,8 +24,15 @@ const (
 	StepCLIAnalyze   = "cli_analyze"
 	StepCLISpec      = "cli_spec"
 	StepCLIImplement = "cli_implement"
-	StepCrossReview  = "cross_review"
-	StepCLIMR        = "cli_mr"
+	// StepCLIImplementBackend/Frontend are the parallel CLI implement tracks
+	// (Phase 4): two CLI agents implement against the same approved spec set
+	// in their own git worktrees (models.WorktreeSuffixBackend/Frontend),
+	// then StepMerge reconciles both — mirroring StepCodeBackend/Frontend's
+	// existing pattern in MediumWorkflow.
+	StepCLIImplementBackend  = "cli_implement_backend"
+	StepCLIImplementFrontend = "cli_implement_frontend"
+	StepCrossReview          = "cross_review"
+	StepCLIMR                = "cli_mr"
 )
 
 // Step status constants used across the engine and API.
@@ -284,6 +291,35 @@ func CLISpecFirstWorkflow(runners map[string]StepFunc, includeCrossReview bool) 
 	return Definition{Name: "auto-code-os-cli-spec-first-workflow", Steps: steps}
 }
 
+// CLISpecFirstParallelWorkflow is CLISpecFirstWorkflow's dual-agent variant
+// (Phase 4): after the spec is authored, two CLI agents implement in
+// parallel — one in the backend role worktree, one in the frontend role
+// worktree (mirrors MediumWorkflow's code_backend/code_frontend split) —
+// then StepMerge reconciles both role branches into the integration branch
+// before the optional cross_review and cli_mr steps.
+func CLISpecFirstParallelWorkflow(runners map[string]StepFunc, includeCrossReview bool) Definition {
+	statusSchema := Schema{Fields: map[string]FieldSchema{
+		"status": {Type: FieldString, Required: false},
+	}}
+
+	steps := []StepDefinition{
+		{ID: StepCLIAnalyze, Name: "Analyze", OutputSchema: statusSchema, Run: runners[StepCLIAnalyze]},
+		{ID: StepCLISpec, Name: "Author Spec", DependsOn: []string{StepCLIAnalyze}, OutputSchema: statusSchema, Run: runners[StepCLISpec]},
+		{ID: StepCLIImplementBackend, Name: "Implement (Backend)", DependsOn: []string{StepCLISpec}, OutputSchema: statusSchema, Run: runners[StepCLIImplementBackend]},
+		{ID: StepCLIImplementFrontend, Name: "Implement (Frontend)", DependsOn: []string{StepCLISpec}, OutputSchema: statusSchema, Run: runners[StepCLIImplementFrontend]},
+		{ID: StepMerge, Name: "Merge", DependsOn: []string{StepCLIImplementBackend, StepCLIImplementFrontend}, OutputSchema: statusSchema, Run: runners[StepMerge]},
+	}
+
+	lastStep := StepMerge
+	if includeCrossReview {
+		steps = append(steps, StepDefinition{ID: StepCrossReview, Name: "Cross-Harness Review", DependsOn: []string{StepMerge}, OutputSchema: statusSchema, Run: runners[StepCrossReview]})
+		lastStep = StepCrossReview
+	}
+	steps = append(steps, StepDefinition{ID: StepCLIMR, Name: "Merge Request", DependsOn: []string{lastStep}, OutputSchema: statusSchema, Run: runners[StepCLIMR]})
+
+	return Definition{Name: "auto-code-os-cli-spec-first-parallel-workflow", Steps: steps}
+}
+
 func HardWorkflow(runners map[string]StepFunc, subtasks map[string][]string) Definition {
 	def := MediumWorkflow(runners, subtasks)
 	def.Name = "auto-code-os-hard-workflow"
@@ -326,7 +362,7 @@ func DescribeStep(name string) string {
 // resumes to, the "analyze" step).
 func StatusForStep(step string) string {
 	switch step {
-	case StepCLIImplement:
+	case StepCLIImplement, StepCLIImplementBackend, StepCLIImplementFrontend:
 		return models.TaskStatusCoding
 	case StepCLIAnalyze, StepCLISpec:
 		return models.TaskStatusAnalyzing

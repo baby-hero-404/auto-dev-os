@@ -1,7 +1,22 @@
 import type { Task, TaskSpecStatus, TaskStatus } from "@/lib/types";
 
-/** The one canonical enumeration of CLI-spec-first flow step ids, in order. */
-export const CLI_STEPS = ["cli_analyze", "cli_spec", "cli_implement", "cross_review", "cli_mr"] as const;
+/**
+ * The one canonical enumeration of CLI-spec-first flow step ids, in order.
+ * Includes both the single-track `cli_implement` shape (workflow.CLISpecFirstWorkflow)
+ * and the dual-agent parallel-track shape (workflow.CLISpecFirstParallelWorkflow,
+ * `cli_implement_backend`/`cli_implement_frontend` joined by the shared `merge` step)
+ * — a given task's checkpoints only ever populate one of the two shapes.
+ */
+export const CLI_STEPS = [
+  "cli_analyze",
+  "cli_spec",
+  "cli_implement",
+  "cli_implement_backend",
+  "cli_implement_frontend",
+  "merge",
+  "cross_review",
+  "cli_mr",
+] as const;
 
 export type BadgeVariant =
   | "neutral"

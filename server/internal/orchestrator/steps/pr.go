@@ -88,7 +88,8 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 	// can set the task to pr_ready/human_review and fall through to this step
 	// without ever pausing, which would otherwise make this guard fire before
 	// any real PR was ever created.
-	prAlreadyCreated := len(s.rt.Task.PRURLs) > 0 || len(s.rt.Task.PRMetadata) > 0
+	prMetadataEmpty := len(s.rt.Task.PRMetadata) == 0 || string(s.rt.Task.PRMetadata) == "[]" || string(s.rt.Task.PRMetadata) == "null"
+	prAlreadyCreated := len(s.rt.Task.PRURLs) > 0 || !prMetadataEmpty
 	if prAlreadyCreated && (s.rt.Task.Status == models.TaskStatusPrReady || s.rt.Task.Status == models.TaskStatusHumanReview) {
 		return nil, workflow.ErrWaitingApproval
 	}

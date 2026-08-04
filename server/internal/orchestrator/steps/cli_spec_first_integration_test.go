@@ -20,7 +20,7 @@ type fakeCLIEngineRunner struct {
 	slug string
 }
 
-func (f *fakeCLIEngineRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error) {
+func (f *fakeCLIEngineRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (CLIStepOutput, error) {
 	switch stepID {
 	case workflow.StepCLIAnalyze:
 		return CLIStepOutput{
@@ -65,7 +65,7 @@ func (f *fakeCLIEngineRunner) RunCLIStep(ctx context.Context, task *models.Task,
 
 type fakeWorktreeHostPathResolver struct{ root string }
 
-func (f *fakeWorktreeHostPathResolver) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task) (string, error) {
+func (f *fakeWorktreeHostPathResolver) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task, worktreeSuffix string) (string, error) {
 	return f.root, nil
 }
 

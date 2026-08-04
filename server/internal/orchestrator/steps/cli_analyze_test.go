@@ -11,15 +11,17 @@ import (
 )
 
 type mockCLIStepRunner struct {
-	output     CLIStepOutput
-	err        error
-	gotCapture []string
-	gotInstr   string
+	output            CLIStepOutput
+	err               error
+	gotCapture        []string
+	gotInstr          string
+	gotWorktreeSuffix string
 }
 
-func (m *mockCLIStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string) (CLIStepOutput, error) {
+func (m *mockCLIStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (CLIStepOutput, error) {
 	m.gotCapture = captureFiles
 	m.gotInstr = instruction
+	m.gotWorktreeSuffix = worktreeSuffix
 	return m.output, m.err
 }
 
@@ -34,6 +36,19 @@ func (m *mockStepPromptLoader) LoadStepPrompt(stepID string) (string, error) {
 
 func (m *mockStepPromptLoader) MaterializeCLIContext(ctx context.Context, task models.Task, agent *models.Agent, stepID string) (map[string]string, error) {
 	return nil, nil
+}
+
+func (m *mockStepPromptLoader) LoadRolePrompt(agent *models.Agent, task models.Task, stepID string) (string, error) {
+	return "", nil
+}
+
+type mockWorktreeHostPathResolver struct {
+	root string
+	err  error
+}
+
+func (m *mockWorktreeHostPathResolver) ResolveHostWorktreeRoot(ctx context.Context, task *models.Task, worktreeSuffix string) (string, error) {
+	return m.root, m.err
 }
 
 type mockCLITaskUpdater struct {

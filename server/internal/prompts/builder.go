@@ -152,6 +152,33 @@ func (a *PromptAssembler) LoadStepPrompt(stepID string) (string, error) {
 	return a.loadStepPromptWithFallback(stepID)
 }
 
+// LoadRolePrompt exposes the same role-prompt resolution loadBaseRolePrompts
+// uses for the tool-loop assembler pipeline (agent.Role -> tool.EffectiveRoleForStep
+// -> promptPaths.RolePrompt, with "backend"/"frontend" both mapping to the
+// shared "coder" role file) to callers that build one standalone CLI
+// instruction string per spawn instead — e.g. the CLI spec-first steps, so
+// a CLI agent given AgentRoleFrontend/AgentRoleBackend gets the same
+// role-specific instructions the API-native flow would produce, instead of
+// a second, divergent profile format. A nil agent or missing role file
+// returns ("", nil) rather than an error — same fallback behavior
+// loadBaseRolePrompts already has, so an unrecognized/missing role doesn't
+// need a new validation error path.
+func (a *PromptAssembler) LoadRolePrompt(agent *models.Agent, task models.Task, stepID string) (string, error) {
+	if agent == nil || a.promptPaths == nil || a.fs == nil {
+		return "", nil
+	}
+	role := tool.EffectiveRoleForStep(stepID, agent.Role, &task)
+	roleFile := role
+	if role == models.AgentRoleBackend || role == models.AgentRoleFrontend {
+		roleFile = "coder"
+	}
+	content, err := a.fs.ReadFile(a.promptPaths.RolePrompt(roleFile))
+	if err != nil {
+		return "", nil
+	}
+	return string(content), nil
+}
+
 // loadStepPromptWithFallback implements fallback-based step prompt loading (REQ-004).
 func (a *PromptAssembler) loadStepPromptWithFallback(stepID string) (string, error) {
 	if a.promptPaths == nil || a.fs == nil {

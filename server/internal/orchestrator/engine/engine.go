@@ -62,6 +62,16 @@ type CodeStepRequest struct {
 	// spawns; torn down by the same .autocode/ cleanup. Nil/empty means no
 	// context/ directory is created at all (identical to today's behavior).
 	ContextFiles map[string]string
+
+	// WorktreeSuffix identifies which role worktree this step runs against
+	// (e.g. models.WorktreeSuffixBackend/Frontend), or "" for the main
+	// checkout. Only used to namespace the host log directory (see cli.go's
+	// logsHostDir) so two role tracks running as separate, concurrent
+	// containers for the same task never bind-mount the same host log
+	// directory into their own mcp-context's fixed in-container log path —
+	// that would let their unlocked, interleaved writes to
+	// mcp-server.log/mcp-trace.jsonl corrupt each other.
+	WorktreeSuffix string
 }
 
 // CodeStepResult is the outcome of running one coding step through an engine.
@@ -82,8 +92,18 @@ type CodeStepResult struct {
 	Command string
 
 	// LoopKilled is true when the CLI engine terminated the subprocess early
-	// because its output was judged to be looping (see loopDetector).
+	// because its output was judged to be looping (see loopDetector), either
+	// via the post-hoc check over the fully captured output or because the
+	// sandbox runtime's own live in-stream detector already force-killed the
+	// container mid-run (Phase 7, "Smart Idle Timeout & Loop Detection").
 	LoopKilled bool
+
+	// IdleTimeoutHit is true when the sandbox runtime force-killed the
+	// container because no stdout/stderr activity was observed for the
+	// configured idle timeout (Phase 7) — distinct from LoopKilled (which
+	// fires on repeated output, not silence) and from a plain req.Timeout
+	// expiry (which returns a hard sandbox.Run error, not a CodeStepResult).
+	IdleTimeoutHit bool
 
 	// QuotaExceeded is true when the captured output/exit code matched a
 	// known quota/rate-limit signature for this CLI (see cli_quota.go,
@@ -92,6 +112,7 @@ type CodeStepResult struct {
 	// Success/Error, which are still decided purely by exit code + loop
 	// detection.
 	QuotaExceeded bool
+	QuotaCooldown time.Duration
 
 	// AuthInvalid is true when the captured output matched a known "not
 	// authenticated" signature for this CLI at any confidence level (see
@@ -141,6 +162,18 @@ type CodeStepResult struct {
 	// falls back to whatever host-session auto-mount (authDirs) is available,
 	// which is the "Not logged in" failure mode this field is meant to catch.
 	CredentialFilesResolved int
+
+	// TelemetryOK, CostUSD, DurationMS, and TokensUsed are the parsed result
+	// of scanning Output for a trailing --output-format json summary block
+	// (Phase 6, "Telemetry Parsing" — see parseCLITelemetry). TelemetryOK is
+	// false (and the three metrics left zero) when no recognizable telemetry
+	// JSON was present — e.g. the provider doesn't support/enforce structured
+	// output yet — so callers can skip persisting a spurious all-zero row
+	// instead of assuming absence means zero cost.
+	TelemetryOK bool
+	CostUSD     float64
+	DurationMS  int64
+	TokensUsed  int64
 }
 
 // ExecutionEngine abstracts over how a coding step actually gets executed.

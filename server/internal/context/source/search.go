@@ -103,6 +103,47 @@ func (c *Cache) SearchTags(inputQuery string, limit int) ([]ScoredTag, error) {
 	return candidates, nil
 }
 
+// FindExactSymbol returns cached "def" tags whose name matches symbolName
+// exactly (case-sensitive), scored 1.0 each — used for symbol-name lookups
+// (ast.query) where the caller wants the definition, not the fuzzy
+// term-overlap ranking SearchTags does for natural-language queries.
+func (c *Cache) FindExactSymbol(symbolName string, limit int) ([]ScoredTag, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if symbolName == "" {
+		return nil, nil
+	}
+
+	rows, err := c.db.Query(`SELECT filepath, tags_json FROM file_cache`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var matches []ScoredTag
+	for rows.Next() {
+		var relPath, tagsJSON string
+		if err := rows.Scan(&relPath, &tagsJSON); err != nil {
+			continue
+		}
+		var fileTags []Tag
+		if err := json.Unmarshal([]byte(tagsJSON), &fileTags); err != nil {
+			continue
+		}
+		for _, tag := range fileTags {
+			if tag.Kind != "def" || tag.Name != symbolName {
+				continue
+			}
+			matches = append(matches, ScoredTag{Tag: tag, Score: 1.0})
+			if len(matches) >= limit {
+				return matches, nil
+			}
+		}
+	}
+	return matches, nil
+}
+
 func buildQuery(input string) searchQuery {
 	query := searchQuery{
 		terms: map[string]float64{},

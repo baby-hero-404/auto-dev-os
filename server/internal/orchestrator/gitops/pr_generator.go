@@ -267,6 +267,8 @@ func assessRisk(task *models.Task, changedFiles []string) (string, string) {
 	}
 
 	switch {
+	case hasMigration && task.Complexity == models.TaskComplexityHard:
+		return models.PRRiskCritical, "Hard complexity task containing database migration files"
 	case hasMigration:
 		return models.PRRiskHigh, "Contains database migration files"
 	case task.Complexity == models.TaskComplexityHard || fileCount > 15:

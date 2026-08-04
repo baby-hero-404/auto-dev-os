@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -243,10 +244,13 @@ func hostPathForContainerPath(hostWorkspace, containerPath string) (string, erro
 // RunCodeStep writes the instruction to .autocode/prompt.md inside the
 // worktree, spawns the configured CLI with {prompt_file}/{workdir}
 // placeholders substituted, and cleans up .autocode/ afterward so the
-// prompt file never ends up committed. Success is decided by exit code and
-// post-hoc loop detection over the captured output (Runtime.Run is a
-// blocking call with no live streaming, so early-kill mid-run is not
-// possible with the current sandbox interface).
+// prompt file never ends up committed. Success is decided by exit code plus
+// two independent kill signals: post-hoc loop detection over the fully
+// captured output (detectLoop, below) and the sandbox runtime's own live
+// mid-run kill (sandbox.CommandResult.Killed — idle timeout or in-stream
+// loop detection, Phase 7 "Smart Idle Timeout & Loop Detection" — since
+// Runtime.Run now streams logs as they arrive rather than only returning
+// them after the container exits).
 func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*CodeStepResult, error) {
 	cfg := req.CLIConfig
 	if cfg == nil || strings.TrimSpace(cfg.Command) == "" {
@@ -260,6 +264,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	if timeout <= 0 {
 		timeout = defaultCLITimeout
 	}
+	idleTimeout := resolveIdleTimeout()
 
 	autocodeDir := req.ContainerWorkDir + "/.autocode"
 	promptFile := autocodeDir + "/prompt.md"
@@ -308,6 +313,8 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		a = strings.ReplaceAll(a, "{workdir}", req.ContainerWorkDir)
 		args[i] = a
 	}
+	mcp := buildMCPBootstrap(cfg, req.ContainerWorkDir, autocodeDir)
+	args = append(args, mcp.extraArgs...)
 	invocation := append([]string{cfg.Command}, args...)
 	quotedInvocation := make([]string, len(invocation))
 	for i, p := range invocation {
@@ -327,10 +334,12 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	}
 
 	script := fmt.Sprintf(
-		"cd %s && %s; status=$?%s; rm -rf %s; exit $status",
+		"cd %s && %s%s; status=$?%s; %srm -rf %s; exit $status",
 		paths.QuoteShellArg(req.ContainerWorkDir),
+		mcp.prefix,
 		strings.Join(quotedInvocation, " "),
 		captureScript.String(),
+		mcp.cleanup,
 		paths.QuoteShellArg(autocodeDir),
 	)
 
@@ -348,6 +357,16 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		return nil, err
 	}
 
+	// logsHostDir/runLogFilePath: Phase 6 observability. Both derive purely
+	// from HostWorkspace/StepID (no new CodeStepRequest field needed) —
+	// server/.data/workspaces/<task-id>/logs/, bind-mounted at
+	// sandbox.LogsContainerDir for mcp-context's own log/trace files, and
+	// .../logs/cli_<step-id>_run.log for this subprocess's real-time
+	// stdout/stderr copy (docs/guides/tracing-workflow-logs.md's documented
+	// layout).
+	logsHostDir := filepath.Join(req.HostWorkspace, "logs")
+	runLogFilePath := filepath.Join(logsHostDir, fmt.Sprintf("cli_%s_run.log", req.StepID))
+
 	result, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
 		AgentID:         agentID(req.Agent),
@@ -357,6 +376,9 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		NetworkMode:     req.NetworkMode,
 		Timeout:         timeout,
 		CredentialFiles: credentialFiles,
+		LogsHostDir:     logsHostDir,
+		LogFilePath:     runLogFilePath,
+		IdleTimeout:     idleTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cli engine: run failed: %w", err)
@@ -396,7 +418,16 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		combined += result.Stderr
 	}
 	combined, capturedFiles := extractCapturedFiles(combined)
-	killed := detectLoop(combined)
+	telemetry, telemetryOK := parseCLITelemetry(combined)
+	// killed is true either from the post-hoc error-line heuristic over the
+	// fully captured output (detectLoop) or because the sandbox runtime
+	// itself already force-killed the container mid-run (result.Killed —
+	// idle timeout or its own live loop detector, Phase 7). The two are
+	// deliberately OR'd rather than one replacing the other: detectLoop
+	// still catches loops confined to a short burst that never triggers the
+	// live in-stream threshold before the process exits on its own.
+	killed := detectLoop(combined) || result.Killed
+	idleTimeoutHit := result.Killed && result.KillReason == sandbox.KillReasonIdleTimeout
 	authConfidence := detectAuthInvalid(cfg.ProfileRef, combined)
 	authInvalid := authConfidence != AuthInvalidNone
 	authInvalidConfirmed := authConfidence == AuthInvalidConfirmed
@@ -406,7 +437,12 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	// the same output would let the quota cooldown path mask the permanent
 	// one. Applies at any confidence level: even a merely suspected match
 	// isn't a quota signature, so it shouldn't cool down the credential.
-	quotaExceeded := !authInvalid && detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
+	quotaExceeded, quotaCooldown := detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
+	if authInvalid {
+		quotaExceeded = false
+		quotaCooldown = 0
+	}
+
 	// Checked regardless of exit code: some CLIs print a question and then
 	// exit 0 ("can't prompt non-interactively"), which would otherwise be
 	// read as a silent success. Skipped when a more specific outcome
@@ -421,7 +457,9 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		Success:                 result.ExitCode == 0 && !killed && !awaitingInput && !authInvalid,
 		Output:                  redactSecrets(combined),
 		LoopKilled:              killed,
+		IdleTimeoutHit:          idleTimeoutHit,
 		QuotaExceeded:           quotaExceeded,
+		QuotaCooldown:           quotaCooldown,
 		AuthInvalid:             authInvalid,
 		AuthInvalidConfirmed:    authInvalidConfirmed,
 		AwaitingInput:           awaitingInput,
@@ -430,14 +468,22 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		Command:                 redactSecrets(strings.Join(quotedInvocation, " ")),
 		CredentialID:            credID,
 		CredentialFilesResolved: len(credentialFiles),
+		TelemetryOK:             telemetryOK,
+		CostUSD:                 telemetry.CostUSD,
+		DurationMS:              telemetry.DurationMS,
+		TokensUsed:              telemetry.TokensUsed,
 	}
 	switch {
+	case idleTimeoutHit:
+		res.Error = fmt.Sprintf("cli engine: no stdout/stderr activity for %s, killing step as stalled", idleTimeout)
 	case killed:
 		res.Error = "cli engine: repeated error output detected, killing step as a stuck loop"
 	case authInvalidConfirmed:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: credential not authenticated (permanent, will not retry): %s", lastNonEmptyLine(combined)))
 	case authInvalid: // suspected only — see AuthInvalidSuspected doc
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: possible auth failure, unconfirmed signature (will retry): %s", lastNonEmptyLine(combined)))
+	case quotaExceeded:
+		res.Error = redactSecrets(fmt.Sprintf("cli engine: rate limit or quota exceeded (will cool down and retry): %s", lastNonEmptyLine(combined)))
 	case awaitingInput:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: process appears to be waiting for input: %s", lastNonEmptyLine(combined)))
 	case result.ExitCode != 0:
@@ -467,6 +513,25 @@ func detectLoop(output string) bool {
 		}
 	}
 	return triggered
+}
+
+// idleTimeoutEnvVar lets operators tune Phase 7's idle-activity kill
+// threshold without a rebuild — e.g. loosening it for an org whose agents
+// legitimately go quiet for a while (long build/test commands) without
+// writing progress output. Unset/invalid/non-positive falls back to
+// sandbox.DefaultIdleTimeout (15m).
+const idleTimeoutEnvVar = "AUTOCODE_CLI_IDLE_TIMEOUT_MINUTES"
+
+func resolveIdleTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(idleTimeoutEnvVar))
+	if raw == "" {
+		return sandbox.DefaultIdleTimeout
+	}
+	minutes, err := strconv.Atoi(raw)
+	if err != nil || minutes <= 0 {
+		return sandbox.DefaultIdleTimeout
+	}
+	return time.Duration(minutes) * time.Minute
 }
 
 func cloneEnv(env map[string]string) map[string]string {

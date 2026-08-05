@@ -124,17 +124,25 @@ export function TaskDetailLayout() {
                 {workflow.job.last_error}
               </p>
               <div className="z-10 flex items-center gap-3 mt-1">
-                <BoundaryResolutionControls
-                  errorMsg={workflow.job.last_error}
-                  task={task}
-                  updateTask={updateTask}
-                  execute={execute}
-                  setError={setError}
-                />
-                {!workflow.job.last_error.includes("boundary") && (
-                  <button onClick={retry} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
-                    Retry Step
+                {workflow.job.last_error.includes("workflow paused by user") ? (
+                  <button onClick={execute} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
+                    ▶ Resume Task
                   </button>
+                ) : (
+                  <>
+                    <BoundaryResolutionControls
+                      errorMsg={workflow.job.last_error}
+                      task={task}
+                      updateTask={updateTask}
+                      execute={execute}
+                      setError={setError}
+                    />
+                    {!workflow.job.last_error.includes("boundary") && (
+                      <button onClick={retry} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
+                        Retry Step
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>

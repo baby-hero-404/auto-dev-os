@@ -314,6 +314,18 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		a = strings.ReplaceAll(a, "{workdir}", req.ContainerWorkDir)
 		args[i] = a
 	}
+
+	if req.ResumeSessionID != "" {
+		switch cfg.ProfileRef {
+		case "claude_code":
+			args = append(args, "--resume", req.ResumeSessionID)
+		case "antigravity":
+			args = append(args, "--conversation", req.ResumeSessionID)
+		case "openai_codex":
+			args = append(args, "resume", "--last")
+		}
+	}
+
 	mcp := buildMCPBootstrap(cfg, req.ContainerWorkDir, autocodeDir)
 	args = append(args, mcp.extraArgs...)
 	invocation := append([]string{cfg.Command}, args...)
@@ -368,6 +380,35 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	logsHostDir := filepath.Join(req.HostWorkspace, "logs")
 	runLogFilePath := filepath.Join(logsHostDir, fmt.Sprintf("cli_%s_run.log", req.StepID))
 
+	var sessionMounts map[string]string
+	if cfg.ProfileRef != "" {
+		sessionMounts = make(map[string]string)
+		// Isolate sessions by provider and credential_id to prevent multiple accounts from clobbering each other
+		sessionDir := filepath.Join(req.HostWorkspace, "session", cfg.ProfileRef)
+		if cfg.CredentialID != "" {
+			sessionDir = filepath.Join(sessionDir, cfg.CredentialID)
+		}
+		
+		// Map known CLI persistence directories to the isolated session directory
+		layouts := map[string][]string{
+			"claude_code":  {".claude"},
+			"antigravity":  {".gemini"},
+			"openai_codex": {".config/codex"},
+		}
+		
+		if paths, ok := layouts[cfg.ProfileRef]; ok {
+			for _, p := range paths {
+				hostPath := filepath.Join(sessionDir, p)
+				containerPath := filepath.Join(sandbox.SandboxHomeDir, p)
+				
+				if err := os.MkdirAll(hostPath, 0o755); err != nil {
+					return nil, fmt.Errorf("cli engine: create session mount dir %s: %w", hostPath, err)
+				}
+				sessionMounts[containerPath] = hostPath
+			}
+		}
+	}
+
 	result, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
 		AgentID:         agentID(req.Agent),
@@ -378,6 +419,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		Timeout:         timeout,
 		CredentialFiles: credentialFiles,
 		LogsHostDir:     logsHostDir,
+		SessionMounts:   sessionMounts,
 		LogFilePath:     runLogFilePath,
 		IdleTimeout:     idleTimeout,
 	})
@@ -478,6 +520,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		CostUSD:                 telemetry.CostUSD,
 		DurationMS:              telemetry.DurationMS,
 		TokensUsed:              telemetry.TokensUsed,
+		SessionID:               telemetry.SessionID,
 	}
 	switch {
 	case idleTimeoutHit:
@@ -493,7 +536,22 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	case awaitingInput:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: process appears to be waiting for input: %s", lastNonEmptyLine(combined)))
 	case result.ExitCode != 0:
-		res.Error = redactSecrets(fmt.Sprintf("cli exited with status %d", result.ExitCode))
+		reason := ""
+		switch result.ExitCode {
+		case 126:
+			reason = " (Command invoked cannot execute - Permission denied)"
+		case 127:
+			reason = " (Command not found)"
+		case 130:
+			reason = " (Terminated by SIGINT)"
+		case 137:
+			reason = " (OOM killed by OS kernel - SIGKILL)"
+		case 139:
+			reason = " (Segmentation fault - SIGSEGV)"
+		case 143:
+			reason = " (Terminated by SIGTERM)"
+		}
+		res.Error = redactSecrets(fmt.Sprintf("cli exited with status %d%s", result.ExitCode, reason))
 	}
 	return res, nil
 }

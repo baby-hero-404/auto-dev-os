@@ -466,7 +466,7 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-stroke bg-card p-5 overflow-auto max-h-[500px] leading-relaxed animate-fade-in shadow-inner text-sm">
+        <div className="rounded-lg border border-stroke bg-card p-5 overflow-auto max-h-[75vh] leading-relaxed animate-fade-in shadow-inner text-sm">
           {activeSpecTab === "proposal" && <Markdown content={analysisData.proposal_md || ""} />}
           {activeSpecTab === "specs" && <Markdown content={analysisData.specs_md || ""} />}
           {activeSpecTab === "design" && <Markdown content={analysisData.design_md || ""} />}

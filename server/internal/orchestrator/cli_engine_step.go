@@ -67,6 +67,13 @@ func (o *Orchestrator) finishCLIRun(ctx context.Context, taskID, jobID, stepID, 
 	}
 	_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_output", artifactBody)
 	_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_prompt", buildCLIPromptArtifact(res.Command, instruction, nil))
+	// Only save a resumable session ID when the run actually ended via a
+	// mid-run kill/idle-timeout (REQ-003): resuming into a conversation that
+	// failed for another reason (auth, logic error) can make the model repeat
+	// the same mistake, so a retry after those failures must start fresh.
+	if res.SessionID != "" && (res.IdleTimeoutHit || res.LoopKilled) {
+		_ = o.checkpoints.SaveArtifact(ctx, jobID, taskID, stepID, "cli_session_id", res.SessionID)
+	}
 }
 
 // buildCLIPromptArtifact formats the exact input the CLI agent received —
@@ -157,6 +164,7 @@ func (r *cliEngineRunner) buildRequest(ctx context.Context, task *models.Task, a
 		networkMode = sandbox.NetworkModeBridge
 	}
 
+	resumeSessionID, _ := ctx.Value(resumeSessionIDCtxKey).(string)
 	req := engine.CodeStepRequest{
 		Task:             task,
 		Agent:            agent,
@@ -168,6 +176,7 @@ func (r *cliEngineRunner) buildRequest(ctx context.Context, task *models.Task, a
 		NetworkMode:      networkMode,
 		CLIConfig:        r.cfg,
 		OrgID:            r.orgID,
+		ResumeSessionID:  resumeSessionID,
 	}
 	if r.cfg != nil && r.cfg.TimeoutMinutes > 0 {
 		req.Timeout = time.Duration(r.cfg.TimeoutMinutes) * time.Minute

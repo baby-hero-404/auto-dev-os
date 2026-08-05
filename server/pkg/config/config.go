@@ -173,6 +173,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("logging.llm_trace_enabled", "LOG_LLM_TRACE_ENABLED")
 	v.BindEnv("logging.llm_log_level", "LOG_LLM_LOG_LEVEL")
 	v.BindEnv("sandbox.disable_networking", "SANDBOX_DISABLE_NETWORKING")
+	v.BindEnv("sandbox.memory_mb", "SANDBOX_MEMORY_MB")
 	v.BindEnv("execution.state_machine_enabled", "EXECUTION_STATE_MACHINE_ENABLED")
 	v.BindEnv("execution.max_tool_iterations", "MAX_TOOL_ITERATIONS")
 

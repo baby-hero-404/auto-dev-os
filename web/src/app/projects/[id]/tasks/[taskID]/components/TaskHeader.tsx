@@ -63,7 +63,7 @@ export function TaskHeader() {
             ▶ Start Execution
           </button>
         )}
-        {task && isEffectivelyFailed(task, workflow) && (
+        {task && isEffectivelyFailed(task, workflow?.job) && (
           <button onClick={retry} className="px-4 py-1.5 rounded-lg border-none bg-[#bf000f] text-white text-[13px] font-semibold hover:bg-[#e40014] cursor-pointer">
             ↻ Restart Task
           </button>

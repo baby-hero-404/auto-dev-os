@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -117,6 +118,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	}
 
 	eng := engine.NewCLIEngine(r.o.runtime, r.o.credentials)
+	resumeSessionID, _ := ctx.Value(resumeSessionIDCtxKey).(string)
 	req := engine.CodeStepRequest{
 		Task:             task,
 		Agent:            agent,
@@ -130,6 +132,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		CaptureFiles:     captureFiles,
 		ContextFiles:     contextFiles,
 		OrgID:            orgID,
+		ResumeSessionID:  resumeSessionID,
 	}
 	if cfg.TimeoutMinutes > 0 {
 		req.Timeout = time.Duration(cfg.TimeoutMinutes) * time.Minute
@@ -149,6 +152,19 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	r.mu.Unlock()
 	if preflightErr != nil {
 		return steps.CLIStepOutput{}, fmt.Errorf("cli engine preflight failed: %w", preflightErr)
+	}
+
+	if strings.HasPrefix(stepID, "cli_implement") && r.o.workspaceRoot != "" {
+		slug := steps.TaskSpecSlug(task)
+		srcDir := filepath.Join(hostWorkspace, "specs")
+		dstDir := filepath.Join(worktreeHostPath, "docs", "openspecs", slug)
+		if stat, err := os.Stat(srcDir); err == nil && stat.IsDir() {
+			_ = os.MkdirAll(dstDir, 0755)
+			cmd := exec.CommandContext(ctx, "cp", "-a", srcDir+"/.", dstDir+"/")
+			if err := cmd.Run(); err != nil {
+				r.o.log(ctx, task.ID, &jobID, "warn", fmt.Sprintf("failed to sync specs to worktree: %v", err))
+			}
+		}
 	}
 
 	res, err := eng.RunCodeStep(ctx, req)
@@ -213,6 +229,13 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	}
 	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_output", artifactBody)
 	_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_prompt", buildCLIPromptArtifact(res.Command, instruction, contextFiles))
+	// Only save a resumable session ID when the run actually ended via a
+	// mid-run kill/idle-timeout (REQ-003): resuming into a conversation that
+	// failed for another reason (auth, logic error) can make the model repeat
+	// the same mistake, so a retry after those failures must start fresh.
+	if res.SessionID != "" && (res.IdleTimeoutHit || res.LoopKilled) {
+		_ = r.o.checkpoints.SaveArtifact(ctx, jobID, task.ID, stepID, "cli_session_id", res.SessionID)
+	}
 
 	// Phase 6 "Telemetry Parsing": accumulate onto the job's running totals
 	// (one workflow_jobs row spans every cli_* step of this run). Best-effort

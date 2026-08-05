@@ -24,6 +24,14 @@ export const DEFAULT_FLEET = [
     assignment_strategy: "auto_join",
   },
   {
+    name: "AI Mobile Developer",
+    role: "mobile-developer",
+    goal: "Expert in React Native and Flutter. Build touch-first, battery-conscious mobile apps.",
+    model_level_group: "balanced",
+    autonomy_level: "supervised",
+    assignment_strategy: "auto_join",
+  },
+  {
     name: "AI Reviewer",
     role: "reviewer",
     goal: "Review changes for correctness, regressions, security issues, and missing tests.",

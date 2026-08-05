@@ -120,7 +120,7 @@ export function CLISpecPanel() {
           </div>
 
           <div className={`rounded-lg border border-stroke bg-card p-6 md:p-8 overflow-auto leading-relaxed shadow-inner text-sm ${
-            isFullscreen ? "flex-1 min-h-0" : "max-h-[500px]"
+            isFullscreen ? "flex-1 min-h-0" : "max-h-[75vh]"
           }`}>
             <Markdown content={tabs.find((t) => t.id === tab)?.content || ""} />
           </div>

@@ -44,6 +44,10 @@ export function BoundaryResolutionControls({
     }
   }
 
+  if (violatedFiles.length === 0) {
+    return null;
+  }
+
   const showApproveOption = violatedFiles.length > 0;
 
   const handleApprove = async () => {

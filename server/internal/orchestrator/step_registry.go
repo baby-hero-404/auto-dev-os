@@ -9,6 +9,14 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
+// resumeSessionIDCtxKeyType is a typed context key for the CLI session-resume
+// signal (REQ-003, cli-session-continuity) so it can't collide with a plain
+// string key from another package, matching the prompts.StepInputsCtxKey
+// convention used alongside it.
+type resumeSessionIDCtxKeyType struct{}
+
+var resumeSessionIDCtxKey = resumeSessionIDCtxKeyType{}
+
 func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID string, jobStep string) map[string]workflow.StepFunc {
 	o.initRepoutil()
 	o.initCheckpoints()
@@ -243,6 +251,14 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		}
 		runner := func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
 			ctx = context.WithValue(ctx, prompts.StepInputsCtxKey, sc.Inputs)
+			if val, ok := sc.Initial["resume_session_id"].(string); ok && val != "" {
+				// Only inject the resume session ID if this is the step that was actually retried.
+				// Otherwise, if this step succeeds and the workflow engine proceeds to the next step
+				// within the same run, the next step would erroneously inherit the previous step's session.
+				if targetStep, ok := sc.Initial["retried_step_id"].(string); ok && targetStep == stepID {
+					ctx = context.WithValue(ctx, resumeSessionIDCtxKey, val)
+				}
+			}
 			res, err := step.Execute(ctx, sc)
 			return map[string]any(res), err
 		}

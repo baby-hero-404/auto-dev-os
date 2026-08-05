@@ -129,6 +129,25 @@ export function CheckpointsPanel() {
     return true;
   });
 
+  // Group consecutive identical checkpoints
+  const groupedCheckpoints = [];
+  for (const cp of filteredCheckpoints) {
+    const status = typeof cp.state?.status === "string" ? cp.state.status : "recorded";
+    const error = typeof cp.state?.error === "string" ? cp.state.error : undefined;
+    
+    if (groupedCheckpoints.length > 0) {
+      const lastGroup = groupedCheckpoints[groupedCheckpoints.length - 1];
+      const lastStatus = typeof lastGroup.cp.state?.status === "string" ? lastGroup.cp.state.status : "recorded";
+      const lastError = typeof lastGroup.cp.state?.error === "string" ? lastGroup.cp.state.error : undefined;
+      
+      if (lastGroup.cp.step === cp.step && lastStatus === status && lastError === error && status === "failed") {
+        lastGroup.count++;
+        continue;
+      }
+    }
+    groupedCheckpoints.push({ cp, count: 1 });
+  }
+
   const isPauseReason = lastError && (
     lastError.includes("workflow paused for human spec review") ||
     lastError.includes("workflow paused for human task clarification")
@@ -203,11 +222,11 @@ export function CheckpointsPanel() {
           Checkpoint History ({checkpoints.length})
         </h4>
  
-        {filteredCheckpoints.length === 0 ? (
+        {groupedCheckpoints.length === 0 ? (
           <p className="text-xs text-content-muted italic px-0.5">No checkpoints recorded yet.</p>
         ) : (
           <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-surface/20 divide-y divide-stroke/10 shadow-sm">
-            {filteredCheckpoints.map((cp, idx) => {
+            {groupedCheckpoints.map(({ cp, count }, idx) => {
               const status = typeof cp.state?.status === "string" ? cp.state.status : "recorded";
               const error = typeof cp.state?.error === "string" ? cp.state.error : undefined;
               
@@ -232,8 +251,15 @@ export function CheckpointsPanel() {
               return (
                 <div key={idx} className="p-3.5 text-xs flex flex-col gap-1.5 hover:bg-surface/50 transition-colors duration-150">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono font-bold text-foreground truncate">{friendlyStepName(cp.step)}</span>
-                    <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono font-bold text-foreground truncate">{friendlyStepName(cp.step)}</span>
+                      {count > 1 && (
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shrink-0">
+                          {count} Retries
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge} shrink-0`}>
                       {status}
                     </span>
                   </div>

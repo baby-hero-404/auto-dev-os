@@ -248,3 +248,42 @@ func TestFinishCLIRun_AuthInvalidSuspected_DoesNotMarkReauth(t *testing.T) {
 		t.Errorf("expected a warn-level log entry about the suspected auth-invalid match, got: %+v", workflows.logs)
 	}
 }
+
+type mockArtifactRepoForCLI struct {
+	ArtifactRepository
+	saved []string
+}
+
+func (m *mockArtifactRepoForCLI) ListByTaskID(ctx context.Context, taskID string) ([]models.WorkflowArtifact, error) {
+	return nil, nil
+}
+
+func (m *mockArtifactRepoForCLI) Create(ctx context.Context, art *models.WorkflowArtifact) error {
+	m.saved = append(m.saved, art.Type)
+	return nil
+}
+
+func (m *mockArtifactRepoForCLI) SaveArtifact(ctx context.Context, jobID, taskID, stepID, artType string, payload any) error {
+	m.saved = append(m.saved, artType)
+	return nil
+}
+
+func TestFinishCLIRun_SavesSessionIDArtifact(t *testing.T) {
+	arts := &mockArtifactRepoForCLI{}
+	orch := New(nil, &mockWorkflowRepo{job: &models.WorkflowJob{}}, nil, nil,
+		WithArtifactRepository(arts),
+	)
+	orch.finishCLIRun(context.Background(), "task-1", "job-1", "code_backend", "cred-1", "", &engine.CodeStepResult{
+		Success: false, SessionID: "test-session-123", IdleTimeoutHit: true,
+	})
+	
+	found := false
+	for _, a := range arts.saved {
+		if a == "cli_session_id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected cli_session_id artifact to be saved, got %v", arts.saved)
+	}
+}

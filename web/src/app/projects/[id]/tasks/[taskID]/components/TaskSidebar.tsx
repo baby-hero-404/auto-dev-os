@@ -9,11 +9,20 @@ export function TaskSidebar() {
   const { projectID, task, workflow, cancel, deleteTask, workflowSteps, latest, implementationItems, stepDurations } = useTaskDetail();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const st = task?.status || "todo";
 
+  let st = task?.status || "todo";
   const jobStatus = workflow?.job?.status?.toLowerCase();
+
+  // Address Task Status Desync: if workflow is running and active step is known, use that as status
+  if (jobStatus === "running" && workflow?.job?.step) {
+    if (workflow.job.step === "cli_analyze") st = "analyzing";
+    else if (workflow.job.step === "cli_spec") st = "spec_review";
+    else if (workflow.job.step.startsWith("cli_implement")) st = "coding";
+    else if (workflow.job.step === "cli_mr" || workflow.job.step === "cross_review") st = "pr_ready";
+  }
+
   const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
-  const isFailedJob = task ? isEffectivelyFailed(task, workflow) : false;
+  const isFailedJob = task ? isEffectivelyFailed(task, workflow?.job) : false;
 
   const badge = getTaskStatusBadge(st);
   const code = st;
@@ -57,15 +66,16 @@ export function TaskSidebar() {
       tasks,
       dur,
       icon: failedHere ? '✕' : done ? '✓' : active ? '●' : '',
-      bg: failedHere ? 'rgba(239, 68, 68, 0.1)' : done ? 'rgba(16, 185, 129, 0.1)' : active ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-      fg: failedHere ? '#ef4444' : done ? '#10b981' : active ? '#3b82f6' : 'rgba(148, 163, 184, 0.8)',
-      ring: failedHere ? 'rgba(239, 68, 68, 0.25)' : done ? 'rgba(16, 185, 129, 0.25)' : active ? 'rgba(59, 130, 246, 0.25)' : 'rgba(148, 163, 184, 0.15)',
+      bg: failedHere ? 'rgba(239, 68, 68, 0.1)' : done ? 'rgba(16, 185, 129, 0.1)' : active ? (isPausedAtThisStep ? 'rgba(245, 158, 11, 0.1)' : 'rgba(59, 130, 246, 0.1)') : 'transparent',
+      fg: failedHere ? '#ef4444' : done ? '#10b981' : active ? (isPausedAtThisStep ? '#f59e0b' : '#3b82f6') : 'rgba(148, 163, 184, 0.8)',
+      ring: failedHere ? 'rgba(239, 68, 68, 0.25)' : done ? 'rgba(16, 185, 129, 0.25)' : active ? (isPausedAtThisStep ? 'rgba(245, 158, 11, 0.25)' : 'rgba(59, 130, 246, 0.25)') : 'rgba(148, 163, 184, 0.15)',
       weight: active || failedHere ? 600 : 400,
-      color: failedHere ? '#ef4444' : active ? '#3b82f6' : done ? 'var(--foreground)' : 'var(--content-muted)',
+      color: failedHere ? '#ef4444' : active ? (isPausedAtThisStep ? '#f59e0b' : '#3b82f6') : done ? 'var(--foreground)' : 'var(--content-muted)',
       sub: failedHere ? 'failed' : active ? (isPausedAtThisStep ? 'paused' : 'in progress') : done ? '' : '',
-      subC: failedHere ? '#ef4444' : active ? '#3b82f6' : 'transparent',
+      subC: failedHere ? '#ef4444' : active ? (isPausedAtThisStep ? '#f59e0b' : '#3b82f6') : 'transparent',
       done,
       active,
+      paused: isPausedAtThisStep,
     };
   });
 
@@ -130,7 +140,7 @@ export function TaskSidebar() {
                           {ph.done ? (
                             <span className="text-emerald-500 font-bold text-[10px]">✓</span>
                           ) : ph.active ? (
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block animate-pulse"></span>
+                            <span className={`w-1.5 h-1.5 rounded-full inline-block ${ph.paused ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}`}></span>
                           ) : (
                             <span className="w-1.5 h-1.5 rounded-full bg-stroke/40 inline-block"></span>
                           )}
@@ -149,13 +159,13 @@ export function TaskSidebar() {
       <div className="bg-card border border-stroke/10 rounded-2xl p-5.5 shadow-sm hover:shadow-md transition-all duration-200">
         <div className="text-[10px] font-bold tracking-wider uppercase text-content-muted mb-3.5">Details</div>
         <div className="flex flex-col gap-3 text-xs">
-          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Status</span><span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-surface/50" style={{ color: fg }}>{code}</span></div>
+          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Status</span><span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-surface/50 max-w-[120px] truncate" style={{ color: fg }}>{code}</span></div>
           <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Priority</span><span className="font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/25">P{task?.priority || 0}</span></div>
-          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Agent</span><span className="font-semibold text-foreground">{task?.agent_id ? "Agentic Autonomous" : "Auto Mode"}</span></div>
+          <div className="flex justify-between items-center py-1 border-b border-stroke/5"><span className="text-content-muted">Agent</span><span className="font-semibold text-foreground max-w-[140px] truncate" title={task?.agent_id ? "Agentic Autonomous" : "Auto Mode"}>{task?.agent_id ? "Agentic Autonomous" : "Auto Mode"}</span></div>
           {codedBy && (
             <div className="flex justify-between items-center py-1 border-b border-stroke/5">
               <span className="text-content-muted">Coded By</span>
-              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-blue-500/10 dark:text-blue-400 border border-blue-500/20">
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-blue-500/10 dark:text-blue-400 border border-blue-500/20 max-w-[140px] truncate" title={codedBy.provider || codedBy.model || codedBy.engine || "API-native"}>
                 {codedBy.provider || codedBy.model || codedBy.engine || "API-native"}
               </span>
             </div>
@@ -163,7 +173,7 @@ export function TaskSidebar() {
           {reviewedBy && (
             <div className="flex justify-between items-center py-1 border-b border-stroke/5">
               <span className="text-content-muted">Reviewed By</span>
-              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-purple-500/10 dark:text-purple-400 border border-purple-500/20">
+              <span className="font-mono text-xs text-foreground font-semibold px-2 py-0.5 rounded bg-purple-500/10 dark:text-purple-400 border border-purple-500/20 max-w-[140px] truncate" title={reviewedBy.provider || reviewedBy.model || "Reviewer"}>
                 {reviewedBy.provider || reviewedBy.model || "Reviewer"}
               </span>
             </div>
@@ -177,15 +187,23 @@ export function TaskSidebar() {
         <div className="text-[10px] font-bold tracking-wider uppercase text-rose-600 dark:text-rose-500 mb-3.5">Danger Zone</div>
         <div className="flex flex-col gap-2">
           {canCancel && (
-            <button onClick={cancel} className="w-full px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-background/50 text-xs font-bold text-rose-600 cursor-pointer text-left hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
+            <button onClick={cancel} className="w-full px-3.5 py-2.5 rounded-xl border border-transparent bg-background/50 text-xs font-bold text-content-muted cursor-pointer text-left hover:text-rose-600 hover:border-rose-500/20 hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
               ⊘ Close Task
             </button>
           )}
-          <button onClick={() => setShowDeleteModal(true)} className="w-full px-3.5 py-2.5 rounded-xl border border-rose-500/20 bg-background/50 text-xs font-bold text-rose-600 cursor-pointer text-left hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
+          <button onClick={() => setShowDeleteModal(true)} className="w-full px-3.5 py-2.5 rounded-xl border border-transparent bg-background/50 text-xs font-bold text-content-muted cursor-pointer text-left hover:text-rose-600 hover:border-rose-500/20 hover:bg-rose-500/10 transition-all duration-150 flex items-center gap-2">
             🗑 Delete Task
           </button>
         </div>
       </div>
+      <ConfirmDialog 
+        isOpen={showDeleteModal} 
+        onClose={() => setShowDeleteModal(false)} 
+        onConfirm={handleDeleteConfirm}
+        title="Delete Task"
+        description="Are you sure you want to delete this task? This action cannot be undone."
+        confirmText={isDeleting ? "Deleting..." : "Delete Task"}
+      />
     </>
   );
 }

@@ -501,3 +501,66 @@ func TestCLIEngine_Name(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", e.Name(), models.ExecutionEngineCLI)
 	}
 }
+
+func TestCLIEngine_RunCodeStep_SetsSessionMounts(t *testing.T) {
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
+	e := NewCLIEngine(rt, nil)
+	cfg := &models.CLIEngineConfig{Command: "claude", ProfileRef: "claude_code"}
+	req := baseReq(cfg)
+
+	if _, err := e.RunCodeStep(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(rt.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(rt.calls))
+	}
+
+	expectedHostPath := filepath.Join(req.HostWorkspace, "session", "claude_code", ".claude")
+	expectedContainerPath := filepath.Join(sandbox.SandboxHomeDir, ".claude")
+	
+	if mountPath, ok := rt.calls[0].SessionMounts[expectedContainerPath]; !ok || mountPath != expectedHostPath {
+		t.Errorf("expected SessionMounts[%q] = %q, got map: %v", expectedContainerPath, expectedHostPath, rt.calls[0].SessionMounts)
+	}
+}
+
+func TestCLIEngine_RunCodeStep_ResumeFlags(t *testing.T) {
+	tests := []struct {
+		profileRef   string
+		sessionID    string
+		expectedArgs []string
+	}{
+		{"claude_code", "claude-123", []string{"--resume", "claude-123"}},
+		{"antigravity", "agy-456", []string{"--conversation", "agy-456"}},
+		{"openai_codex", "codex-789", []string{"resume", "--last"}},
+		{"unknown_cli", "unknown-123", nil}, // should not append any resume flags
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.profileRef, func(t *testing.T) {
+			rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0}}}
+			e := NewCLIEngine(rt, nil)
+			cfg := &models.CLIEngineConfig{Command: "testcmd", ProfileRef: tc.profileRef}
+			
+			req := baseReq(cfg)
+			req.ResumeSessionID = tc.sessionID
+			
+			_, err := e.RunCodeStep(context.Background(), req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			
+			if len(rt.calls) == 0 {
+				t.Fatal("expected sandbox request")
+			}
+			
+			cmdLine := rt.calls[0].Command[2] // bash -lc '<script>'
+			
+			for _, exp := range tc.expectedArgs {
+				if !strings.Contains(cmdLine, exp) {
+					t.Errorf("expected script to contain %q, but got: %s", exp, cmdLine)
+				}
+			}
+		})
+	}
+}

@@ -566,10 +566,31 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		}
 
 		inputs := map[string]any{
-			"task_id":  task.ID,
-			"agent_id": agent.ID,
-			"job_id":   job.ID,
+			"task_id":         task.ID,
+			"agent_id":        agent.ID,
+			"job_id":          job.ID,
+			"retried_step_id": job.Step,
 		}
+
+		if attempt > 1 {
+			if arts, errArts := o.artifacts.ListByTaskID(ctx, task.ID); errArts == nil {
+				for i := len(arts) - 1; i >= 0; i-- {
+					if arts[i].Step == job.Step && arts[i].Type == "cli_session_id" {
+						// Payload is JSON-encoded (SaveArtifact does
+						// json.Marshal on write), so a plain string(...)
+						// cast would leave the literal wrapping quote
+						// characters in the session ID and break every
+						// resume attempt.
+						var sessionID string
+						if err := json.Unmarshal(arts[i].Payload, &sessionID); err == nil && sessionID != "" {
+							inputs["resume_session_id"] = sessionID
+						}
+						break
+					}
+				}
+			}
+		}
+
 		if err != nil {
 			failedSteps := make(map[string]string)
 			for stepID, status := range result.Status {

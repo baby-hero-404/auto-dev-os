@@ -171,6 +171,14 @@ export function isEffectivelyFailed(
 ): boolean {
   if (task.status === "failed") return true;
   if (job?.status === "failed") return true;
-  if (job?.status === "paused" && job.last_error != null && job.last_error !== "") return true;
+  if (job?.status === "paused" && job.last_error != null && job.last_error !== "") {
+    const isPauseReason = job.last_error.includes("workflow paused for human spec review") || 
+                          job.last_error.includes("workflow paused for human task clarification") ||
+                          job.last_error.includes("workflow paused by user") ||
+                          job.last_error.includes("workflow waiting approval");
+    if (!isPauseReason) {
+      return true;
+    }
+  }
   return false;
 }

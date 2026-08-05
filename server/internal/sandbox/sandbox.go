@@ -55,6 +55,11 @@ type CommandRequest struct {
 	// bind mounts (e.g. StubRuntime) may ignore it.
 	LogsHostDir string
 
+	// SessionMounts defines explicit bind mounts (container absolute path -> host absolute path).
+	// This is used by the orchestrator to map specific persistence directories (like ~/.claude or ~/.gemini)
+	// to isolated session folders on the host, decoupling session continuity from the container's $HOME.
+	SessionMounts map[string]string
+
 	// LogFilePath, if set, is an absolute host path a supporting runtime
 	// streams the subprocess's combined stdout/stderr into in real time
 	// (io.MultiWriter alongside the buffered CommandResult.Stdout/Stderr) as
@@ -113,14 +118,21 @@ type CommandResult struct {
 	// decides how to treat it via KillReason, same as it already does for
 	// non-zero ExitCode.
 	Killed bool
-	// KillReason is "idle_timeout" or "loop_detected" when Killed is true,
-	// "" otherwise.
+	// KillReason is "idle_timeout", "loop_detected", or "oom_killed" when
+	// Killed is true, "" otherwise.
 	KillReason string
 }
 
 const (
 	KillReasonIdleTimeout  = "idle_timeout"
 	KillReasonLoopDetected = "loop_detected"
+	// KillReasonOOM marks a container terminated by the kernel/cgroup OOM
+	// killer rather than by our own watchForStall watchdog: the process
+	// receives SIGKILL externally (exit code 137) with no stallReason set,
+	// so without this the run looked like a plain crash and no resume
+	// session was ever saved for it (REQ-003) even though OOM interruptions
+	// are exactly the kind of failure a resume should recover from.
+	KillReasonOOM = "oom_killed"
 )
 
 type Runtime interface {

@@ -119,6 +119,17 @@ func credentialFilesOverlap(authDirTarget string, credentialFiles map[string]str
 	return false
 }
 
+// sessionMountsOverlap checks if the target path is already covered by a SessionMount
+// (e.g. SessionMounts mounts "/home/agent/.claude" and target is "/home/agent/.claude/.credentials.json")
+func sessionMountsOverlap(target string, sessionMounts map[string]string) bool {
+	for smTarget := range sessionMounts {
+		if target == smTarget || strings.HasPrefix(target, smTarget+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // copyDirTree recursively copies src into dst, preserving file modes and
 // symlinks. Used to stage a host CLI config directory (e.g. ~/.gemini) into
 // a throwaway writable location before mounting it into the sandbox — see
@@ -221,6 +232,18 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		})
 	}
 
+	for targetContainerPath, hostPath := range req.SessionMounts {
+		// Ensure the host path exists
+		if err := os.MkdirAll(hostPath, 0o777); err != nil {
+			return nil, fmt.Errorf("create session mount dir: %w", err)
+		}
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: hostPath,
+			Target: targetContainerPath,
+		})
+	}
+
 	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
 		goModCachePath := filepath.Join(homeDir, "go", "pkg", "mod")
 		if gopath := os.Getenv("GOPATH"); gopath != "" {
@@ -287,7 +310,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		// there: the CLI gets a writable home, the host original is
 		// untouched, and the staging copy is discarded after the run.
 		authDirFiles := map[string]string{
-			filepath.Join(homeDir, ".claude.json"):                 filepath.Join(SandboxHomeDir, ".claude.json"),                 // Claude Code config
+			filepath.Join(homeDir, ".claude.json"):                            filepath.Join(SandboxHomeDir, ".claude.json"),                 // Claude Code config
 			filepath.Join(homeDir, ".claude", ".credentials.json"): filepath.Join(SandboxHomeDir, ".claude", ".credentials.json"), // Claude Code OAuth session
 		}
 		authDirTrees := map[string]string{
@@ -297,6 +320,9 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 
 		for absHostPath, targetContainerPath := range authDirFiles {
 			if credentialFilesOverlap(targetContainerPath, req.CredentialFiles) {
+				continue
+			}
+			if sessionMountsOverlap(targetContainerPath, req.SessionMounts) {
 				continue
 			}
 			if _, err := os.Stat(absHostPath); err == nil {
@@ -310,6 +336,12 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 
 		for absHostPath, targetContainerPath := range authDirTrees {
+			if credentialFilesOverlap(targetContainerPath, req.CredentialFiles) {
+				continue
+			}
+			if sessionMountsOverlap(targetContainerPath, req.SessionMounts) {
+				continue
+			}
 			stat, err := os.Stat(absHostPath)
 			if err != nil || !stat.IsDir() {
 				continue
@@ -330,6 +362,13 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 	}
 
+	// For credential files, they are typically small files containing OAuth
+	// tokens or API keys (e.g. .claude.json, .gemini/antigravity-oauth-token).
+	// Because Docker cannot reliably bind-mount single files from the host
+	// while supporting atomic renames (which these CLIs do when refreshing
+	// tokens), we stage them in a temporary directory on the host and mount
+	// the whole parent directories.
+	
 	credentialHostPaths := make(map[string]string, len(req.CredentialFiles))
 	if len(req.CredentialFiles) > 0 {
 		credDir, err := os.MkdirTemp("", "auto-code-os-cred-*")
@@ -338,8 +377,40 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 		defer os.RemoveAll(credDir)
 
-		// Recreate the exact file layout inside credDir
+		// Recreate the exact file layout inside credDir OR write directly to a SessionMount
 		for targetContainerPath, content := range req.CredentialFiles {
+			var smContainerPath, smHostPath string
+			isCovered := false
+			for smTarget, smHost := range req.SessionMounts {
+				if targetContainerPath == smTarget || strings.HasPrefix(targetContainerPath, smTarget+"/") {
+					isCovered = true
+					smContainerPath = smTarget
+					smHostPath = smHost
+					break
+				}
+			}
+
+			if isCovered {
+				// The path is already mapped by a SessionMount (e.g. ~/.claude).
+				// Write the credential directly into the host session directory.
+				relPath := strings.TrimPrefix(targetContainerPath, smContainerPath)
+				hostPath := filepath.Join(smHostPath, relPath)
+
+				if err := os.MkdirAll(filepath.Dir(hostPath), 0o777); err != nil {
+					return nil, fmt.Errorf("create credential subdirs in session: %w", err)
+				}
+				// 0o666, not owner-only: bind mounts carry host-side
+				// permission bits as-is with no UID remapping (see
+				// copyDirTree above), and the container's fixed "agent" UID
+				// is not generally the same UID as the host server process
+				// writing this file.
+				if err := os.WriteFile(hostPath, []byte(content), 0o666); err != nil {
+					return nil, fmt.Errorf("write credential file in session: %w", err)
+				}
+				credentialHostPaths[targetContainerPath] = hostPath
+				continue
+			}
+
 			// e.g. "/home/agent/.claude/.credentials.json" -> "home/agent/.claude/.credentials.json"
 			relPath := strings.TrimPrefix(targetContainerPath, "/")
 			hostPath := filepath.Join(credDir, relPath)
@@ -350,7 +421,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 			
 			// 0o666 allows read/write from any UID inside the container
 			if err := os.WriteFile(hostPath, []byte(content), 0o666); err != nil {
-				return nil, fmt.Errorf("stage credential file: %w", err)
+				return nil, fmt.Errorf("write credential file: %w", err)
 			}
 			
 			// We need this map for extracting updated files later
@@ -361,6 +432,11 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		// Mounting individual files breaks atomic rename (rename(2) returns EXDEV).
 		mountTargets := make(map[string]bool)
 		for targetContainerPath := range req.CredentialFiles {
+			// If it was written to a SessionMount, it doesn't need its own mount target
+			if sessionMountsOverlap(targetContainerPath, req.SessionMounts) {
+				continue
+			}
+			
 			rel, err := filepath.Rel(SandboxHomeDir, targetContainerPath)
 			if err == nil && !strings.HasPrefix(rel, "..") && rel != "." && strings.Contains(rel, string(filepath.Separator)) {
 				// E.g. target="/home/agent/.claude/.credentials.json", rel=".claude/.credentials.json"
@@ -517,6 +593,20 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	killed := stallReason != ""
 	killReason := stallReason
 	stallMu.Unlock()
+
+	// stallReason only covers kills our own watchForStall watchdog
+	// initiated. A container can also die from an external SIGKILL — most
+	// commonly the kernel/cgroup OOM killer enforcing r.config.MemoryBytes —
+	// which surfaces only as statusCode 137 via ContainerWait with no
+	// stallReason set. Docker's inspect API carries the authoritative
+	// OOMKilled flag for exactly this case, so check it rather than
+	// guessing from the exit code alone.
+	if !killed && statusCode == 137 {
+		if inspect, err := r.client.ContainerInspect(context.Background(), containerID); err == nil && inspect.State != nil && inspect.State.OOMKilled {
+			killed = true
+			killReason = KillReasonOOM
+		}
+	}
 
 	return &CommandResult{
 		ExitCode:               int(statusCode),

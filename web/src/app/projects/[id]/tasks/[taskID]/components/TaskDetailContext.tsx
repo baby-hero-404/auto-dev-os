@@ -667,8 +667,18 @@ export function TaskDetailProvider({
   const stepMetadata = useMemo(() => {
     const map = new Map<string, { status: string; timestamp?: string; error?: string }>();
     for (const checkpoint of workflow?.checkpoints ?? []) {
-      const status = checkpoint.state?.status;
+      let status = checkpoint.state?.status;
       const error = checkpoint.state?.error;
+      
+      if (status === "failed" && typeof error === "string") {
+        const isPauseReason = error.includes("workflow paused for human spec review") || 
+                              error.includes("workflow paused for human task clarification") ||
+                              error.includes("workflow paused by user");
+        if (isPauseReason) {
+          status = "waiting_approval";
+        }
+      }
+      
       map.set(checkpoint.step, {
         status: typeof status === "string" ? status : "recorded",
         timestamp: checkpoint.created_at,

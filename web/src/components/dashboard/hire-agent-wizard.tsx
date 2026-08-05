@@ -25,9 +25,10 @@ const ROLE_TIER_HINT: Record<string, TierID> = {
   planner: "powerful",
   backend: "balanced",
   frontend: "balanced",
+  "mobile-developer": "balanced",
   reviewer: "fast",
-  qa: "balanced",
-  "security-auditor": "powerful",
+  qa: "fast",
+  "security-auditor": "fast",
   "db-architect": "powerful",
   "documentation-writer": "balanced",
 };

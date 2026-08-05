@@ -70,6 +70,47 @@ function groupLogs(logs: RealtimeLog[], isCliFlow: boolean): GroupedLogItem[] {
 
 function LogMessage({ message }: { message: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Attempt to parse JSON to render it nicely
+  let parsedJson: any = null;
+  let isJson = false;
+  if (message.trim().startsWith("{") || message.trim().startsWith("[")) {
+    try {
+      parsedJson = JSON.parse(message);
+      isJson = true;
+    } catch (e) {
+      // not valid json
+    }
+  }
+
+  if (isJson) {
+    const formatted = JSON.stringify(parsedJson, null, 2);
+    const lines = formatted.split("\n");
+    const isLong = lines.length > 8;
+
+    if (!isLong) {
+      return <pre className="whitespace-pre-wrap text-[#c9d1d9] break-words font-mono text-[10px] bg-[#0d1117] p-2 rounded border border-[#30363d]/50">{formatted}</pre>;
+    }
+
+    const previewLines = lines.slice(0, 6).join("\n");
+    const displayedText = isExpanded ? formatted : previewLines;
+
+    return (
+      <div className="flex flex-col gap-1 w-full mt-0.5">
+        <pre className="whitespace-pre-wrap text-[#c9d1d9] break-words font-mono text-[10px] leading-relaxed bg-[#0d1117] p-2 rounded border border-[#30363d]/50">
+          {displayedText}
+          {!isExpanded && <span className="text-[#8b949e]">...</span>}
+        </pre>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-[10px] font-bold text-[#58a6ff] hover:text-[#58a6ff]/80 transition-colors self-start mt-1 cursor-pointer flex items-center gap-1"
+        >
+          {isExpanded ? "Hide details" : `View full JSON (${lines.length} lines)`}
+        </button>
+      </div>
+    );
+  }
+
   const lines = message.split("\n");
   const isLong = lines.length > 8 || message.length > 1000;
 

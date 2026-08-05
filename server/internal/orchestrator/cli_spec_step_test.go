@@ -398,3 +398,59 @@ func TestCLIStepRunner_RunCLIStep_QuotaExceededSetsCooldown(t *testing.T) {
 		t.Errorf("expected SetCooldown called once with cred-claude, got %v", cooldown.ids)
 	}
 }
+
+type successSessionSandboxRuntime struct{ commands []string }
+
+func (m *successSessionSandboxRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (*sandbox.CommandResult, error) {
+	m.commands = append(m.commands, req.Command...)
+	if len(req.Command) >= 3 && strings.Contains(req.Command[2], "status=$?") {
+		return &sandbox.CommandResult{
+			ExitCode:   1, // Exit 1 for main command to avoid unmocked gitOps panic
+			Stdout:     "all done\n{\"tokens_used\": 42, \"session_id\": \"test-session-456\"}",
+			Killed:     true,
+			KillReason: sandbox.KillReasonIdleTimeout,
+		}, nil
+	}
+	return &sandbox.CommandResult{ExitCode: 0}, nil
+}
+func (m *successSessionSandboxRuntime) Destroy(ctx context.Context) error { return nil }
+func (m *successSessionSandboxRuntime) Prewarm(ctx context.Context) error { return nil }
+func (m *successSessionSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
+	return nil
+}
+
+func TestCLIStepRunner_RunCLIStep_SavesSessionIDArtifact(t *testing.T) {
+	arts := &mockArtifactRepoForCLI{}
+	rt := &successSessionSandboxRuntime{}
+	workflows := &mockWorkflowRepo{job: &models.WorkflowJob{}}
+	orch := New(nil, workflows, nil, rt,
+		WithArtifactRepository(arts),
+		WithProjectRepository(&fakeProjectRepo{project: &models.Project{
+			OrgID: "org-1",
+			ExecutionProviders: execProviders(t, []models.ExecutionProviderConfig{
+				{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true},
+			}),
+		}}),
+		WithCredentials(fakeCredentialGetter{}),
+		WithCredentialAvailability(&fakeCredentialPool{
+			byID: map[string]fakeCred{"cred-1": {provider: "cli:claude", status: models.ProviderCredentialStatusActive}},
+		}),
+		WithWorkspaceRoot(t.TempDir()),
+	)
+	runner := newCLIStepRunner(orch)
+	task := &models.Task{ID: "task-1", ProjectID: "proj-1"}
+	_, err := runner.RunCLIStep(context.Background(), task, nil, "job-1", "cli_implement", "impl this", nil, nil, "")
+	if err == nil {
+		t.Fatalf("expected error from ExitCode=1 to prevent panic")
+	}
+	
+	found := false
+	for _, a := range arts.saved {
+		if a == "cli_session_id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected cli_session_id artifact to be saved, got %v", arts.saved)
+	}
+}

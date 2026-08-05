@@ -10,6 +10,7 @@ const (
 	AgentRolePlanner             = "planner"
 	AgentRoleBackend             = "backend"
 	AgentRoleFrontend            = "frontend"
+	AgentRoleMobileDeveloper     = "mobile-developer"
 	AgentRoleReviewer            = "reviewer"
 	AgentRoleQA                  = "qa"
 	AgentRoleSecurityAuditor     = "security-auditor"

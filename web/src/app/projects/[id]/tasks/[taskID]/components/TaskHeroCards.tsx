@@ -12,6 +12,8 @@ import {
   isMergedStatus,
   isEffectivelyFailed
 } from "@/lib/status";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Clock,
   Sparkles,
@@ -61,8 +63,11 @@ export function TaskHeroCards() {
 
   const [isRejectFormOpen, setIsRejectFormOpen] = useState(false);
   const st = task?.status || "todo";
-  const isFailed = task ? isEffectivelyFailed(task, workflow) : false;
-  const heroTodo = !isFailed && isTodoStatus(st);
+  const isFailed = task ? isEffectivelyFailed(task, workflow?.job) : false;
+  const isPaused = workflow?.job?.status === "paused";
+  
+  const heroClarification = !isFailed && task?.spec_status === "clarification_required";
+  const heroTodo = !isFailed && !heroClarification && isTodoStatus(st);
   const heroLoad = !isFailed && isPreparationStatus(st);
   const heroSpec = !isFailed && st === 'spec_review';
   const heroExec = !isFailed && isExecutionStatus(st);
@@ -126,6 +131,20 @@ export function TaskHeroCards() {
         </div>
       )}
 
+      {heroClarification && (
+        <div className="bg-linear-to-br from-amber-500/10 via-amber-500/[0.02] to-orange-500/5 border border-amber-500/25 rounded-2xl p-5.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-md hover:shadow-lg transition-all duration-200 animate-fade-in">
+          <div className="flex items-center gap-3.5">
+            <span className="w-11 h-11 flex items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-500 border border-amber-500/20 shrink-0 shadow-inner">
+              <AlertCircle className="h-5.5 w-5.5" />
+            </span>
+            <div>
+              <div className="text-base font-bold text-foreground">Clarification Required</div>
+              <div className="text-xs text-content-muted mt-0.5">The agent has asked one or more questions about the task. Please provide answers in the Spec panel below.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {heroLoad && (
         <div className="flex flex-col gap-4">
           <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
@@ -154,16 +173,22 @@ export function TaskHeroCards() {
 
       {heroExec && (
         isCliFlow ? (
-          <div className="bg-linear-to-br from-blue-500/10 via-blue-500/5 to-slate-500/5 border border-blue-500/20 rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in">
-            <div className="absolute -top-10 -right-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+          <div className={`bg-linear-to-br border rounded-2xl p-5.5 shadow-sm relative overflow-hidden animate-fade-in ${isPaused ? 'from-amber-500/10 via-amber-500/5 to-slate-500/5 border-amber-500/20' : 'from-blue-500/10 via-blue-500/5 to-slate-500/5 border-blue-500/20'}`}>
+            <div className={`absolute -top-10 -right-10 w-24 h-24 rounded-full blur-2xl pointer-events-none ${isPaused ? 'bg-amber-500/10' : 'bg-blue-500/10'}`} />
             <div className="flex items-center gap-3 mb-2 z-10 relative">
-              <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
-              <span className="text-sm font-bold text-blue-700 dark:text-blue-400 tracking-wide capitalize">
-                CLI Engine Executing...
+              {isPaused ? (
+                <span className="w-5 h-5 flex items-center justify-center rounded-full bg-amber-500/20 shrink-0 text-amber-700 dark:text-amber-400">
+                  <Pause className="h-3 w-3" />
+                </span>
+              ) : (
+                <span className="w-5 h-5 rounded-full border-2 border-blue-500/20 border-t-blue-600 dark:border-t-blue-400 animate-spin shrink-0"></span>
+              )}
+              <span className={`text-sm font-bold tracking-wide capitalize ${isPaused ? 'text-amber-700 dark:text-amber-400' : 'text-blue-700 dark:text-blue-400'}`}>
+                {isPaused ? "Execution Paused" : "CLI Engine Executing..."}
               </span>
             </div>
             <div className="text-xs text-content-muted z-10 pl-8 relative">
-              The agent is running locally in the background. Terminal output will be captured and displayed once the command completes.
+              {isPaused ? "The agent has been paused. Terminal output is suspended." : "The agent is running locally in the background. Terminal output will be captured and displayed once the command completes."}
             </div>
           </div>
         ) : (
@@ -171,10 +196,10 @@ export function TaskHeroCards() {
             <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-stroke/10 bg-surface/20">
               <div className="flex items-center gap-2.5">
                 <span className="relative flex h-2 w-2">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${st === 'fixing' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${st === 'fixing' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                  {!isPaused && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${st === 'fixing' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isPaused ? 'bg-amber-500' : st === 'fixing' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
                 </span>
-                <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} in progress</span>
+                <span className="text-xs uppercase font-extrabold tracking-wider text-content-muted capitalize">{st} {isPaused ? "paused" : "in progress"}</span>
               </div>
             </div>
             <LogConsole logs={logs} isExpanded={true} hideHeader={true} droppedLogCount={droppedLogCount} onReloadFullHistory={reloadFullLogs} isReloadingHistory={isReloadingLogs} isCliFlow={isCliFlow} />
@@ -380,8 +405,32 @@ function PRMetadataView() {
               </div>
               
               {pr.body && (
-                <div className="text-[13px] text-foreground whitespace-pre-wrap font-mono leading-relaxed bg-surface border border-stroke p-3.5 rounded-lg">
-                  {pr.body}
+                <div className="text-[13px] text-foreground font-sans leading-relaxed bg-surface border border-stroke p-4 rounded-xl overflow-hidden mt-2 relative prose prose-sm dark:prose-invert max-w-none
+                  prose-headings:mt-4 prose-headings:mb-2 prose-h3:text-sm prose-h3:font-bold prose-h2:text-base prose-h1:text-lg
+                  prose-p:mt-2 prose-p:mb-2 
+                  prose-a:text-brand-primary prose-a:no-underline hover:prose-a:underline
+                  prose-strong:font-bold prose-strong:text-foreground
+                  prose-ul:mt-2 prose-ul:mb-2 prose-li:mt-0.5 prose-li:mb-0.5
+                  prose-table:mt-4 prose-table:mb-4 prose-table:w-full prose-table:border-collapse prose-table:text-xs
+                  prose-th:border prose-th:border-stroke prose-th:bg-surface/50 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-semibold
+                  prose-td:border prose-td:border-stroke prose-td:px-3 prose-td:py-2
+                  prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-surface-elevated prose-code:rounded-md prose-code:text-[11px] prose-code:border prose-code:border-stroke/50 prose-code:font-mono prose-code:before:content-none prose-code:after:content-none
+                  prose-pre:bg-surface-elevated prose-pre:border prose-pre:border-stroke prose-pre:p-3 prose-pre:rounded-lg prose-pre:text-[11px] prose-pre:font-mono prose-pre:overflow-x-auto
+                ">
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      table: ({node, ...props}) => (
+                        <div className="w-full overflow-x-auto my-4 rounded-lg border border-stroke">
+                          <table className="w-full text-sm text-left border-collapse" {...props} />
+                        </div>
+                      ),
+                      th: ({node, ...props}) => <th className="bg-surface/50 px-4 py-3 font-semibold text-foreground border-b border-stroke" {...props} />,
+                      td: ({node, ...props}) => <td className="px-4 py-3 text-content-muted border-b border-stroke/50" {...props} />
+                    }}
+                  >
+                    {pr.body}
+                  </ReactMarkdown>
                 </div>
               )}
               

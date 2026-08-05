@@ -81,3 +81,24 @@ func TestTopLevelJSONObjects_IgnoresBracesInStrings(t *testing.T) {
 		t.Errorf("unexpected object: %q", objs[0])
 	}
 }
+
+func TestParseCLITelemetry_SessionID(t *testing.T) {
+	output := `{"session_id":"abc12345","conversation_id":"def67890"}`
+	got, ok := parseCLITelemetry(output)
+	if !ok {
+		t.Fatalf("expected telemetry to be found")
+	}
+	if got.SessionID != "abc12345" {
+		t.Errorf("session_id = %q, want abc12345", got.SessionID)
+	}
+	
+	// agy uses conversation_id, which should map to SessionID if session_id is not present
+	output2 := `{"conversation_id":"def67890"}`
+	got2, ok2 := parseCLITelemetry(output2)
+	if !ok2 {
+		t.Fatalf("expected telemetry to be found")
+	}
+	if got2.SessionID != "def67890" {
+		t.Errorf("session_id (from conversation_id) = %q, want def67890", got2.SessionID)
+	}
+}

@@ -9,12 +9,14 @@ import "encoding/json"
 // since not every CLI/version reports every metric; parseCLITelemetry
 // tolerates whichever subset is present and leaves the rest zero.
 type cliTelemetry struct {
-	TotalCostUSD *float64 `json:"total_cost_usd"`
-	CostUSD      *float64 `json:"cost_usd"`
-	DurationMS   *int64   `json:"duration_ms"`
-	DurationAPI  *int64   `json:"duration_api_ms"`
-	TokensUsed   *int64   `json:"tokens_used"`
-	Usage        *struct {
+	TotalCostUSD   *float64 `json:"total_cost_usd"`
+	CostUSD        *float64 `json:"cost_usd"`
+	DurationMS     *int64   `json:"duration_ms"`
+	DurationAPI    *int64   `json:"duration_api_ms"`
+	TokensUsed     *int64   `json:"tokens_used"`
+	SessionID      *string  `json:"session_id"`
+	ConversationID *string  `json:"conversation_id"`
+	Usage          *struct {
 		InputTokens  int64  `json:"input_tokens"`
 		OutputTokens int64  `json:"output_tokens"`
 		TotalTokens  *int64 `json:"total_tokens"`
@@ -28,6 +30,7 @@ type CLITelemetry struct {
 	CostUSD    float64
 	DurationMS int64
 	TokensUsed int64
+	SessionID  string
 }
 
 // parseCLITelemetry scans combined subprocess output for the last
@@ -76,6 +79,14 @@ func parseCLITelemetry(output string) (CLITelemetry, bool) {
 			} else {
 				candidate.TokensUsed = t.Usage.InputTokens + t.Usage.OutputTokens
 			}
+			matched = true
+		}
+		switch {
+		case t.SessionID != nil:
+			candidate.SessionID = *t.SessionID
+			matched = true
+		case t.ConversationID != nil:
+			candidate.SessionID = *t.ConversationID
 			matched = true
 		}
 		if matched {

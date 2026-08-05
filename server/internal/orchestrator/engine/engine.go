@@ -40,6 +40,10 @@ type CodeStepRequest struct {
 	// container root when there is no worktree split.
 	ContainerWorkDir string
 
+	// ResumeSessionID, if non-empty, requests the CLI engine to resume a
+	// previously interrupted interactive session rather than starting fresh.
+	ResumeSessionID string
+
 	// NetworkMode mirrors sandbox.CommandRequest.NetworkMode (e.g. "bridge"
 	// or "none"); the caller decides this from project/org networking
 	// policy, same as the existing sandbox step runners.
@@ -174,6 +178,7 @@ type CodeStepResult struct {
 	CostUSD     float64
 	DurationMS  int64
 	TokensUsed  int64
+	SessionID   string
 }
 
 // ExecutionEngine abstracts over how a coding step actually gets executed.

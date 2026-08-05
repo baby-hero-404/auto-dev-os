@@ -45,6 +45,9 @@ func mustCompile(path string) *jsonschema.Schema {
 // Config on success. A nil/empty raw is not an error — callers should treat
 // that as "no config" (REQ-002) without calling ValidateConfig at all.
 func ValidateConfig(raw []byte) (*Config, []ValidationError, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil, nil
+	}
 	var generic map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &generic); err != nil {
 		return nil, []ValidationError{{Path: "$", Message: "invalid JSON: " + err.Error()}}, nil

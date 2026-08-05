@@ -49,7 +49,7 @@ sandbox:
   skills_root: "/home/ubuntu/my_projects/skills"
   workspace_retention_hours: 72
   workspace_cleanup_interval_minutes: 60
-  memory_mb: 1024
+  memory_mb: 4096
   nano_cpus: 1000000000
   disable_networking: false
 

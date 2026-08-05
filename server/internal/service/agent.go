@@ -146,7 +146,7 @@ func (s *AgentService) prepareCreateInput(ctx context.Context, input models.Crea
 	if err := validateAgentAssignmentStrategy(input.AssignmentStrategy); err != nil {
 		return input, err
 	}
-	if len(input.ContextConfig) == 0 {
+	if len(input.ContextConfig) == 0 || string(input.ContextConfig) == "null" {
 		input.ContextConfig = []byte(`{"max_input_tokens":128000}`)
 	}
 

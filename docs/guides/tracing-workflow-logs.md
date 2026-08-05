@@ -161,3 +161,52 @@ With the introduction of the CLI Orchestrator wrapper, debugging agent failures 
 1. **Agent Crashes or Loops:** Check `server/.data/workspaces/<task-id>/logs/cli_{role}_run.log` (e.g. `cli_frontend_run.log`). This contains the raw, real-time `stdout`/`stderr` multiplexed from the headless CLI tool (`agy`, `claude`, or `codex`). If the agent gets stuck in a bash loop or exhausts its context window, the evidence is here.
 2. **JSON-RPC Protocol Errors:** If the orchestrator reports the agent disconnected or crashed due to JSON parsing errors, check `server/.data/workspaces/<task-id>/logs/mcp-server.log`. The MCP Server isolates all internal Go logs (`Info`/`Error`/`Debug`) here to avoid corrupting `stdout`.
 3. **Context Hallucinations:** If the agent implements something wildly incorrect, don't assume the model is at fault. Check `server/.data/workspaces/<task-id>/logs/mcp-trace.jsonl`. This file dumps every JSON-RPC request and response payload. Grep it for `ast.query` or `repo.search` to see exactly what codebase context was fed to the agent at that exact moment.
+
+## 10. `bash: line N: Killed` in a `cli_*_run.log` means SIGKILL — go to the DB, not the log
+
+A CLI step's run log showing only `bash: line 4: N Killed '<tool>' ...` (no other
+output) means the process was SIGKILL'd — the log itself won't say why. Cross-check
+against Postgres rather than guessing from the log alone:
+
+```bash
+docker exec autocodeosdb psql -U autocodeuser -d autocodeosdb -c \
+  "SELECT id, status, step, attempts, last_error, updated_at FROM workflow_jobs WHERE task_id='<task-id>' ORDER BY updated_at DESC;"
+docker exec autocodeosdb psql -U autocodeuser -d autocodeosdb -c \
+  "SELECT job_id, step, type, payload, created_at FROM workflow_artifacts WHERE task_id='<task-id>' ORDER BY created_at DESC;"
+```
+
+A killed step with **no `cli_session_id` artifact** for that step (compare against
+steps that succeeded, which do have one) means the runtime never classified the kill
+as resumable. As of this writing (`internal/sandbox/docker.go`), `CommandResult.Killed`
+is set two ways: our own `watchForStall` watchdog firing (idle timeout / loop
+detection), or — checked directly via `ContainerInspect`'s `State.OOMKilled` flag —
+the kernel/cgroup OOM killer terminating the container when it exceeds
+`SANDBOX_MEMORY_MB`. A raw exit code of 137 with neither of those set means an
+external kill that isn't classified at all (e.g. `docker kill` issued from outside,
+host reboot); the run is treated as a plain failure with no resume signal.
+
+For the actual memory ceiling a killed container hit, check `docker inspect
+<container> --format '{{.HostConfig.Memory}} {{.State.OOMKilled}}'` — but note the
+container is removed (via the `defer ContainerRemove` in `docker.go`) as soon as the
+step function returns, so this only works if you catch it live with `docker ps -a`
+while the step is still running or has *just* failed, not after the fact.
+
+## 11. "workspace is locked in DB by another active process" right after a pause+resume is a known race, not corruption
+
+`PauseJob` (`orchestrator.go`) cancels the running job's context but does **not**
+synchronously release the Postgres advisory lock — release happens in a `defer` in
+`worker.go` only once the paused goroutine actually finishes unwinding, which can take
+a few seconds under load (step cleanup, container teardown, etc.). `AcquireWorkspaceLock`
+retries for 15s to cover this, but resuming/retrying *immediately* after pausing can
+still lose the race. Confirm rather than assume it's stuck:
+
+```bash
+docker exec autocodeosdb psql -U autocodeuser -d autocodeosdb -c \
+  "SELECT pid, mode, granted, objid FROM pg_locks WHERE locktype='advisory';"
+```
+
+If this comes back empty, the lock has already cleared and the earlier error was
+transient — just retry. If a row persists for more than ~30s after the old job
+finished, that's a real leaked connection worth investigating (check
+`ReleaseAdvisoryLock` call sites and whether some exit path skips the
+`releaseWorkspaceLock` defer).

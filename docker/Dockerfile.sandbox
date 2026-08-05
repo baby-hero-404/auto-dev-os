@@ -55,23 +55,13 @@ RUN groupadd --gid ${USER_GID} agent \
 
 WORKDIR /workspace
 
-USER agent
+USER root
 # Explicitly set PATH so tools like antigravity are always accessible
-ENV PATH="/home/agent/.local/bin:${PATH}"
-
+ENV PATH="/usr/local/bin:${PATH}"
 # The antigravity installer has no per-user variant of its own; it installs to
-# $HOME/.local/bin, so it must run as `agent` (not root) to land somewhere this
-# user can execute from.
-RUN bash -c 'set -o pipefail; curl -fsSL https://antigravity.google/cli/install.sh | bash'
+# $HOME/.local/bin. We temporarily set HOME=/root to install it as root, then
+# move the binary to /usr/local/bin to keep /home/agent completely stateless.
+RUN bash -c 'set -o pipefail; HOME=/root curl -fsSL https://antigravity.google/cli/install.sh | bash && mv /root/.local/bin/agy /usr/local/bin/agy && rm -rf /root/.local'
 
-# Pre-create agy's own log/crash dirs, owned by `agent`, so they exist BEFORE
-# the per-org credential file gets bind-mounted at
-# .gemini/antigravity-cli/antigravity-oauth-token (see docker.go's
-# resolveCredentialFiles/CredentialFiles). Docker auto-creates missing bind
-# mount parent directories as root at container-create time, which agy (UID
-# 1000, non-root) then can't write into — causing
-# "opening log file: ... permission denied" for cli-*.log and
-# crash_*.log even though the run itself succeeds.
-RUN mkdir -p /home/agent/.gemini/antigravity-cli/log /home/agent/.gemini/antigravity-cli/crashes
-
+USER agent
 CMD ["bash", "-c", "pwd && ls -la"]

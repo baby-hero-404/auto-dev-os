@@ -15,7 +15,7 @@ import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
 import { SupportingAccordion } from "./SupportingAccordion";
 
 export function TaskDetailLayout() {
-  const { task, workflow, updateTask, execute, setError, isTaskLoading, workflowError, isCliFlow } = useTaskDetail();
+  const { task, workflow, updateTask, execute, retry, setError, isTaskLoading, workflowError, isCliFlow } = useTaskDetail();
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     specification: false,
@@ -123,7 +123,7 @@ export function TaskDetailLayout() {
               <p className="text-xs font-mono bg-amber-500/[0.03] dark:bg-amber-950/20 border border-amber-500/10 dark:border-amber-900/20 rounded-xl p-3.5 break-all whitespace-pre-wrap text-amber-900/90 dark:text-amber-200/95 leading-relaxed shadow-inner z-10">
                 {workflow.job.last_error}
               </p>
-              <div className="z-10">
+              <div className="z-10 flex items-center gap-3 mt-1">
                 <BoundaryResolutionControls
                   errorMsg={workflow.job.last_error}
                   task={task}
@@ -131,6 +131,11 @@ export function TaskDetailLayout() {
                   execute={execute}
                   setError={setError}
                 />
+                {!workflow.job.last_error.includes("boundary") && (
+                  <button onClick={retry} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
+                    Retry Step
+                  </button>
+                )}
               </div>
             </div>
           )}

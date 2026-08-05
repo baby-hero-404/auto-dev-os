@@ -21,6 +21,7 @@ type mockGitProvider struct {
 	prHead        string
 	prBase        string
 	clonedURL     string
+	createErr     error
 }
 
 func (m *mockGitProvider) CloneRepo(ctx context.Context, repoURL, token, branch, localPath string) (string, error) {
@@ -41,6 +42,9 @@ func (m *mockGitProvider) CommitAndPush(ctx context.Context, localPath, message,
 }
 
 func (m *mockGitProvider) CreatePR(ctx context.Context, owner, repo, title, head, base, body, token string) (string, error) {
+	if m.createErr != nil {
+		return "", m.createErr
+	}
 	m.prTitle = title
 	m.prHead = head
 	m.prBase = base
@@ -299,7 +303,9 @@ func TestGitOpsAdapter_CreatePullRequest_ParsesOriginalSSHURL(t *testing.T) {
 }
 
 func TestGitOpsAdapter_CreatePullRequest_NoChangesReturnsEmptyURL(t *testing.T) {
-	provider := &mockGitProvider{}
+	provider := &mockGitProvider{
+		createErr: errors.New("Validation Failed: No commits between main and feature-branch"),
+	}
 	repoDb := &mockRepoLookup{
 		repo: &models.Repository{
 			ID:     "repo-123",
@@ -308,10 +314,6 @@ func TestGitOpsAdapter_CreatePullRequest_NoChangesReturnsEmptyURL(t *testing.T) 
 		},
 	}
 	tmpDir := t.TempDir()
-	repoPath := filepath.Join(tmpDir, "repo-123")
-	if err := initGitRepoWithoutAheadCommits(repoPath); err != nil {
-		t.Fatalf("init test repo: %v", err)
-	}
 
 	adapter := NewGitOpsAdapter(provider, repoDb, tmpDir, nil)
 	prURL, err := adapter.CreatePullRequest(context.Background(), "https://github.com/test-owner/test-repo.git", "feature-branch", "title", "body")
@@ -320,9 +322,6 @@ func TestGitOpsAdapter_CreatePullRequest_NoChangesReturnsEmptyURL(t *testing.T) 
 	}
 	if prURL != "" {
 		t.Fatalf("expected empty PR URL for no-change branch, got %q", prURL)
-	}
-	if provider.prTitle != "" || provider.prHead != "" || provider.prBase != "" {
-		t.Fatalf("provider should not be called when no changes are detected")
 	}
 }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useTaskDetail } from "./TaskDetailContext";
-import { canResumeTask, showAnalyzeAction } from "@/lib/status";
+import { canResumeTask, showAnalyzeAction, isEffectivelyFailed } from "@/lib/status";
 
 export function TaskHeader() {
   const {
@@ -63,7 +63,7 @@ export function TaskHeader() {
             ▶ Start Execution
           </button>
         )}
-        {st === 'failed' && (
+        {task && isEffectivelyFailed(task, workflow) && (
           <button onClick={retry} className="px-4 py-1.5 rounded-lg border-none bg-[#bf000f] text-white text-[13px] font-semibold hover:bg-[#e40014] cursor-pointer">
             ↻ Restart Task
           </button>

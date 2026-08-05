@@ -15,6 +15,8 @@ export interface CliAuthProviderConfig {
   extractUrl: (rawBuf: string, cleanBuf: string) => string | null;
   extractCode?: (rawBuf: string, cleanBuf: string) => string | null;
   isSuccess: (rawBuf: string, cleanBuf: string) => boolean;
+  /** Whether the provider requires the user to manually paste an auth code back into the terminal. */
+  requiresManualCodePaste?: boolean;
 }
 
 // Shared by CLIs (Claude, Codex) that print one of these plain-English
@@ -57,6 +59,7 @@ export const CLI_AUTH_PROVIDERS: Record<string, CliAuthProviderConfig> = {
     },
     // Claude CLI prints "Logged in as" or similar on success.
     isSuccess: (_rawBuf, cleanBuf) => hasCommonSuccessPhrase(cleanBuf),
+    requiresManualCodePaste: true,
   },
 
   "cli:codex": {

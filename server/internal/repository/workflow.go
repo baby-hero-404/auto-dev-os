@@ -438,6 +438,8 @@ func (r *WorkflowRepo) ListLogs(ctx context.Context, taskID string) ([]models.Ta
 
 	var logs []models.TaskLog
 	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
 		var log models.TaskLog
 		if err := json.Unmarshal(scanner.Bytes(), &log); err != nil {

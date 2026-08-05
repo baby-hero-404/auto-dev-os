@@ -338,28 +338,57 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		}
 		defer os.RemoveAll(credDir)
 
-		i := 0
+		// Recreate the exact file layout inside credDir
 		for targetContainerPath, content := range req.CredentialFiles {
-			hostPath := filepath.Join(credDir, fmt.Sprintf("f%d", i))
-			i++
-			// 0o666, not 0o600: this file is bind-mounted read-write (not
-			// ReadOnly, see below) so the CLI can refresh/write back its own
-			// credential (see UpdatedCredentialFiles). Owner-only bits are
-			// written by the host server process's UID but read/written
-			// inside the container by the fixed "agent" UID from
-			// docker/Dockerfile.sandbox — a different UID that a bind mount
-			// never remaps — so 0o600 would silently block that write-back
-			// exactly like the authDirTrees permission-denied bug this
-			// mirrors.
+			// e.g. "/home/agent/.claude/.credentials.json" -> "home/agent/.claude/.credentials.json"
+			relPath := strings.TrimPrefix(targetContainerPath, "/")
+			hostPath := filepath.Join(credDir, relPath)
+
+			if err := os.MkdirAll(filepath.Dir(hostPath), 0o777); err != nil {
+				return nil, fmt.Errorf("create credential subdirs: %w", err)
+			}
+			
+			// 0o666 allows read/write from any UID inside the container
 			if err := os.WriteFile(hostPath, []byte(content), 0o666); err != nil {
 				return nil, fmt.Errorf("stage credential file: %w", err)
 			}
+			
+			// We need this map for extracting updated files later
+			credentialHostPaths[targetContainerPath] = hostPath
+		}
+
+		// Figure out the highest-level directories to mount so that atomic renames work.
+		// Mounting individual files breaks atomic rename (rename(2) returns EXDEV).
+		mountTargets := make(map[string]bool)
+		for targetContainerPath := range req.CredentialFiles {
+			rel, err := filepath.Rel(SandboxHomeDir, targetContainerPath)
+			if err == nil && !strings.HasPrefix(rel, "..") && rel != "." && strings.Contains(rel, string(filepath.Separator)) {
+				// E.g. target="/home/agent/.claude/.credentials.json", rel=".claude/.credentials.json"
+				// Top-level child of /home/agent is ".claude"
+				parts := strings.Split(rel, string(filepath.Separator))
+				topLevel := filepath.Join(SandboxHomeDir, parts[0])
+				mountTargets[topLevel] = true
+			} else {
+				// Either outside SandboxHomeDir, or it's a file right in the home directory
+				// (e.g. "/home/agent/.claude.json"). In this case, we have to mount it directly.
+				mountTargets[targetContainerPath] = true
+			}
+		}
+
+		for targetContainerPath := range mountTargets {
+			relPath := strings.TrimPrefix(targetContainerPath, "/")
+			hostPath := filepath.Join(credDir, relPath)
+
+			// If it's a directory, ensure it is fully writable by the agent user
+			if stat, err := os.Stat(hostPath); err == nil && stat.IsDir() {
+				os.Chmod(hostPath, 0o777)
+			}
+
 			mounts = append(mounts, mount.Mount{
 				Type:   mount.TypeBind,
 				Source: hostPath,
 				Target: targetContainerPath,
 			})
-			credentialHostPaths[targetContainerPath] = hostPath
 		}
 	}
 

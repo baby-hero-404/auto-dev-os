@@ -147,8 +147,29 @@ func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, 
 		authArgs = append(authArgs, "-c", "http.extraHeader=AUTHORIZATION: basic "+b64)
 	}
 
+	// Push by resolved URL, never by the "origin" remote name: wkspace's
+	// writeGitCredentialHelper (server/internal/orchestrator/wkspace/create.go)
+	// deliberately sets remote.origin.pushurl to a bogus "denied://" scheme on
+	// every task workspace, to fail-fast any push attempted by the sandboxed
+	// CLI agent itself. That override only kicks in when git resolves a push
+	// target by remote *name* ("origin") — pushing straight to remote.origin.url
+	// bypasses it entirely, since there's no remote name to look up. Using
+	// "origin" here previously made this, the orchestrator's own legitimate
+	// push, hit the same block and fail with
+	// "git: 'remote-denied' is not a git command" (git stripping the "git-"
+	// prefix off the git-remote-denied helper it couldn't find).
+	getURLCmd := gitCommand(ctx, "-C", localPath, "config", "--get", "remote.origin.url")
+	originURLOutput, err := getURLCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git config get origin URL: %w: %s", err, sanitizeToken(string(originURLOutput), token))
+	}
+	originURL := strings.TrimSpace(string(originURLOutput))
+	if originURL == "" {
+		return fmt.Errorf("git config get origin URL: remote.origin.url is empty for %s", localPath)
+	}
+
 	lsArgs := append([]string{"-C", localPath}, authArgs...)
-	lsArgs = append(lsArgs, "ls-remote", "--heads", "origin")
+	lsArgs = append(lsArgs, "ls-remote", "--heads", originURL)
 	lsCmd := gitCommand(ctx, lsArgs...)
 	lsOut, err := lsCmd.CombinedOutput()
 	if err == nil && len(strings.TrimSpace(string(lsOut))) == 0 {
@@ -157,7 +178,7 @@ func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, 
 			checkCmd := gitCommand(ctx, "-C", localPath, "show-ref", "--quiet", "refs/heads/"+b)
 			if err := checkCmd.Run(); err == nil {
 				pushArgs := append([]string{"-C", localPath}, authArgs...)
-				pushArgs = append(pushArgs, "push", "-u", "origin", b)
+				pushArgs = append(pushArgs, "push", "-u", originURL, b)
 				_ = gitCommand(ctx, pushArgs...).Run()
 				break
 			}
@@ -171,7 +192,7 @@ func (p *GitHubProvider) CommitAndPush(ctx context.Context, localPath, message, 
 		b64 := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 		pushArgs = append(pushArgs, "-c", "http.extraHeader=AUTHORIZATION: basic "+b64)
 	}
-	pushArgs = append(pushArgs, "push", "-f", "origin", "HEAD")
+	pushArgs = append(pushArgs, "push", "-f", originURL, "HEAD")
 	pushCmd := gitCommand(ctx, pushArgs...)
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push: %w: %s", err, sanitizeToken(string(output), token))

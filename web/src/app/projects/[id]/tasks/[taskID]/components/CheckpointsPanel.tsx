@@ -19,20 +19,43 @@ function artifactsForStep(artifacts: WorkflowArtifact[] | undefined, step: strin
 
 function CliOutputViewer({ output }: { output: string }) {
   const [expanded, setExpanded] = useState(false);
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  let parsed: any = null;
+  let isJson = false;
+  try {
+    parsed = JSON.parse(output);
+    isJson = typeof parsed === 'object' && parsed !== null;
+  } catch {
+    // Not JSON
+  }
+
+  const hasError = isJson && parsed.is_error === true;
+  const duration = isJson && parsed.duration_api_ms ? `${parsed.duration_api_ms}ms` : null;
+  const sessionId = isJson && parsed.session_id ? parsed.session_id : null;
+
   return (
     <div className="mt-1.5 rounded-lg border border-stroke/10 bg-surface/20 dark:bg-surface/50 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-content-muted hover:text-foreground transition-colors"
+        className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-surface/30 transition-colors"
       >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Terminal size={11} />
-        CLI Output
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-content-muted hover:text-foreground transition-colors">
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <Terminal size={11} />
+          CLI Output
+        </div>
+        {isJson && (
+          <div className="flex items-center gap-2">
+            {hasError && <span className="text-[9px] px-1.5 py-0.5 bg-rose-500/10 text-rose-500 rounded font-semibold border border-rose-500/20">Error</span>}
+            {duration && <span className="text-[9px] px-1.5 py-0.5 bg-surface border border-stroke/50 text-content-muted rounded font-mono">{duration}</span>}
+            {sessionId && <span className="text-[9px] px-1.5 py-0.5 bg-surface border border-stroke/50 text-content-muted rounded font-mono truncate max-w-[80px]" title={sessionId}>{sessionId}</span>}
+          </div>
+        )}
       </button>
       {expanded && (
         <pre className="text-[10px] font-mono whitespace-pre-wrap break-all p-2.5 pt-0 max-h-[320px] overflow-y-auto custom-scrollbar text-foreground/80">
-          {output}
+          {isJson ? JSON.stringify(parsed, null, 2) : output}
         </pre>
       )}
     </div>
@@ -88,6 +111,24 @@ export function CheckpointsPanel() {
   
   // reversed checkpoints
   const reversedCheckpoints = [...checkpoints].reverse();
+  
+  const seenStepAttempts = new Set<string>();
+  const filteredCheckpoints = reversedCheckpoints.filter((cp) => {
+    const status = typeof cp.state?.status === "string" ? cp.state.status : "recorded";
+    const attempt = typeof cp.state?.attempt === "number" ? cp.state.attempt : 0;
+    const key = `${cp.step}_${attempt}`;
+    
+    const hasNewer = seenStepAttempts.has(key);
+    seenStepAttempts.add(key);
+
+    // Hide older 'running' checkpoints if we already have a newer checkpoint for this attempt
+    if (status === "running" && hasNewer) {
+      return false;
+    }
+    
+    return true;
+  });
+
   const isPauseReason = lastError && (
     lastError.includes("workflow paused for human spec review") ||
     lastError.includes("workflow paused for human task clarification")
@@ -162,11 +203,11 @@ export function CheckpointsPanel() {
           Checkpoint History ({checkpoints.length})
         </h4>
  
-        {reversedCheckpoints.length === 0 ? (
+        {filteredCheckpoints.length === 0 ? (
           <p className="text-xs text-content-muted italic px-0.5">No checkpoints recorded yet.</p>
         ) : (
           <div className="border border-stroke/10 rounded-2xl overflow-hidden bg-surface/20 divide-y divide-stroke/10 shadow-sm">
-            {reversedCheckpoints.map((cp, idx) => {
+            {filteredCheckpoints.map((cp, idx) => {
               const status = typeof cp.state?.status === "string" ? cp.state.status : "recorded";
               const error = typeof cp.state?.error === "string" ? cp.state.error : undefined;
               

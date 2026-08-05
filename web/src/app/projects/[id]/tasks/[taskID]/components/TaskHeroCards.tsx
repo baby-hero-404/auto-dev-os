@@ -9,8 +9,8 @@ import {
   isPreparationStatus, 
   isExecutionStatus, 
   isReviewingStatus, 
-  isFailedStatus, 
-  isMergedStatus 
+  isMergedStatus,
+  isEffectivelyFailed
 } from "@/lib/status";
 import {
   Clock,
@@ -52,7 +52,6 @@ export function TaskHeroCards() {
     analyze,
     execute,
     isExecutionReady,
-    prSummaries,
     feedback,
     setFeedback,
     submittingPR,
@@ -62,14 +61,15 @@ export function TaskHeroCards() {
 
   const [isRejectFormOpen, setIsRejectFormOpen] = useState(false);
   const st = task?.status || "todo";
-  const heroTodo = isTodoStatus(st);
-  const heroLoad = isPreparationStatus(st);
-  const heroSpec = st === 'spec_review';
-  const heroExec = isExecutionStatus(st);
-  const heroReview = isReviewingStatus(st);
-  const heroPr = st === 'pr_ready' || st === 'human_review';
-  const heroMerged = isMergedStatus(st);
-  const heroFailed = isFailedStatus(st);
+  const isFailed = task ? isEffectivelyFailed(task, workflow) : false;
+  const heroTodo = !isFailed && isTodoStatus(st);
+  const heroLoad = !isFailed && isPreparationStatus(st);
+  const heroSpec = !isFailed && st === 'spec_review';
+  const heroExec = !isFailed && isExecutionStatus(st);
+  const heroReview = !isFailed && isReviewingStatus(st);
+  const heroPr = !isFailed && (st === 'pr_ready' || st === 'human_review');
+  const heroMerged = !isFailed && isMergedStatus(st);
+  const heroFailed = isFailed;
 
   const completedCheckpoints = useMemo(() => {
     if (!workflow?.checkpoints) return [];

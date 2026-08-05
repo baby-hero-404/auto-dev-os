@@ -1,4 +1,4 @@
-import type { Task, TaskSpecStatus, TaskStatus } from "@/lib/types";
+import type { Task, TaskSpecStatus, TaskStatus, WorkflowJob } from "@/lib/types";
 
 /**
  * The one canonical enumeration of CLI-spec-first flow step ids, in order.
@@ -163,4 +163,14 @@ export function isExecutionReady(task: Pick<Task, "status" | "spec_status">): bo
     (task.spec_status === "auto_approved" || task.spec_status === "approved") &&
     (task.status === "todo" || task.status === "failed")
   );
+}
+
+export function isEffectivelyFailed(
+  task: Pick<Task, "status">,
+  job?: Pick<WorkflowJob, "status" | "last_error"> | null
+): boolean {
+  if (task.status === "failed") return true;
+  if (job?.status === "failed") return true;
+  if (job?.status === "paused" && job.last_error != null && job.last_error !== "") return true;
+  return false;
 }

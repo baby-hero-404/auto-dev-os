@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -406,7 +407,12 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 			// Best-effort: a refreshed-token write-back failing must never
 			// fail the step itself (the run already succeeded/failed on its
 			// own terms) — only the *next* run would see a stale token.
-			_ = e.credentials.UpdateCredentialPayload(ctx, req.OrgID, cfg.CredentialID, merged)
+			err := e.credentials.UpdateCredentialPayload(ctx, req.OrgID, cfg.CredentialID, merged)
+			if err != nil {
+				log.Printf("[CLI Engine] Failed to save updated credential %s for org %s: %v", cfg.CredentialID, req.OrgID, err)
+			} else {
+				log.Printf("[CLI Engine] Successfully saved updated credential %s for org %s (%d files refreshed)", cfg.CredentialID, req.OrgID, len(result.UpdatedCredentialFiles))
+			}
 		}
 	}
 

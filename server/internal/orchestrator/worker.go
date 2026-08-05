@@ -619,7 +619,20 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			break
 		}
 		if errors.Is(err, cliengine.ErrConfigInvalid) {
-			o.log(ctx, task.ID, &job.ID, "warn", "cli engine configuration is invalid; skipping remaining retries (fix cli_engine_config and retry manually)")
+			// Don't give up outright: a confirmed auth failure already got the
+			// bad credential marked needs_reauth (cli_engine_step.go's
+			// finishCLIRun), so the *next* ResolveExecutionProvider call may
+			// legitimately land on a different, still-usable provider/credential
+			// in project.ExecutionProviders — retrying gives that a chance
+			// instead of failing a task that hasn't done any real work yet.
+			// No backoff: this isn't a transient/rate-limit condition, so
+			// waiting buys nothing. If no fallback exists, the same error
+			// recurs and attempt bookkeeping below still bounds it to maxRetries.
+			if attempt < maxRetries {
+				o.log(ctx, task.ID, &job.ID, "warn", fmt.Sprintf("cli engine configuration invalid for this provider; retrying immediately in case a fallback provider is available (attempt %d of %d)...", attempt+1, maxRetries))
+				continue
+			}
+			o.log(ctx, task.ID, &job.ID, "warn", "cli engine configuration is invalid and no retries remain; failing task (fix cli_engine_config or configure a fallback provider)")
 			break
 		}
 		if attempt < maxRetries {

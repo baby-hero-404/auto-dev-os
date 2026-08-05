@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -199,30 +198,9 @@ func (a *GitOpsAdapter) CreatePullRequest(ctx context.Context, repoURL, branchNa
 		return "", err
 	}
 
-	path := a.localPath(ctx, repo.ID)
 	baseBranch := repo.Branch
 	if baseBranch == "" {
 		baseBranch = "main" // fallback
-	}
-
-	// Local check to see if there are any commits between base branch and task branch.
-	cmd := exec.CommandContext(ctx, "git", "-C", path, "log", fmt.Sprintf("%s..%s", baseBranch, branchName), "--oneline")
-	if output, err := cmd.CombinedOutput(); err == nil {
-		if len(strings.TrimSpace(string(output))) == 0 {
-			observability.Info(ctx, "skipping PR creation because branch has no commits relative to base branch",
-				"branch", branchName, "base", baseBranch)
-			return "", nil
-		}
-	} else {
-		// If baseBranch isn't main but master, try master.
-		if baseBranch == "main" {
-			cmd = exec.CommandContext(ctx, "git", "-C", path, "log", fmt.Sprintf("master..%s", branchName), "--oneline")
-			if output, err2 := cmd.CombinedOutput(); err2 == nil && len(strings.TrimSpace(string(output))) == 0 {
-				observability.Info(ctx, "skipping PR creation because branch has no commits relative to master",
-					"branch", branchName)
-				return "", nil
-			}
-		}
 	}
 
 	owner, repoName, err := parseRepoOwnerName(repoURL)

@@ -256,10 +256,16 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		prGen := gitops.NewPRGenerator()
 		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded, selfReviewFallback, codedBy, reviewedBy)
 
-		prURL, err := s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
-		if err != nil {
-			s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
-			return nil, fmt.Errorf("create PR failed for %s: %w", repo.URL, err)
+		var prURL string
+		var err error
+		if strings.TrimSpace(repoDiffText) == "" && len(repoChangedFiles) == 0 {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("skipping PR creation for %s because there is no diff to base branch", repo.URL))
+		} else {
+			prURL, err = s.gitops.CreatePullRequest(ctx, repo.URL, branchName, summary.Title, summary.Body)
+			if err != nil {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "error", fmt.Sprintf("create PR failed for %s: %v", repo.URL, err))
+				return nil, fmt.Errorf("create PR failed for %s: %w", repo.URL, err)
+			}
 		}
 		if strings.TrimSpace(prURL) == "" {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "info", fmt.Sprintf("create PR returned no URL for %s; proceeding with local changes", repo.URL))

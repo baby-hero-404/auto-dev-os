@@ -34,6 +34,20 @@ export function CLISpecPanel() {
     return null;
   }
 
+  const isEmptySpec = !spec.proposal && !spec.specs && !spec.design && !spec.tasks;
+
+  if (isEmptySpec) {
+    return (
+      <div className="relative overflow-hidden rounded-xl border border-stroke/50 bg-card/60 backdrop-blur-xl p-8 shadow-lg flex flex-col items-center justify-center text-center gap-3">
+        <FileText size={32} className="text-content-muted/50" />
+        <div>
+          <h2 className="font-heading text-base font-bold text-foreground">No Specification Data</h2>
+          <p className="text-sm text-content-muted mt-1">There is no specification data available for this task yet.</p>
+        </div>
+      </div>
+    );
+  }
+
   const progressPct = spec.progress.total > 0 ? Math.round((spec.progress.done / spec.progress.total) * 100) : 0;
 
   const tabs: { id: SpecTab; label: string; content: string }[] = [

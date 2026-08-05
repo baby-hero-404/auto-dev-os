@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTaskDetail } from "./TaskDetailContext";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { getTaskStatusBadge } from "@/lib/status";
+import { getTaskStatusBadge, isEffectivelyFailed } from "@/lib/status";
 
 export function TaskSidebar() {
   const router = useRouter();
@@ -13,6 +13,7 @@ export function TaskSidebar() {
 
   const jobStatus = workflow?.job?.status?.toLowerCase();
   const canCancel = jobStatus === "running" || jobStatus === "paused" || jobStatus === "queued";
+  const isFailedJob = task ? isEffectivelyFailed(task, workflow) : false;
 
   const badge = getTaskStatusBadge(st);
   const code = st;
@@ -24,8 +25,9 @@ export function TaskSidebar() {
 
     // Highlight step if it is running, OR if the job is paused and this is the current job step
     const isPausedAtThisStep = jobStatus === 'paused' && workflow?.job?.step === step;
+    const isFailedAtThisStep = isFailedJob && workflow?.job?.step === step;
     const active = status === 'running' || isPausedAtThisStep;
-    const failedHere = status === 'failed';
+    const failedHere = status === 'failed' || isFailedAtThisStep;
     const dur = stepDurations.get(step);
 
     const formatStepName = (step: string) => {

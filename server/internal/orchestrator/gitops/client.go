@@ -123,7 +123,13 @@ func (c *DefaultSandboxGitClient) GetPRDiff(ctx context.Context, task *models.Ta
 	// baseBranch name itself (e.g. cross_review captures a diff while still on
 	// "master"), which would make `git diff master...HEAD` trivially empty even
 	// though local master is genuinely ahead of origin/master.
-	diffCmd := fmt.Sprintf("cd %[1]s && (git diff origin/%[2]s...HEAD 2>/dev/null | grep -q . && git diff origin/%[2]s...HEAD || git diff %[2]s...HEAD 2>/dev/null | grep -q . && git diff %[2]s...HEAD || git diff HEAD~1 2>/dev/null || git diff)",
+	// Deliberately no HEAD~1/plain-`git diff` fallback here: either of those
+	// answers "what did the last commit/working tree change" rather than
+	// "what does this branch add versus base", so they report a non-empty
+	// diff even when the branch is fully caught up with base (e.g. a retry
+	// after base already absorbed these commits) — which previously made
+	// PRStep re-attempt PR creation on every retry with nothing new to ship.
+	diffCmd := fmt.Sprintf("cd %[1]s && (git diff origin/%[2]s...HEAD 2>/dev/null | grep -q . && git diff origin/%[2]s...HEAD || git diff %[2]s...HEAD 2>/dev/null || true)",
 		paths.QuoteShellArg(containerPath),
 		baseBranch,
 	)

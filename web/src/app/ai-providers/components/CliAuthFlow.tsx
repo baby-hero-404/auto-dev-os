@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import dynamic from "next/dynamic";
 import { CheckCircle2, Copy } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ const InteractiveTerminal = dynamic(
   () => import("./InteractiveTerminal").then((mod) => mod.InteractiveTerminal),
   { ssr: false }
 );
+import type { InteractiveTerminalApi } from "./InteractiveTerminal";
 
 interface CliAuthFlowProps {
   provider: string;
@@ -22,6 +23,8 @@ export function CliAuthFlow({ provider, orgID, token, onExit, onError }: CliAuth
   const [authUrl, setAuthUrl] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [authSuccess, setAuthSuccess] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const terminalApiRef = useRef<InteractiveTerminalApi | null>(null);
 
   if (!config) {
     onError(`Unsupported CLI provider: ${provider}`);
@@ -78,6 +81,36 @@ export function CliAuthFlow({ provider, orgID, token, onExit, onError }: CliAuth
               ))}
             </div>
           )}
+          {config.requiresManualCodePaste && (
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && manualCode.trim()) {
+                    terminalApiRef.current?.sendInput(manualCode + "\n");
+                    setManualCode("");
+                  }
+                }}
+                placeholder="Paste authorization code here"
+                className="flex-1 rounded-md border border-stroke bg-background px-3 py-2 text-sm text-foreground placeholder:text-content-muted focus:border-brand-primary focus:outline-none focus:ring-1 focus:ring-brand-primary"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (manualCode.trim()) {
+                    terminalApiRef.current?.sendInput(manualCode + "\n");
+                    setManualCode("");
+                  }
+                }}
+                disabled={!manualCode.trim()}
+                className="rounded-md bg-brand-primary px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Submit
+              </button>
+            </div>
+          )}
           {config.footerNote && <p className="mt-3 text-xs text-brand-primary">{config.footerNote}</p>}
         </div>
       ) : null}
@@ -95,6 +128,7 @@ export function CliAuthFlow({ provider, orgID, token, onExit, onError }: CliAuth
         onUrlFound={setAuthUrl}
         onCodeFound={setAuthCode}
         onSuccessFound={() => setAuthSuccess(true)}
+        apiRef={terminalApiRef}
       />
     </div>
   );

@@ -10,6 +10,10 @@ import { api } from "@/lib/api";
 // the same WS connection.
 const RESIZE_SENTINEL = "\x00RESIZE:";
 
+export interface InteractiveTerminalApi {
+  sendInput: (data: string) => void;
+}
+
 interface InteractiveTerminalProps {
   orgID: string;
   token: string;
@@ -39,9 +43,10 @@ interface InteractiveTerminalProps {
   onUrlFound?: (url: string) => void;
   onCodeFound?: (code: string) => void;
   onSuccessFound?: () => void;
+  apiRef?: React.MutableRefObject<InteractiveTerminalApi | null>;
 }
 
-export function InteractiveTerminal({ orgID, token, provider, mode = "auth", credentialID, initialCommand, extractUrl, extractCode, isSuccess, onExit, onError, onUrlFound, onCodeFound, onSuccessFound }: InteractiveTerminalProps) {
+export function InteractiveTerminal({ orgID, token, provider, mode = "auth", credentialID, initialCommand, extractUrl, extractCode, isSuccess, onExit, onError, onUrlFound, onCodeFound, onSuccessFound, apiRef }: InteractiveTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const stdoutBuffer = useRef("");
   const term = useRef<Terminal | null>(null);
@@ -86,6 +91,18 @@ export function InteractiveTerminal({ orgID, token, provider, mode = "auth", cre
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    if (apiRef) {
+      apiRef.current = {
+        sendInput: (data: string) => {
+          if (socket.current?.readyState === WebSocket.OPEN) {
+            socket.current.send(data);
+          }
+        },
+      };
+    }
+  }, [apiRef]);
 
   useEffect(() => {
     if (!terminalRef.current) return;

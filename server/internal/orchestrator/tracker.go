@@ -126,5 +126,9 @@ func (o *Orchestrator) updateTaskStatus(ctx context.Context, taskID string, newS
 		}
 	}
 
+	if updated.ParentTaskID != nil && (newStatus == models.TaskStatusMerged || newStatus == models.TaskStatusFailed) {
+		o.onChildTaskTerminal(ctx, updated, newStatus == models.TaskStatusMerged)
+	}
+
 	return updated, nil
 }

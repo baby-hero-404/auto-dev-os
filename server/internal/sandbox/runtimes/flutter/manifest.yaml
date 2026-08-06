@@ -1,0 +1,18 @@
+id: flutter
+# Flutter was never part of the old monolith image (docker/Dockerfile.sandbox
+# has no Flutter SDK) — built fresh from docker/runtimes/flutter/Dockerfile
+# via `make sandbox-images`. Until that's run at least once on a given host,
+# selecting the flutter runtime will fail to pull/find this tag, or (if an
+# older/wrong image happens to share the tag) fail at the healthcheck step —
+# either way "sandbox not ready" per manager.go, never a silent no-op.
+image: autocode/flutter:latest
+detect:
+  - pubspec.yaml
+cache:
+  - host: ~/.pub-cache
+    container: /home/agent/.pub-cache
+  - host: ~/.gradle
+    container: /home/agent/.gradle
+setup:
+  - flutter pub get
+healthcheck: "flutter doctor"

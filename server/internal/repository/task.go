@@ -112,6 +112,24 @@ func (r *TaskRepo) Update(ctx context.Context, id string, input models.UpdateTas
 			updates["execution_engine"] = *input.ExecutionEngine
 		}
 	}
+	if input.SequenceIndex != nil {
+		updates["sequence_index"] = *input.SequenceIndex
+	}
+	if input.DecompositionMode != nil {
+		updates["decomposition_mode"] = *input.DecompositionMode
+	}
+	if input.ComplexityScore != nil {
+		updates["complexity_score"] = input.ComplexityScore
+	}
+	if input.DependsOn != nil {
+		updates["depends_on"] = *input.DependsOn
+	}
+	if input.BlockedChildID != nil {
+		updates["blocked_child_id"] = *input.BlockedChildID
+	}
+	if input.ClearBlockedChild {
+		updates["blocked_child_id"] = nil
+	}
 	if err := r.db.WithContext(ctx).Model(t).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
 	}

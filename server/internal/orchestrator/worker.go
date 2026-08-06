@@ -97,7 +97,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 
 		// Guarantee workspace lock release on ALL exit paths.
 		if taskID != "" {
-			o.releaseWorkspaceLock(taskID)
+			o.releaseWorkspaceLock(context.WithoutCancel(ctx), taskID)
 		}
 	}()
 
@@ -109,6 +109,20 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 	}
 	taskID = job.TaskID
 	ctx = observability.WithTaskID(ctx, job.TaskID)
+
+	// task-subtask-decomposition: every workflow-job execution of a task
+	// (parent or child) is wrapped in its own TaskAttempt row, created here
+	// and finalized once this run() terminates (see the finalStatus block
+	// below). Best-effort: a nil o.taskAttempts (not wired) or a create
+	// failure never blocks the underlying workflow.
+	var currentAttempt *models.TaskAttempt
+	if o.taskAttempts != nil {
+		if a, aErr := o.taskAttempts.Create(ctx, taskID, job.ID); aErr != nil {
+			o.log(ctx, taskID, &job.ID, "warn", fmt.Sprintf("failed to create task attempt: %v", aErr))
+		} else {
+			currentAttempt = a
+		}
+	}
 
 	task, err := o.tasks.GetByID(ctx, job.TaskID)
 	if err != nil {
@@ -727,9 +741,11 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			o.log(cleanupCtx, task.ID, &job.ID, "info", finalErr)
 			return
 		}
+		o.finalizeTaskAttempt(context.WithoutCancel(ctx), currentAttempt, updatedJob, 1)
 		o.fail(ctx, job, fmt.Errorf("%s", finalErr))
 		return
 	}
+	o.finalizeTaskAttempt(context.WithoutCancel(ctx), currentAttempt, updatedJob, 0)
 	cleanupCtx := context.WithoutCancel(ctx)
 	defer o.cleanupWorkspaceAfterFinalState(cleanupCtx, task.ID)
 	if _, err := o.workflows.UpdateJob(cleanupCtx, job.ID, map[string]any{"status": models.WorkflowJobStatusDone, "step": models.WorkflowStepDone, "last_error": ""}); err != nil {

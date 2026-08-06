@@ -27,11 +27,11 @@ func (m *Manager) RepoHostPath(task *models.Task, ws *models.TaskWorkspace, repo
 		}
 	}
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
-	return wp.RepoMain(task.ID, RepoNameFromURL(repo.URL)).String()
+	return wp.RepoMain(models.WorkspaceOwnerID(task), RepoNameFromURL(repo.URL)).String()
 }
 
 func (m *Manager) GetTaskRepoHostPath(ctx context.Context, task *models.Task) (string, error) {
-	localPath := sandbox.WorkspacePath(m.WorkspaceRoot, task.ID)
+	localPath := sandbox.WorkspacePath(m.WorkspaceRoot, models.WorkspaceOwnerID(task))
 	ws, err := m.LoadTaskWorkspace(ctx, task)
 	if task.RepositoryID == nil {
 		// RepositoryID is an optional CreateTaskInput field (see
@@ -98,7 +98,7 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 	if err != nil {
 		clean := strings.TrimPrefix(worktreeSuffix, "-")
 		clean = strings.TrimSuffix(clean, "-worktree")
-		localPath := sandbox.WorkspacePath(m.WorkspaceRoot, task.ID)
+		localPath := sandbox.WorkspacePath(m.WorkspaceRoot, models.WorkspaceOwnerID(task))
 		if task.RepositoryID != nil {
 			return filepath.Join(localPath, clean)
 		}
@@ -131,7 +131,7 @@ func (m *Manager) HostWorktreePath(task *models.Task, repoPath string, worktreeS
 	} else if role == "frontend" {
 		roleSuffix = "fe"
 	}
-	rWS.Branches.Role[role] = paths.DeriveRoleBranchName(task.ID, task.Title, roleSuffix)
+	rWS.Branches.Role[role] = paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, roleSuffix)
 
 	if wsLoaded, errLoad := m.LoadTaskWorkspace(ctx, task); errLoad == nil {
 		for i := range wsLoaded.Repos {

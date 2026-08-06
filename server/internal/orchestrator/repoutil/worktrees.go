@@ -12,9 +12,9 @@ import (
 )
 
 func (m *Manager) SetupRoleBranches(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, repos []models.Repository, ws *models.TaskWorkspace, skipFE bool) {
-	integrationBranch := paths.DeriveBranchName(task.ID, task.Title)
-	beBranch := paths.DeriveRoleBranchName(task.ID, task.Title, "be")
-	feBranch := paths.DeriveRoleBranchName(task.ID, task.Title, "fe")
+	integrationBranch := paths.DeriveBranchName(models.WorkspaceOwnerID(task), task.Title)
+	beBranch := paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, "be")
+	feBranch := paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, "fe")
 
 	for _, repo := range repos {
 		localPath := m.RepoHostPath(task, ws, repo)
@@ -42,8 +42,8 @@ git -C %[1]s show-ref --verify --quiet refs/heads/%[4]s || git -C %[1]s branch %
 }
 
 func (m *Manager) SetupRoleWorktrees(ctx context.Context, task *models.Task, agent *models.Agent, repos []models.Repository, ws *models.TaskWorkspace, roleName string, roleLabel string, worktreeSuffix string) error {
-	roleBranch := paths.DeriveRoleBranchName(task.ID, task.Title, roleName)
-	integrationBranch := paths.DeriveBranchName(task.ID, task.Title)
+	roleBranch := paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, roleName)
+	integrationBranch := paths.DeriveBranchName(models.WorkspaceOwnerID(task), task.Title)
 
 	for _, repo := range repos {
 		localPath := m.RepoHostPath(task, ws, repo)
@@ -166,8 +166,8 @@ func (m *Manager) CreateGitCheckpoint(ctx context.Context, task *models.Task, ag
 			roleName = models.RoleFrontend
 		}
 		if worktreeSuffix != "" {
-			roleBranch := paths.DeriveRoleBranchName(task.ID, task.Title, roleName)
-			integrationBranch := paths.DeriveBranchName(task.ID, task.Title)
+			roleBranch := paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, roleName)
+			integrationBranch := paths.DeriveBranchName(models.WorkspaceOwnerID(task), task.Title)
 			validateScript := fmt.Sprintf(`set -e
 if [ ! -d %[1]s ] || ! grep -q '^gitdir:' %[1]s/.git 2>/dev/null; then
   echo "WORKTREE_INVALID"
@@ -266,7 +266,7 @@ func (m *Manager) RestoreGitCheckpoint(ctx context.Context, task *models.Task, a
 			roleName = models.RoleFrontend
 		}
 
-		roleBranch := paths.DeriveRoleBranchName(task.ID, task.Title, roleName)
+		roleBranch := paths.DeriveRoleBranchName(models.WorkspaceOwnerID(task), task.Title, roleName)
 
 		// If a prior step's patch was applied but never committed (e.g. commitSandbox failed -
 		// REQ-M04), the dirty worktree state below is about to be discarded by checkout/reset/clean.

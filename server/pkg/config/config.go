@@ -98,6 +98,18 @@ type ExecutionConfig struct {
 	// LLM calls) the state-machine rollout gate (cmd/rollout-gate) tolerates before it
 	// reports "pass" — see docs/openspecs/runtime-centric-completion-2026 REQ-001.
 	RolloutViolationThresholdPct float64 `mapstructure:"rollout_violation_threshold_pct"`
+	// DecompositionThreshold is the ComplexityScore.Total above which analyze
+	// proposes a task split (docs/openspecs/task-subtask-decomposition). The
+	// score is always computed and stored regardless of this threshold; it
+	// only gates whether a []ChildTaskSpec is produced.
+	DecompositionThreshold int `mapstructure:"decomposition_threshold"`
+	// DecompositionModeDefault is the org/project-wide fallback for
+	// Task.DecompositionMode when neither the task nor its project set one
+	// explicitly: "manual" (propose, operator approves), "auto" (skip the
+	// review gate), or "disabled" (never split, pre-existing single-task
+	// path unconditionally). Defaults to "disabled" so this feature ships
+	// fully opt-in (tasks.md Rollback Plan / Safe Deploy).
+	DecompositionModeDefault string `mapstructure:"decomposition_mode_default"`
 }
 
 type AutoCodeOSConfig struct {
@@ -235,6 +247,13 @@ func normalize(cfg *Config) error {
 
 	if cfg.Execution.RolloutViolationThresholdPct <= 0 {
 		cfg.Execution.RolloutViolationThresholdPct = 1.0
+	}
+
+	if cfg.Execution.DecompositionThreshold <= 0 {
+		cfg.Execution.DecompositionThreshold = 100
+	}
+	if cfg.Execution.DecompositionModeDefault == "" {
+		cfg.Execution.DecompositionModeDefault = "disabled"
 	}
 
 	if cfg.Git.DefaultAgentName == "" {

@@ -85,7 +85,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.containerPathForHostPath,
 			o.maxPhaseCost,
 			o.registry,
-		),
+		).WithDecomposition(o.decompositionThreshold, o.decompositionModeDefault),
 		steps.NewPlanStep(
 			rt,
 			o.tasks,                             // TaskReader

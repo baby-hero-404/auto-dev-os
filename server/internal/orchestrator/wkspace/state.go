@@ -12,16 +12,19 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
-// GetTaskWorkspace returns the workspace layout for a task.
+// GetTaskWorkspace returns the workspace layout for a task. A decomposed
+// child resolves to its parent's workspace ID (models.WorkspaceOwnerID) so
+// the whole family shares one on-disk workspace/branch lineage.
 func (m *Manager) GetTaskWorkspace(task *models.Task) *models.TaskWorkspace {
+	ownerID := models.WorkspaceOwnerID(task)
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
 	return &models.TaskWorkspace{
-		Root:         wp.TaskRoot(task.ID).String(),
-		SpecsDir:     wp.SpecsDir(task.ID).String(),
-		ContextDir:   wp.ContextDir(task.ID).String(),
-		ArtifactsDir: wp.ArtifactsDir(task.ID).String(),
-		LogsDir:      wp.LogsDir(task.ID).String(),
-		PRDir:        wp.PRDir(task.ID).String(),
+		Root:         wp.TaskRoot(ownerID).String(),
+		SpecsDir:     wp.SpecsDir(ownerID).String(),
+		ContextDir:   wp.ContextDir(ownerID).String(),
+		ArtifactsDir: wp.ArtifactsDir(ownerID).String(),
+		LogsDir:      wp.LogsDir(ownerID).String(),
+		PRDir:        wp.PRDir(ownerID).String(),
 	}
 }
 
@@ -123,7 +126,7 @@ func (m *Manager) FindRepoWorkspaceByPath(ctx context.Context, task *models.Task
 				return rWS, nil
 			}
 		}
-		repoRootAbs := paths.NewOSWorkspacePaths(m.WorkspaceRoot).RepoRoot(task.ID, rWS.Name).String()
+		repoRootAbs := paths.NewOSWorkspacePaths(m.WorkspaceRoot).RepoRoot(models.WorkspaceOwnerID(task), rWS.Name).String()
 		if rel, errRel := filepath.Rel(repoRootAbs, absPath); errRel == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return rWS, nil
 		}

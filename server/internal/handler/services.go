@@ -64,6 +64,8 @@ type TaskService interface {
 	UpdateSpecConfig(context.Context, string, bool) (*models.Task, error)
 	ListSubTasks(context.Context, string) ([]models.Task, error)
 	CreateSubTask(context.Context, string, models.CreateTaskInput) (*models.Task, error)
+	ApproveSplit(context.Context, string, []models.ChildTaskSpec, string) ([]models.Task, error)
+	RejectSplit(context.Context, string) (*models.Task, error)
 }
 
 type RuleService interface {

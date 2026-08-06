@@ -11,6 +11,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/lib/pq"
 )
 
 type TaskService struct {
@@ -334,6 +335,102 @@ func (s *TaskService) CreateSubTask(ctx context.Context, parentID string, input 
 	}
 	input.ParentTaskID = &parentID
 	return s.Create(ctx, parent.ProjectID, input)
+}
+
+// ApproveSplit is the task-subtask-decomposition split-approval path
+// (docs/openspecs/task-subtask-decomposition, Phase 3): given the operator-
+// approved (or decomposition_mode=auto auto-proceeding) ordered list of
+// ChildTaskSpec, it creates one child Task per spec via the existing
+// CreateSubTask — never a parallel code path — setting SequenceIndex and
+// resolving each spec's DependsOn indices to the created siblings' task IDs.
+// The parent's DecompositionMode is recorded so later dispatch/blocked
+// logic knows this parent is decomposition-managed.
+func (s *TaskService) ApproveSplit(ctx context.Context, parentID string, specs []models.ChildTaskSpec, mode string) ([]models.Task, error) {
+	if len(specs) < 2 {
+		return nil, ErrValidation("a split must contain at least 2 child tasks")
+	}
+	switch mode {
+	case "manual", "auto":
+	default:
+		return nil, ErrValidation("decomposition_mode must be manual or auto to approve a split")
+	}
+
+	parent, err := s.repo.GetByID(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	children := make([]models.Task, 0, len(specs))
+	for i, spec := range specs {
+		seq := i
+		child, err := s.CreateSubTask(ctx, parentID, models.CreateTaskInput{
+			Title:        spec.Title,
+			Description:  spec.Instructions,
+			Complexity:   parent.Complexity,
+			RepositoryID: parent.RepositoryID,
+			AgentID:      parent.AgentID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create child task %d: %w", i, err)
+		}
+		if _, err := s.repo.Update(ctx, child.ID, models.UpdateTaskInput{SequenceIndex: &seq}); err != nil {
+			return nil, fmt.Errorf("set sequence_index for child task %d: %w", i, err)
+		}
+		child.SequenceIndex = &seq
+		children = append(children, *child)
+	}
+
+	// Resolve each spec's DependsOn (indices into specs) to the sibling task
+	// IDs just created, now that every child has an ID.
+	for i, spec := range specs {
+		if len(spec.DependsOn) == 0 {
+			continue
+		}
+		var depIDs pq.StringArray
+		for _, depIdx := range spec.DependsOn {
+			if depIdx < 0 || depIdx >= len(children) {
+				continue
+			}
+			depIDs = append(depIDs, children[depIdx].ID)
+		}
+		if len(depIDs) == 0 {
+			continue
+		}
+		if _, err := s.repo.Update(ctx, children[i].ID, models.UpdateTaskInput{DependsOn: &depIDs}); err != nil {
+			return nil, fmt.Errorf("set depends_on for child task %d: %w", i, err)
+		}
+		children[i].DependsOn = depIDs
+	}
+
+	if _, err := s.repo.Update(ctx, parentID, models.UpdateTaskInput{DecompositionMode: &mode}); err != nil {
+		return nil, fmt.Errorf("mark parent as decomposed: %w", err)
+	}
+
+	return children, nil
+}
+
+// RejectSplit clears any proposed split from the parent's Analysis so the
+// task falls through to the existing single-task path unchanged — the
+// operator declining decomposition never forces it (specs.md Failure
+// Scenario: "Analyze proposes a split the operator rejects").
+func (s *TaskService) RejectSplit(ctx context.Context, parentID string) (*models.Task, error) {
+	task, err := s.repo.GetByID(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(task.Analysis) == 0 {
+		return task, nil
+	}
+	var analysis models.TaskAnalysis
+	if err := json.Unmarshal(task.Analysis, &analysis); err != nil {
+		return nil, ErrValidation("stored analysis is not valid JSON")
+	}
+	analysis.ProposedSplit = nil
+	raw, err := json.Marshal(analysis)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Update(ctx, parentID, models.UpdateTaskInput{Analysis: raw})
 }
 
 func buildTaskAnalysis(task *models.Task) models.TaskAnalysis {

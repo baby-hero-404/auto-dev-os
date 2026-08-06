@@ -165,7 +165,16 @@ func (m *Manager) AcquireWorkspaceLock(ctx context.Context, task *models.Task, j
 	return nil
 }
 
-func (m *Manager) ReleaseWorkspaceLock(taskID string) {
+// ReleaseWorkspaceLock releases the in-process heartbeat/DB advisory lock
+// tracked under taskID (both keyed by the task's own ID — one lock per
+// concurrently-running job, independent of workspace sharing) and removes
+// the on-disk ".workspace.lock"/".git-creds" files. Those files live under
+// the workspace root, which for a decomposition child is the *parent's*
+// workspace (models.WorkspaceOwnerID) — AcquireWorkspaceLock resolves the
+// lock file path the same way via GetTaskWorkspace, so this must too, or a
+// child's lock release would silently miss the real lock file and leave
+// the shared workspace locked for the next sibling.
+func (m *Manager) ReleaseWorkspaceLock(ctx context.Context, taskID string) {
 	weHoldLock := false
 	if cancelVal, loaded := m.LockCancels.LoadAndDelete(taskID); loaded {
 		weHoldLock = true
@@ -182,7 +191,13 @@ func (m *Manager) ReleaseWorkspaceLock(taskID string) {
 		}
 	}
 	if weHoldLock {
-		root := filepath.Join(m.WorkspaceRoot, taskID)
+		ownerID := taskID
+		if m.Tasks != nil {
+			if task, err := m.Tasks.GetByID(ctx, taskID); err == nil && task != nil {
+				ownerID = models.WorkspaceOwnerID(task)
+			}
+		}
+		root := filepath.Join(m.WorkspaceRoot, ownerID)
 		lockPath := filepath.Join(root, ".workspace.lock")
 		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
 			m.Log(context.Background(), taskID, nil, "warn", fmt.Sprintf("failed to remove workspace lock file: %v", err))

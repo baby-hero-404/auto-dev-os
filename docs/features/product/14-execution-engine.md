@@ -109,6 +109,20 @@ Stdio-only MCP server bundled trong sandbox image. Expose 6 tools — `repo.sear
 **Resilience & Security:**
 - Smart idle timeout (15 min default, `AUTOCODE_CLI_IDLE_TIMEOUT_MINUTES`) + streaming loop detector (200-line ring buffer, 10× repetition) → `ContainerKill(SIGKILL)` ngay khi phát hiện.
 - Sandbox cache mounts fixed sang `/home/agent/` (non-root UID 1000).
+
+## D. Sandbox Manager v2 (Per-Runtime Container Orchestration)
+
+Sandbox Manager v2 (`server/internal/sandbox/`) nâng cấp cơ chế Sandbox từ hình thức Docker Image đơn khối (monolith) lên mô hình Orchestration đa môi trường theo runtime dự án:
+
+1. **Auto-Detection (`detector.go`):** Đọc các marker files trong repo (`package.json` → Node, `requirements.txt`/`pyproject.toml` → Python, `go.mod` → Go, `pom.xml` → Java, `pubspec.yaml` → Flutter) để tự động nhận diện Runtime môi trường mà không cần khởi động container.
+2. **Dynamic Registry & Manifests (`registry.go`):** Nạp cấu hình từ các file `manifest.yaml` trong `server/internal/sandbox/runtimes/*/manifest.yaml`. Mỗi manifest định nghĩa:
+   - `image`: Docker Image tương ứng (vd. `autocode/node:latest`, `autocode/go:latest`, `autocode/python:latest`).
+   - `cache`: Danh sách bind-mounts đệm toàn cục (`~/.npm`, `~/.cache/pip`, `~/go/pkg/mod`, `~/.pub-cache`).
+   - `setup` & `healthcheck`: Các lệnh chuẩn bị môi trường và kiểm tra sức khỏe container trước khi giao việc cho CLI Agent.
+3. **Multi-Version Best Practices:**
+   - **Go Runtime:** Thiết lập `ENV GOTOOLCHAIN=auto` cho phép Go SDK tự động tải và chuyển đổi đúng phiên bản Go mà `go.mod` yêu cầu.
+   - **Python Runtime:** Tích hợp `uv` giúp khởi tạo virtualenvs và quản lý dependency siêu tốc.
+   - **Layered Dockerfile Build:** Quản lý qua target `make sandbox-images` trong `Makefile`.
 - Credentials injected qua `container.Config.Env`, không bao giờ interpolated vào `cmd.Args`. `redactSecrets` scrub toàn bộ log/checkpoint output (4 credential shapes: Anthropic/OpenAI/Gemini/GitHub).
 - Context cancellation: `ContainerKill(SIGKILL)` ngay lập tức khi job bị cancel, không cần chờ 5s SIGTERM grace.
 - Partial retry: backend track checkpoint survive → chỉ frontend track bị re-run (Phase 5 checkpoint resume).

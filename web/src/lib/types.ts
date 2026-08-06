@@ -142,6 +142,7 @@ export type TaskStatus =
   | "context_loading"
   | "analyzing"
   | "spec_review"
+  | "planning_split"
   | "coding"
   | "reviewing"
   | "fixing"
@@ -149,7 +150,8 @@ export type TaskStatus =
   | "pr_ready"
   | "human_review"
   | "merged"
-  | "failed";
+  | "failed"
+  | "blocked";
 
 export type TaskSpecStatus =
   | "none"
@@ -161,11 +163,40 @@ export type TaskSpecStatus =
   | "auto_approved"
   | "ready_with_warnings";
 
+export type ComplexityScore = {
+  total: number;
+  file_count: number;
+  instruction_length: number;
+  data_migration: boolean;
+  security_sensitive: boolean;
+};
+
+export type ChildTaskSpec = {
+  title: string;
+  instructions: string;
+  expected_files?: string[];
+};
+
+export type ChildTaskSummary = {
+  changed_files: string[];
+  test_pass_count: number;
+  test_fail_count: number;
+  duration_seconds: number;
+  cost_usd: number;
+  contract_deviation?: string;
+};
+
 export type Task = {
   id: string;
   project_id: string;
   agent_id?: string;
   parent_task_id?: string;
+  sequence_index?: number;
+  decomposition_mode?: "manual" | "auto" | "disabled";
+  complexity_score?: ComplexityScore;
+  depends_on?: string[];
+  blocked_child_id?: string;
+  subtasks?: Task[];
   repository_id?: string;
   title: string;
   description: string;
@@ -282,6 +313,7 @@ export type TaskAnalysis = {
   specs_md?: string;
   design_md?: string;
   tasks_md?: string;
+  child_specs?: ChildTaskSpec[];
   tasks?: TaskDAG[];
   complexity_details?: ComplexityDetails;
   risks_details?: RiskDetail[];

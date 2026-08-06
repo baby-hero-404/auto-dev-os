@@ -36,6 +36,10 @@ func (m *testTaskRepo) Update(ctx context.Context, id string, input models.Updat
 	return nil, errors.New("task not found")
 }
 
+func (m *testTaskRepo) ListSubTasks(ctx context.Context, parentID string) ([]models.Task, error) {
+	return nil, nil
+}
+
 func (m *testTaskRepo) ListRecentByStatus(ctx context.Context, statuses []string, limit int) ([]models.Task, error) {
 	if m.task != nil {
 		for _, s := range statuses {

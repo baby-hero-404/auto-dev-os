@@ -78,7 +78,7 @@ func (m *Manager) InitTaskWorkspace(ctx context.Context, task *models.Task) (*mo
 				Worktrees: make(map[string]string),
 			},
 			Branches: models.RepoWorkspaceBranches{
-				Integration: paths.DeriveBranchName(task.ID, task.Title),
+				Integration: paths.DeriveBranchName(models.WorkspaceOwnerID(task), task.Title),
 				Role:        make(map[string]string),
 			},
 		}
@@ -175,6 +175,17 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 
 	var workspaceRestored bool
 
+	// A decomposition child shares its parent's workspace/branch lineage
+	// (models.WorkspaceOwnerID) so children execute sequentially, each
+	// committing on top of the last. If this task's workspace already
+	// exists on disk here it necessarily belongs either to the parent's own
+	// setup or to an earlier sibling's committed work — reset-on-resume
+	// (below) must never run for it, or child 2+ would git-clean away
+	// child 1's real, already-committed changes before it even starts
+	// (design.md, "Key Decisions": continuous execution, not
+	// isolated-then-merged).
+	isSharedChildWorkspace := task.ParentTaskID != nil
+
 	for i, rWS := range ws.Repos {
 		repoAbsPath := filepath.Join(ws.Root, rWS.Paths.Main)
 		gitDir := filepath.Join(repoAbsPath, ".git")
@@ -185,7 +196,7 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 		}
 
 		if workspaceExists {
-			if !hasWorkToPreserve {
+			if !hasWorkToPreserve && !isSharedChildWorkspace {
 				if err := ResetExistingWorkspace(ctx, repoAbsPath); err != nil {
 					return fmt.Errorf("reset existing workspace at %s: %w", repoAbsPath, err)
 				}
@@ -216,7 +227,16 @@ func (m *Manager) EnsureWorkspaceCloned(ctx context.Context, task *models.Task, 
 			m.Log(ctx, task.ID, nil, "warn", fmt.Sprintf("failed to provision git credential helper for %s: %v", rWS.Name, err))
 		}
 
-		ws.Repos[i].Branches.Integration = paths.DeriveBranchName(task.ID, task.Title)
+		// Only (re)derive the integration branch name if it isn't already
+		// set. For a shared child workspace this preserves whichever
+		// sibling's title first named the branch — recomputing per-child
+		// here would slugify *this* task's own title while still using the
+		// shared owner ID as the short-ID suffix, producing a different
+		// branch string per sibling even though they must all land on the
+		// same branch.
+		if ws.Repos[i].Branches.Integration == "" {
+			ws.Repos[i].Branches.Integration = paths.DeriveBranchName(models.WorkspaceOwnerID(task), task.Title)
+		}
 	}
 
 	if err := m.SaveTaskWorkspaceMetadata(task, ws); err != nil {

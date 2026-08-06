@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec } from "../types";
+import type { ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec, ChildTaskSpec } from "../types";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -168,6 +168,28 @@ export const tasks = {
       token,
       body: JSON.stringify({ action, comment: comment ?? "" }),
     });
+  },
+  approveSplit(taskID: string, token: string, childSpecs?: ChildTaskSpec[]) {
+    return request<Task>(`/tasks/${taskID}/split/approve`, {
+      method: "POST",
+      token,
+      body: childSpecs ? JSON.stringify({ child_specs: childSpecs }) : undefined,
+    });
+  },
+  rejectSplit(taskID: string, token: string) {
+    return request<Task>(`/tasks/${taskID}/split/reject`, {
+      method: "POST",
+      token,
+    });
+  },
+  retrySplit(taskID: string, token: string) {
+    return request<Task>(`/tasks/${taskID}/split/retry`, {
+      method: "POST",
+      token,
+    });
+  },
+  getSubtasks(taskID: string, token: string) {
+    return request<Task[]>(`/tasks/${taskID}/subtasks`, { token });
   },
   clarify(taskID: string, token: string, context: string) {
     return request<Task>(`/tasks/${taskID}/clarify`, {

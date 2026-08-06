@@ -92,7 +92,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	}
 
 	r.o.initRepoutil()
-	hostWorkspace := sandbox.WorkspacePath(r.o.workspaceRoot, task.ID)
+	hostWorkspace := sandbox.WorkspacePath(r.o.workspaceRoot, models.WorkspaceOwnerID(task))
 
 	// Must resolve to the repo's actual checkout (code/repos/<name>/main),
 	// not the bare task workspace root: passing hostWorkspace itself into
@@ -282,7 +282,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 			slug := steps.TaskSpecSlug(task)
 			worktreeRoot := r.o.repoutil.HostWorktreePath(task, repoHostPath, worktreeSuffix)
 			srcDir := filepath.Join(worktreeRoot, "docs", "openspecs", slug)
-			dstDir := filepath.Join(sandbox.WorkspacePath(r.o.workspaceRoot, task.ID), "specs")
+			dstDir := filepath.Join(sandbox.WorkspacePath(r.o.workspaceRoot, models.WorkspaceOwnerID(task)), "specs")
 
 			if stat, err := os.Stat(srcDir); err == nil && stat.IsDir() {
 				_ = os.MkdirAll(dstDir, 0755)

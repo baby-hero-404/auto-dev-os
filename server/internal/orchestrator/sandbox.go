@@ -16,7 +16,7 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 	ctx, span := otel.Tracer("auto-code-os/orchestrator").Start(ctx, "orchestrator.sandbox_step")
 	defer span.End()
 
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+	localPath := sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task))
 	networkMode := sandbox.NetworkModeNone
 	if !o.disableNetworking {
 		networkMode = sandbox.NetworkModeBridge
@@ -51,7 +51,7 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 
 func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
 	o.initRepoutil()
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+	localPath := sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task))
 	hostWorkspacePath := localPath
 	if worktreeSuffix != "" {
 		hostWorkspacePath = o.repoutil.HostWorktreePath(task, localPath, worktreeSuffix)
@@ -102,7 +102,7 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 
 func (o *Orchestrator) containerPathForHostPath(task *models.Task, hostPath string, worktreeSuffix string) string {
 	o.initRepoutil()
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+	localPath := sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task))
 	activeWorkspaceHostPath := localPath
 	if worktreeSuffix != "" {
 		activeWorkspaceHostPath = o.repoutil.HostWorktreePath(task, localPath, worktreeSuffix)
@@ -188,7 +188,7 @@ func (o *Orchestrator) readAffectedFileContent(ctx context.Context, task *models
 
 func (o *Orchestrator) affectedFileRoots(ctx context.Context, task *models.Task, file string) []string {
 	o.initRepoutil()
-	localPath := sandbox.WorkspacePath(o.workspaceRoot, task.ID)
+	localPath := sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task))
 	roots := []string{localPath}
 	if repoHostPath, err := o.repoutil.GetTaskRepoHostPath(ctx, task); err == nil && repoHostPath != localPath {
 		roots = append([]string{repoHostPath}, roots...)

@@ -49,6 +49,21 @@ type AnalyzeStep struct {
 	lastValidationError     error
 	lastValidationIteration int
 	lastAttemptIteration    int
+	// decompositionThreshold/decompositionModeDefault feed the task-subtask-
+	// decomposition Complexity Score gate (see decompose.go). Zero-value
+	// threshold means "never propose a split" (safe default for callers/tests
+	// that don't wire these), matching decomposition_mode=disabled behavior.
+	decompositionThreshold   int
+	decompositionModeDefault string
+}
+
+// WithDecomposition configures the analyze-time split-proposal gate
+// (task-subtask-decomposition). Optional: callers that don't invoke this
+// get threshold=0 (no split ever proposed), preserving existing behavior.
+func (s *AnalyzeStep) WithDecomposition(threshold int, modeDefault string) *AnalyzeStep {
+	s.decompositionThreshold = threshold
+	s.decompositionModeDefault = modeDefault
+	return s
 }
 
 func NewAnalyzeStep(
@@ -652,6 +667,31 @@ func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, 
 
 func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.TaskAnalysis, fallbackUsed bool) (StepResult, error) {
 	oldComplexity := s.rt.Task.Complexity
+
+	// task-subtask-decomposition: the Complexity Score is always computed and
+	// stored, regardless of decomposition_mode, so the threshold can be
+	// tuned later against real outcomes (specs.md Scenario: "Analyze step
+	// computes a Complexity Score"). Only over-threshold + non-"disabled"
+	// mode produces a ProposedSplit.
+	score := ComputeComplexityScore(s.rt.Task, analysis)
+	analysis.ComplexityScore = &score
+	mode := ResolveDecompositionMode(s.rt.Task.DecompositionMode, s.decompositionModeDefault)
+	if s.decompositionThreshold > 0 && score.Total >= s.decompositionThreshold && mode != "disabled" {
+		if split := BuildProposedSplit(s.rt.Task, analysis); len(split) > 1 {
+			analysis.ProposedSplit = split
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf(
+				"metric task.decomposition.split_proposed value=1 parent_task_id=%s child_count=%d complexity_total=%d",
+				s.rt.Task.ID, len(split), score.Total))
+		}
+	}
+	if s.taskUpdate != nil {
+		if scoreRaw, mErr := json.Marshal(score); mErr == nil {
+			if _, uErr := s.taskUpdate.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{ComplexityScore: scoreRaw}); uErr != nil {
+				s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to persist complexity_score: %v", uErr))
+			}
+		}
+	}
+
 	analysis.SpecHash = ""
 	rawBytes, _ := json.Marshal(analysis)
 	hash := sha256.Sum256(rawBytes)

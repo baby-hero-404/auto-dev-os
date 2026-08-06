@@ -20,7 +20,20 @@ import (
 // directly from an HTTP request path (PR approve, PR-merged webhook), and
 // blocking those on cleanup would add unrelated latency to the response.
 func (m *Manager) CleanupWorkspaceAfterFinalState(ctx context.Context, taskID string) {
-	m.ReleaseWorkspaceLock(taskID)
+	m.ReleaseWorkspaceLock(ctx, taskID)
+
+	// A decomposition child shares its parent's workspace (models.
+	// WorkspaceOwnerID) with the rest of the family. Reaching a final state
+	// itself only means *this* child is done, not that the whole family is
+	// — a not-yet-started sibling still needs that shared clone. Skip disk
+	// cleanup here and let the parent's own terminal transition
+	// (completeDecomposedParent, decomposition.go) trigger it once every
+	// child has actually finished.
+	if m.Tasks != nil {
+		if task, err := m.Tasks.GetByID(ctx, taskID); err == nil && task.ParentTaskID != nil {
+			return
+		}
+	}
 
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
@@ -36,7 +49,7 @@ func (m *Manager) CleanupWorkspaceAfterFinalState(ctx context.Context, taskID st
 // (main checkout and worktrees alike) while preserving logs, specs, and
 // captured diffs/metadata, which live outside code/repos/ and are untouched.
 func (m *Manager) PartialCleanupWorkspace(ctx context.Context, taskID string) error {
-	m.ReleaseWorkspaceLock(taskID)
+	m.ReleaseWorkspaceLock(ctx, taskID)
 
 	root := sandbox.WorkspacePath(m.WorkspaceRoot, taskID)
 	wp := paths.NewOSWorkspacePaths(m.WorkspaceRoot)
@@ -194,7 +207,7 @@ func (m *Manager) RemoveWorkspace(taskID string) error {
 	if strings.TrimSpace(taskID) == "" {
 		return fmt.Errorf("task id is required")
 	}
-	m.ReleaseWorkspaceLock(taskID)
+	m.ReleaseWorkspaceLock(context.Background(), taskID)
 
 	// Finding 8: DB Checkpoint & Artifact Pruning
 	if m.Workflows != nil {

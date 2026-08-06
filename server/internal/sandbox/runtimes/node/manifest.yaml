@@ -1,0 +1,12 @@
+id: node
+# Built from docker/runtimes/node/Dockerfile (FROM autocode-base:latest) via
+# `make sandbox-images`. Not built on-demand — see manager.go's comment on
+# why no on-demand `docker build` happens in the request path.
+image: autocode/node:latest
+detect:
+  - package.json
+cache:
+  - host: ~/.npm
+    container: /home/agent/.npm
+setup: []
+healthcheck: "node --version"

@@ -104,6 +104,65 @@ func (h *TaskHandler) RequestAnalysisChanges(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, t)
 }
 
+type approveSplitRequest struct {
+	Children []models.ChildTaskSpec `json:"children"`
+	Mode     string                 `json:"mode"`
+}
+
+// ApproveSplit is the task-subtask-decomposition operator-approval endpoint
+// (docs/openspecs/task-subtask-decomposition, specs.md "Operator approves
+// the split"): creates the child Task rows and kicks off sequential
+// dispatch of the first child.
+func (h *TaskHandler) ApproveSplit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	var input approveSplitRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	children, err := h.svc.ApproveSplit(r.Context(), id, input.Children, input.Mode)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if h.orch != nil {
+		if err := h.orch.DispatchDecomposedParent(r.Context(), id); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, envelope{"children": children})
+}
+
+// RejectSplit is the "operator declines the proposed decomposition" path —
+// the task falls through to the existing single-task execution, unchanged.
+func (h *TaskHandler) RejectSplit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	t, err := h.svc.RejectSplit(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// RetryBlockedParent resumes a TaskStatusBlocked decomposed parent at
+// exactly its recorded failing child (specs.md Failure Scenario: "A child
+// task fails" — resume behavior).
+func (h *TaskHandler) RetryBlockedParent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	if h.orch == nil {
+		writeError(w, http.StatusNotFound, "orchestrator not found")
+		return
+	}
+	t, err := h.orch.RetryBlockedParent(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
 // GetSpec reads the CLI spec-first flow's 4 OpenSpec docs live off the
 // task's worktree, for the frontend Spec panel.
 func (h *TaskHandler) GetSpec(w http.ResponseWriter, r *http.Request) {

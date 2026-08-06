@@ -72,6 +72,9 @@ type Orchestrator struct {
 	credentialPool      CredentialAvailability
 	cooldownSetter      CooldownSetter
 	credStatusSetter    CredentialStatusSetter
+	taskAttempts        TaskAttemptRepository
+	decompositionThreshold   int
+	decompositionModeDefault string
 }
 
 func (o *Orchestrator) wake() {
@@ -256,6 +259,23 @@ func WithGitConfig(gitConfig config.GitConfig) Option {
 	}
 }
 
+// WithTaskAttemptRepository wires the repo used to create/finalize
+// TaskAttempt rows around decomposed child dispatch (task-subtask-decomposition).
+func WithTaskAttemptRepository(repo TaskAttemptRepository) Option {
+	return func(o *Orchestrator) {
+		o.taskAttempts = repo
+	}
+}
+
+// WithDecompositionConfig wires the analyze-time split-trigger threshold and
+// the org/project default decomposition_mode (task-subtask-decomposition).
+func WithDecompositionConfig(threshold int, modeDefault string) Option {
+	return func(o *Orchestrator) {
+		o.decompositionThreshold = threshold
+		o.decompositionModeDefault = modeDefault
+	}
+}
+
 func WithLLMProvider(provider llm.Provider) Option {
 	return func(o *Orchestrator) {
 		o.llm = provider
@@ -339,7 +359,7 @@ func (o *Orchestrator) UpdateTaskSpec(ctx context.Context, taskID string, req mo
 	if err != nil {
 		return err
 	}
-	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, taskID), "specs")
+	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task)), "specs")
 	if _, err := os.Stat(specDir); err != nil {
 		if o.repoutil != nil {
 			repoPath, repoErr := o.repoutil.GetTaskRepoHostPath(ctx, task)
@@ -463,7 +483,7 @@ func (o *Orchestrator) RetryFromLastStep(ctx context.Context, taskID string) (*m
 				"status":     models.WorkflowJobStatusFailed,
 				"last_error": "superseded by retry",
 			})
-			o.releaseWorkspaceLock(taskID)
+			o.releaseWorkspaceLock(ctx, taskID)
 		}
 	}
 
@@ -650,7 +670,7 @@ func (o *Orchestrator) GetTaskSpec(ctx context.Context, taskID string) (*models.
 	if err != nil {
 		return nil, err
 	}
-	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, taskID), "specs")
+	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, models.WorkspaceOwnerID(task)), "specs")
 	if _, err := os.Stat(specDir); err != nil {
 		if o.repoutil != nil {
 			repoPath, repoErr := o.repoutil.GetTaskRepoHostPath(ctx, task)
@@ -784,7 +804,7 @@ func (o *Orchestrator) CancelJob(ctx context.Context, taskID string) error {
 		}
 	}
 
-	o.releaseWorkspaceLock(taskID)
+	o.releaseWorkspaceLock(ctx, taskID)
 	o.wake()
 	return nil
 }

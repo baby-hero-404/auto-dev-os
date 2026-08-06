@@ -1,0 +1,15 @@
+id: python
+# Built from docker/runtimes/python/Dockerfile (FROM autocode-base:latest)
+# via `make sandbox-images`.
+image: autocode/python:latest
+# Both marker files are checked; either one alone is enough to detect a
+# Python project (some repos ship only requirements.txt, others have moved
+# fully to pyproject.toml with no requirements.txt at all).
+detect:
+  - requirements.txt
+  - pyproject.toml
+cache:
+  - host: ~/.cache/pip
+    container: /home/agent/.cache/pip
+setup: []
+healthcheck: "python3 --version"

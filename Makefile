@@ -11,7 +11,7 @@ WEB_PORT ?= 3000
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
 LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
 
-.PHONY: help init build clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build clone-references rollout-gate
+.PHONY: help init build clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build sandbox-images clone-references rollout-gate
 
 # Default target displays the help menu
 .DEFAULT_GOAL := help
@@ -71,6 +71,23 @@ sandbox-build: ## Build the Docker sandbox image for agents
 		--build-arg USER_UID=$(shell id -u) \
 		--build-arg USER_GID=$(shell id -g) \
 		-f docker/Dockerfile.sandbox . --network host
+
+sandbox-images: ## Build the layered per-runtime sandbox images (autocode-base + node/python/java/go/flutter), tagged to match server/internal/sandbox/runtimes/*/manifest.yaml's image: fields. Not wired into any request-time code path — SandboxManager only selects an already-built tag, never builds one live.
+	@echo "==> Building autocode-base image..."
+	docker build -t autocode-base:latest \
+		--build-arg USER_UID=$(shell id -u) \
+		--build-arg USER_GID=$(shell id -g) \
+		-f docker/runtimes/base/Dockerfile . --network host
+	@echo "==> Building node runtime image..."
+	docker build -t autocode/node:latest -f docker/runtimes/node/Dockerfile docker/runtimes/node --network host
+	@echo "==> Building python runtime image..."
+	docker build -t autocode/python:latest -f docker/runtimes/python/Dockerfile docker/runtimes/python --network host
+	@echo "==> Building java runtime image..."
+	docker build -t autocode/java:latest -f docker/runtimes/java/Dockerfile docker/runtimes/java --network host
+	@echo "==> Building go runtime image..."
+	docker build -t autocode/go:latest -f docker/runtimes/go/Dockerfile docker/runtimes/go --network host
+	@echo "==> Building flutter runtime image..."
+	docker build -t autocode/flutter:latest -f docker/runtimes/flutter/Dockerfile docker/runtimes/flutter --network host
 
 # ── Running Development Servers (Host-Direct + Docker DB) ────────────────
 

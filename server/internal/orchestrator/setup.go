@@ -71,9 +71,9 @@ func (o *Orchestrator) cleanupWorkspaceAfterFinalState(ctx context.Context, task
 	o.wkspace.CleanupWorkspaceAfterFinalState(ctx, taskID)
 }
 
-func (o *Orchestrator) releaseWorkspaceLock(taskID string) {
+func (o *Orchestrator) releaseWorkspaceLock(ctx context.Context, taskID string) {
 	o.initWkspace()
-	o.wkspace.ReleaseWorkspaceLock(taskID)
+	o.wkspace.ReleaseWorkspaceLock(ctx, taskID)
 }
 
 func (o *Orchestrator) RemoveWorkspace(taskID string) error {

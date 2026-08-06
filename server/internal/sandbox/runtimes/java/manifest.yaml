@@ -1,0 +1,13 @@
+id: java
+# Built from docker/runtimes/java/Dockerfile (FROM autocode-base:latest) via
+# `make sandbox-images`.
+image: autocode/java:latest
+detect:
+  - pom.xml
+cache:
+  - host: ~/.m2
+    container: /home/agent/.m2
+  - host: ~/.gradle
+    container: /home/agent/.gradle
+setup: []
+healthcheck: "java -version"

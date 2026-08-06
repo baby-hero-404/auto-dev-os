@@ -11,6 +11,8 @@ import { TaskHeroCards } from "./TaskHeroCards";
 import { TaskSubtasks } from "./TaskSubtasks";
 import { TaskSidebar } from "./TaskSidebar";
 import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
+import { SplitProposalCard } from "./SplitProposalCard";
+import { BlockedTaskNotice } from "./BlockedTaskNotice";
 
 import { SupportingAccordion } from "./SupportingAccordion";
 
@@ -148,10 +150,13 @@ export function TaskDetailLayout() {
             </div>
           )}
 
+        <SplitProposalCard />
+        <BlockedTaskNotice />
+
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start mb-8">
           <div id="hero-cards-section" className="flex flex-col gap-4">
             <TaskHeroCards />
-            {!isCliFlow && <TaskSubtasks />}
+            <TaskSubtasks />
           </div>
 
           <div className="flex flex-col gap-4">

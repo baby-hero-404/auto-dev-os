@@ -47,6 +47,18 @@ func NewDockerRuntime(config DockerConfig) (*DockerRuntime, error) {
 	return &DockerRuntime{client: cli, config: config}, nil
 }
 
+// resolveImage returns requestImage if set, falling back to the runtime's
+// configured default image otherwise — the "empty = today's exact behavior"
+// contract CommandRequest.Image documents, so a caller that never opts into
+// per-runtime image selection (i.e. everything before SandboxManager
+// existed) is unaffected.
+func (r *DockerRuntime) resolveImage(requestImage string) string {
+	if requestImage != "" {
+		return requestImage
+	}
+	return r.config.Image
+}
+
 func (r *DockerRuntime) Health(ctx context.Context) error {
 	if _, err := r.client.Ping(ctx); err != nil {
 		return fmt.Errorf("ping docker daemon: %w", err)
@@ -287,6 +299,21 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 			}
 		}
 
+		// req.ExtraCacheMounts (SandboxManager-resolved runtime manifest
+		// caches, e.g. flutter's ~/.pub-cache) are additive to the hardcoded
+		// cacheDirs above, not a replacement — same os.Stat-guarded,
+		// writable-bind pattern, since these caches also need write access
+		// to install anything not already present.
+		for targetContainerPath, absHostPath := range req.ExtraCacheMounts {
+			if stat, err := os.Stat(absHostPath); err == nil && stat.IsDir() {
+				mounts = append(mounts, mount.Mount{
+					Type:   mount.TypeBind,
+					Source: absHostPath,
+					Target: targetContainerPath,
+				})
+			}
+		}
+
 		// Inject host CLI credentials into the sandbox so the container can
 		// automatically utilize the host's existing OAuth sessions without
 		// manual config. A per-org CredentialFiles entry targeting the same
@@ -476,7 +503,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	networkMode := container.NetworkMode(resolvedNetworkMode)
 
 	createResp, err := r.client.ContainerCreate(ctx, &container.Config{
-		Image:      r.config.Image,
+		Image:      r.resolveImage(req.Image),
 		Cmd:        req.Command,
 		Env:        env,
 		WorkingDir: "/workspace",
@@ -723,7 +750,7 @@ func (r *DockerRuntime) RunInteractive(ctx context.Context, req CommandRequest, 
 	networkMode := container.NetworkMode(resolvedNetworkMode)
 
 	createResp, err := r.client.ContainerCreate(ctx, &container.Config{
-		Image:        r.config.Image,
+		Image:        r.resolveImage(req.Image),
 		Cmd:          req.Command,
 		Env:          env,
 		WorkingDir:   "/workspace",

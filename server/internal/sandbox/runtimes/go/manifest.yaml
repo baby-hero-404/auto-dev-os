@@ -1,0 +1,11 @@
+id: go
+# Built from docker/runtimes/go/Dockerfile (FROM autocode-base:latest) via
+# `make sandbox-images`.
+image: autocode/go:latest
+detect:
+  - go.mod
+cache:
+  - host: ~/go/pkg/mod
+    container: /go/pkg/mod
+setup: []
+healthcheck: "go version"

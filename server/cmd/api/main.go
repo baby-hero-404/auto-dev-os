@@ -82,6 +82,7 @@ func run() error {
 	}
 	roleTemplateRepo := repository.NewRoleTemplateRepo(db)
 	taskRepo := repository.NewTaskRepo(db)
+	taskAttemptRepo := repository.NewTaskAttemptRepo(db)
 	ruleRepo := repository.NewRuleRepo(db)
 	skillRepo := repository.NewSkillRepo(db)
 	skillSourceRepo := repository.NewSkillSourceRepo(db)
@@ -208,6 +209,8 @@ func run() error {
 	opts = append(opts, orchestrator.WithCredentialAvailability(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithCooldownSetter(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithCredentialStatusSetter(credentialPoolSvc))
+	opts = append(opts, orchestrator.WithTaskAttemptRepository(taskAttemptRepo))
+	opts = append(opts, orchestrator.WithDecompositionConfig(cfg.Execution.DecompositionThreshold, cfg.Execution.DecompositionModeDefault))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
@@ -380,6 +383,11 @@ func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPool
 }
 
 func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {
+	registry, err := sandbox.NewRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("load sandbox runtime manifests: %w", err)
+	}
+
 	switch cfg.Sandbox.Runtime {
 	case "docker":
 		runtime, err := sandbox.NewDockerRuntime(sandbox.DockerConfig{
@@ -397,9 +405,13 @@ func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {
 		if err := runtime.Health(ctx); err != nil {
 			return nil, err
 		}
-		return runtime, nil
+		return sandbox.NewManager(runtime, registry), nil
 	case "", "stub":
-		return sandbox.NewStubRuntime(), nil
+		// SandboxManager wrapping StubRuntime is still a transparent
+		// passthrough for dev/test mode: StubRuntime ignores CommandRequest.
+		// Image/ExtraCacheMounts entirely (see sandbox.go), so detection
+		// resolving a manifest here has no observable effect beyond that.
+		return sandbox.NewManager(sandbox.NewStubRuntime(), registry), nil
 	default:
 		return nil, fmt.Errorf("unsupported SANDBOX_RUNTIME %q", cfg.Sandbox.Runtime)
 	}

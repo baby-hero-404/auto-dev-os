@@ -52,6 +52,15 @@ sandbox:
   memory_mb: 4096
   nano_cpus: 1000000000
   disable_networking: false
+  # Timeout for generic sandbox steps (runSandboxStep/runSandboxStepInWorktree
+  # in orchestrator/sandbox.go — git/build/setup commands, NOT the CLI agent's
+  # own conversation turn, which uses CLIProfile.TimeoutMinutes/defaultCLITimeout
+  # instead). Without an explicit default here, cfg.Sandbox.TimeoutMinutes is
+  # the Go zero value (0), WithSandboxTimeout's `if timeout > 0` guard skips
+  # applying it, and Orchestrator silently keeps its 5-minute struct-literal
+  # fallback — enough for `git status` but not for a slow `npm install` or
+  # `flutter pub get` on a cold cache. Override via env SANDBOX_TIMEOUT_MINUTES.
+  timeout_minutes: 60
 
 worker:
   enabled: true
@@ -73,5 +82,12 @@ execution:
   max_tool_result_chars: 8000
   max_tool_iterations: 15
   rollout_violation_threshold_pct: 1.0
+  # decomposition_threshold: ComplexityScore.Total above which analyze
+  # proposes splitting a task into sequential sub-tasks (task-subtask-
+  # decomposition). Tune post-launch without a code change.
+  decomposition_threshold: 100
+  # decomposition_mode_default: org/project fallback when neither is set —
+  # "disabled" ships this feature fully opt-in (manual|auto|disabled).
+  decomposition_mode_default: "disabled"
 
 

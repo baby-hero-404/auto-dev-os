@@ -54,13 +54,14 @@ Bước 6: Con Người Duyệt & Merge
    Reject → Task quay lại fixing hoặc chuyển failed.
 ```
 
-## Vòng Đời Task (12 Trạng Thái)
+## Vòng Đời Task (14 Trạng Thái)
 
 > Bảng này là nguồn canonical cho toàn bộ vòng đời + chính sách hoàn thành task — được tham chiếu bởi §08 Workflow Engine ("Task Completion Policy") và §09 PR & Human Review thay vì lặp lại.
 
 ```
-todo → context_loading → analyzing → spec_review → coding ⟷ reviewing ⟷ fixing → testing → pr_ready → human_review → merged
-                                                                                                                      ↘ failed
+todo → context_loading → analyzing ┬→ spec_review ------------------------┬→ coding ⟷ reviewing ⟷ fixing → testing → pr_ready → human_review → merged
+                                   └→ planning_split → (subtasks sequential) ┘                          │                                ↘ failed
+                                                                                                        └→ blocked (child failed)
 ```
 
 | Phase | Status | Mô tả |
@@ -69,10 +70,12 @@ todo → context_loading → analyzing → spec_review → coding ⟷ reviewing 
 | | `context_loading` | Agent đang checkout repo và nạp ngữ cảnh dự án |
 | | `analyzing` | Agent Planner đang phân tích, tạo spec, đánh giá complexity + risk |
 | | `spec_review` | Con người review spec/plan. Easy + low-risk → auto-skip; Easy + high-risk hoặc Medium/Hard → chờ approve |
-| ⚡ **Executing** | `coding` | Agent đang viết code (có thể song song theo ownership) |
+| | `planning_split` | Cổng kiểm soát phân rã task: khi Complexity Score vượt ngưỡng, chờ con người duyệt kịch bản chia Sub-tasks con (`manual` mode) |
+| ⚡ **Executing** | `coding` | Agent đang viết code (hoặc chạy tuần tự theo các Sub-task con) |
 | | `reviewing` | Agent Reviewer đang review chéo code |
 | | `fixing` | Agent đang sửa lỗi từ review (bounded: max `max_review_fix_cycles` vòng) |
 | | `testing` | Agent đang chạy full test suite + lint + build |
+| | `blocked` | Tạm dừng Task cha khi một Sub-task con bị lỗi. Giữ nguyên tiến độ các child đã xong, cho phép Retry riêng child bị nghẽn |
 | ✅ **Approval** | `pr_ready` | PR đã được tạo, chờ human review. Task **chưa** hoàn thành |
 | | `human_review` | Con người đang review PR |
 | | `merged` | Hoàn tất — PR đã merge, task hoàn thành |
@@ -228,6 +231,15 @@ logs/llm/call-{nnn}-{step}/
   ├── parsed.json
   └── metadata.json   # Lưu step, call_number, token usage, duration, retry count
 ```
+
+## Map-Reduce Sub-task Decomposition (🟢 Implemented)
+
+Hệ thống phân rã Task tự động (`docs/openspecs/task-subtask-decomposition/`) giải quyết dứt điểm sự cố quá tải Context (như các task lớn 350k input token bị timeout):
+- **Complexity Score đa yếu tố:** Tự động tính toán điểm phức tạp dựa trên token estimate, số file ảnh hưởng, độ sâu phụ thuộc và migration risk (`server/internal/orchestrator/steps/decompose.go`).
+- **Trạng thái `planning_split` & Review UI:** Khi điểm complexity vượt ngưỡng, hệ thống tạo `ChildTaskSpec[]` đề xuất. Trong chế độ `manual`, màn hình Web UI (`SplitProposalCard.tsx`) cho phép con người xem xét, chỉnh sửa từng task con và bấm **Approve Split** hoặc **Reject Split**.
+- **Chạy tuần tự trên Lineage chung:** Các task con được tạo thành các record `Task` chuẩn (`sequence_index`, `parent_task_id`), commit tuần tự lên cùng branch của Task cha mà không tạo worktree cô lập.
+- **Trạng thái `blocked` & Child Retry:** Nếu 1 child bị lỗi, Task cha chuyển sang `blocked` (không phải `failed`), lưu `blocked_child_id`. Nút **Retry Blocked Child** trên Web UI (`BlockedTaskNotice.tsx`) gọi API `/tasks/{taskID}/split/retry` để chạy lại riêng child lỗi mà không làm mất tiến độ các child đã xong.
+- **Deterministic Reduce Rollup:** Bước `reduce` (`server/internal/orchestrator/steps/reduce.go`) gộp danh sách file thay đổi (union) và tổng hợp chi phí/thời gian mà không gọi LLM nhồi lại raw chat logs, giúp chống phình Context ở Task cha.
 
 ## Tích Hợp Planned
 

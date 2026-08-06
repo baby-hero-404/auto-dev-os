@@ -21,6 +21,13 @@ const (
 	TaskStatusHumanReview    = "human_review"
 	TaskStatusMerged         = "merged"
 	TaskStatusFailed         = "failed"
+	// TaskStatusBlocked is reachable only from a running decomposed parent
+	// task whose current child (by SequenceIndex) failed — it is never a
+	// valid destination for a non-decomposed task (docs/openspecs/
+	// task-subtask-decomposition/specs.md Invariants). Unlike TaskStatusFailed,
+	// it does not imply "this work did not happen": completed sibling
+	// children's progress remains intact and the parent is resumable.
+	TaskStatusBlocked = "blocked"
 )
 
 // Task complexity levels.
@@ -37,7 +44,7 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusContextLoading: {TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusTesting, TaskStatusPrReady, TaskStatusFailed},
 	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
 	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed, TaskStatusAnalyzing},
-	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusFailed, TaskStatusAnalyzing},
+	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusFailed, TaskStatusAnalyzing, TaskStatusBlocked, TaskStatusMerged},
 	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing, TaskStatusAnalyzing},
@@ -45,6 +52,12 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusHumanReview:    {TaskStatusPrReady, TaskStatusMerged, TaskStatusFixing, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusMerged:         {},
 	TaskStatusFailed:         {TaskStatusTodo, TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusPrReady, TaskStatusHumanReview},
+	// TaskStatusBlocked (decomposed-parent-only, see the constant's doc comment):
+	// retrying resumes to TaskStatusCoding (redispatches the failed child in
+	// place), or the parent proceeds forward to TaskStatusMerged once every
+	// child eventually succeeds and Reduce completes; TaskStatusFailed remains
+	// reachable for an operator who abandons the decomposed run entirely.
+	TaskStatusBlocked: {TaskStatusCoding, TaskStatusMerged, TaskStatusFailed},
 }
 
 const (
@@ -84,8 +97,45 @@ type Task struct {
 	PRMetadata      json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
 	ExecutionEngine *string         `json:"execution_engine,omitempty" gorm:"column:execution_engine"` // nil = inherit from project
 	SubTasks        []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	// SequenceIndex is this task's 0-based dispatch order among its siblings
+	// when it is a decomposed child (nil for a non-decomposed task or a
+	// decomposition parent). Children execute strictly in this order in v1
+	// (docs/openspecs/task-subtask-decomposition).
+	SequenceIndex *int `json:"sequence_index,omitempty"`
+	// DecompositionMode is "manual" | "auto" | "disabled", resolved at
+	// analyze time (task override, else project default, else "manual").
+	// Nil means "not yet resolved for this task" and behaves like the
+	// pre-existing single-task path (no auto-split).
+	DecompositionMode *string `json:"decomposition_mode,omitempty"`
+	// ComplexityScore is the analyze-time split-risk breakdown (tokens,
+	// affected files, dependency depth, deliverable count, total), stored
+	// regardless of whether a split was proposed (telemetry/tuning value).
+	ComplexityScore json.RawMessage `json:"complexity_score,omitempty" gorm:"type:jsonb"`
+	// DependsOn holds sibling child-task IDs this task's Contract declared a
+	// dependency on. Captured from Phase 1 but not used for scheduling in
+	// v1 — dispatch is strictly SequenceIndex order (see proposal.md Non-goals).
+	DependsOn pq.StringArray `json:"depends_on,omitempty" gorm:"type:text[]"`
+	// BlockedChildID is the child task ID whose failure put this (parent)
+	// task into TaskStatusBlocked. Nil unless Status == TaskStatusBlocked.
+	BlockedChildID *string   `json:"blocked_child_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// WorkspaceOwnerID returns the task ID whose on-disk workspace and git
+// branch a given task's execution should use. A decomposed child (v1 only
+// supports a single level of parent/child, so ParentTaskID is always the
+// root) shares its parent's workspace/branch lineage so children execute
+// sequentially on the same worktree, each committing on top of the last,
+// rather than each getting an isolated clone
+// (docs/openspecs/task-subtask-decomposition/design.md, "Key Decisions").
+// Every other identity concern (logging, checkpoints, TaskAttempt rows, PR
+// association, telemetry) must keep using task.ID directly, not this value.
+func WorkspaceOwnerID(task *Task) string {
+	if task.ParentTaskID != nil && *task.ParentTaskID != "" {
+		return *task.ParentTaskID
+	}
+	return task.ID
 }
 
 // CreateTaskInput is the payload to create a task.
@@ -119,6 +169,12 @@ type UpdateTaskInput struct {
 	PRMetadata      json.RawMessage `json:"pr_metadata,omitempty"`
 	ParentTaskID    *string         `json:"parent_task_id,omitempty"`
 	ExecutionEngine *string         `json:"execution_engine,omitempty"`
+	SequenceIndex     *int             `json:"sequence_index,omitempty"`
+	DecompositionMode *string          `json:"decomposition_mode,omitempty"`
+	ComplexityScore   json.RawMessage  `json:"complexity_score,omitempty"`
+	DependsOn         *pq.StringArray  `json:"depends_on,omitempty"`
+	BlockedChildID    *string          `json:"blocked_child_id,omitempty"`
+	ClearBlockedChild bool             `json:"-"`
 }
 
 type ComplexityDetails struct {
@@ -140,6 +196,70 @@ type AffectedFile struct {
 	File       string  `json:"file"`
 	Confidence float64 `json:"confidence"`
 	Reason     string  `json:"reason"`
+}
+
+// ComplexityScore is the analyze-time, multi-factor split-risk breakdown
+// (docs/openspecs/task-subtask-decomposition). A single input-token
+// threshold under/over-triggers depending on task shape, so risk is
+// computed from four independent factors and summed into Total.
+type ComplexityScore struct {
+	Tokens           int `json:"tokens"`
+	Files            int `json:"files"`
+	DependencyDepth  int `json:"dependency_depth"`
+	DeliverableCount int `json:"deliverable_count"`
+	Total            int `json:"total"`
+}
+
+// ChildTaskContract is the Contract carried by a proposed ChildTaskSpec:
+// what the child can assume as input, and what it is expected to produce.
+// The Contract makes a wrong split boundary detectable immediately (a child
+// that doesn't touch its OutputExpected files) instead of surfacing only as
+// a confusing downstream failure.
+type ChildTaskContract struct {
+	InputPreviousSummary *ChildTaskSummary `json:"input_previous_summary,omitempty"`
+	OutputExpected       []string          `json:"output_expected"`
+}
+
+// ChildTaskSpec is analyze's pre-approval output: one proposed child task in
+// an ordered split. DependsOn holds indices into the same proposed list
+// (resolved to real task IDs only once children are actually created).
+type ChildTaskSpec struct {
+	Title        string            `json:"title"`
+	Instructions string            `json:"instructions"`
+	Contract     ChildTaskContract `json:"contract"`
+	DependsOn    []int             `json:"depends_on,omitempty"`
+}
+
+// ChildTaskSummary is a child task's post-execution structured outcome —
+// the only thing the next sibling or the Reduce step ever consumes, never a
+// child's raw CLI transcript (docs/openspecs/task-subtask-decomposition
+// Rules: "The Reduce aggregation step never re-sends a child's full raw CLI
+// transcript...").
+type ChildTaskSummary struct {
+	TaskID            string   `json:"task_id"`
+	SequenceIndex     int      `json:"sequence_index"`
+	ChangedFiles      []string `json:"changed_files"`
+	TestsPassed       int      `json:"tests_passed"`
+	TestsFailed       int      `json:"tests_failed"`
+	CostUSD           float64  `json:"cost_usd"`
+	DurationSeconds   int      `json:"duration_seconds"`
+	OneLineOutcome    string   `json:"one_line_outcome"`
+	ContractDeviation *string  `json:"contract_deviation,omitempty"`
+}
+
+// DecomposedTaskSummary is the parent's deterministic Reduce output: the
+// aggregate of every child's ChildTaskSummary, plus decomposition metrics.
+type DecomposedTaskSummary struct {
+	ChangedFiles       []string           `json:"changed_files"`
+	TestsPassed        int                `json:"tests_passed"`
+	TestsFailed        int                `json:"tests_failed"`
+	CostUSD            float64            `json:"cost_usd"`
+	DurationSeconds    int                `json:"duration_seconds"`
+	Children           []ChildTaskSummary `json:"children"`
+	TokensBeforeSplit  int                `json:"tokens_before_split"`
+	TokensAfterSplit   int                `json:"tokens_after_split"`
+	DurationSingleEst  int                `json:"duration_single_estimate_seconds"`
+	CostSavedUSD       float64            `json:"cost_saved_usd"`
 }
 
 type TaskDAG struct {
@@ -258,10 +378,10 @@ type TaskAnalysis struct {
 	TaskRules              []string            `json:"task_rules,omitempty"`
 	RequiredSkills         []string            `json:"required_skills,omitempty"`
 	RiskDomains            []string            `json:"risk_domains,omitempty"`
-	ProposalMD             string              `json:"-"`
-	SpecsMD                string              `json:"-"`
-	DesignMD               string              `json:"-"`
-	TasksMD                string              `json:"-"`
+	ProposalMD             string              `json:"proposal_md,omitempty"`
+	SpecsMD                string              `json:"specs_md,omitempty"`
+	DesignMD               string              `json:"design_md,omitempty"`
+	TasksMD                string              `json:"tasks_md,omitempty"`
 	IncludeSpecInMR        bool                `json:"include_spec_in_mr"`
 	SpecFeedbackText       string              `json:"spec_feedback_text,omitempty"`
 	Tasks                  []TaskDAG           `json:"tasks,omitempty"`
@@ -269,6 +389,13 @@ type TaskAnalysis struct {
 	RisksDetails           []RiskDetail        `json:"risks_details,omitempty"`
 	RequiredSkillsMap      map[string][]string `json:"required_skills_map,omitempty"`
 	RetryCount             int                 `json:"retry_count,omitempty"`
+	// ComplexityScore and ProposedSplit are the task-subtask-decomposition
+	// feature's analyze-time output (docs/openspecs/task-subtask-decomposition).
+	// ComplexityScore is always computed and recorded; ProposedSplit is only
+	// populated when the score crosses the configured threshold and
+	// decomposition_mode isn't "disabled".
+	ComplexityScore *ComplexityScore `json:"complexity_score,omitempty"`
+	ProposedSplit   []ChildTaskSpec  `json:"proposed_split,omitempty"`
 }
 
 // FrozenContext holds the immutable execution contract for a workflow run.

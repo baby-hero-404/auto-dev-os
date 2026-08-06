@@ -121,6 +121,20 @@ type TaskRepository interface {
 	GetByID(ctx context.Context, id string) (*models.Task, error)
 	Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error)
 	ListRecentByStatus(ctx context.Context, statuses []string, limit int) ([]models.Task, error)
+	// ListSubTasks returns a decomposed parent's children (task-subtask-decomposition
+	// dispatch/reduce; already-shipped repo method, see internal/repository/task.go).
+	ListSubTasks(ctx context.Context, parentID string) ([]models.Task, error)
+}
+
+// TaskAttemptRepository records per-execution-attempt forensics (start/end
+// time, exit status, tokens, cost) separately from the Task row itself
+// (docs/openspecs/task-subtask-decomposition).
+type TaskAttemptRepository interface {
+	Create(ctx context.Context, taskID string, sandboxRef string) (*models.TaskAttempt, error)
+	Finalize(ctx context.Context, id string, input models.FinalizeTaskAttemptInput) (*models.TaskAttempt, error)
+	ListByTaskID(ctx context.Context, taskID string) ([]models.TaskAttempt, error)
+	GetLatestByTaskID(ctx context.Context, taskID string) (*models.TaskAttempt, error)
+	ListByTaskIDs(ctx context.Context, taskIDs []string) ([]models.TaskAttempt, error)
 }
 
 // WorkflowRepository manages workflow jobs, checkpoints, and logs.

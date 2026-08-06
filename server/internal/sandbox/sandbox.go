@@ -80,6 +80,24 @@ type CommandRequest struct {
 	// unused. Runtimes without live log streaming (e.g. StubRuntime) ignore
 	// it.
 	IdleTimeout time.Duration
+
+	// Image, if non-empty, overrides DockerConfig.Image for this single
+	// request. Populated by SandboxManager once it has detected a project's
+	// runtime and resolved its manifest's image tag — left empty by every
+	// caller that builds a CommandRequest directly (unchanged today's
+	// fixed-image behavior), so this field is additive, not a breaking
+	// change to any existing call site.
+	Image string
+
+	// ExtraCacheMounts is an additional set of container-path -> host-path
+	// bind mounts, merged on top of docker.go's hardcoded cacheDirs map, not
+	// a replacement for it — replacing the hardcoded set would require
+	// auditing every existing caller that relies on it implicitly. Populated
+	// by SandboxManager from the detected runtime manifest's `cache:` list
+	// (e.g. flutter's ~/.pub-cache). A runtime honoring this must skip
+	// mounting an entry whose host path doesn't exist, matching the
+	// os.Stat-guarded pattern already used for the hardcoded cache dirs.
+	ExtraCacheMounts map[string]string
 }
 
 // DefaultIdleTimeout is the idle-activity timeout (Phase 7, "Smart Idle

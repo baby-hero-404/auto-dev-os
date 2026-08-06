@@ -63,6 +63,10 @@ export const api = {
   approveTaskWorkflow: projects.tasks.approveWorkflow,
   approvePR: projects.tasks.approvePR,
   rejectPR: projects.tasks.rejectPR,
+  approveTaskSplit: projects.tasks.approveSplit,
+  rejectTaskSplit: projects.tasks.rejectSplit,
+  retryTaskSplit: projects.tasks.retrySplit,
+  getTaskSubtasks: projects.tasks.getSubtasks,
   taskArtifacts: projects.tasks.artifacts,
   taskArtifactsByTask: projects.tasks.artifactsByTask,
 

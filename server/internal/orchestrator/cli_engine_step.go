@@ -143,7 +143,7 @@ func (r *cliEngineRunner) buildRequest(ctx context.Context, task *models.Task, a
 	resolvedRole := tool.EffectiveRoleForStep(stepID, agentRole, task)
 	worktreeSuffix := worktreeSuffixForRole(resolvedRole)
 
-	hostWorkspace := sandbox.WorkspacePath(r.o.workspaceRoot, task.ID)
+	hostWorkspace := sandbox.WorkspacePath(r.o.workspaceRoot, models.WorkspaceOwnerID(task))
 
 	// The CLI must run from the actual repo checkout (or its role worktree),
 	// not the bare task workspace root: hostWorkspace only bind-mounts to

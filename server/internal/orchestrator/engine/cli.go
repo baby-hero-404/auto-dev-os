@@ -27,7 +27,7 @@ var ErrConfigInvalid = errors.New("cli engine: invalid configuration")
 const (
 	authPreflightTimeout = 30 * time.Second
 	binaryCheckTimeout   = 30 * time.Second
-	defaultCLITimeout    = 30 * time.Minute
+	defaultCLITimeout    = 3 * time.Hour
 
 	// captureFileMarker/captureFileEndMarker delimit a base64-encoded capture
 	// block in the subprocess's combined stdout/stderr output. The path

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -29,7 +28,7 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", command},
 		NetworkMode: networkMode,
-		Timeout:     5 * time.Minute,
+		Timeout:     o.sandboxTimeout,
 	})
 	if err != nil {
 		return nil, err
@@ -80,7 +79,7 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", wrappedCommand},
 		NetworkMode: networkMode,
-		Timeout:     5 * time.Minute,
+		Timeout:     o.sandboxTimeout,
 	})
 	if err != nil {
 		return nil, err

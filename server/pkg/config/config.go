@@ -69,6 +69,7 @@ type SandboxConfig struct {
 	MemoryMB                        int64  `mapstructure:"memory_mb"`
 	NanoCPUs                        int64  `mapstructure:"nano_cpus"`
 	DisableNetworking               bool   `mapstructure:"disable_networking"`
+	TimeoutMinutes                  int    `mapstructure:"timeout_minutes"`
 }
 
 type WorkerConfig struct {

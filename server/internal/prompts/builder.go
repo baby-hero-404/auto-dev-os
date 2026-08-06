@@ -492,6 +492,23 @@ func resolveTaskAnalysisForCollect(ctx context.Context, task models.Task, stepID
 		}
 	}
 
+	// Load specs from disk (specs/ directory) since they are no longer in DB
+	if wsRoot, ok := ctx.Value(provider.WorkspaceRootKey).(string); ok && wsRoot != "" {
+		specsDir := filepath.Join(wsRoot, "specs")
+		if b, err := os.ReadFile(filepath.Join(specsDir, "proposal.md")); err == nil {
+			analysis.ProposalMD = string(b)
+		}
+		if b, err := os.ReadFile(filepath.Join(specsDir, "specs.md")); err == nil {
+			analysis.SpecsMD = string(b)
+		}
+		if b, err := os.ReadFile(filepath.Join(specsDir, "design.md")); err == nil {
+			analysis.DesignMD = string(b)
+		}
+		if b, err := os.ReadFile(filepath.Join(specsDir, "tasks.md")); err == nil {
+			analysis.TasksMD = string(b)
+		}
+	}
+
 	inputs := StepInputsFromCtx(ctx)
 	if inputs == nil {
 		return analysis

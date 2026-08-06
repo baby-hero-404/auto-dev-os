@@ -258,10 +258,12 @@ type TaskAnalysis struct {
 	TaskRules              []string            `json:"task_rules,omitempty"`
 	RequiredSkills         []string            `json:"required_skills,omitempty"`
 	RiskDomains            []string            `json:"risk_domains,omitempty"`
-	ProposalMD             string              `json:"proposal_md,omitempty"`
-	SpecsMD                string              `json:"specs_md,omitempty"`
-	DesignMD               string              `json:"design_md,omitempty"`
-	TasksMD                string              `json:"tasks_md,omitempty"`
+	ProposalMD             string              `json:"-"`
+	SpecsMD                string              `json:"-"`
+	DesignMD               string              `json:"-"`
+	TasksMD                string              `json:"-"`
+	IncludeSpecInMR        bool                `json:"include_spec_in_mr"`
+	SpecFeedbackText       string              `json:"spec_feedback_text,omitempty"`
 	Tasks                  []TaskDAG           `json:"tasks,omitempty"`
 	ComplexityDetails      *ComplexityDetails  `json:"complexity_details,omitempty"`
 	RisksDetails           []RiskDetail        `json:"risks_details,omitempty"`
@@ -300,6 +302,13 @@ type TaskSpec struct {
 	Design   string           `json:"design"`
 	Tasks    string           `json:"tasks"`
 	Progress TaskSpecProgress `json:"progress"`
+}
+
+type UpdateTaskSpecRequest struct {
+	Proposal *string `json:"proposal,omitempty"`
+	Specs    *string `json:"specs,omitempty"`
+	Design   *string `json:"design,omitempty"`
+	Tasks    *string `json:"tasks,omitempty"`
 }
 
 type ClarifyTaskInput struct {

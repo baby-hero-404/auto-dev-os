@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Sparkles, Check, AlertCircle, ChevronDown, ChevronUp, Edit2, Save, X } from "lucide-react";
 import { Markdown } from "@/components/ui/markdown";
 import { TaskClarificationForm } from "@/components/projects/task-clarification-form";
 import { tasks as tasksApi } from "@/lib/api/projects";
 import { useAuthedSWR } from "@/lib/use-authed-swr";
+import { mutate } from "swr";
 import { useTaskDetail, isAffectedFile } from "./TaskDetailContext";
 
 interface SpecPanelProps {
@@ -30,13 +31,21 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
 
   // Outer collapse: default-collapsed. Uncontrolled fallback when no props given.
   const [internalOpen, setInternalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const isOpen = isExpanded ?? internalOpen;
   const toggleOpen = onToggle ?? (() => setInternalOpen((v) => !v));
 
+  const { data: spec } = useAuthedSWR(
+    taskID ? ["task-spec", taskID] : null,
+    (token) => tasksApi.getSpec(taskID, token)
+  );
+
   const presenceChips = [
     { label: "Scope", present: !!analysisData.scope },
-    { label: "Recommendation", present: !!analysisData.proposal_md },
-    { label: "Architecture", present: !!analysisData.design_md },
+    { label: "Recommendation", present: !!spec?.proposal },
+    { label: "Architecture", present: !!spec?.design },
     { label: "Risks", present: !!(analysisData.risk_domains && analysisData.risk_domains.length > 0) },
   ].filter((c) => c.present);
 
@@ -86,30 +95,45 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
     localStorage.setItem(`task-boundaries-collapsed-${taskID}`, String(nextState));
   };
 
-  const handleSelectSummary = useCallback(() => setActiveSpecTab("summary"), [setActiveSpecTab]);
-  const handleSelectProposal = useCallback(() => setActiveSpecTab("proposal"), [setActiveSpecTab]);
-  const handleSelectSpecs = useCallback(() => setActiveSpecTab("specs"), [setActiveSpecTab]);
-  const handleSelectDesign = useCallback(() => setActiveSpecTab("design"), [setActiveSpecTab]);
-  const handleSelectTasks = useCallback(() => setActiveSpecTab("tasks"), [setActiveSpecTab]);
+  const handleSelectSummary = useCallback(() => {
+    setActiveSpecTab("summary");
+    setIsEditing(false);
+  }, [setActiveSpecTab]);
+
+  const handleEdit = () => {
+    let content = "";
+    if (activeSpecTab === "proposal") content = spec?.proposal || "";
+    if (activeSpecTab === "specs") content = spec?.specs || "";
+    if (activeSpecTab === "design") content = spec?.design || "";
+    if (activeSpecTab === "tasks") content = spec?.tasks || "";
+    setEditContent(content);
+    setIsEditing(true);
+  };
+
+  const handleSave = async () => {
+    if (!token) return;
+    setIsSaving(true);
+    try {
+      await tasksApi.updateSpec(taskID, token, { [activeSpecTab]: editContent });
+      await mutate(["task-spec", taskID]);
+      setIsEditing(false);
+    } catch (e) {
+      console.error("Failed to save spec", e);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleAnswersSubmitted = useCallback(async () => {
     await mutateWorkflow();
   }, [mutateWorkflow]);
 
   const hasMarkdownData = !!(
-    analysisData.proposal_md ||
-    analysisData.specs_md ||
-    analysisData.design_md ||
-    analysisData.tasks_md
+    spec?.proposal ||
+    spec?.specs ||
+    spec?.design ||
+    spec?.tasks
   );
-
-  const { data: cliSpec } = useAuthedSWR(
-    ["task-spec", taskID],
-    (token) => tasksApi.getSpec(taskID, token)
-  );
-
-  if (cliSpec && (cliSpec.proposal || cliSpec.specs || cliSpec.design || cliSpec.tasks)) {
-    return null;
-  }
 
   if (!task?.analysis || !task?.spec_status || task.spec_status === "none" || Object.keys(analysisData).length === 0) {
     return null;
@@ -151,36 +175,36 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
             >
               Summary
             </button>
-            {analysisData.proposal_md && (
+            {spec?.proposal && (
               <button
-                onClick={handleSelectProposal}
+                onClick={() => setActiveSpecTab("proposal")}
                 className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${activeSpecTab === "proposal" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                   }`}
               >
                 Proposal
               </button>
             )}
-            {analysisData.specs_md && (
+            {spec?.specs && (
               <button
-                onClick={handleSelectSpecs}
+                onClick={() => setActiveSpecTab("specs")}
                 className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${activeSpecTab === "specs" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                   }`}
               >
                 Specs
               </button>
             )}
-            {analysisData.design_md && (
+            {spec?.design && (
               <button
-                onClick={handleSelectDesign}
+                onClick={() => setActiveSpecTab("design")}
                 className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${activeSpecTab === "design" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                   }`}
               >
                 Design
               </button>
             )}
-            {analysisData.tasks_md && (
+            {spec?.tasks && (
               <button
-                onClick={handleSelectTasks}
+                onClick={() => setActiveSpecTab("tasks")}
                 className={`px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${activeSpecTab === "tasks" ? "bg-card text-brand-primary shadow-sm ring-1 ring-stroke" : "text-content-muted hover:text-foreground hover:bg-card/50"
                   }`}
               >
@@ -466,11 +490,41 @@ export function SpecPanel({ isExpanded, onToggle }: SpecPanelProps = {}) {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-stroke bg-card p-5 overflow-auto max-h-[75vh] leading-relaxed animate-fade-in shadow-inner text-sm">
-          {activeSpecTab === "proposal" && <Markdown content={analysisData.proposal_md || ""} />}
-          {activeSpecTab === "specs" && <Markdown content={analysisData.specs_md || ""} />}
-          {activeSpecTab === "design" && <Markdown content={analysisData.design_md || ""} />}
-          {activeSpecTab === "tasks" && <Markdown content={analysisData.tasks_md || ""} />}
+        <div className="rounded-lg border border-stroke bg-card overflow-hidden max-h-[75vh] shadow-inner text-sm flex flex-col min-h-[40vh]">
+          {isEditing ? (
+            <div className="flex flex-col h-full flex-1">
+              <div className="bg-surface/50 border-b border-stroke p-2 flex justify-between items-center shrink-0">
+                <span className="text-xs font-semibold text-content-muted capitalize">Editing {activeSpecTab}</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-xs rounded-md border border-stroke hover:bg-surface cursor-pointer flex items-center gap-1">
+                    <X size={14} /> Cancel
+                  </button>
+                  <button onClick={handleSave} disabled={isSaving} className="px-3 py-1 text-xs rounded-md bg-brand-primary text-white hover:bg-brand-primary/90 cursor-pointer flex items-center gap-1 disabled:opacity-50">
+                    <Save size={14} /> {isSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                className="flex-1 w-full p-4 bg-transparent outline-none resize-none font-mono text-sm leading-relaxed"
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="p-5 overflow-auto h-full relative group">
+              <button 
+                onClick={handleEdit}
+                className="absolute top-4 right-4 p-2 bg-surface border border-stroke rounded-md text-content-muted hover:text-foreground hover:bg-card/80 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-sm"
+                title="Edit this tab"
+              >
+                <Edit2 size={16} />
+              </button>
+              {activeSpecTab === "proposal" && <Markdown content={spec?.proposal || ""} />}
+              {activeSpecTab === "specs" && <Markdown content={spec?.specs || ""} />}
+              {activeSpecTab === "design" && <Markdown content={spec?.design || ""} />}
+              {activeSpecTab === "tasks" && <Markdown content={spec?.tasks || ""} />}
+            </div>
+          )}
         </div>
       ))}
     </div>

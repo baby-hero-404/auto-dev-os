@@ -172,6 +172,7 @@ func run() error {
 		orchestrator.WithContextEngine(ctxEngine),
 		orchestrator.WithGitConfig(cfg.Git),
 		orchestrator.WithDisableNetworking(cfg.Sandbox.DisableNetworking),
+		orchestrator.WithSandboxTimeout(time.Duration(cfg.Sandbox.TimeoutMinutes) * time.Minute),
 	}
 
 	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {

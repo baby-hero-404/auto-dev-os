@@ -598,8 +598,7 @@ func (s *AnalyzeStep) buildAnalyzeInstruction(ctx context.Context, stepCtx workf
 }
 
 func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, analysis *models.TaskAnalysis) {
-	changeName := patch.DeriveChangeName(s.rt.Task)
-	changeDir := filepath.Join(localPath, "openspec", "changes", changeName)
+	changeDir := filepath.Join(localPath, "specs")
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to create change directory: %v", err))
 		return
@@ -644,7 +643,8 @@ func (s *AnalyzeStep) writeOpenSpecFiles(ctx context.Context, localPath string, 
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save tasks.md: %v", err))
 	}
 
-	meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", changeName, s.rt.Task.ID)
+	slug := TaskSpecSlug(s.rt.Task)
+	meta := fmt.Sprintf("changeName: %s\ntaskId: %s\nstatus: pending_review\n", slug, s.rt.Task.ID)
 	if err := os.WriteFile(filepath.Join(changeDir, ".openspec.yaml"), []byte(meta), 0o644); err != nil {
 		s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("failed to save .openspec.yaml: %v", err))
 	}

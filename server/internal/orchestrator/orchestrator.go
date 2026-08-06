@@ -57,6 +57,7 @@ type Orchestrator struct {
 	disableNetworking   bool
 	llmTraceEnabled     bool
 	llmLogLevel         string
+	sandboxTimeout      time.Duration
 	maxPhaseCost        float64
 	stateMachineEnabled bool
 	maxToolResultChars  int
@@ -98,6 +99,14 @@ type Option func(*Orchestrator)
 func WithDisableNetworking(disabled bool) Option {
 	return func(o *Orchestrator) {
 		o.disableNetworking = disabled
+	}
+}
+
+func WithSandboxTimeout(timeout time.Duration) Option {
+	return func(o *Orchestrator) {
+		if timeout > 0 {
+			o.sandboxTimeout = timeout
+		}
 	}
 }
 
@@ -274,6 +283,7 @@ func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager 
 		retention:       defaultWorkspaceRetention(),
 		llmTraceEnabled: true,
 		llmLogLevel:     "debug",
+		sandboxTimeout:  5 * time.Minute,
 		wakeChan:        make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
@@ -321,6 +331,51 @@ func (a taskAffectedFilesAdapter) GetAffectedFiles(ctx context.Context, taskID s
 		files = append(files, f.File)
 	}
 	return files, nil
+}
+
+// UpdateTaskSpec overwrites the content of the markdown specification files in the workspace.
+func (o *Orchestrator) UpdateTaskSpec(ctx context.Context, taskID string, req models.UpdateTaskSpecRequest) error {
+	task, err := o.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	specDir := filepath.Join(sandbox.WorkspacePath(o.workspaceRoot, taskID), "specs")
+	if _, err := os.Stat(specDir); err != nil {
+		if o.repoutil != nil {
+			repoPath, repoErr := o.repoutil.GetTaskRepoHostPath(ctx, task)
+			if repoErr == nil {
+				root := o.repoutil.HostWorktreePath(task, repoPath, "")
+				slug := steps.TaskSpecSlug(task)
+				specDir = filepath.Join(root, "docs", "openspecs", slug)
+			}
+		}
+	}
+
+	if _, err := os.Stat(specDir); err != nil {
+		return fmt.Errorf("spec not found: cli_spec has not run yet for this task")
+	}
+
+	if req.Proposal != nil {
+		if err := os.WriteFile(filepath.Join(specDir, "proposal.md"), []byte(*req.Proposal), 0644); err != nil {
+			return err
+		}
+	}
+	if req.Specs != nil {
+		if err := os.WriteFile(filepath.Join(specDir, "specs.md"), []byte(*req.Specs), 0644); err != nil {
+			return err
+		}
+	}
+	if req.Design != nil {
+		if err := os.WriteFile(filepath.Join(specDir, "design.md"), []byte(*req.Design), 0644); err != nil {
+			return err
+		}
+	}
+	if req.Tasks != nil {
+		if err := os.WriteFile(filepath.Join(specDir, "tasks.md"), []byte(*req.Tasks), 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (o *Orchestrator) ListArtifacts(ctx context.Context, jobID string) ([]models.WorkflowArtifact, error) {

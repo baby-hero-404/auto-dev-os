@@ -120,6 +120,24 @@ func (h *TaskHandler) GetSpec(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, spec)
 }
 
+func (h *TaskHandler) UpdateSpec(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	var req models.UpdateTaskSpecRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if h.orch == nil {
+		writeError(w, http.StatusNotFound, "orchestrator not found")
+		return
+	}
+	if err := h.orch.UpdateTaskSpec(r.Context(), id, req); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 type specReviewRequest struct {
 	Action  string `json:"action"`
 	Comment string `json:"comment"`
@@ -186,6 +204,25 @@ func (h *TaskHandler) UpdateAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, err := h.svc.UpdateAnalysis(r.Context(), id, raw)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+type updateSpecConfigRequest struct {
+	IncludeSpecInMR bool `json:"include_spec_in_mr"`
+}
+
+func (h *TaskHandler) UpdateSpecConfig(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "taskID")
+	var input updateSpecConfigRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	t, err := h.svc.UpdateSpecConfig(r.Context(), id, input.IncludeSpecInMR)
 	if err != nil {
 		writeServiceError(w, err)
 		return

@@ -61,6 +61,7 @@ type TaskService interface {
 	ApproveAnalysis(context.Context, string) (*models.Task, error)
 	RequestAnalysisChanges(context.Context, string, models.ClarifyTaskInput) (*models.Task, error)
 	UpdateAnalysis(context.Context, string, json.RawMessage) (*models.Task, error)
+	UpdateSpecConfig(context.Context, string, bool) (*models.Task, error)
 	ListSubTasks(context.Context, string) ([]models.Task, error)
 	CreateSubTask(context.Context, string, models.CreateTaskInput) (*models.Task, error)
 }

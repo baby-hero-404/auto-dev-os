@@ -148,6 +148,20 @@ export const tasks = {
   getSpec(taskID: string, token: string) {
     return request<TaskSpec>(`/tasks/${taskID}/spec`, { token });
   },
+  updateSpecConfig(taskID: string, token: string, includeSpecInMR: boolean) {
+    return request<Task>(`/tasks/${taskID}/specs/config`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ include_spec_in_mr: includeSpecInMR }),
+    });
+  },
+  updateSpec(taskID: string, token: string, payload: Partial<TaskSpec>) {
+    return request<{ status: string }>(`/tasks/${taskID}/spec`, {
+      method: "PUT",
+      token,
+      body: JSON.stringify(payload),
+    });
+  },
   specReview(taskID: string, token: string, action: "approve" | "request_changes", comment?: string) {
     return request<Task>(`/tasks/${taskID}/spec-review`, {
       method: "POST",

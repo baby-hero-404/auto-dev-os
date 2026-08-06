@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/gitops"
@@ -218,6 +221,28 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		// This keeps all the changes staged.
 		if err := s.git.ResetSoft(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, baseBranch); err != nil {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("reset soft failed for %s (squash may fail): %v", repo.URL, err))
+		}
+		includeSpec := false
+		var analysis models.TaskAnalysis
+		if len(s.rt.Task.Analysis) > 0 {
+			_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
+			includeSpec = analysis.IncludeSpecInMR
+		}
+		
+		slug := TaskSpecSlug(s.rt.Task)
+		specDst := filepath.Join(localPath, "docs", "openspecs", slug)
+		if includeSpec {
+			ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
+			if ws != nil {
+				specSrc := filepath.Join(ws.Root, "specs")
+				if stat, err := os.Stat(specSrc); err == nil && stat.IsDir() {
+					_ = os.MkdirAll(specDst, 0755)
+					cmd := exec.CommandContext(ctx, "cp", "-a", specSrc+"/.", specDst+"/")
+					_ = cmd.Run()
+				}
+			}
+		} else {
+			_ = os.RemoveAll(specDst)
 		}
 
 		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)

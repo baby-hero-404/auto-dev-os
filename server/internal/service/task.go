@@ -309,6 +309,20 @@ func (s *TaskService) UpdateAnalysis(ctx context.Context, id string, analysis js
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{Analysis: analysis, SpecStatus: &specStatus})
 }
 
+func (s *TaskService) UpdateSpecConfig(ctx context.Context, id string, includeSpec bool) (*models.Task, error) {
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var analysis models.TaskAnalysis
+	if len(task.Analysis) > 0 {
+		_ = json.Unmarshal(task.Analysis, &analysis)
+	}
+	analysis.IncludeSpecInMR = includeSpec
+	raw, _ := json.Marshal(analysis)
+	return s.repo.Update(ctx, id, models.UpdateTaskInput{Analysis: raw})
+}
+
 func (s *TaskService) ListSubTasks(ctx context.Context, parentID string) ([]models.Task, error) {
 	return s.repo.ListSubTasks(ctx, parentID)
 }

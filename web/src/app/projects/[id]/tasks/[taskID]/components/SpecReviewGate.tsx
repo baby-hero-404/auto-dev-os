@@ -20,17 +20,29 @@ export function SpecReviewGate() {
 
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState<"approve" | "request_changes" | null>(null);
+  const [includeSpec, setIncludeSpec] = useState(false);
 
   const handleCliApprove = async () => {
     if (!token) return;
     setSubmitting("approve");
     try {
+      await tasksApi.updateSpecConfig(taskID, token, includeSpec);
       await tasksApi.specReview(taskID, token, "approve");
       await mutateWorkflow();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to approve spec");
     } finally {
       setSubmitting(null);
+    }
+  };
+
+  const handleClassicApprove = async () => {
+    if (!token) return;
+    try {
+      await tasksApi.updateSpecConfig(taskID, token, includeSpec);
+      approveSpec();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update spec config");
     }
   };
 
@@ -64,6 +76,10 @@ export function SpecReviewGate() {
                 <p className="text-xs text-amber-900/75 dark:text-amber-200/75 leading-normal mt-1">
                   Accept the proposal/specs/design/tasks as authored and let cli_implement proceed.
                 </p>
+                <label className="flex items-center gap-2 mt-3 text-xs text-amber-900 dark:text-amber-200 cursor-pointer">
+                  <input type="checkbox" checked={includeSpec} onChange={(e) => setIncludeSpec(e.target.checked)} className="rounded border-amber-500/30 text-amber-600 focus:ring-amber-500 bg-background/50" />
+                  Include specification files in the final Merge Request
+                </label>
               </div>
               <button
                 onClick={handleCliApprove}
@@ -114,12 +130,16 @@ export function SpecReviewGate() {
         <div className="z-10">
           <div className="text-sm font-bold text-foreground">Definition-of-Ready Gate</div>
           <div className="text-xs text-content-muted mt-0.5 leading-normal">Review the specification below and approve it before coding starts.</div>
+          <label className="flex items-center gap-2 mt-2 text-xs text-content-muted cursor-pointer">
+            <input type="checkbox" checked={includeSpec} onChange={(e) => setIncludeSpec(e.target.checked)} className="rounded border-stroke text-brand-primary focus:ring-brand-primary bg-background/50" />
+            Include specification files in the final Merge Request
+          </label>
         </div>
         <div className="flex items-center gap-2 z-10 self-end md:self-center">
           <button onClick={requestSpecChanges} className="px-4 py-2 rounded-xl border border-stroke bg-background/50 text-content text-xs font-semibold hover:bg-surface transition-all duration-150 cursor-pointer">
             Request Changes
           </button>
-          <button onClick={approveSpec} className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
+          <button onClick={handleClassicApprove} className="px-4.5 py-2 rounded-xl border-none bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition-all duration-150 hover:shadow-md hover:shadow-emerald-500/20 active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5">
             <Check className="h-3.5 w-3.5" /> Approve Spec
           </button>
         </div>

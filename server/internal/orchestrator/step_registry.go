@@ -85,7 +85,8 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.containerPathForHostPath,
 			o.maxPhaseCost,
 			o.registry,
-		).WithDecomposition(o.decompositionThreshold, o.decompositionModeDefault),
+		).WithDecomposition(o.decompositionThreshold).
+			WithSplitAutoApprove(splitAutoApproverAdapter{approve: o.autoApproveSplit}, o.decompositionMaxAutoChildren),
 		steps.NewPlanStep(
 			rt,
 			o.tasks,                             // TaskReader

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTaskDetail } from "./TaskDetailContext";
-import { ListTodo, AlertTriangle, Check, Loader2, GitFork } from "lucide-react";
+import { ListTodo, AlertTriangle, Check, GitFork } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { tasks as tasksApi } from "@/lib/api/projects";
 import type { Task } from "@/lib/types";
@@ -10,10 +10,11 @@ import type { Task } from "@/lib/types";
 export function TaskSubtasks() {
   const { task, taskID, token, implementationItems } = useTaskDetail();
   const [dbSubtasks, setDbSubtasks] = useState<Task[]>(task?.subtasks || []);
-  const [loading, setLoading] = useState(false);
+
 
   useEffect(() => {
     if (task?.subtasks && task.subtasks.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDbSubtasks(task.subtasks);
       return;
     }
@@ -21,7 +22,6 @@ export function TaskSubtasks() {
     if (!token || !taskID) return;
 
     let isMounted = true;
-    setLoading(true);
     tasksApi
       .getSubtasks(taskID, token)
       .then((res) => {
@@ -29,10 +29,7 @@ export function TaskSubtasks() {
           setDbSubtasks(res);
         }
       })
-      .catch(() => {})
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
+      .catch(() => {});
 
     return () => {
       isMounted = false;
@@ -44,12 +41,14 @@ export function TaskSubtasks() {
 
   if (!hasDbSubtasks && !hasImplItems) {
     const st = task?.status || "todo";
-    if (st === "coding" || st === "testing" || st === "reviewing" || st === "fixing" || st === "planning_split") {
+    const hasSplitProposal = !!task?.analysis?.child_specs && task.analysis.child_specs.length > 0;
+    const isCliTask = !!task?.analysis?.cli_spec_info;
+    if (!isCliTask && (st === "coding" || st === "testing" || st === "reviewing" || st === "fixing" || hasSplitProposal)) {
       return (
         <EmptyState
           icon={ListTodo}
           title="No subtasks yet"
-          description={st === "planning_split" ? "Review split proposal above..." : "Waiting for sub-tasks..."}
+          description={hasSplitProposal ? "Review split proposal above..." : "Waiting for sub-tasks..."}
         />
       );
     }

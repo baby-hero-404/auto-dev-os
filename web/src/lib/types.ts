@@ -142,7 +142,6 @@ export type TaskStatus =
   | "context_loading"
   | "analyzing"
   | "spec_review"
-  | "planning_split"
   | "coding"
   | "reviewing"
   | "fixing"
@@ -177,6 +176,15 @@ export type ChildTaskSpec = {
   expected_files?: string[];
 };
 
+export type AvailableAction = {
+  id: string;
+  label: string;
+  style: "primary" | "warning" | "danger" | "default" | string;
+  confirmation_required: boolean;
+  endpoint: string;
+  disabled_reason?: string;
+};
+
 export type ChildTaskSummary = {
   changed_files: string[];
   test_pass_count: number;
@@ -196,6 +204,7 @@ export type Task = {
   complexity_score?: ComplexityScore;
   depends_on?: string[];
   blocked_child_id?: string;
+  block_reason?: string;
   subtasks?: Task[];
   repository_id?: string;
   title: string;
@@ -210,6 +219,7 @@ export type Task = {
   spec_status: TaskSpecStatus;
   clarifications?: ClarificationRound[];
   execution_engine?: string;
+  available_actions?: AvailableAction[];
   created_at: string;
   updated_at: string;
 };
@@ -314,6 +324,7 @@ export type TaskAnalysis = {
   design_md?: string;
   tasks_md?: string;
   child_specs?: ChildTaskSpec[];
+  cli_spec_info?: unknown;
   tasks?: TaskDAG[];
   complexity_details?: ComplexityDetails;
   risks_details?: RiskDetail[];
@@ -342,6 +353,7 @@ export type WorkflowJob = {
   step: string;
   attempts: number;
   last_error: string;
+  sleep_until?: string;
   created_at: string;
   updated_at: string;
   // Accumulated CLI telemetry (Phase 6) across every cli_* step this job runs.

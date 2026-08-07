@@ -248,15 +248,46 @@ func (r *WorkflowRepo) ResetStuckJobs(ctx context.Context) error {
 
 		// Reset agents to idle
 		if len(agentIDs) > 0 {
-			if err := tx.Table("agents").Where("id IN ?", agentIDs).Update("status", models.AgentStatusIdle).Error; err != nil {
+			if err := tx.Model(&models.Agent{}).Where("id IN ?", agentIDs).Update("status", models.AgentStatusIdle).Error; err != nil {
 				return err
 			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reset stuck jobs: %w", err)
+	}
+	return nil
+}
+
+func (r *WorkflowRepo) WakeSleepingJobs(ctx context.Context) error {
+	now := time.Now()
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var sleepingJobs []models.WorkflowJob
+		if err := tx.Where("status = ? AND sleep_until < ?", models.WorkflowJobStatusSleeping, now).Find(&sleepingJobs).Error; err != nil {
+			return err
+		}
+		if len(sleepingJobs) == 0 {
+			return nil
+		}
+
+		var jobIDs []string
+		for _, job := range sleepingJobs {
+			jobIDs = append(jobIDs, job.ID)
+		}
+
+		// Wake jobs up to queued state and clear sleep_until
+		if err := tx.Model(&models.WorkflowJob{}).Where("id IN ?", jobIDs).Updates(map[string]interface{}{
+			"status":      models.WorkflowJobStatusQueued,
+			"sleep_until": nil,
+		}).Error; err != nil {
+			return err
 		}
 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("reset stuck jobs: %w", err)
+		return fmt.Errorf("wake sleeping jobs: %w", err)
 	}
 	return nil
 }

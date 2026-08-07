@@ -646,6 +646,18 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			})
 			return
 		}
+		
+		var cooldownErr *ErrAllCredentialsInCooldown
+		if errors.As(err, &cooldownErr) {
+			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("All available credentials hit quota limits. Sleeping until %v", cooldownErr.SleepUntil))
+			_, _ = o.workflows.UpdateJob(ctx, job.ID, map[string]any{
+				"status":      models.WorkflowJobStatusSleeping,
+				"sleep_until": cooldownErr.SleepUntil,
+				"last_error":  err.Error(),
+			})
+			return
+		}
+		
 		if err == nil || errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
 			break
 		}

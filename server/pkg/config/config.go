@@ -103,13 +103,12 @@ type ExecutionConfig struct {
 	// score is always computed and stored regardless of this threshold; it
 	// only gates whether a []ChildTaskSpec is produced.
 	DecompositionThreshold int `mapstructure:"decomposition_threshold"`
-	// DecompositionModeDefault is the org/project-wide fallback for
-	// Task.DecompositionMode when neither the task nor its project set one
-	// explicitly: "manual" (propose, operator approves), "auto" (skip the
-	// review gate), or "disabled" (never split, pre-existing single-task
-	// path unconditionally). Defaults to "disabled" so this feature ships
-	// fully opt-in (tasks.md Rollback Plan / Safe Deploy).
-	DecompositionModeDefault string `mapstructure:"decomposition_mode_default"`
+	// DecompositionMaxAutoChildren caps how many children a
+	// decomposition_mode=auto split may auto-approve without operator
+	// review — a cost/operational safety net. A split proposing more than
+	// this falls back to sitting as a ProposedSplit awaiting manual
+	// approval, same as decomposition_mode=manual.
+	DecompositionMaxAutoChildren int `mapstructure:"decomposition_max_auto_children"`
 }
 
 type AutoCodeOSConfig struct {
@@ -252,8 +251,8 @@ func normalize(cfg *Config) error {
 	if cfg.Execution.DecompositionThreshold <= 0 {
 		cfg.Execution.DecompositionThreshold = 100
 	}
-	if cfg.Execution.DecompositionModeDefault == "" {
-		cfg.Execution.DecompositionModeDefault = "disabled"
+	if cfg.Execution.DecompositionMaxAutoChildren <= 0 {
+		cfg.Execution.DecompositionMaxAutoChildren = 5
 	}
 
 	if cfg.Git.DefaultAgentName == "" {

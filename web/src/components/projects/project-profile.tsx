@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 
 import { Switch } from "@/components/ui/switch";
 import { ExecutionProvidersList, defaultExecutionProviders } from "./execution-providers-list";
-import { GovernanceConfigEditor } from "./GovernanceConfigEditor";
+
 import { LearnedSkillsPanel } from "./LearnedSkillsPanel";
 import { toast } from "sonner";
 
@@ -44,7 +44,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
   const [autoReviewPolicy, setAutoReviewPolicy] = useState(project?.auto_review_policy ?? "complexity_based");
   const [reviewHarnessPolicy, setReviewHarnessPolicy] = useState(project?.review_harness_policy ?? "different_model");
   const [smartRouting, setSmartRouting] = useState<boolean>(project?.smart_routing ?? true);
-  const [pipelineConfig, setPipelineConfig] = useState<unknown>(project?.pipeline_config ?? null);
+
   const [maxRetries, setMaxRetries] = useState(project?.max_retries ?? 3);
   const [maxReviewFixCycles, setMaxReviewFixCycles] = useState(project?.max_review_fix_cycles ?? 3);
   const [defaultBranch, setDefaultBranch] = useState(project?.default_branch ?? "main");
@@ -81,7 +81,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
       setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
       setSmartRouting(project.smart_routing ?? true);
-      setPipelineConfig(project.pipeline_config ?? null);
+
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -99,7 +99,6 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
     (project?.auto_review_policy ?? "complexity_based") !== autoReviewPolicy ||
     (project?.review_harness_policy ?? "different_model") !== reviewHarnessPolicy ||
     (project?.smart_routing ?? true) !== smartRouting ||
-    JSON.stringify(project?.pipeline_config ?? null) !== JSON.stringify(pipelineConfig) ||
     (project?.max_retries ?? 3) !== maxRetries ||
     (project?.max_review_fix_cycles ?? 3) !== maxReviewFixCycles ||
     (project?.default_branch ?? "main") !== defaultBranch ||
@@ -114,7 +113,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
       setAutoReviewPolicy(project.auto_review_policy ?? "complexity_based");
       setReviewHarnessPolicy(project.review_harness_policy ?? "different_model");
       setSmartRouting(project.smart_routing ?? true);
-      setPipelineConfig(project.pipeline_config ?? null);
+
       setMaxRetries(project.max_retries ?? 3);
       setMaxReviewFixCycles(project.max_review_fix_cycles ?? 3);
       setDefaultBranch(project.default_branch ?? "main");
@@ -139,7 +138,7 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
         auto_review_policy: autoReviewPolicy,
         review_harness_policy: reviewHarnessPolicy,
         smart_routing: smartRouting,
-        pipeline_config: pipelineConfig,
+
         max_retries: maxRetries,
         max_review_fix_cycles: maxReviewFixCycles,
         default_branch: defaultBranch.trim(),
@@ -343,15 +342,6 @@ export function ProjectProfile({ project, token, onUpdateProject }: ProjectProfi
             />
           </CardContent>
         </Card>
-
-        {/* Governance Config Editor */}
-        <GovernanceConfigEditor
-          pipelineConfig={pipelineConfig}
-          token={token ?? ""}
-          onChange={setPipelineConfig}
-          serverError={updateError}
-          disabled={isUpdating}
-        />
 
         {updateError && (
           <span className="text-xs text-danger font-medium leading-normal block">{updateError}</span>

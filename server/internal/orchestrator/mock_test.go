@@ -37,6 +37,15 @@ func (m *mockTaskRepo) Update(ctx context.Context, id string, input models.Updat
 	if input.Analysis != nil {
 		m.task.Analysis = input.Analysis
 	}
+	if input.RetryCount != nil {
+		m.task.RetryCount = *input.RetryCount
+	}
+	if input.ExecutionStartedAt != nil {
+		m.task.ExecutionStartedAt = input.ExecutionStartedAt
+	}
+	if input.BlockReason != nil {
+		m.task.BlockReason = *input.BlockReason
+	}
 	return m.task, nil
 }
 
@@ -131,6 +140,10 @@ func (m *mockWorkflowRepo) CreateLog(ctx context.Context, log models.TaskLog) er
 }
 
 func (m *mockWorkflowRepo) ResetStuckJobs(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockWorkflowRepo) WakeSleepingJobs(ctx context.Context) error {
 	return nil
 }
 

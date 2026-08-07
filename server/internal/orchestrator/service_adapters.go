@@ -18,6 +18,14 @@ func (a statusUpdaterAdapter) UpdateTaskStatus(ctx context.Context, taskID strin
 	return a.update(ctx, taskID, status)
 }
 
+type splitAutoApproverAdapter struct {
+	approve func(ctx context.Context, taskID string, specs []models.ChildTaskSpec) error
+}
+
+func (a splitAutoApproverAdapter) AutoApproveSplit(ctx context.Context, taskID string, specs []models.ChildTaskSpec) error {
+	return a.approve(ctx, taskID, specs)
+}
+
 type llmRunnerAdapter struct {
 	run func(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepID string, instruction string) (map[string]any, error)
 }

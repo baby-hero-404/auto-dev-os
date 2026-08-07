@@ -71,6 +71,7 @@ func (o *Orchestrator) StartWorker(ctx context.Context, interval time.Duration, 
 		case <-o.wakeChan:
 		case <-ticker.C:
 			_ = o.workflows.ResetStuckJobs(ctx)
+			_ = o.workflows.WakeSleepingJobs(ctx)
 		}
 	}
 }

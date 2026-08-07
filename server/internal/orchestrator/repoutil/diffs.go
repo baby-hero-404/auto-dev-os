@@ -25,6 +25,7 @@ func (m *Manager) getEngine(ctx context.Context) orchestratorpatch.PatchEngine {
 				m.Log(ctx, taskID, nil, level, message)
 			}
 		},
+		CheckSecurityReview: m.CheckSecurityReview,
 	}
 	if m.ListRepositories != nil {
 		runner.ListRepositories = m.ListRepositories

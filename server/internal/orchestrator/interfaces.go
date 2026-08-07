@@ -154,6 +154,7 @@ type WorkflowRepository interface {
 	SubscribeLogs(taskID string) chan models.TaskLog
 	UnsubscribeLogs(taskID string, ch chan models.TaskLog)
 	ResetStuckJobs(ctx context.Context) error
+	WakeSleepingJobs(ctx context.Context) error
 	ResetAllRunningJobs(ctx context.Context) error
 	AcquireAdvisoryLock(ctx context.Context, taskID string) (any, bool, error)
 	ReleaseAdvisoryLock(ctx context.Context, lockConn any, taskID string) error

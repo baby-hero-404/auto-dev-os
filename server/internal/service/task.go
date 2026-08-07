@@ -54,11 +54,70 @@ func (s *TaskService) Create(ctx context.Context, projectID string, input models
 }
 
 func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {
-	return s.repo.GetByID(ctx, id)
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	task.AvailableActions = computeAvailableActions(task)
+	return task, nil
 }
 
 func (s *TaskService) ListByProjectID(ctx context.Context, projectID string) ([]models.Task, error) {
-	return s.repo.ListByProjectID(ctx, projectID)
+	tasks, err := s.repo.ListByProjectID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tasks {
+		tasks[i].AvailableActions = computeAvailableActions(&tasks[i])
+	}
+	return tasks, nil
+}
+
+const actionsEndpoint = "POST /tasks/{taskID}/actions"
+
+// computeAvailableActions is the single backend-authoritative source for
+// which action buttons the frontend may render for a task's current status
+// (docs/openspecs/status-driven-agent-workspace/specs.md invariant #2). It
+// is the only function permitted to return an approval-style action
+// (approve_spec/request_changes), and only for TaskStatusSpecReview —
+// autopilot handles every later transition (decomposition, review/fix/test,
+// PR creation) without a per-step human gate.
+func computeAvailableActions(task *models.Task) []models.AvailableAction {
+	switch task.Status {
+	case models.TaskStatusSpecReview:
+		return []models.AvailableAction{
+			{ID: "approve_spec", Label: "Approve Spec", Style: "primary", Endpoint: actionsEndpoint},
+			{ID: "request_changes", Label: "Request Changes", Style: "secondary", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+			{ID: "cancel", Label: "Cancel", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	case models.TaskStatusBlocked:
+		return []models.AvailableAction{
+			{ID: "retry_blocked", Label: "Retry", Style: "primary", Endpoint: actionsEndpoint},
+			{ID: "cancel", Label: "Cancel", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	case models.TaskStatusFailed:
+		return []models.AvailableAction{
+			{ID: "retry", Label: "Retry", Style: "primary", Endpoint: actionsEndpoint},
+			{ID: "delete", Label: "Delete", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	case models.TaskStatusMerged:
+		return []models.AvailableAction{}
+	case models.TaskStatusTodo:
+		return []models.AvailableAction{
+			{ID: "execute", Label: "Execute", Style: "primary", Endpoint: actionsEndpoint},
+			{ID: "delete", Label: "Delete", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	case models.TaskStatusPrReady, models.TaskStatusHumanReview:
+		return []models.AvailableAction{
+			{ID: "cancel", Label: "Cancel", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	default:
+		// context_loading, analyzing, coding, reviewing, fixing, testing.
+		return []models.AvailableAction{
+			{ID: "pause", Label: "Pause", Style: "warning", Endpoint: actionsEndpoint},
+			{ID: "cancel", Label: "Cancel", Style: "danger", ConfirmationRequired: true, Endpoint: actionsEndpoint},
+		}
+	}
 }
 
 func (s *TaskService) Update(ctx context.Context, id string, input models.UpdateTaskInput) (*models.Task, error) {
@@ -84,7 +143,12 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 			return nil, err
 		}
 	}
-	return s.repo.Update(ctx, id, input)
+	task, err := s.repo.Update(ctx, id, input)
+	if err != nil {
+		return nil, err
+	}
+	task.AvailableActions = computeAvailableActions(task)
+	return task, nil
 }
 
 // validateTaskEngineOverride guards against setting a task's execution_engine

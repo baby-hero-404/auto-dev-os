@@ -47,7 +47,6 @@ export const TASK_STATUS_BADGES: Record<TaskStatus, StatusBadge> = {
   context_loading: { variant: "indigo", label: "Loading Context", bg: "#e0efff", fg: "#005bb8", group: "Preparation", chartColor: "#3b82f6" },
   analyzing: { variant: "info", label: "Analyzing", bg: "#e0efff", fg: "#005bb8", group: "Preparation", chartColor: "#f59e0b" },
   spec_review: { variant: "purple", label: "Spec Review", bg: "#fef3c6", fg: "#795800", group: "Preparation · Gate", chartColor: "#a78bfa" },
-  planning_split: { variant: "warning", label: "Split Review", bg: "#fef3c6", fg: "#b45309", group: "Preparation · Gate", chartColor: "#f59e0b" },
   coding: { variant: "cyan", label: "Coding", bg: "#e0efff", fg: "#005bb8", group: "Execution", chartColor: "#22c55e" },
   reviewing: { variant: "violet", label: "Reviewing", bg: "#f3e8ff", fg: "#7f22fe", group: "Execution", chartColor: "#06b6d4" },
   fixing: { variant: "orange", label: "Fixing", bg: "#fff1e0", fg: "#b75000", group: "Execution", chartColor: "#fb923c" },

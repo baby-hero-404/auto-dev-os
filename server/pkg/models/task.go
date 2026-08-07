@@ -21,12 +21,14 @@ const (
 	TaskStatusHumanReview    = "human_review"
 	TaskStatusMerged         = "merged"
 	TaskStatusFailed         = "failed"
-	// TaskStatusBlocked is reachable only from a running decomposed parent
-	// task whose current child (by SequenceIndex) failed — it is never a
-	// valid destination for a non-decomposed task (docs/openspecs/
-	// task-subtask-decomposition/specs.md Invariants). Unlike TaskStatusFailed,
-	// it does not imply "this work did not happen": completed sibling
-	// children's progress remains intact and the parent is resumable.
+	// TaskStatusBlocked is reachable either from a running decomposed parent
+	// task whose current child (by SequenceIndex) failed (docs/openspecs/
+	// task-subtask-decomposition/specs.md Invariants — BlockedChildID set),
+	// or from any in-flight task that trips an execution guardrail
+	// (docs/openspecs/status-driven-agent-workspace/tasks.md 2.3 —
+	// BlockReason set instead). Unlike TaskStatusFailed, it does not imply
+	// "this work did not happen": prior progress remains intact and the task
+	// is resumable via the retry_blocked action.
 	TaskStatusBlocked = "blocked"
 )
 
@@ -45,19 +47,19 @@ var ValidTaskTransitions = map[string][]string{
 	TaskStatusAnalyzing:      {TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusPrReady, TaskStatusMerged, TaskStatusFailed},
 	TaskStatusSpecReview:     {TaskStatusCoding, TaskStatusTodo, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusCoding:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusHumanReview, TaskStatusFailed, TaskStatusAnalyzing, TaskStatusBlocked, TaskStatusMerged},
-	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
-	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing},
-	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing, TaskStatusAnalyzing},
+	TaskStatusReviewing:      {TaskStatusFixing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing, TaskStatusBlocked},
+	TaskStatusFixing:         {TaskStatusReviewing, TaskStatusTesting, TaskStatusFailed, TaskStatusAnalyzing, TaskStatusBlocked},
+	TaskStatusTesting:        {TaskStatusPrReady, TaskStatusFixing, TaskStatusFailed, TaskStatusMerged, TaskStatusReviewing, TaskStatusAnalyzing, TaskStatusBlocked},
 	TaskStatusPrReady:        {TaskStatusHumanReview, TaskStatusMerged, TaskStatusFailed, TaskStatusFixing, TaskStatusAnalyzing},
 	TaskStatusHumanReview:    {TaskStatusPrReady, TaskStatusMerged, TaskStatusFixing, TaskStatusFailed, TaskStatusAnalyzing},
 	TaskStatusMerged:         {},
 	TaskStatusFailed:         {TaskStatusTodo, TaskStatusContextLoading, TaskStatusAnalyzing, TaskStatusSpecReview, TaskStatusCoding, TaskStatusReviewing, TaskStatusFixing, TaskStatusTesting, TaskStatusPrReady, TaskStatusHumanReview},
-	// TaskStatusBlocked (decomposed-parent-only, see the constant's doc comment):
-	// retrying resumes to TaskStatusCoding (redispatches the failed child in
-	// place), or the parent proceeds forward to TaskStatusMerged once every
-	// child eventually succeeds and Reduce completes; TaskStatusFailed remains
-	// reachable for an operator who abandons the decomposed run entirely.
-	TaskStatusBlocked: {TaskStatusCoding, TaskStatusMerged, TaskStatusFailed},
+	// TaskStatusBlocked: a decomposed parent retries back into TaskStatusCoding
+	// (redispatches the failed child in place) or proceeds to TaskStatusMerged
+	// once every child succeeds; a guardrail-blocked task (BlockReason set)
+	// retries back into TaskStatusFixing to resume the run. TaskStatusFailed
+	// remains reachable for an operator who abandons the run entirely.
+	TaskStatusBlocked: {TaskStatusCoding, TaskStatusFixing, TaskStatusMerged, TaskStatusFailed},
 }
 
 const (
@@ -73,20 +75,20 @@ const (
 
 // Task represents a unit of work for an agent.
 type Task struct {
-	ID              string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	ProjectID       string          `json:"project_id" gorm:"type:uuid;not null"`
-	AgentID         *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
-	ParentTaskID    *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
-	RepositoryID    *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
-	Title           string          `json:"title" gorm:"not null"`
-	Description     string          `json:"description" gorm:"default:''"`
-	Status          string          `json:"status" gorm:"default:'todo'"`
-	Complexity      string          `json:"complexity" gorm:"default:'easy'"`
-	Priority        int             `json:"priority" gorm:"default:0"`
-	Labels          pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
-	Analysis        json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
-	SpecStatus      string          `json:"spec_status" gorm:"default:'none'"`
-	Clarifications  json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
+	ID             string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	ProjectID      string          `json:"project_id" gorm:"type:uuid;not null"`
+	AgentID        *string         `json:"agent_id,omitempty" gorm:"type:uuid"`
+	ParentTaskID   *string         `json:"parent_task_id,omitempty" gorm:"type:uuid"`
+	RepositoryID   *string         `json:"repository_id,omitempty" gorm:"type:uuid"`
+	Title          string          `json:"title" gorm:"not null"`
+	Description    string          `json:"description" gorm:"default:''"`
+	Status         string          `json:"status" gorm:"default:'todo'"`
+	Complexity     string          `json:"complexity" gorm:"default:'easy'"`
+	Priority       int             `json:"priority" gorm:"default:0"`
+	Labels         pq.StringArray  `json:"labels" gorm:"type:text[];default:'{}'"`
+	Analysis       json.RawMessage `json:"analysis" gorm:"type:jsonb;default:'{}'"`
+	SpecStatus     string          `json:"spec_status" gorm:"default:'none'"`
+	Clarifications json.RawMessage `json:"clarifications,omitempty" gorm:"type:jsonb;default:'[]'"`
 	// PausedStep records which workflow step raised the clarification pause
 	// (docs/openspecs/cli-execution-reliability, REQ-006) — empty for the
 	// legacy API-native flow, where clarification always originates at, and
@@ -117,9 +119,41 @@ type Task struct {
 	DependsOn pq.StringArray `json:"depends_on,omitempty" gorm:"type:text[]"`
 	// BlockedChildID is the child task ID whose failure put this (parent)
 	// task into TaskStatusBlocked. Nil unless Status == TaskStatusBlocked.
-	BlockedChildID *string   `json:"blocked_child_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	BlockedChildID *string `json:"blocked_child_id,omitempty"`
+	// RetryCount is the fixing<-testing/reviewing re-entry counter enforced
+	// by the execution guardrails (docs/openspecs/status-driven-agent-
+	// workspace/tasks.md 2.3): incremented each time the orchestrator
+	// re-enters TaskStatusFixing from a failed TaskStatusTesting/
+	// TaskStatusReviewing, reset to 0 on a successful fixing->testing->pass
+	// cycle. Never incremented per compile attempt or per file edit.
+	RetryCount int `json:"retry_count" gorm:"column:retry_count;default:0;not null"`
+	// ExecutionStartedAt is set the first time the task leaves TaskStatusTodo,
+	// and is the basis for the MaxExecutionTime wall-clock guardrail.
+	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
+	// BlockReason records which guardrail (or decomposition failure) put the
+	// task into TaskStatusBlocked, mirroring the task.error event's "reason"
+	// field: max_retries_exceeded | execution_timeout | event_volume_exceeded
+	// | security_review_required | <empty for decomposition-parent blocks>.
+	BlockReason string    `json:"block_reason,omitempty" gorm:"column:block_reason;default:''"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// AvailableActions is computed per-request (never persisted) by
+	// TaskService.computeAvailableActions — the single backend-authoritative
+	// source for which action buttons the frontend may render for this
+	// task's current status (docs/openspecs/status-driven-agent-workspace).
+	AvailableActions []AvailableAction `json:"available_actions,omitempty" gorm:"-"`
+}
+
+// AvailableAction describes a single action the frontend may offer for a
+// task's current status. Endpoint is always the single action-dispatch
+// route; Action carries which action to send in the POST body.
+type AvailableAction struct {
+	ID                   string `json:"id"`
+	Label                string `json:"label"`
+	Style                string `json:"style"`
+	ConfirmationRequired bool   `json:"confirmation_required"`
+	Endpoint             string `json:"endpoint"`
+	DisabledReason       string `json:"disabled_reason,omitempty"`
 }
 
 // WorkspaceOwnerID returns the task ID whose on-disk workspace and git
@@ -153,28 +187,31 @@ type CreateTaskInput struct {
 
 // UpdateTaskInput is the payload to partially update a task.
 type UpdateTaskInput struct {
-	Title           *string         `json:"title,omitempty"`
-	Description     *string         `json:"description,omitempty"`
-	Status          *string         `json:"status,omitempty"`
-	Complexity      *string         `json:"complexity,omitempty"`
-	Priority        *int            `json:"priority,omitempty"`
-	Labels          []string        `json:"labels,omitempty"`
-	AgentID         *string         `json:"agent_id,omitempty"`
-	RepositoryID    *string         `json:"repository_id,omitempty"`
-	Analysis        json.RawMessage `json:"analysis,omitempty"`
-	SpecStatus      *string         `json:"spec_status,omitempty"`
-	Clarifications  json.RawMessage `json:"clarifications,omitempty"`
-	PausedStep      *string         `json:"paused_step,omitempty"`
-	PRURLs          *pq.StringArray `json:"pr_urls,omitempty"`
-	PRMetadata      json.RawMessage `json:"pr_metadata,omitempty"`
-	ParentTaskID    *string         `json:"parent_task_id,omitempty"`
-	ExecutionEngine *string         `json:"execution_engine,omitempty"`
-	SequenceIndex     *int             `json:"sequence_index,omitempty"`
-	DecompositionMode *string          `json:"decomposition_mode,omitempty"`
-	ComplexityScore   json.RawMessage  `json:"complexity_score,omitempty"`
-	DependsOn         *pq.StringArray  `json:"depends_on,omitempty"`
-	BlockedChildID    *string          `json:"blocked_child_id,omitempty"`
-	ClearBlockedChild bool             `json:"-"`
+	Title              *string         `json:"title,omitempty"`
+	Description        *string         `json:"description,omitempty"`
+	Status             *string         `json:"status,omitempty"`
+	Complexity         *string         `json:"complexity,omitempty"`
+	Priority           *int            `json:"priority,omitempty"`
+	Labels             []string        `json:"labels,omitempty"`
+	AgentID            *string         `json:"agent_id,omitempty"`
+	RepositoryID       *string         `json:"repository_id,omitempty"`
+	Analysis           json.RawMessage `json:"analysis,omitempty"`
+	SpecStatus         *string         `json:"spec_status,omitempty"`
+	Clarifications     json.RawMessage `json:"clarifications,omitempty"`
+	PausedStep         *string         `json:"paused_step,omitempty"`
+	PRURLs             *pq.StringArray `json:"pr_urls,omitempty"`
+	PRMetadata         json.RawMessage `json:"pr_metadata,omitempty"`
+	ParentTaskID       *string         `json:"parent_task_id,omitempty"`
+	ExecutionEngine    *string         `json:"execution_engine,omitempty"`
+	SequenceIndex      *int            `json:"sequence_index,omitempty"`
+	DecompositionMode  *string         `json:"decomposition_mode,omitempty"`
+	ComplexityScore    json.RawMessage `json:"complexity_score,omitempty"`
+	DependsOn          *pq.StringArray `json:"depends_on,omitempty"`
+	BlockedChildID     *string         `json:"blocked_child_id,omitempty"`
+	ClearBlockedChild  bool            `json:"-"`
+	RetryCount         *int            `json:"retry_count,omitempty"`
+	ExecutionStartedAt *time.Time      `json:"execution_started_at,omitempty"`
+	BlockReason        *string         `json:"block_reason,omitempty"`
 }
 
 type ComplexityDetails struct {
@@ -250,16 +287,16 @@ type ChildTaskSummary struct {
 // DecomposedTaskSummary is the parent's deterministic Reduce output: the
 // aggregate of every child's ChildTaskSummary, plus decomposition metrics.
 type DecomposedTaskSummary struct {
-	ChangedFiles       []string           `json:"changed_files"`
-	TestsPassed        int                `json:"tests_passed"`
-	TestsFailed        int                `json:"tests_failed"`
-	CostUSD            float64            `json:"cost_usd"`
-	DurationSeconds    int                `json:"duration_seconds"`
-	Children           []ChildTaskSummary `json:"children"`
-	TokensBeforeSplit  int                `json:"tokens_before_split"`
-	TokensAfterSplit   int                `json:"tokens_after_split"`
-	DurationSingleEst  int                `json:"duration_single_estimate_seconds"`
-	CostSavedUSD       float64            `json:"cost_saved_usd"`
+	ChangedFiles      []string           `json:"changed_files"`
+	TestsPassed       int                `json:"tests_passed"`
+	TestsFailed       int                `json:"tests_failed"`
+	CostUSD           float64            `json:"cost_usd"`
+	DurationSeconds   int                `json:"duration_seconds"`
+	Children          []ChildTaskSummary `json:"children"`
+	TokensBeforeSplit int                `json:"tokens_before_split"`
+	TokensAfterSplit  int                `json:"tokens_after_split"`
+	DurationSingleEst int                `json:"duration_single_estimate_seconds"`
+	CostSavedUSD      float64            `json:"cost_saved_usd"`
 }
 
 type TaskDAG struct {

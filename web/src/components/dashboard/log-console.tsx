@@ -72,13 +72,13 @@ function LogMessage({ message }: { message: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Attempt to parse JSON to render it nicely
-  let parsedJson: any = null;
+  let parsedJson: unknown = null;
   let isJson = false;
   if (message.trim().startsWith("{") || message.trim().startsWith("[")) {
     try {
       parsedJson = JSON.parse(message);
       isJson = true;
-    } catch (e) {
+    } catch {
       // not valid json
     }
   }

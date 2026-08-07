@@ -32,7 +32,14 @@ type Runner struct {
 	// task.Analysis. Pushing raw stale bytes here previously raced with
 	// concurrent step updates and silently dropped their writes.
 	UpdateTaskAnalysis func(ctx context.Context, task *models.Task, mutate func(*models.TaskAnalysis) bool) error
-	Log                      func(ctx context.Context, taskID string, level string, message string)
+	Log                func(ctx context.Context, taskID string, level string, message string)
+	// CheckSecurityReview implements the security/deny-list guardrail
+	// (docs/openspecs/status-driven-agent-workspace/tasks.md 2.3): given the
+	// set of changed file paths and the raw diff, reports whether the patch
+	// should be blocked for human review. Injected rather than imported
+	// directly so this package doesn't need to depend on internal/service's
+	// project-configurable deny list.
+	CheckSecurityReview func(changedPaths []string, diffContent string) (blocked bool, reason string)
 }
 
 func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchText string, worktreeSuffix string) error {
@@ -67,6 +74,34 @@ func (r *Runner) ApplyPatch(ctx context.Context, task *models.Task, agent *model
 
 	// Split patch by repository using the new normalized split helper
 	repoPatches := r.SplitPatchByRepoWithWorkspace(patchText, ws, role)
+
+	if r.CheckSecurityReview != nil {
+		var changedPaths []string
+		for repoName, repoPatchText := range repoPatches {
+			for _, line := range strings.Split(repoPatchText, "\n") {
+				var file string
+				if strings.HasPrefix(line, "+++ ") {
+					file = strings.TrimPrefix(line, "+++ ")
+					file = strings.TrimSpace(file)
+					file = strings.TrimPrefix(file, "b/")
+				}
+				if file != "" && file != "/dev/null" {
+					if repoName != "" && !strings.HasPrefix(file, repoName+"/") {
+						file = repoName + "/" + file
+					}
+					changedPaths = append(changedPaths, file)
+				}
+			}
+		}
+		if blocked, reason := r.CheckSecurityReview(changedPaths, patchText); blocked {
+			return &PolicyViolationError{
+				Severity:   SeverityCritical,
+				ErrorMsg:   reason,
+				Reason:     "security_review_required",
+				Violations: changedPaths,
+			}
+		}
+	}
 
 	// Validate paths via AgentPathContext if present
 	var pathCtx *paths.AgentPathContext

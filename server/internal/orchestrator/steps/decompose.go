@@ -120,23 +120,6 @@ func ComputeComplexityScore(task *models.Task, analysis models.TaskAnalysis) mod
 	}
 }
 
-// ResolveDecompositionMode resolves Task.DecompositionMode (task override,
-// else the org/project default) to one of "manual"|"auto"|"disabled",
-// falling back to "manual" if the resolved value is unrecognized/empty
-// (proposal.md Decisions: "decomposition_mode ... default manual").
-func ResolveDecompositionMode(taskOverride *string, orgDefault string) string {
-	mode := orgDefault
-	if taskOverride != nil && *taskOverride != "" {
-		mode = *taskOverride
-	}
-	switch mode {
-	case "manual", "auto", "disabled":
-		return mode
-	default:
-		return "manual"
-	}
-}
-
 // BuildProposedSplit produces an ordered []ChildTaskSpec once the
 // Complexity Score has crossed the threshold and decomposition isn't
 // disabled. Splitting is done by deliverable clause (the same heuristic

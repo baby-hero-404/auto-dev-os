@@ -50,6 +50,33 @@ func (f *fakeCredentialPool) GetByID(ctx context.Context, id string) (*models.Pr
 	return &models.ProviderCredentialResponse{ID: id, Provider: c.provider, Status: c.status, CooldownUntil: c.cooldownUntil}, nil
 }
 
+// GetMinCooldown mirrors *service.CredentialPoolService.GetMinCooldown's
+// semantics against the fake's in-memory set: the shortest remaining
+// cooldown among matching-provider credentials, or 0 if any of them is
+// free right now.
+func (f *fakeCredentialPool) GetMinCooldown(ctx context.Context, orgID, provider, model string) (time.Duration, string, error) {
+	now := time.Now()
+	var minCooldown time.Duration = -1
+	var minCredID string
+	for id, c := range f.byID {
+		if c.provider != provider {
+			continue
+		}
+		var cd time.Duration
+		if c.cooldownUntil != nil && c.cooldownUntil.After(now) {
+			cd = c.cooldownUntil.Sub(now)
+		}
+		if minCooldown == -1 || cd < minCooldown {
+			minCooldown = cd
+			minCredID = id
+		}
+	}
+	if minCooldown == -1 {
+		return 0, "", nil
+	}
+	return minCooldown, minCredID, nil
+}
+
 func execProviders(t *testing.T, list []models.ExecutionProviderConfig) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(list)

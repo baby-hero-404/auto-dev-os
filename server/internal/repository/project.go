@@ -153,6 +153,18 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	if len(input.PipelineConfig) > 0 {
 		updates["pipeline_config"] = input.PipelineConfig
 	}
+	if input.MaxTaskRetryCount != nil {
+		updates["max_task_retry_count"] = *input.MaxTaskRetryCount
+	}
+	if input.MaxExecutionMinutes != nil {
+		updates["max_execution_minutes"] = *input.MaxExecutionMinutes
+	}
+	if input.MaxEventCount != nil {
+		updates["max_event_count"] = *input.MaxEventCount
+	}
+	if input.CostBudget != nil {
+		updates["cost_budget"] = *input.CostBudget
+	}
 	if err := r.db.WithContext(ctx).Model(p).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update project: %w", err)
 	}

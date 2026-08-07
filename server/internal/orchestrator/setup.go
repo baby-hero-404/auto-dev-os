@@ -130,11 +130,13 @@ func (o *Orchestrator) initRepoutil() {
 			o.gitConfig.DefaultAgentName,
 			o.gitConfig.DefaultAgentEmail,
 		)
+		o.repoutil.CheckSecurityReview = o.checkSecurityReview
 	} else {
 		o.repoutil.WorkspaceRoot = o.workspaceRoot
 		o.repoutil.DefaultAgentName = o.gitConfig.DefaultAgentName
 		o.repoutil.DefaultAgentEmail = o.gitConfig.DefaultAgentEmail
 		o.repoutil.UpdateTaskAnalysis = o.safeUpdateTaskAnalysis
+		o.repoutil.CheckSecurityReview = o.checkSecurityReview
 		if o.repositories != nil {
 			o.repoutil.ListRepositories = o.repositories.ListByProjectID
 		}

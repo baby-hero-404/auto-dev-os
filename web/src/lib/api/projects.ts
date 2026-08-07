@@ -1,5 +1,6 @@
 import { request } from "./client";
 import type { ExecutionProviderConfig, GitAccount, Project, Repository, Rule, Task, WorkflowJob, WorkflowStatus, TaskLog, WorkflowArtifact, TaskAnalysis, TaskSpec, ChildTaskSpec } from "../types";
+import type { TaskEvent } from "../types/task-event";
 
 export function list(orgID: string, token: string) {
   return request<Project[]>(`/organizations/${orgID}/projects`, { token });
@@ -246,6 +247,7 @@ export const tasks = {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let currentEvent = "";
 
         while (true) {
           const { done, value } = await reader.read();
@@ -255,7 +257,6 @@ export const tasks = {
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
 
-          let currentEvent = "";
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               currentEvent = line.slice(7).trim();
@@ -266,6 +267,8 @@ export const tasks = {
                   onLog(JSON.parse(dataStr));
                 } catch {}
               }
+            } else if (line === "") {
+              currentEvent = "";
             }
           }
         }
@@ -299,11 +302,108 @@ export const tasks = {
       body: JSON.stringify({ feedback }),
     });
   },
+  dispatchAction(taskID: string, token: string, action: string, requestID: string, comment?: string) {
+    return request<Task>(`/tasks/${taskID}/actions`, {
+      method: "POST",
+      token,
+      body: JSON.stringify({ action, request_id: requestID, comment: comment ?? "" }),
+    });
+  },
   artifacts(jobID: string, token: string) {
     return request<WorkflowArtifact[]>(`/workflows/${jobID}/artifacts`, { token });
   },
   artifactsByTask(taskID: string, token: string) {
     return request<WorkflowArtifact[]>(`/tasks/${taskID}/artifacts`, { token });
+  },
+  events(taskID: string, token: string, before?: number, limit?: number) {
+    const params = new URLSearchParams();
+    if (before) params.set("before", String(before));
+    if (limit) params.set("limit", String(limit));
+    const qs = params.toString();
+    return request<TaskEvent[]>(`/tasks/${taskID}/events${qs ? `?${qs}` : ""}`, { token });
+  },
+  // Reads the SSE event stream via fetch + ReadableStream (not native
+  // EventSource) — mirrors streamLogs above, since EventSource can't set an
+  // Authorization header and this API has no query-param token fallback.
+  async streamEvents(
+    taskID: string,
+    token: string,
+    after: number,
+    signal: AbortSignal,
+    onEvent: (event: TaskEvent) => void,
+    onFatalError?: (err: Error) => void,
+    onStatusChange?: (connected: boolean) => void,
+  ) {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:32080/api/v1";
+    let retryDelay = 1000;
+    let cursor = after;
+
+    while (!signal.aborted) {
+      try {
+        onStatusChange?.(false);
+        const res = await fetch(`${API_BASE}/tasks/${taskID}/events/stream?after=${cursor}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal,
+        });
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403 || res.status === 404) {
+            throw new StreamFatalError(res.status);
+          }
+          throw new Error(`Stream failed: ${res.status}`);
+        }
+
+        retryDelay = 1000;
+        onStatusChange?.(true);
+        if (!res.body) throw new Error("No body");
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEvent = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6);
+              if (currentEvent !== "error") {
+                try {
+                  const parsed: TaskEvent = JSON.parse(dataStr);
+                  cursor = parsed.sequence_number;
+                  onEvent(parsed);
+                } catch {}
+              }
+            } else if (line === "") {
+              currentEvent = "";
+            }
+          }
+        }
+      } catch (err) {
+        const error = err as Error;
+        onStatusChange?.(false);
+        if (error.name === "AbortError" || signal.aborted) {
+          return;
+        }
+        if (err instanceof StreamFatalError) {
+          onFatalError?.(err);
+          return;
+        }
+      }
+
+      if (signal.aborted) return;
+
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      retryDelay = Math.min(retryDelay * 2, 5000);
+    }
   },
 };
 

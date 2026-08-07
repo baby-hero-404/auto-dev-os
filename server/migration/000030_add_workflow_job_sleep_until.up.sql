@@ -1,0 +1,1 @@
+ALTER TABLE workflow_jobs ADD COLUMN sleep_until TIMESTAMP WITH TIME ZONE;

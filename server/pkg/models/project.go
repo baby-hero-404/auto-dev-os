@@ -239,12 +239,27 @@ type Project struct {
 	ReviewHarnessPolicy string          `json:"review_harness_policy" gorm:"column:review_harness_policy;default:'different_model';not null"`
 	SmartRouting        bool            `json:"smart_routing" gorm:"column:smart_routing;default:true;not null"`
 	PipelineConfig      json.RawMessage `json:"pipeline_config,omitempty" gorm:"column:pipeline_config;type:jsonb"`
-	RepositoriesCount   int             `json:"repositories_count,omitempty" gorm:"->"`
-	AgentsCount         int             `json:"agents_count,omitempty" gorm:"->"`
-	TasksDoneCount      int             `json:"tasks_done_count,omitempty" gorm:"->"`
-	TasksTotalCount     int             `json:"tasks_total_count,omitempty" gorm:"->"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	// MaxTaskRetryCount bounds Task.RetryCount (the fixing<-testing/reviewing
+	// re-entry counter, distinct from MaxRetries above which governs
+	// whole-workflow-attempt retries) — execution guardrail (tasks.md 2.3).
+	MaxTaskRetryCount int `json:"max_task_retry_count" gorm:"column:max_task_retry_count;default:5;not null"`
+	// MaxExecutionMinutes bounds wall-clock time since Task.ExecutionStartedAt.
+	MaxExecutionMinutes int `json:"max_execution_minutes" gorm:"column:max_execution_minutes;default:120;not null"`
+	// MaxEventCount bounds task_events rows per task.
+	MaxEventCount int `json:"max_event_count" gorm:"column:max_event_count;default:20000;not null"`
+	// CostBudget is accepted for forward compatibility but the guardrail is
+	// inactive: no execution engine in this codebase currently exposes
+	// token/cost usage data, so enforcing this would require fabricating a
+	// number (docs/openspecs/status-driven-agent-workspace/tasks.md 2.3 —
+	// "do not substitute a conservative estimated limit"). MaxExecutionMinutes
+	// and MaxTaskRetryCount are the enforced backstop until cost data exists.
+	CostBudget        *float64  `json:"cost_budget,omitempty" gorm:"column:cost_budget"`
+	RepositoriesCount int       `json:"repositories_count,omitempty" gorm:"->"`
+	AgentsCount       int       `json:"agents_count,omitempty" gorm:"->"`
+	TasksDoneCount    int       `json:"tasks_done_count,omitempty" gorm:"->"`
+	TasksTotalCount   int       `json:"tasks_total_count,omitempty" gorm:"->"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // CreateProjectInput is the payload to create a project.
@@ -281,6 +296,10 @@ type UpdateProjectInput struct {
 	ReviewHarnessPolicy *string          `json:"review_harness_policy,omitempty"`
 	SmartRouting        *bool            `json:"smart_routing,omitempty"`
 	PipelineConfig      json.RawMessage  `json:"pipeline_config,omitempty"`
+	MaxTaskRetryCount   *int             `json:"max_task_retry_count,omitempty"`
+	MaxExecutionMinutes *int             `json:"max_execution_minutes,omitempty"`
+	MaxEventCount       *int             `json:"max_event_count,omitempty"`
+	CostBudget          *float64         `json:"cost_budget,omitempty"`
 }
 
 // ValidateExecutionEngine returns an error if engine is set but not a recognized value.

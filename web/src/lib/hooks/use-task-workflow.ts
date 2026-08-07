@@ -276,7 +276,7 @@ export function useTaskWorkflow(taskID: string) {
 }
 
 function isWorkflowTerminal(status?: string) {
-  return status === "failed" || status === "merged";
+  return status === "failed" || status === "merged" || status === "done";
 }
 
 function toRealtimeLog(taskID: string, log: TaskLog): RealtimeLog {

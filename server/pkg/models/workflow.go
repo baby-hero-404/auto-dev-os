@@ -8,9 +8,10 @@ import (
 const (
 	WorkflowJobStatusQueued  = "queued"
 	WorkflowJobStatusRunning = "running"
-	WorkflowJobStatusPaused  = "paused"
-	WorkflowJobStatusDone    = "done"
-	WorkflowJobStatusFailed  = "failed"
+	WorkflowJobStatusPaused   = "paused"
+	WorkflowJobStatusSleeping = "sleeping"
+	WorkflowJobStatusDone     = "done"
+	WorkflowJobStatusFailed   = "failed"
 )
 
 const (
@@ -34,9 +35,10 @@ type WorkflowJob struct {
 	Status    string    `json:"status" gorm:"default:'queued'"`
 	Step      string    `json:"step" gorm:"default:'analyze'"`
 	Attempts  int       `json:"attempts" gorm:"default:0"`
-	LastError string    `json:"last_error" gorm:"default:''"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	LastError  string     `json:"last_error" gorm:"default:''"`
+	SleepUntil *time.Time `json:"sleep_until,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 
 	// TotalCostUSD/TotalDurationMS/TotalTokensUsed accumulate CLI telemetry
 	// (Phase 6, "Telemetry Parsing") across every cli_* step this job runs —

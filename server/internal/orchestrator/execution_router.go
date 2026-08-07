@@ -23,6 +23,7 @@ import (
 type CredentialAvailability interface {
 	SelectCredential(ctx context.Context, orgID, provider, model string, strategy service.CredentialStrategy, excludeIDs map[string]bool) (*service.DecryptedCredential, error)
 	GetByID(ctx context.Context, id string) (*models.ProviderCredentialResponse, error)
+	GetMinCooldown(ctx context.Context, orgID, provider, model string) (time.Duration, string, error)
 }
 
 // CooldownSetter cools a credential down after a CLI run's captured output
@@ -47,10 +48,18 @@ type CredentialStatusSetter interface {
 // the caller: enough to either use the existing api-native LLM path, or
 // build a cliEngineRunner without re-reading project.CLIEngineConfig.
 type ResolvedExecutionProvider struct {
-	Type         string // "api" | "cli"
+	Type         string // "api", "cli"
 	Ref          string
-	CredentialID string                  // resolved concrete credential id (cli); empty for api (CredentialPoolService picks at call time)
-	CLIConfig    *models.CLIEngineConfig // populated for type=="cli"
+	CredentialID string
+	CLIConfig    *models.CLIEngineConfig
+}
+
+type ErrAllCredentialsInCooldown struct {
+	SleepUntil time.Time
+}
+
+func (e *ErrAllCredentialsInCooldown) Error() string {
+	return fmt.Sprintf("all credentials in cooldown until %v", e.SleepUntil)
 }
 
 // ResolveExecutionProvider picks the first enabled, available candidate in
@@ -126,22 +135,46 @@ func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string
 		sorted = filtered
 	}
 
+	var minSleep time.Time
 	for _, p := range sorted {
 		if !p.Enabled {
 			continue
 		}
+		var isAvail bool
+		var credProvider string
 		switch p.Type {
 		case "api":
-			if o.hasAvailableCredential(ctx, orgID, p.Ref, p.CredentialID) {
+			isAvail = o.hasAvailableCredential(ctx, orgID, p.Ref, p.CredentialID)
+			credProvider = p.Ref
+			if isAvail {
 				return &ResolvedExecutionProvider{Type: "api", Ref: p.Ref}, nil
 			}
 		case "cli":
-			cfg, credID, ok := o.resolveCLICandidate(ctx, orgID, p)
-			if ok {
+			var cfg *models.CLIEngineConfig
+			var credID string
+			cfg, credID, isAvail = o.resolveCLICandidate(ctx, orgID, p)
+			if isAvail {
 				return &ResolvedExecutionProvider{Type: "cli", Ref: p.Ref, CredentialID: credID, CLIConfig: cfg}, nil
+			}
+			if profile, ok := models.ProfileOrEmpty(p.Ref); ok {
+				credProvider = profile.CredentialProvider
+			}
+		}
+
+		if credProvider != "" && o.credentialPool != nil {
+			if cdDur, _, err := o.credentialPool.GetMinCooldown(ctx, orgID, credProvider, ""); err == nil && cdDur > 0 {
+				cdTime := time.Now().Add(cdDur)
+				if minSleep.IsZero() || cdTime.Before(minSleep) {
+					minSleep = cdTime
+				}
 			}
 		}
 	}
+	
+	if !minSleep.IsZero() {
+		return nil, &ErrAllCredentialsInCooldown{SleepUntil: minSleep}
+	}
+
 	return nil, fmt.Errorf("no enabled execution provider is available")
 }
 

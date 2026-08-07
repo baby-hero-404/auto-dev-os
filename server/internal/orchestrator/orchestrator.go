@@ -29,52 +29,85 @@ import (
 // Orchestrator coordinates the end-to-end workflow for task execution:
 // agent assignment, workspace provisioning, step execution, and cleanup.
 type Orchestrator struct {
-	tasks               TaskRepository
-	workflows           WorkflowRepository
-	agents              AgentAssigner
-	runtime             sandbox.Runtime
-	prompts             PromptBuilder
-	llm                 llm.Provider
-	ctxEngine           provider.ContextEngine
-	memHooks            MemoryRecorder
-	learnEngine         LearningRecorder
-	gitOps              GitOpsClient
-	artifacts           ArtifactRepository
-	repositories        RepositoryRepository
-	projects            ProjectRepository
-	orgs                OrganizationRepository
-	sandboxGit          gitops.SandboxGitClient
-	workspaceRoot       string
-	dataRoot            string
-	retention           WorkspaceRetention
-	wg                  sync.WaitGroup
-	lockCancels         sync.Map
-	lockConns           sync.Map
-	jobCancels          sync.Map
-	wkspace             *wkspace.Manager
-	checkpoints         *checkpoint.Store
-	repoutil            *repoutil.Manager
-	disableNetworking   bool
-	llmTraceEnabled     bool
-	llmLogLevel         string
-	sandboxTimeout      time.Duration
-	maxPhaseCost        float64
-	stateMachineEnabled bool
-	maxToolResultChars  int
-	maxToolIterations   int
-	wakeChan            chan struct{}
-	registry            *tool.Registry
-	capManager          *tool.CapabilityManager
-	gitConfig           config.GitConfig
-	learnedSkills       LearnedSkillReader
-	attestations        steps.AttestationSigner
-	credentials         engine.CredentialGetter
-	credentialPool      CredentialAvailability
-	cooldownSetter      CooldownSetter
-	credStatusSetter    CredentialStatusSetter
-	taskAttempts        TaskAttemptRepository
-	decompositionThreshold   int
-	decompositionModeDefault string
+	tasks                    TaskRepository
+	workflows                WorkflowRepository
+	agents                   AgentAssigner
+	runtime                  sandbox.Runtime
+	prompts                  PromptBuilder
+	llm                      llm.Provider
+	ctxEngine                provider.ContextEngine
+	memHooks                 MemoryRecorder
+	learnEngine              LearningRecorder
+	gitOps                   GitOpsClient
+	artifacts                ArtifactRepository
+	repositories             RepositoryRepository
+	projects                 ProjectRepository
+	orgs                     OrganizationRepository
+	sandboxGit               gitops.SandboxGitClient
+	workspaceRoot            string
+	dataRoot                 string
+	retention                WorkspaceRetention
+	wg                       sync.WaitGroup
+	lockCancels              sync.Map
+	lockConns                sync.Map
+	jobCancels               sync.Map
+	wkspace                  *wkspace.Manager
+	checkpoints              *checkpoint.Store
+	repoutil                 *repoutil.Manager
+	disableNetworking        bool
+	llmTraceEnabled          bool
+	llmLogLevel              string
+	sandboxTimeout           time.Duration
+	maxPhaseCost             float64
+	stateMachineEnabled      bool
+	maxToolResultChars       int
+	maxToolIterations        int
+	wakeChan                 chan struct{}
+	registry                 *tool.Registry
+	capManager               *tool.CapabilityManager
+	gitConfig                config.GitConfig
+	learnedSkills            LearnedSkillReader
+	attestations             steps.AttestationSigner
+	eventAdapter             *sandbox.EventAdapter
+	taskEventCounter         TaskEventCounter
+	credentials              engine.CredentialGetter
+	credentialPool           CredentialAvailability
+	cooldownSetter           CooldownSetter
+	credStatusSetter         CredentialStatusSetter
+	taskAttempts                 TaskAttemptRepository
+	decompositionThreshold       int
+	decompositionMaxAutoChildren int
+	splitCreator                 SplitCreator
+}
+
+// SplitCreator is the narrow slice of TaskService.ApproveSplit the
+// orchestrator needs to auto-proceed a decomposition_mode=auto split. Set
+// via SetSplitCreator after both Orchestrator and TaskService exist (main.go
+// constructs TaskService after Orchestrator.New, so this can't be a
+// constructor arg or Option without an import cycle).
+type SplitCreator interface {
+	ApproveSplit(ctx context.Context, parentID string, specs []models.ChildTaskSpec, mode string) ([]models.Task, error)
+}
+
+// SetSplitCreator wires the decomposition_mode=auto split-creation
+// dependency (task-subtask-decomposition). Optional: if never called,
+// auto-mode splits fall back to sitting as a ProposedSplit awaiting manual
+// approval, same as decomposition_mode=manual.
+func (o *Orchestrator) SetSplitCreator(sc SplitCreator) {
+	o.splitCreator = sc
+}
+
+// autoApproveSplit implements steps.SplitAutoApprover: creates the child
+// Task rows via the same TaskService.ApproveSplit path manual approval
+// uses, then starts sequential child dispatch.
+func (o *Orchestrator) autoApproveSplit(ctx context.Context, taskID string, specs []models.ChildTaskSpec) error {
+	if o.splitCreator == nil {
+		return fmt.Errorf("auto-approve split: no split creator wired")
+	}
+	if _, err := o.splitCreator.ApproveSplit(ctx, taskID, specs, "auto"); err != nil {
+		return err
+	}
+	return o.DispatchDecomposedParent(ctx, taskID)
 }
 
 func (o *Orchestrator) wake() {
@@ -180,6 +213,30 @@ func WithCredentialStatusSetter(setter CredentialStatusSetter) Option {
 	}
 }
 
+// WithEventAdapter wires the TaskEvent normalizer (Phase 1/2 of
+// docs/openspecs/status-driven-agent-workspace) into the orchestrator's
+// existing log() choke point — every workflow log line is also normalized
+// into a task_events row, best-effort (never fails the calling step).
+// TaskEventCounter is the narrow slice of *service.TaskEventService needed
+// by the event-volume execution guardrail (tasks.md 2.3) — declared locally
+// to avoid a hard dependency on the concrete type from this constructor.
+type TaskEventCounter interface {
+	CountByTaskID(ctx context.Context, taskID string) (int64, error)
+}
+
+// WithTaskEventCounter wires the event-volume guardrail's row-count check.
+func WithTaskEventCounter(counter TaskEventCounter) Option {
+	return func(o *Orchestrator) {
+		o.taskEventCounter = counter
+	}
+}
+
+func WithEventAdapter(adapter *sandbox.EventAdapter) Option {
+	return func(o *Orchestrator) {
+		o.eventAdapter = adapter
+	}
+}
+
 func WithArtifactRepository(repo ArtifactRepository) Option {
 	return func(o *Orchestrator) {
 		o.artifacts = repo
@@ -268,11 +325,14 @@ func WithTaskAttemptRepository(repo TaskAttemptRepository) Option {
 }
 
 // WithDecompositionConfig wires the analyze-time split-trigger threshold and
-// the org/project default decomposition_mode (task-subtask-decomposition).
-func WithDecompositionConfig(threshold int, modeDefault string) Option {
+// the max child count auto-decomposition is allowed to auto-approve without
+// operator review (task-subtask-decomposition). Decomposition is always
+// "auto" — there is no manual/disabled mode. A split exceeding
+// maxAutoChildren falls back to sitting as an unapproved ProposedSplit.
+func WithDecompositionConfig(threshold int, maxAutoChildren int) Option {
 	return func(o *Orchestrator) {
 		o.decompositionThreshold = threshold
-		o.decompositionModeDefault = modeDefault
+		o.decompositionMaxAutoChildren = maxAutoChildren
 	}
 }
 

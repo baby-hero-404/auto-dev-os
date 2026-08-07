@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/middleware"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -351,6 +353,9 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeServiceError(w, err)
 		return
+	}
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		t.AvailableActions = service.ApplyActionPolicy(t.AvailableActions, claims.Role)
 	}
 	writeJSON(w, http.StatusOK, t)
 }

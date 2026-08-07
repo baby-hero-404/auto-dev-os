@@ -3,8 +3,7 @@
 import { useMemo } from "react";
 import { ChevronDown, ChevronRight, Check, AlertTriangle } from "lucide-react";
 import { useTaskDetail } from "./TaskDetailContext";
-import { SpecPanel } from "./SpecPanel";
-import { CLISpecPanel } from "./CLISpecPanel";
+
 import { LogConsole, parseMilestones } from "@/components/dashboard/log-console";
 import { CheckpointsPanel } from "./CheckpointsPanel";
 import { AuditPanel } from "./AuditPanel";
@@ -125,33 +124,7 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
         Supporting Information
       </h2>
 
-      {/* Accordion 1: Specification */}
-      {isCliFlow ? (
-        task?.status !== 'spec_review' && <CLISpecPanel />
-      ) : (
-        task?.status !== 'spec_review' && (
-          <AccordionItem
-            title="Specification"
-            isOpen={!!openSections.specification}
-            onToggle={() => onToggleSection("specification")}
-            summary={
-              <div className="flex flex-wrap gap-1">
-                {presenceChips.map((c) => (
-                  <span
-                    key={c.label}
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 shadow-sm"
-                  >
-                    <Check size={9} className="stroke-[3]" />
-                    {c.label}
-                  </span>
-                ))}
-              </div>
-            }
-          >
-            <SpecPanel isExpanded={true} onToggle={() => {}} />
-          </AccordionItem>
-        )
-      )}
+
 
       {/* Accordion 2: Execution Logs */}
       {(!['coding', 'testing', 'fixing', 'failed', 'merged', 'pr_ready', 'human_review'].includes(task?.status || '') || (isCliFlow && ['coding', 'testing', 'fixing'].includes(task?.status || ''))) && (
@@ -175,18 +148,20 @@ export function SupportingAccordion({ openSections, onToggleSection }: Supportin
       )}
 
       {/* Accordion 3: Checkpoints */}
-      <AccordionItem
-        title="Checkpoints"
-        isOpen={!!openSections.checkpoints}
-        onToggle={() => onToggleSection("checkpoints")}
-        summary={
-          <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] text-content-muted">
-            <span>{checkpointCount} recorded steps</span>
-          </div>
-        }
-      >
-        <CheckpointsPanel />
-      </AccordionItem>
+      {process.env.NEXT_PUBLIC_AGENT_WORKSPACE !== "true" && (
+        <AccordionItem
+          title="Checkpoints"
+          isOpen={!!openSections.checkpoints}
+          onToggle={() => onToggleSection("checkpoints")}
+          summary={
+            <div className="flex items-center gap-1.5 min-w-0 max-w-full font-mono text-[11px] text-content-muted">
+              <span>{checkpointCount} recorded steps</span>
+            </div>
+          }
+        >
+          <CheckpointsPanel />
+        </AccordionItem>
+      )}
 
       {/* Accordion 4: Attestation Audit */}
       <AccordionItem

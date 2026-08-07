@@ -6,42 +6,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTaskDetail } from "./TaskDetailContext";
 import { isActiveStatus } from "@/lib/status";
 import { TaskHeader } from "./TaskHeader";
-import { TaskTitleBlock } from "./TaskTitleBlock";
-import { TaskHeroCards } from "./TaskHeroCards";
-import { TaskSubtasks } from "./TaskSubtasks";
-import { TaskSidebar } from "./TaskSidebar";
-import { BoundaryResolutionControls } from "./BoundaryResolutionControls";
-import { SplitProposalCard } from "./SplitProposalCard";
-import { BlockedTaskNotice } from "./BlockedTaskNotice";
+import { TaskSummaryHeader } from "./TaskSummaryHeader";
+import { HumanDecisionSurface } from "./HumanDecisionSurface";
+import { AgentTimeline } from "./AgentTimeline";
+import { StatusViewRegistry } from "@/lib/status/registry";
 
 import { SupportingAccordion } from "./SupportingAccordion";
 
+// The status-driven UI (Phase 3 + 4) is now the default layout.
 export function TaskDetailLayout() {
-  const { task, workflow, updateTask, execute, retry, setError, isTaskLoading, workflowError, isCliFlow } = useTaskDetail();
+  const { task, workflow, updateTask, execute, retry, setError, isTaskLoading, workflowError } = useTaskDetail();
 
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    specification: false,
-    logs: false,
-    description: false,
-    checkpoints: false,
-  });
-
-  const toggleSection = useCallback((key: string) => {
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
-
-  useEffect(() => {
-    if (task && isActiveStatus(task.status)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setOpenSections((prev) => {
-        if (!prev.logs || !prev.checkpoints) {
-          return { ...prev, logs: true, checkpoints: true };
-        }
-        return prev;
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.status]);
 
 
   if (isTaskLoading) {
@@ -104,67 +79,81 @@ export function TaskDetailLayout() {
       <TaskHeader />
 
       <div className="max-w-295 mx-auto px-8 pt-7 pb-12">
-        <TaskTitleBlock />
+        <TaskSummaryHeader />
 
-        {workflow?.job?.status === "paused" &&
-          workflow?.job?.last_error &&
-          !workflow.job.last_error.includes("workflow paused for human task clarification") &&
-          task?.status !== "spec_review" &&
-          task?.status !== "pr_ready" &&
-          task?.status !== "human_review" &&
-          task?.status !== "merged" && (
-            <div className="mb-6 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-orange-500/5 backdrop-blur-md shadow-lg shadow-amber-500/5 p-5 text-sm flex flex-col gap-3 relative overflow-hidden transition-all duration-300 hover:shadow-amber-500/10">
-              <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-              <div className="flex items-center gap-2.5 font-bold text-amber-800 dark:text-amber-400 text-sm tracking-wide z-10">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                </span>
-                Task Execution Paused (Action Required)
-              </div>
-              <p className="text-xs font-mono bg-amber-500/[0.03] dark:bg-amber-950/20 border border-amber-500/10 dark:border-amber-900/20 rounded-xl p-3.5 break-all whitespace-pre-wrap text-amber-900/90 dark:text-amber-200/95 leading-relaxed shadow-inner z-10">
-                {workflow.job.last_error}
-              </p>
-              <div className="z-10 flex items-center gap-3 mt-1">
-                {workflow.job.last_error.includes("workflow paused by user") ? (
-                  <button onClick={execute} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
-                    ▶ Resume Task
-                  </button>
-                ) : (
-                  <>
-                    <BoundaryResolutionControls
-                      errorMsg={workflow.job.last_error}
-                      task={task}
-                      updateTask={updateTask}
-                      execute={execute}
-                      setError={setError}
-                    />
-                    {!workflow.job.last_error.includes("boundary") && (
-                      <button onClick={retry} className="px-4 py-2 rounded-xl border-none bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all duration-150 shadow-sm cursor-pointer">
-                        Retry Step
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+        <SplitScreenWorkspace />
+      </div>
+    </div>
+  );
+}
 
-        <SplitProposalCard />
-        <BlockedTaskNotice />
+// The split-screen workspace: Human Decision Surface (control) on the left,
+// Agent Timeline (activity) on the right. Desktop shows both side-by-side;
+// mobile collapses to tabs, defaulting per StatusViewRegistry[status].defaultTab
+// since e.g. "coding" wants Activity up front while "spec_review" wants Control.
+function SplitScreenWorkspace() {
+  const { task, workflow, updateTask, execute, retry, setError, isTaskLoading, workflowError } = useTaskDetail();
+  const defaultTab = task ? StatusViewRegistry[task.status]?.defaultTab ?? "control" : "control";
+  const [mobileTab, setMobileTab] = useState<"control" | "activity">(defaultTab);
+  const [lastStatus, setLastStatus] = useState(task?.status);
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-start mb-8">
-          <div id="hero-cards-section" className="flex flex-col gap-4">
-            <TaskHeroCards />
-            <TaskSubtasks />
-          </div>
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    specification: false,
+    logs: false,
+    description: false,
+    checkpoints: false,
+  });
 
-          <div className="flex flex-col gap-4">
-            <TaskSidebar />
-          </div>
+  const toggleSection = useCallback((key: string) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  useEffect(() => {
+    if (task && isActiveStatus(task.status)) {
+      setOpenSections((prev) => {
+        if (!prev.logs || !prev.checkpoints) {
+          return { ...prev, logs: true, checkpoints: true };
+        }
+        return prev;
+      });
+    }
+  }, [task?.status]);
+
+  // Reset the mobile tab to the new status's default whenever status changes
+  // (adjusted during render, not an effect, per React's "storing information
+  // from previous renders" pattern — avoids a redundant extra render).
+  if (task?.status !== lastStatus) {
+    setLastStatus(task?.status);
+    setMobileTab(defaultTab);
+  }
+
+  return (
+    <div className="mb-8">
+      <div className="flex gap-1 border-b border-stroke [@media(min-width:1200px)]:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileTab("control")}
+          className={`px-3 py-2 text-sm ${mobileTab === "control" ? "border-b-2 border-brand-primary text-content" : "text-content-secondary"}`}
+        >
+          Control
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("activity")}
+          className={`px-3 py-2 text-sm ${mobileTab === "activity" ? "border-b-2 border-brand-primary text-content" : "text-content-secondary"}`}
+        >
+          Activity
+        </button>
+      </div>
+
+      <div className="[@media(min-width:1200px)]:grid [@media(min-width:1200px)]:grid-cols-[70%_30%] [@media(min-width:1200px)]:gap-8 [@media(min-width:1200px)]:items-start">
+        <div className={`${mobileTab === "control" ? "block" : "hidden"} [@media(min-width:1200px)]:block [@media(min-width:1200px)]:max-h-[calc(100vh-280px)] [@media(min-width:1200px)]:overflow-y-auto [@media(min-width:1200px)]:sticky [@media(min-width:1200px)]:top-4 pr-2`}>
+          <HumanDecisionSurface />
+          <SupportingAccordion openSections={openSections} onToggleSection={toggleSection} />
         </div>
-
-        <SupportingAccordion openSections={openSections} onToggleSection={toggleSection} />
+        <div className={`${mobileTab === "activity" ? "block" : "hidden"} [@media(min-width:1200px)]:block [@media(min-width:1200px)]:max-h-[calc(100vh-280px)] [@media(min-width:1200px)]:overflow-y-auto [@media(min-width:1200px)]:sticky [@media(min-width:1200px)]:top-4 bg-surface/30 rounded-2xl border border-stroke/10 p-2 shadow-inner`}>
+          <AgentTimeline />
+        </div>
       </div>
     </div>
   );

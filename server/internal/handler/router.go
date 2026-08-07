@@ -9,6 +9,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -40,6 +41,8 @@ type Deps struct {
 
 	ProviderModelSvc   ProviderModelService
 	AttestationSvc     AttestationService
+	TaskEventSvc       *service.TaskEventService
+	TaskActionSvc      *service.TaskActionService
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
@@ -56,7 +59,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(observability.TraceMiddleware("auto-code-os-api"))
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	
+
 	// Apply 30s timeout to all routes except the websocket terminal
 	r.Use(func(next http.Handler) http.Handler {
 		timeoutHandler := chimw.Timeout(30 * time.Second)(next)
@@ -112,6 +115,8 @@ func NewRouter(d Deps) http.Handler {
 	authH := NewAuthHandler(d.AuthSvc)
 	webhookH := NewWebhookHandler(d.TaskSvc, d.Orch)
 	workflowH := NewWorkflowHandler(d.Orch)
+	taskEventH := NewTaskEventHandler(d.TaskEventSvc)
+	taskActionH := NewTaskActionHandler(d.TaskActionSvc)
 	memoryH := NewMemoryHandler(d.MemorySvc)
 	learningH := NewLearningHandler(d.LearningSvc)
 	gitAccH := NewGitAccountHandler(d.GitAccountSvc)
@@ -275,6 +280,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/tasks/{taskID}/logs/stream", workflowH.StreamLogs)
 			r.Get("/tasks/{taskID}/workflow", workflowH.Status)
 			r.Get("/tasks/{taskID}/artifacts", workflowH.ArtifactsByTask)
+			r.Get("/tasks/{taskID}/events", taskEventH.List)
+			r.Get("/tasks/{taskID}/events/stream", taskEventH.Stream)
+			r.Post("/tasks/{taskID}/actions", taskActionH.Dispatch)
 			r.Post("/tasks/{taskID}/approve", workflowH.Approve)
 			r.Post("/tasks/{taskID}/retry", workflowH.Retry)
 			r.Post("/tasks/{taskID}/pause", workflowH.Pause)

@@ -662,6 +662,7 @@ export function TaskDetailProvider({
       return steps;
     }
     return [WORKFLOW_STEPS.CONTEXT_LOAD, WORKFLOW_STEPS.ANALYZE];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.complexity, analysisData.tasks_md, analysisData.execution_units]);
 
   const stepMetadata = useMemo(() => {

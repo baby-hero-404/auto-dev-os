@@ -89,6 +89,7 @@ func run() error {
 	authRepo := repository.NewAuthRepo(db)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowRepo.SetLogFileRoot(cfg.Logging.FileRoot)
+	taskEventRepo := repository.NewTaskEventRepo(db)
 	analyticsRepo := repository.NewAnalyticsRepo(db)
 	dashboardRepo := repository.NewAnalyticsDashboardRepo(db)
 	auditRepo := repository.NewAuditRepo(db)
@@ -210,7 +211,11 @@ func run() error {
 	opts = append(opts, orchestrator.WithCooldownSetter(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithCredentialStatusSetter(credentialPoolSvc))
 	opts = append(opts, orchestrator.WithTaskAttemptRepository(taskAttemptRepo))
-	opts = append(opts, orchestrator.WithDecompositionConfig(cfg.Execution.DecompositionThreshold, cfg.Execution.DecompositionModeDefault))
+	opts = append(opts, orchestrator.WithDecompositionConfig(cfg.Execution.DecompositionThreshold, cfg.Execution.DecompositionMaxAutoChildren))
+
+	taskEventSvc := service.NewTaskEventService(taskEventRepo)
+	opts = append(opts, orchestrator.WithEventAdapter(sandbox.NewEventAdapter(taskEventSvc, artifactRepo)))
+	opts = append(opts, orchestrator.WithTaskEventCounter(taskEventSvc))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
 
@@ -218,12 +223,17 @@ func run() error {
 	repoSvc.SetProjectRepo(projRepo)
 	repoSvc.SetGitAccountRepo(gitAccountRepo)
 
+	taskSvc := service.NewTaskService(taskRepo, projRepo, repoRepo, orgRepo)
+	orch.SetSplitCreator(taskSvc)
+	taskActionRequestRepo := repository.NewTaskActionRequestRepo(db)
+	taskActionSvc := service.NewTaskActionService(taskSvc, taskActionRequestRepo, orch)
+
 	deps := handler.Deps{
 		OrgSvc:             service.NewOrganizationService(orgRepo),
 		ProjSvc:            service.NewProjectService(projRepo, service.NewSeederService(ruleRepo), cfg.AutoCodeOS.DataRoot),
 		RepoSvc:            repoSvc,
 		AgentSvc:           service.NewAgentService(agentRepo).WithRoleTemplateRepo(roleTemplateRepo),
-		TaskSvc:            service.NewTaskService(taskRepo, projRepo, repoRepo, orgRepo),
+		TaskSvc:            taskSvc,
 		RuleSvc:            service.NewRuleService(ruleRepo),
 		SkillSvc:           skillSvc,
 		LearnedSkillSvc:    learnedSkillRepo,
@@ -237,6 +247,8 @@ func run() error {
 		ProviderCredSvc:    credentialPoolSvc,
 		ProviderModelSvc:   providerModelSvc,
 		AttestationSvc:     attestationSvc,
+		TaskEventSvc:       taskEventSvc,
+		TaskActionSvc:      taskActionSvc,
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,

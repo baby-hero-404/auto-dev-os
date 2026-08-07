@@ -24,6 +24,10 @@ type Manager struct {
 	UpdateTaskAnalysis         func(ctx context.Context, task *models.Task, mutate func(*models.TaskAnalysis) bool) error
 	DefaultAgentName           string
 	DefaultAgentEmail          string
+	// CheckSecurityReview implements the security/deny-list guardrail
+	// (docs/openspecs/status-driven-agent-workspace/tasks.md 2.3), forwarded
+	// to every patch.Runner this Manager builds.
+	CheckSecurityReview func(changedPaths []string, diffContent string) (blocked bool, reason string)
 }
 
 func NewManager(

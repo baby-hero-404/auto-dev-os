@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "test:parity": "SKIP_WEBSERVER=1 playwright test task-status-parity"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

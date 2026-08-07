@@ -16,7 +16,6 @@ export function formatLatency(ms: number) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-import type { TaskStatus } from "@/lib/types";
 import { TASK_STATUS_BADGES } from "@/lib/status";
 
 export const STATUS_COLORS: Record<string, string> = Object.fromEntries(

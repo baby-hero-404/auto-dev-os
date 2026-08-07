@@ -117,6 +117,10 @@ func (m *testWorkflowRepo) ResetStuckJobs(ctx context.Context) error {
 	return nil
 }
 
+func (m *testWorkflowRepo) WakeSleepingJobs(ctx context.Context) error {
+	return nil
+}
+
 func (m *testWorkflowRepo) ResetAllRunningJobs(ctx context.Context) error {
 	return nil
 }

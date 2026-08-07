@@ -27,7 +27,8 @@ export function TaskHeader() {
   const st = task?.status || "todo";
   const totalSteps = workflowSteps.length;
   const stepsDone = workflowStatusCounts.done;
-  const showStepProgress = totalSteps > 0 && st !== "todo" && st !== "merged" && (stepsDone > 0 || jobStatus === "running");
+  const isJobActive = jobStatus === "running" || jobStatus === "sleeping";
+  const showStepProgress = totalSteps > 0 && st !== "todo" && st !== "merged" && (stepsDone > 0 || isJobActive);
 
   return (
     <div className="flex items-center justify-between gap-4 px-8 py-3.5 bg-card border-b border-stroke">
@@ -38,7 +39,7 @@ export function TaskHeader() {
         </Link>
         {showStepProgress && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-stroke bg-surface px-2.5 py-0.5 text-[11px] font-medium text-content-muted">
-            Step {Math.min(stepsDone + (jobStatus === "running" ? 1 : 0), totalSteps)} of {totalSteps}
+            Step {Math.min(stepsDone + (isJobActive ? 1 : 0), totalSteps)} of {totalSteps}
           </span>
         )}
       </div>

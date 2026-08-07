@@ -86,8 +86,5 @@ execution:
   # proposes splitting a task into sequential sub-tasks (task-subtask-
   # decomposition). Tune post-launch without a code change.
   decomposition_threshold: 100
-  # decomposition_mode_default: org/project fallback when neither is set —
-  # "disabled" ships this feature fully opt-in (manual|auto|disabled).
-  decomposition_mode_default: "disabled"
 
 

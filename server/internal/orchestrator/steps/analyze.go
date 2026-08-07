@@ -49,20 +49,42 @@ type AnalyzeStep struct {
 	lastValidationError     error
 	lastValidationIteration int
 	lastAttemptIteration    int
-	// decompositionThreshold/decompositionModeDefault feed the task-subtask-
-	// decomposition Complexity Score gate (see decompose.go). Zero-value
-	// threshold means "never propose a split" (safe default for callers/tests
-	// that don't wire these), matching decomposition_mode=disabled behavior.
-	decompositionThreshold   int
-	decompositionModeDefault string
+	// decompositionThreshold feeds the task-subtask-decomposition Complexity
+	// Score gate (see decompose.go). Zero-value means "never propose a
+	// split" (safe default for callers/tests that don't wire this).
+	decompositionThreshold int
+	// splitApprover/decompositionMaxAutoChildren: decomposition is always
+	// auto (no manual-approval mode) — once a ProposedSplit clears the spec
+	// review gate and is within the cap, the analyze step auto-approves and
+	// dispatches it itself rather than waiting on an operator.
+	splitApprover                SplitAutoApprover
+	decompositionMaxAutoChildren int
+}
+
+// SplitAutoApprover lets the analyze step auto-proceed a proposed
+// decomposition split without operator approval — the same underlying path
+// (TaskService.ApproveSplit + Orchestrator.DispatchDecomposedParent) a
+// manual approval would use, never a parallel code path (decompose.go's
+// ApproveSplit doc comment).
+type SplitAutoApprover interface {
+	AutoApproveSplit(ctx context.Context, taskID string, specs []models.ChildTaskSpec) error
 }
 
 // WithDecomposition configures the analyze-time split-proposal gate
 // (task-subtask-decomposition). Optional: callers that don't invoke this
 // get threshold=0 (no split ever proposed), preserving existing behavior.
-func (s *AnalyzeStep) WithDecomposition(threshold int, modeDefault string) *AnalyzeStep {
+func (s *AnalyzeStep) WithDecomposition(threshold int) *AnalyzeStep {
 	s.decompositionThreshold = threshold
-	s.decompositionModeDefault = modeDefault
+	return s
+}
+
+// WithSplitAutoApprove wires the auto-approve path and the max child count
+// it's allowed to auto-approve — beyond that cap the split falls back to
+// sitting as a ProposedSplit awaiting manual approval (cost/operational
+// safety net; the only remaining human touchpoint is spec review itself).
+func (s *AnalyzeStep) WithSplitAutoApprove(approver SplitAutoApprover, maxAutoChildren int) *AnalyzeStep {
+	s.splitApprover = approver
+	s.decompositionMaxAutoChildren = maxAutoChildren
 	return s
 }
 
@@ -669,21 +691,31 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 	oldComplexity := s.rt.Task.Complexity
 
 	// task-subtask-decomposition: the Complexity Score is always computed and
-	// stored, regardless of decomposition_mode, so the threshold can be
-	// tuned later against real outcomes (specs.md Scenario: "Analyze step
-	// computes a Complexity Score"). Only over-threshold + non-"disabled"
-	// mode produces a ProposedSplit.
+	// stored regardless of threshold, so it can be tuned later against real
+	// outcomes (specs.md Scenario: "Analyze step computes a Complexity
+	// Score"). Whether a ProposedSplit is actually built and auto-approved
+	// is decided below, once specStatus is known — it must never race ahead
+	// of a spec review that's about to pause the task (see autoDecompose
+	// below).
 	score := ComputeComplexityScore(s.rt.Task, analysis)
 	analysis.ComplexityScore = &score
-	mode := ResolveDecompositionMode(s.rt.Task.DecompositionMode, s.decompositionModeDefault)
-	if s.decompositionThreshold > 0 && score.Total >= s.decompositionThreshold && mode != "disabled" {
+
+	// The split proposal itself is pure/side-effect-free (no child tasks
+	// created yet), so it's safe to build now and fold into the persisted
+	// Analysis JSON below. Actually *creating* children via AutoApproveSplit
+	// happens later, gated on specStatus, once we know spec review doesn't
+	// need to pause first.
+	var proposedSplit []models.ChildTaskSpec
+	if s.decompositionThreshold > 0 && score.Total >= s.decompositionThreshold {
 		if split := BuildProposedSplit(s.rt.Task, analysis); len(split) > 1 {
+			proposedSplit = split
 			analysis.ProposedSplit = split
 			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf(
 				"metric task.decomposition.split_proposed value=1 parent_task_id=%s child_count=%d complexity_total=%d",
 				s.rt.Task.ID, len(split), score.Total))
 		}
 	}
+
 	if s.taskUpdate != nil {
 		if scoreRaw, mErr := json.Marshal(score); mErr == nil {
 			if _, uErr := s.taskUpdate.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{ComplexityScore: scoreRaw}); uErr != nil {
@@ -787,7 +819,38 @@ func (s *AnalyzeStep) applyAnalyzePolicy(ctx context.Context, analysis models.Ta
 		if specStatus == models.TaskSpecStatusClarificationRequired {
 			pauseReason = "workflow paused for human task clarification"
 		}
+		// A pending spec review or clarification question is the one human
+		// gate that must never be raced past — even if this task's
+		// Complexity Score also crossed the decomposition threshold, no
+		// child tasks are created here. The proposed split is already
+		// persisted in Analysis for a human to see, but auto-approval only
+		// happens once spec review itself clears (below).
 		return nil, workflow.PauseError{Step: workflow.StepAnalyze, Reason: pauseReason}
+	}
+
+	// Spec review has cleared (auto-approved or ready-with-warnings) — the
+	// sole human gate is satisfied, so decomposition proceeds fully
+	// automatically per product policy: "chỉ cần duyệt qua spec, mọi thứ
+	// còn lại là auto trừ khi có question".
+	if len(proposedSplit) > 1 && s.splitApprover != nil {
+		if s.decompositionMaxAutoChildren > 0 && len(proposedSplit) > s.decompositionMaxAutoChildren {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf(
+				"metric task.decomposition.auto_approve_capped value=1 parent_task_id=%s child_count=%d max=%d",
+				s.rt.Task.ID, len(proposedSplit), s.decompositionMaxAutoChildren))
+		} else if err := s.splitApprover.AutoApproveSplit(ctx, s.rt.Task.ID, proposedSplit); err != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("auto-approve split failed, continuing as a single task: %v", err))
+		} else {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf(
+				"metric task.decomposition.auto_approved value=1 parent_task_id=%s child_count=%d",
+				s.rt.Task.ID, len(proposedSplit)))
+			// Children were just created and dispatch of the first one started
+			// (via SplitAutoApprover). The parent's own single-task pipeline
+			// must not also proceed — it's now decomposition-managed and will
+			// be completed by completeDecomposedParent once every child
+			// succeeds (decomposition.go).
+			return nil, workflow.PauseError{Step: workflow.StepAnalyze, Reason: fmt.Sprintf(
+				"auto-decomposed into %d child tasks", len(proposedSplit))}
+		}
 	}
 
 	if oldComplexity != analysis.Complexity && specStatus == models.TaskSpecStatusAutoApproved {

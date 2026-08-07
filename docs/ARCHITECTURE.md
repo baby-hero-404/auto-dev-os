@@ -255,6 +255,34 @@ cli_analyze → cli_spec → cli_implement_backend ┐
 
 **Resilience:** Smart idle timeout (15 min default, configurable via `AUTOCODE_CLI_IDLE_TIMEOUT_MINUTES`) + streaming loop detector (200-line ring buffer, 10× repetition threshold) — both signal via `ContainerKill(SIGKILL)` rather than waiting for the absolute step timeout. Sandbox cache mounts fixed to `/home/agent/` (non-root user). Credentials injected as env vars, never interpolated into `cmd.Args`; `redactSecrets` scrubs all log/checkpoint output.
 
+## 4.3 Execution Guardrails (Status-Driven Agent Workspace)
+
+> Full spec: `docs/openspecs/status-driven-agent-workspace/`. Pure guardrail logic lives in `server/internal/service/task_guardrail.go`; wired at the single choke points every task status transition and every `task_events` write pass through (`internal/orchestrator/tracker.go`'s `updateTaskStatus`/`log`), plus `internal/orchestrator/patch/applier.go`'s `ApplyPatch` for the security guardrail. These are what make "no per-step human approval" safe.
+
+| Guardrail | Trigger | `Task.BlockReason` | Configured via |
+|---|---|---|---|
+| Max retries | `Task.RetryCount` reaches `Project.MaxTaskRetryCount` (default 5); increments on a `Fixing`-bound re-entry from `Testing`/`Reviewing`, resets to 0 on a successful `Testing` exit | `max_retries_exceeded` | `Project.MaxTaskRetryCount` |
+| Execution timeout | Wall-clock time since `Task.ExecutionStartedAt` (set once, on first leaving `Todo`) exceeds `Project.MaxExecutionMinutes` (default 120) | `execution_timeout` | `Project.MaxExecutionMinutes` |
+| Event volume | `task_events` row count for the task exceeds `Project.MaxEventCount` (default 20000), checked after every event write | `event_volume_exceeded` | `Project.MaxEventCount` |
+| Security review | An LLM-generated diff touches a deny-listed path (default: `.github/workflows/`, `infra/`) or matches a hardcoded-secret pattern, checked before `ApplyPatch` applies/commits it | `security_review_required` | Hardcoded default deny list (`service.DefaultSecurityDenyListPaths`) — a project-configurable deny list is not yet implemented; deferred as a v1 scope reduction |
+| Cost budget | **Inactive.** `Project.CostBudget` exists as a field for forward-compatibility, but `EvalCostBudget` always returns `false` — no execution engine in this codebase currently exposes token/cost usage data, and the guardrail deliberately does not substitute a fabricated/estimated limit | n/a | n/a (not enforced) |
+
+A tripped guardrail force-transitions the task to `TaskStatusBlocked` and emits a `task.error` event with the corresponding reason — distinct from the pre-existing decomposed-parent block (`Task.BlockedChildID` set, `BlockReason` empty). The `retry_blocked` action branches on `BlockedChildID` presence to resume either path.
+
+## 4.4 Task Events & the Status-Driven Task Detail UI
+
+> Full spec: `docs/openspecs/status-driven-agent-workspace/`. This section documents the agent-activity event stream and the split-screen Task Detail page it feeds — the current, final iteration of the page (the several `docs/openspecs/task-detail-*` and `docs/openspecs/workflow-centric-dashboard`/`ui-status-consolidation` specs each describe an earlier iteration that this one has superseded).
+
+**`task_events` table** (`server/pkg/models/task_event.go`, migration `000026`, FK to `workflow_artifacts` added in `000029`): an append-only, per-task log of agent activity — `task.started/completed/error`, `status.changed`, `agent.reasoning_summary`, `agent.plan`, `agent.message`, `tool.started/finished`, `file.changed`, `command.started/finished`, `test.result`. Ordered by a per-task monotonic `sequence_number` (not `created_at`, which is unsafe under concurrent writers — see `design.md` → Ordering), assigned via a `SELECT ... FOR UPDATE` in the same insert transaction. Payloads over `MaxPayloadBytes` (8KB) are externalized to `workflow_artifacts` and referenced by `ArtifactID`.
+
+**`EventAdapter`** (`server/internal/sandbox`, wired via `orchestrator.WithEventAdapter` in `cmd/api/main.go`): normalizes CLI-agent output into `TaskEvent` writes through `TaskEventService`, which also fans them out to live SSE subscribers (`TaskEventService.Subscribe`/`Unsubscribe`).
+
+**HTTP surface** (`internal/handler/task_event.go`): `GET /tasks/{taskID}/events?before=&limit=` (cursor-paginated history, newest-first) and `GET /tasks/{taskID}/events/stream?after=` (SSE). The stream handler subscribes to the live broadcast *before* running its catch-up query, then dedupes the catch-up result against anything buffered during that window by `sequence_number` (`streamEventsLoop`) — closing a reconnect race where a client could otherwise see the same event twice or, in the naive ordering, miss one.
+
+**Task Detail UI** (`web/src/app/projects/[id]/tasks/[taskID]/components/`, gated behind `NEXT_PUBLIC_AGENT_WORKSPACE`): a split-screen layout — `HumanDecisionSurface` (left, ~45%) is a single dispatcher keyed on `Task.Status` via `StatusViewRegistry` (`lib/status/registry.ts`, one status-view component per `TaskStatus`), rendering `DynamicActionBar` beneath it; `AgentTimeline` (right, ~55%) renders the `task_events` history plus live stream, one `TimelineEntry` per event. Collapses to a `Control`/`Activity` tab layout below 1200px, defaulting to whichever tab `StatusViewRegistry[status].defaultTab` names. The SSE client (`tasks.streamEvents` in `lib/api/projects.ts`) uses `fetch`+`ReadableStream`, not the browser's native `EventSource`, because this API's SSE auth is Authorization-header-only.
+
+**Single-approval-gate model**: `Task.AvailableActions` (service-computed, additive field on the Task API response) is the *only* place approval-shaped actions appear — `DynamicActionBar` renders exactly what the backend returns, with no independent frontend notion of which statuses need approval. Only `spec_review` currently produces an approve/request-changes pair; every other status either auto-proceeds or exposes operational actions (pause/cancel/retry) gated by `ActionPolicy` (owner or `project.write`, `project.admin` for delete) independently of what the UI happens to show.
+
 ## 5. Rule Engine Architecture (Strict Layered Context)
 
 ```

@@ -33,10 +33,7 @@ func TestWithCheckpointRecovery_RestoresStatusOnResume(t *testing.T) {
 		workflow.StepCodeBackend,
 		func(output map[string]any) string { return models.TaskStatusCoding },
 		&models.Task{ID: "task-1"},
-		&models.Agent{ID: "agent-1"},
-		workflow.StepPlan,
 		runner,
-		nil,
 		func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
 			updated = newStatus
 			return &models.Task{ID: taskID, Status: newStatus}, nil
@@ -67,12 +64,9 @@ func TestWithCheckpointRecovery_IgnoresStatusRestoreError(t *testing.T) {
 		workflow.StepCodeBackend,
 		func(output map[string]any) string { return models.TaskStatusCoding },
 		&models.Task{ID: "task-1"},
-		&models.Agent{ID: "agent-1"},
-		workflow.StepPlan,
 		func(ctx context.Context, sc workflow.StepContext) (map[string]any, error) {
 			return nil, errors.New("runner should not be called")
 		},
-		nil,
 		func(ctx context.Context, taskID string, newStatus string) (*models.Task, error) {
 			return nil, errors.New("transition denied")
 		},

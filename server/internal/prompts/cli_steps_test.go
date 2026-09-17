@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadStepPrompt_CLISteps(t *testing.T) {
-	a := NewPromptAssemblerWithRules(nil, nil, paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{})
+	a := NewPromptAssemblerWithRules(nil, paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{})
 
 	cases := map[string]string{
 		"cli_analyze":   ".autocode/analysis.md",
@@ -31,7 +31,7 @@ func TestLoadStepPrompt_CLISteps(t *testing.T) {
 // non-interactively with no stdin attached, so it must never stop mid-run to
 // ask a clarifying question — it has to assume and document instead.
 func TestLoadStepPrompt_CLISteps_ForbidClarifyingQuestions(t *testing.T) {
-	a := NewPromptAssemblerWithRules(nil, nil, paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{})
+	a := NewPromptAssemblerWithRules(nil, paths.NewOSPromptPaths("."), paths.NewOSFileSystem(), &MockContextEngine{})
 
 	for _, stepID := range []string{"cli_analyze", "cli_spec", "cli_implement"} {
 		content, err := a.LoadStepPrompt(stepID)

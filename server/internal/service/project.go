@@ -49,9 +49,6 @@ func (s *ProjectService) Create(ctx context.Context, orgID string, input models.
 	if input.Name == "" {
 		return nil, ErrValidation("name is required")
 	}
-	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
-		return nil, err
-	}
 	if _, err := models.ValidateExecutionProviders(input.ExecutionProviders); err != nil {
 		return nil, ErrValidation(err.Error())
 	}
@@ -86,33 +83,14 @@ func (s *ProjectService) Create(ctx context.Context, orgID string, input models.
 }
 
 func (s *ProjectService) GetByID(ctx context.Context, id string) (*models.Project, error) {
-	project, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	maskProjectCLIEnv(project)
-	return project, nil
+	return s.repo.GetByID(ctx, id)
 }
 
 func (s *ProjectService) ListByOrgID(ctx context.Context, orgID string) ([]models.Project, error) {
-	projects, err := s.repo.ListByOrgID(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range projects {
-		maskProjectCLIEnv(&projects[i])
-	}
-	return projects, nil
+	return s.repo.ListByOrgID(ctx, orgID)
 }
 
 func (s *ProjectService) Update(ctx context.Context, id string, input models.UpdateProjectInput) (*models.Project, error) {
-	engine := ""
-	if input.ExecutionEngine != nil {
-		engine = *input.ExecutionEngine
-	}
-	if err := validateEngineInput(input.ExecutionEngine, input.CLIEngineConfig); err != nil {
-		return nil, err
-	}
 	if _, err := models.ValidateExecutionProviders(input.ExecutionProviders); err != nil {
 		return nil, ErrValidation(err.Error())
 	}
@@ -121,55 +99,10 @@ func (s *ProjectService) Update(ctx context.Context, id string, input models.Upd
 			return nil, ErrValidation(err.Error())
 		}
 	}
-	if engine == models.ExecutionEngineCLI && input.CLIEngineConfig == nil {
-		// engine flipping to cli without a config payload in this PATCH: verify an existing config has a command.
-		existing, err := s.repo.GetByID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		var cfg models.CLIEngineConfig
-		_ = json.Unmarshal(existing.CLIEngineConfig, &cfg)
-		if err := models.ValidateCLIEngineConfig(engine, &cfg); err != nil {
-			return nil, ErrValidation(err.Error())
-		}
-	}
 	if err := validatePipelineConfig(input.PipelineConfig); err != nil {
 		return nil, err
 	}
-	project, err := s.repo.Update(ctx, id, input)
-	if err != nil {
-		return nil, err
-	}
-	maskProjectCLIEnv(project)
-	return project, nil
-}
-
-func validateEngineInput(engine *string, cfg *models.CLIEngineConfig) error {
-	if engine != nil {
-		if err := models.ValidateExecutionEngine(*engine); err != nil {
-			return ErrValidation(err.Error())
-		}
-		if *engine == models.ExecutionEngineCLI && cfg != nil {
-			if err := models.ValidateCLIEngineConfig(*engine, cfg); err != nil {
-				return ErrValidation(err.Error())
-			}
-		}
-	}
-	return nil
-}
-
-func maskProjectCLIEnv(p *models.Project) {
-	if p == nil || len(p.CLIEngineConfig) == 0 {
-		return
-	}
-	var cfg models.CLIEngineConfig
-	if json.Unmarshal(p.CLIEngineConfig, &cfg) != nil {
-		return
-	}
-	masked := cfg.MaskedEnv()
-	if raw, err := json.Marshal(masked); err == nil {
-		p.CLIEngineConfig = raw
-	}
+	return s.repo.Update(ctx, id, input)
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {

@@ -62,9 +62,6 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.Database.MaxOpenConns != 50 {
 		t.Fatalf("expected default DB max open conns 50, got %d", cfg.Database.MaxOpenConns)
 	}
-	if cfg.LLM.EmbeddingModel != "text-embedding-3-small" {
-		t.Fatalf("expected default embedding model, got %q", cfg.LLM.EmbeddingModel)
-	}
 	if cfg.Sandbox.WorkspaceRetentionHours != 72 {
 		t.Fatalf("expected default workspace retention 72h, got %d", cfg.Sandbox.WorkspaceRetentionHours)
 	}

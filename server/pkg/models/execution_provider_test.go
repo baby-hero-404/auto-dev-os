@@ -3,15 +3,15 @@ package models
 import "testing"
 
 func TestAutoEnableExecutionProviderRow_EmptyListScaffolds(t *testing.T) {
-	list, changed := AutoEnableExecutionProviderRow(nil, "anthropic")
+	list, changed := AutoEnableExecutionProviderRow(nil, "cli:claude")
 	if !changed {
 		t.Fatal("expected changed=true")
 	}
-	if len(list) != 7 {
-		t.Fatalf("expected 7-row scaffold, got %d", len(list))
+	if len(list) != 4 {
+		t.Fatalf("expected 4-row scaffold, got %d", len(list))
 	}
 	for _, p := range list {
-		want := p.Type == "api" && p.Ref == "anthropic"
+		want := p.Type == "cli" && p.Ref == "claude_code"
 		if p.Enabled != want {
 			t.Errorf("row %s:%s enabled=%v, want %v", p.Type, p.Ref, p.Enabled, want)
 		}
@@ -73,13 +73,13 @@ func TestAutoEnableExecutionProviderRow_CustomCLINeverAutoEnabled(t *testing.T) 
 }
 
 func TestAutoEnableExecutionProviderRow_MissingRowAppended(t *testing.T) {
-	existing := []ExecutionProviderConfig{{Type: "api", Ref: "openai", Priority: 0, Enabled: true}}
-	list, changed := AutoEnableExecutionProviderRow(existing, "anthropic")
+	existing := []ExecutionProviderConfig{{Type: "cli", Ref: "claude_code", Priority: 0, Enabled: true}}
+	list, changed := AutoEnableExecutionProviderRow(existing, "cli:codex")
 	if !changed {
 		t.Fatal("expected changed=true")
 	}
-	if len(list) != 2 || list[1].Type != "api" || list[1].Ref != "anthropic" || !list[1].Enabled {
-		t.Fatalf("expected anthropic row appended and enabled, got %+v", list)
+	if len(list) != 2 || list[1].Type != "cli" || list[1].Ref != "openai_codex" || !list[1].Enabled {
+		t.Fatalf("expected openai_codex row appended and enabled, got %+v", list)
 	}
 }
 
@@ -90,9 +90,6 @@ func TestDefaultExecutionProviderRows_MatchesFrontendOrder(t *testing.T) {
 		{"cli", "antigravity"},
 		{"cli", "openai_codex"},
 		{"cli", "custom"},
-		{"api", "anthropic"},
-		{"api", "openai"},
-		{"api", "gemini"},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("expected %d rows, got %d", len(want), len(rows))

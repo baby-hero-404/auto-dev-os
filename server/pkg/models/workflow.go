@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	WorkflowJobStatusQueued  = "queued"
-	WorkflowJobStatusRunning = "running"
+	WorkflowJobStatusQueued   = "queued"
+	WorkflowJobStatusRunning  = "running"
 	WorkflowJobStatusPaused   = "paused"
 	WorkflowJobStatusSleeping = "sleeping"
 	WorkflowJobStatusDone     = "done"
@@ -29,12 +29,12 @@ const (
 )
 
 type WorkflowJob struct {
-	ID        string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	TaskID    string    `json:"task_id" gorm:"type:uuid;not null"`
-	AgentID   *string   `json:"agent_id,omitempty" gorm:"type:uuid"`
-	Status    string    `json:"status" gorm:"default:'queued'"`
-	Step      string    `json:"step" gorm:"default:'analyze'"`
-	Attempts  int       `json:"attempts" gorm:"default:0"`
+	ID         string     `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	TaskID     string     `json:"task_id" gorm:"type:uuid;not null"`
+	AgentID    *string    `json:"agent_id,omitempty" gorm:"type:uuid"`
+	Status     string     `json:"status" gorm:"default:'queued'"`
+	Step       string     `json:"step" gorm:"default:'analyze'"`
+	Attempts   int        `json:"attempts" gorm:"default:0"`
 	LastError  string     `json:"last_error" gorm:"default:''"`
 	SleepUntil *time.Time `json:"sleep_until,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`

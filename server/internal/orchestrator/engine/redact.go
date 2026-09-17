@@ -23,11 +23,21 @@ var secretRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b((?:access_token|refresh_token|id_token|api_key|apikey|client_secret|password|secret)\s*=\s*)\S+`),
 }
 
-// redactSecrets scrubs known API-key/token shapes from captured CLI output
-// before it's persisted to logs or checkpoints.
-func redactSecrets(s string) string {
+// RedactSecrets scrubs known API-key/token shapes from text before it is
+// persisted to logs or checkpoints, or rendered into an MR body.
+//
+// The sk-/sk-ant-/AIzaSy patterns are LLM API keys. The platform holds none
+// any more — model auth lives inside the CLI harness under its own
+// subscription session — but they stay: this runs over CLI output and repo
+// content, where a key the *agent* stumbles across in a .env or a fixture is
+// exactly what must not be echoed back out.
+func RedactSecrets(s string) string {
 	for _, re := range secretRegexes {
 		s = re.ReplaceAllString(s, "[REDACTED]")
 	}
 	return s
 }
+
+// redactSecrets is the package-internal alias kept for this package's own call
+// sites in cli.go.
+func redactSecrets(s string) string { return RedactSecrets(s) }

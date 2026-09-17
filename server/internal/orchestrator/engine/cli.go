@@ -27,7 +27,14 @@ var ErrConfigInvalid = errors.New("cli engine: invalid configuration")
 const (
 	authPreflightTimeout = 30 * time.Second
 	binaryCheckTimeout   = 30 * time.Second
-	defaultCLITimeout    = 3 * time.Hour
+	// defaultCLITimeout is the wall-clock backstop when no profile or request
+	// timeout is set. Raised from 3h to 5h alongside CLIProfiles' own cap: a
+	// long spec-first implement run is normal, and truncating it reports a
+	// healthy agent as a failure. The real stall detector is the idle
+	// timeout below (resolveIdleTimeout), which is intentionally NOT scaled
+	// with this value — a hung agent stops printing long before any
+	// wall-clock cap would fire.
+	defaultCLITimeout = 5 * time.Hour
 
 	// captureFileMarker/captureFileEndMarker delimit a base64-encoded capture
 	// block in the subprocess's combined stdout/stderr output. The path
@@ -383,24 +390,31 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	var sessionMounts map[string]string
 	if cfg.ProfileRef != "" {
 		sessionMounts = make(map[string]string)
-		// Isolate sessions by provider and credential_id to prevent multiple accounts from clobbering each other
-		sessionDir := filepath.Join(req.HostWorkspace, "session", cfg.ProfileRef)
+		// Isolate sessions by provider and credential_id to prevent multiple
+		// accounts from clobbering each other. Keyed under the shared
+		// workspace root (HostWorkspace's parent — see
+		// sandbox.WorkspacePath, which joins root+taskID), not under the
+		// per-task HostWorkspace itself: each install's CLI state (login,
+		// project cache, history) must persist across tasks, not reset to a
+		// fresh empty dir every time a new task workspace is created.
+		workspaceRoot := filepath.Dir(req.HostWorkspace)
+		sessionDir := filepath.Join(workspaceRoot, ".cli-homes", cfg.ProfileRef)
 		if cfg.CredentialID != "" {
 			sessionDir = filepath.Join(sessionDir, cfg.CredentialID)
 		}
-		
+
 		// Map known CLI persistence directories to the isolated session directory
 		layouts := map[string][]string{
 			"claude_code":  {".claude"},
 			"antigravity":  {".gemini"},
 			"openai_codex": {".config/codex"},
 		}
-		
+
 		if paths, ok := layouts[cfg.ProfileRef]; ok {
 			for _, p := range paths {
 				hostPath := filepath.Join(sessionDir, p)
 				containerPath := filepath.Join(sandbox.SandboxHomeDir, p)
-				
+
 				if err := os.MkdirAll(hostPath, 0o755); err != nil {
 					return nil, fmt.Errorf("cli engine: create session mount dir %s: %w", hostPath, err)
 				}

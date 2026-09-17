@@ -49,7 +49,6 @@ func (s *CredentialPoolService) SelectCredential(ctx context.Context, orgID, pro
 	if err != nil {
 		return nil, err
 	}
-	apiKey = getAPIKeyOrEnvFallback(selected.Provider, apiKey)
 	s.recordAudit(ctx, models.AuditActionProviderCredentialUsed, &selected, map[string]any{
 		"provider": selected.Provider,
 		"label":    selected.Label,

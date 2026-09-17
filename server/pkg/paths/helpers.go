@@ -253,5 +253,3 @@ func Slugify(s string) string {
 	}
 	return strings.Trim(res, "-")
 }
-
-

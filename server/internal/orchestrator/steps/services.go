@@ -3,12 +3,10 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -34,18 +32,7 @@ type ProjectReader interface {
 	GetByID(ctx context.Context, id string) (*models.Project, error)
 }
 
-// LLMRunner executes a single-shot LLM step. Used by: plan, code_be, code_fe, review, fix.
-type LLMRunner interface {
-	RunLLMStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID string, stepID string, instruction string) (StepResult, error)
-}
-
-// LLMChatter provides multi-turn LLM chat. Used by: analyze (tool loop), context_load (profiler).
-type LLMChatter interface {
-	Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error)
-	ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error)
-}
-
-// PatchApplier applies and validates code patches. Used by: code_be, code_fe, fix.
+// PatchApplier applies and validates code patches. Used by: merge.
 type PatchApplier interface {
 	Validate(ctx context.Context, task *models.Task, patchData string, worktreeSuffix string) []error
 	ApplyPatch(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, patchData string, worktreeSuffix string) error
@@ -129,22 +116,6 @@ type CheckpointReader interface {
 // CheckpointLister lists all checkpoints. Used by: fix (pr_rejection feedback).
 type CheckpointLister interface {
 	ListCheckpoints(ctx context.Context, taskID string) ([]models.WorkflowCheckpoint, error)
-}
-
-// PromptAssembler builds LLM prompts. Used by: analyze, context_load.
-type PromptAssembler interface {
-	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
-	ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error)
-}
-
-// TraceRecorder writes LLM call traces. Used by: analyze.
-type TraceRecorder interface {
-	WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed StepResult, counters llmrunner.TraceCounters, latency time.Duration)
-}
-
-// ReviewerAssigner optionally assigns a specialized reviewer agent. Used by: review.
-type ReviewerAssigner interface {
-	AssignReviewer(ctx context.Context, task *models.Task) (*models.Agent, error)
 }
 
 // AgentReleaser releases a borrowed agent back to the pool.
@@ -337,16 +308,59 @@ const cliWorkingDirNotice = "## Working Directory\n\nYour current working direct
 
 // CLIStepRunner dispatches a single spec-first CLI step (spawn the
 // configured CLI subprocess with the given instruction) and reports its
-// outcome. Distinct from LLMRunner: cli_analyze/cli_spec/cli_implement have
-// no patch-retry-loop or "zero changes = failure" semantics of their own —
-// each step decides pass/fail from its own file-based contract instead.
-// Used by: cli_analyze, cli_spec, cli_implement.
+// outcome. cli_analyze/cli_spec/cli_implement have no patch-retry-loop or
+// "zero changes = failure" semantics — each step decides pass/fail from its
+// own file-based contract instead.
+// Used by: cli_analyze, cli_spec, cli_implement, cross_review.
 type CLIStepRunner interface {
 	// worktreeSuffix routes the run into a role worktree (models.
 	// WorktreeSuffixBackend/Frontend) instead of the main checkout — used by
 	// the parallel CLI implement tracks (Phase 4); "" preserves the original
 	// single-track behavior.
 	RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (CLIStepOutput, error)
+}
+
+// BackendAgentAssigner defines the optional hook to assign a role-specific backend agent.
+// Used by: cli_implement_backend.
+type BackendAgentAssigner interface {
+	AssignBackendAgent(ctx context.Context, task *models.Task) (*models.Agent, error)
+}
+
+// FrontendAgentAssigner defines the optional hook to assign a role-specific frontend agent.
+// Used by: cli_implement_frontend.
+type FrontendAgentAssigner interface {
+	AssignFrontendAgent(ctx context.Context, task *models.Task) (*models.Agent, error)
+}
+
+// ErrNoDistinctCLIHarness is what a CLIReviewRunner returns when every
+// available CLI candidate is the same profile that wrote the code. Callers
+// skip the review rather than run it — a harness reviewing its own output is
+// review theater, and silently degrading to it would hide the loss of
+// independent review behind a passing step.
+var ErrNoDistinctCLIHarness = errors.New("no CLI harness distinct from the coder is available")
+
+// CLIReviewOutput is a CLI step's output plus which harnesses were involved,
+// so the step can record coded_by/reviewed_by without re-resolving anything.
+type CLIReviewOutput struct {
+	CLIStepOutput
+	CoderRef    string
+	ReviewerRef string
+}
+
+// CLIReviewRunner dispatches a CLI step on a harness deliberately chosen to
+// differ from the one that produced the code (cross-harness-review REQ-M02).
+//
+// Before the API-native engine was removed this was an LLM-provider concern:
+// cross_review ran through the shared provider router with
+// llm.WithExcludeProviderID set to the coder's provider. The property being
+// protected — an independent model reviews the work — is unchanged; only the
+// axis moved, from provider ID to CLI profile ref.
+//
+// allowSameHarness is set when review_harness_policy is "same", the one case
+// where reusing the coder's harness is the configured intent.
+// Used by: cross_review.
+type CLIReviewRunner interface {
+	RunCLIReviewStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, allowSameHarness bool) (CLIReviewOutput, error)
 }
 
 // WorktreeHostPathResolver resolves the host filesystem path of a task's

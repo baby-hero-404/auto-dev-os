@@ -18,62 +18,56 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/internal/tool"
-	"github.com/auto-code-os/auto-code-os/server/internal/tool/tools"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
 // Orchestrator coordinates the end-to-end workflow for task execution:
 // agent assignment, workspace provisioning, step execution, and cleanup.
 type Orchestrator struct {
-	tasks                    TaskRepository
-	workflows                WorkflowRepository
-	agents                   AgentAssigner
-	runtime                  sandbox.Runtime
-	prompts                  PromptBuilder
-	llm                      llm.Provider
-	ctxEngine                provider.ContextEngine
-	memHooks                 MemoryRecorder
-	learnEngine              LearningRecorder
-	gitOps                   GitOpsClient
-	artifacts                ArtifactRepository
-	repositories             RepositoryRepository
-	projects                 ProjectRepository
-	orgs                     OrganizationRepository
-	sandboxGit               gitops.SandboxGitClient
-	workspaceRoot            string
-	dataRoot                 string
-	retention                WorkspaceRetention
-	wg                       sync.WaitGroup
-	lockCancels              sync.Map
-	lockConns                sync.Map
-	jobCancels               sync.Map
-	wkspace                  *wkspace.Manager
-	checkpoints              *checkpoint.Store
-	repoutil                 *repoutil.Manager
-	disableNetworking        bool
-	llmTraceEnabled          bool
-	llmLogLevel              string
-	sandboxTimeout           time.Duration
-	maxPhaseCost             float64
-	stateMachineEnabled      bool
-	maxToolResultChars       int
-	maxToolIterations        int
-	wakeChan                 chan struct{}
-	registry                 *tool.Registry
-	capManager               *tool.CapabilityManager
-	gitConfig                config.GitConfig
-	learnedSkills            LearnedSkillReader
-	attestations             steps.AttestationSigner
-	eventAdapter             *sandbox.EventAdapter
-	taskEventCounter         TaskEventCounter
-	credentials              engine.CredentialGetter
-	credentialPool           CredentialAvailability
-	cooldownSetter           CooldownSetter
-	credStatusSetter         CredentialStatusSetter
+	tasks                        TaskRepository
+	workflows                    WorkflowRepository
+	agents                       AgentAssigner
+	runtime                      sandbox.Runtime
+	prompts                      PromptBuilder
+	ctxEngine                    provider.ContextEngine
+	memHooks                     MemoryRecorder
+	learnEngine                  LearningRecorder
+	gitOps                       GitOpsClient
+	artifacts                    ArtifactRepository
+	repositories                 RepositoryRepository
+	projects                     ProjectRepository
+	orgs                         OrganizationRepository
+	sandboxGit                   gitops.SandboxGitClient
+	workspaceRoot                string
+	dataRoot                     string
+	retention                    WorkspaceRetention
+	wg                           sync.WaitGroup
+	lockCancels                  sync.Map
+	lockConns                    sync.Map
+	jobCancels                   sync.Map
+	wkspace                      *wkspace.Manager
+	checkpoints                  *checkpoint.Store
+	repoutil                     *repoutil.Manager
+	disableNetworking            bool
+	llmTraceEnabled              bool
+	llmLogLevel                  string
+	sandboxTimeout               time.Duration
+	maxPhaseCost                 float64
+	stateMachineEnabled          bool
+	maxToolResultChars           int
+	maxToolIterations            int
+	wakeChan                     chan struct{}
+	gitConfig                    config.GitConfig
+	learnedSkills                LearnedSkillReader
+	attestations                 steps.AttestationSigner
+	eventAdapter                 *sandbox.EventAdapter
+	taskEventCounter             TaskEventCounter
+	credentials                  engine.CredentialGetter
+	credentialPool               CredentialAvailability
+	cooldownSetter               CooldownSetter
+	credStatusSetter             CredentialStatusSetter
 	taskAttempts                 TaskAttemptRepository
 	decompositionThreshold       int
 	decompositionMaxAutoChildren int
@@ -336,12 +330,6 @@ func WithDecompositionConfig(threshold int, maxAutoChildren int) Option {
 	}
 }
 
-func WithLLMProvider(provider llm.Provider) Option {
-	return func(o *Orchestrator) {
-		o.llm = provider
-	}
-}
-
 func WithContextEngine(engine provider.ContextEngine) Option {
 	return func(o *Orchestrator) {
 		o.ctxEngine = engine
@@ -368,23 +356,6 @@ func New(taskRepo TaskRepository, workflowRepo WorkflowRepository, agentManager 
 	}
 	for _, opt := range opts {
 		opt(o)
-	}
-
-	provider := taskAffectedFilesAdapter{tasks: o.tasks}
-	o.registry = tools.DefaultRegistry(o.runtime, provider)
-	o.capManager = tool.NewCapabilityManager(o.registry, tool.DefaultRoleProfiles())
-
-	if o.prompts != nil {
-		if setter, ok := o.prompts.(interface{ SetBaseTools([]llm.ToolDefinition) }); ok {
-			setter.SetBaseTools(o.registry.Definitions())
-		}
-		if metaSetter, ok := o.prompts.(interface {
-			SetModelMetadataProvider(llm.MetadataProvider)
-		}); ok {
-			if metaProv, ok := o.llm.(llm.MetadataProvider); ok {
-				metaSetter.SetModelMetadataProvider(metaProv)
-			}
-		}
 	}
 
 	o.sandboxGit = gitops.NewSandboxGitClient(o.runSandboxStep, o.log)

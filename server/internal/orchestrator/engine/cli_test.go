@@ -106,7 +106,7 @@ func TestCLIEngine_Preflight_AuthCheckExitsZeroButReportsNotLoggedIn(t *testing.
 	// output content, not the exit code (REQ-003). Preflight must catch
 	// this via detectAuthInvalid, not exit-code alone.
 	rt := &mockRuntime{results: []*sandbox.CommandResult{
-		{ExitCode: 0},                                       // binary check ok
+		{ExitCode: 0}, // binary check ok
 		{ExitCode: 0, Stdout: "{\n  \"loggedIn\": false\n}"}, // auth check "succeeds" but reports logged out
 	}}
 	e := NewCLIEngine(rt, nil)
@@ -516,9 +516,9 @@ func TestCLIEngine_RunCodeStep_SetsSessionMounts(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", len(rt.calls))
 	}
 
-	expectedHostPath := filepath.Join(req.HostWorkspace, "session", "claude_code", ".claude")
+	expectedHostPath := filepath.Join(filepath.Dir(req.HostWorkspace), ".cli-homes", "claude_code", ".claude")
 	expectedContainerPath := filepath.Join(sandbox.SandboxHomeDir, ".claude")
-	
+
 	if mountPath, ok := rt.calls[0].SessionMounts[expectedContainerPath]; !ok || mountPath != expectedHostPath {
 		t.Errorf("expected SessionMounts[%q] = %q, got map: %v", expectedContainerPath, expectedHostPath, rt.calls[0].SessionMounts)
 	}
@@ -541,21 +541,21 @@ func TestCLIEngine_RunCodeStep_ResumeFlags(t *testing.T) {
 			rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0}}}
 			e := NewCLIEngine(rt, nil)
 			cfg := &models.CLIEngineConfig{Command: "testcmd", ProfileRef: tc.profileRef}
-			
+
 			req := baseReq(cfg)
 			req.ResumeSessionID = tc.sessionID
-			
+
 			_, err := e.RunCodeStep(context.Background(), req)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			
+
 			if len(rt.calls) == 0 {
 				t.Fatal("expected sandbox request")
 			}
-			
+
 			cmdLine := rt.calls[0].Command[2] // bash -lc '<script>'
-			
+
 			for _, exp := range tc.expectedArgs {
 				if !strings.Contains(cmdLine, exp) {
 					t.Errorf("expected script to contain %q, but got: %s", exp, cmdLine)

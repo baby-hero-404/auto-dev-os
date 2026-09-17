@@ -1,11 +1,7 @@
 package models
 
 import (
-	"database/sql/driver"
 	"encoding/json"
-	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -62,7 +58,6 @@ type EpisodicMemory struct {
 	Category    string          `json:"category" gorm:"default:'observation'"`
 	Tags        pq.StringArray  `json:"tags" gorm:"type:text[];default:'{}'"`
 	Metadata    json.RawMessage `json:"metadata" gorm:"type:jsonb;default:'{}'"`
-	Embedding   Embedding       `json:"embedding,omitempty" gorm:"type:vector(1536)"`
 
 	// Decay & reinforcement
 	AccessCount  int       `json:"access_count" gorm:"default:0"`
@@ -101,72 +96,24 @@ func (KnowledgeEdge) TableName() string {
 
 // CreateMemoryInput is the payload to record a new memory.
 type CreateMemoryInput struct {
-	AgentID   string    `json:"agent_id"`
-	ProjectID *string   `json:"project_id,omitempty"`
-	TaskID    *string   `json:"task_id,omitempty"`
-	SessionID *string   `json:"session_id,omitempty"`
-	Tier      string    `json:"tier"`
-	Content   string    `json:"content"`
-	Summary   string    `json:"summary"`
-	Category  string    `json:"category"`
-	Tags      []string  `json:"tags"`
-	Embedding []float32 `json:"embedding,omitempty"`
+	AgentID   string   `json:"agent_id"`
+	ProjectID *string  `json:"project_id,omitempty"`
+	TaskID    *string  `json:"task_id,omitempty"`
+	SessionID *string  `json:"session_id,omitempty"`
+	Tier      string   `json:"tier"`
+	Content   string   `json:"content"`
+	Summary   string   `json:"summary"`
+	Category  string   `json:"category"`
+	Tags      []string `json:"tags"`
 }
 
 // MemorySearchInput is the input for triple-stream memory search.
 type MemorySearchInput struct {
-	Query     string    `json:"query"`
-	AgentID   string    `json:"agent_id"`
-	ProjectID *string   `json:"project_id,omitempty"`
-	Tier      string    `json:"tier,omitempty"`
-	Embedding []float32 `json:"embedding,omitempty"`
-	Limit     int       `json:"limit"`
-}
-
-// Embedding stores a pgvector-compatible float32 vector.
-type Embedding []float32
-
-func (e Embedding) Value() (driver.Value, error) {
-	if len(e) == 0 {
-		return nil, nil
-	}
-	parts := make([]string, len(e))
-	for i, v := range e {
-		parts[i] = strconv.FormatFloat(float64(v), 'g', -1, 32)
-	}
-	return "[" + strings.Join(parts, ",") + "]", nil
-}
-
-func (e *Embedding) Scan(value any) error {
-	if value == nil {
-		*e = nil
-		return nil
-	}
-	var raw string
-	switch v := value.(type) {
-	case string:
-		raw = v
-	case []byte:
-		raw = string(v)
-	default:
-		return fmt.Errorf("scan embedding: unsupported type %T", value)
-	}
-	raw = strings.Trim(raw, "[]")
-	if raw == "" {
-		*e = nil
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]float32, 0, len(parts))
-	for _, part := range parts {
-		f, err := strconv.ParseFloat(strings.TrimSpace(part), 32)
-		if err != nil {
-			return fmt.Errorf("scan embedding: %w", err)
-		}
-		out = append(out, float32(f))
-	}
-	*e = out
-	return nil
+	Query     string  `json:"query"`
+	AgentID   string  `json:"agent_id"`
+	ProjectID *string `json:"project_id,omitempty"`
+	Tier      string  `json:"tier,omitempty"`
+	Limit     int     `json:"limit"`
 }
 
 // MemorySearchResult is a single result from the triple-stream search with merged scores.

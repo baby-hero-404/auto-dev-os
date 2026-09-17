@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
@@ -26,6 +25,9 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 	if input.AutoReviewPolicy != nil {
 		p.AutoReviewPolicy = *input.AutoReviewPolicy
 	}
+	if input.RequireSpecReview != nil {
+		p.RequireSpecReview = *input.RequireSpecReview
+	}
 	if input.MaxRetries != nil {
 		p.MaxRetries = *input.MaxRetries
 	}
@@ -34,14 +36,6 @@ func (r *ProjectRepo) Create(ctx context.Context, orgID string, input models.Cre
 	}
 	if input.DefaultBranch != nil {
 		p.DefaultBranch = *input.DefaultBranch
-	}
-	if input.ExecutionEngine != nil {
-		p.ExecutionEngine = *input.ExecutionEngine
-	}
-	if input.CLIEngineConfig != nil {
-		if raw, err := json.Marshal(*input.CLIEngineConfig); err == nil {
-			p.CLIEngineConfig = raw
-		}
 	}
 	if len(input.ExecutionProviders) > 0 {
 		p.ExecutionProviders = input.ExecutionProviders
@@ -109,6 +103,9 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	if input.AutoReviewPolicy != nil {
 		updates["auto_review_policy"] = *input.AutoReviewPolicy
 	}
+	if input.RequireSpecReview != nil {
+		updates["require_spec_review"] = *input.RequireSpecReview
+	}
 	if input.MaxRetries != nil {
 		updates["max_retries"] = *input.MaxRetries
 	}
@@ -117,29 +114,6 @@ func (r *ProjectRepo) Update(ctx context.Context, id string, input models.Update
 	}
 	if input.DefaultBranch != nil {
 		updates["default_branch"] = *input.DefaultBranch
-	}
-	if input.ExecutionEngine != nil {
-		updates["execution_engine"] = *input.ExecutionEngine
-	}
-	if input.CLIEngineConfig != nil {
-		merged := *input.CLIEngineConfig
-		// "***" in an env value means "keep the existing secret" (client echoes masked values back).
-		if len(merged.Env) > 0 {
-			var existing models.CLIEngineConfig
-			_ = json.Unmarshal(p.CLIEngineConfig, &existing)
-			for k, v := range merged.Env {
-				if v == "***" {
-					if old, ok := existing.Env[k]; ok {
-						merged.Env[k] = old
-					} else {
-						delete(merged.Env, k)
-					}
-				}
-			}
-		}
-		if raw, err := json.Marshal(merged); err == nil {
-			updates["cli_engine_config"] = raw
-		}
 	}
 	if len(input.ExecutionProviders) > 0 {
 		updates["execution_providers"] = input.ExecutionProviders

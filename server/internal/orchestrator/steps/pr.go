@@ -222,27 +222,24 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 		if err := s.git.ResetSoft(ctx, s.rt.Task, s.rt.Agent, containerLocalPath, baseBranch); err != nil {
 			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("reset soft failed for %s (squash may fail): %v", repo.URL, err))
 		}
-		includeSpec := false
-		var analysis models.TaskAnalysis
-		if len(s.rt.Task.Analysis) > 0 {
-			_ = json.Unmarshal(s.rt.Task.Analysis, &analysis)
-			includeSpec = analysis.IncludeSpecInMR
-		}
-		
+		// The spec always ships with the MR — this used to be the
+		// analysis.IncludeSpecInMR toggle. With the pipeline running
+		// unattended by default, the MR is the first and only place a human
+		// sees what the agent decided, so the spec is not optional there.
 		slug := TaskSpecSlug(s.rt.Task)
 		specDst := filepath.Join(localPath, "docs", "openspecs", slug)
-		if includeSpec {
-			ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
-			if ws != nil {
-				specSrc := filepath.Join(ws.Root, "specs")
-				if stat, err := os.Stat(specSrc); err == nil && stat.IsDir() {
-					_ = os.MkdirAll(specDst, 0755)
-					cmd := exec.CommandContext(ctx, "cp", "-a", specSrc+"/.", specDst+"/")
-					_ = cmd.Run()
-				}
+		ws, _ := s.workspace.LoadTaskWorkspace(ctx, s.rt.Task)
+		if ws != nil {
+			specSrc := filepath.Join(ws.Root, "specs")
+			if stat, err := os.Stat(specSrc); err == nil && stat.IsDir() {
+				_ = os.MkdirAll(specDst, 0755)
+				cmd := exec.CommandContext(ctx, "cp", "-a", specSrc+"/.", specDst+"/")
+				_ = cmd.Run()
 			}
-		} else {
-			_ = os.RemoveAll(specDst)
+		}
+		specSection := BuildSpecSection(slug, specDst)
+		if specSection.Missing {
+			s.log.Log(ctx, s.rt.Task.ID, nil, "warn", fmt.Sprintf("MR opened without an OpenSpec: %s was not produced for this task", specDst))
 		}
 
 		commitMsg := fmt.Sprintf("AutoCodeOS: implement task %s\n\nTitle: %s", s.rt.Task.ID, s.rt.Task.Title)
@@ -280,6 +277,7 @@ func (s *PRStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (Ste
 
 		prGen := gitops.NewPRGenerator()
 		summary := prGen.GenerateSummary(ctx, s.rt.Task, s.rt.Agent, repoChangedFiles, repoDiffText, testOutCopy, riskDomains, reviewLimitExceeded, selfReviewFallback, codedBy, reviewedBy)
+		summary.Body = specSection.Render() + summary.Body
 
 		var prURL string
 		var err error
@@ -440,7 +438,7 @@ func structuredCodedByReviewedBy(checkpoints []models.WorkflowCheckpoint) (in At
 			in.CodedByProvider, _ = cb["provider"].(string)
 			in.CodedByModel, _ = cb["model"].(string)
 			if in.CodedByEngine == "" {
-				in.CodedByEngine = string(models.ExecutionEngineAPINative)
+				in.CodedByEngine = models.ExecutionEngineCLI
 			}
 		}
 		if rb, ok := output["reviewed_by"].(map[string]any); ok {
@@ -483,7 +481,7 @@ func codedByReviewedBy(checkpoints []models.WorkflowCheckpoint) (codedBy, review
 			model, _ := cb["model"].(string)
 			if provider != "" || model != "" {
 				if engine == "" {
-					engine = string(models.ExecutionEngineAPINative)
+					engine = models.ExecutionEngineCLI
 				}
 				codedBy = fmt.Sprintf("%s:%s/%s", engine, provider, model)
 			}

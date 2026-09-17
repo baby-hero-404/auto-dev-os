@@ -196,15 +196,3 @@ type ExecutionEngine interface {
 	// RunCodeStep executes one coding step and returns its result.
 	RunCodeStep(ctx context.Context, req CodeStepRequest) (*CodeStepResult, error)
 }
-
-// ResolveEngine applies the precedence: task-level override > project
-// default > api_native fallback.
-func ResolveEngine(taskEngine *string, projectEngine string) string {
-	if taskEngine != nil && *taskEngine != "" {
-		return *taskEngine
-	}
-	if projectEngine != "" {
-		return projectEngine
-	}
-	return models.ExecutionEngineAPINative
-}

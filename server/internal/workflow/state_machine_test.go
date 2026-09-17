@@ -77,28 +77,6 @@ func TestValidateTaskTransition(t *testing.T) {
 	}
 }
 
-func TestComplexityWorkflowDefinitions(t *testing.T) {
-	runners := map[string]StepFunc{}
-	easy := EasyWorkflow(runners)
-	if len(easy.Steps) != 5 {
-		t.Fatalf("expected easy workflow to have 5 steps, got %d", len(easy.Steps))
-	}
-	if easy.Steps[2].ID != StepCodeBackend || easy.Steps[2].DependsOn[0] != StepAnalyze {
-		t.Fatalf("unexpected easy workflow code step: %#v", easy.Steps[2])
-	}
-
-	hard := HardWorkflow(runners, nil)
-	if len(hard.Steps) != 10 {
-		t.Fatalf("expected hard workflow to have 10 steps, got %d", len(hard.Steps))
-	}
-	if hard.Steps[3].ID != StepCodeBackend || hard.Steps[4].ID != StepCodeFrontend {
-		t.Fatalf("expected hard workflow backend/frontend fan-out, got %#v", hard.Steps)
-	}
-	if len(hard.Steps[5].DependsOn) != 2 {
-		t.Fatalf("expected merge to depend on both code steps, got %#v", hard.Steps[5].DependsOn)
-	}
-}
-
 func TestCLISpecFirstWorkflow(t *testing.T) {
 	runners := map[string]StepFunc{}
 	def := CLISpecFirstWorkflow(runners, false)

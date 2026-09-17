@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/auto-code-os/auto-code-os/server/internal/governance"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -24,7 +24,7 @@ type CrossReviewStep struct {
 	rt               StepRuntime
 	tasks            TaskReader
 	projects         ProjectReader
-	llm              LLMRunner
+	runner           CLIReviewRunner
 	diff             DiffCapturer
 	worktree         WorktreeHostPathResolver
 	artifacts        ArtifactSaver
@@ -38,7 +38,7 @@ func NewCrossReviewStep(
 	rt StepRuntime,
 	tasks TaskReader,
 	projects ProjectReader,
-	llmRunner LLMRunner,
+	runner CLIReviewRunner,
 	diff DiffCapturer,
 	worktree WorktreeHostPathResolver,
 	artifacts ArtifactSaver,
@@ -51,7 +51,7 @@ func NewCrossReviewStep(
 		rt:               rt,
 		tasks:            tasks,
 		projects:         projects,
-		llm:              llmRunner,
+		runner:           runner,
 		diff:             diff,
 		worktree:         worktree,
 		artifacts:        artifacts,
@@ -61,6 +61,11 @@ func NewCrossReviewStep(
 		log:              log,
 	}
 }
+
+// cliReviewCapturePath is where the reviewing CLI agent writes its structured
+// verdict, mirroring cli_analyze's capture-file contract: the harness is a
+// black box, so a file it wrote is the only structured channel out of it.
+const cliReviewCapturePath = ".autocode/review.json"
 
 func (s *CrossReviewStep) ID() string { return workflow.StepCrossReview }
 
@@ -76,23 +81,6 @@ func (s *CrossReviewStep) StatusOnResume(output StepResult) string {
 		}
 	}
 	return models.TaskStatusHumanReview
-}
-
-// effectiveCLIHarness resolves the {engine, provider} of the coder side for a
-// CLI-coded task: underlying_provider when declared, otherwise "cli:<command>"
-// as an opaque harness ID (REQ-001b blind-spot guard).
-func effectiveCLIHarness(p *models.Project) (engine string, provider string) {
-	if p == nil {
-		return models.ExecutionEngineCLI, ""
-	}
-	var cfg models.CLIEngineConfig
-	if len(p.CLIEngineConfig) > 0 {
-		_ = json.Unmarshal(p.CLIEngineConfig, &cfg)
-	}
-	if cfg.UnderlyingProvider != "" {
-		return models.ExecutionEngineCLI, cfg.UnderlyingProvider
-	}
-	return models.ExecutionEngineCLI, "cli:" + cfg.Command
 }
 
 // crossReviewFeedback reads the most recent cross_review checkpoint's
@@ -141,8 +129,8 @@ func crossReviewFeedback(ctx context.Context, lister CheckpointLister, taskID st
 }
 
 func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepContext) (StepResult, error) {
-	if s.llm == nil {
-		return nil, fmt.Errorf("llm provider is not configured")
+	if s.runner == nil {
+		return nil, fmt.Errorf("cross_review: CLI runner is not configured")
 	}
 
 	maxCycles := 3
@@ -212,53 +200,58 @@ func (s *CrossReviewStep) Execute(ctx context.Context, stepCtx workflow.StepCont
 			}
 		}
 	}
-	coderEngine, coderProvider := effectiveCLIHarness(project)
 
 	adversarial := policy == models.ReviewHarnessSame ||
 		previousSelfReviewFallback(ctx, s.checkpointLister, s.rt.Task.ID, workflow.StepCrossReview)
 
-	var routeTrace *llm.RouteTrace
-	switch {
-	case policy == models.ReviewHarnessSame:
-		// no exclusion: reviewer is allowed to be the same harness that coded it.
-	case coderProvider != "":
-		if s.log != nil {
-			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "info", fmt.Sprintf("cross-harness review: excluding coder provider %s (%s) for review", coderProvider, coderEngine))
-		}
-		ctx = llm.WithExcludeProviderID(ctx, coderProvider)
-		ctx, routeTrace = llm.WithRouteTrace(ctx)
-	default:
-		if s.log != nil {
-			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "cross-harness review: no underlying_provider declared for the CLI engine; unable to exclude a specific provider")
-		}
-	}
-
+	allowSame := policy == models.ReviewHarnessSame
+	instruction += "\n\n" + cliWorkingDirNotice + "\n\nWrite your review as JSON to `" + cliReviewCapturePath + "`."
 	if adversarial {
 		instruction += adversarialAuditDirective
 	}
 
-	out, err := s.llm.RunLLMStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepCrossReview, instruction)
+	reviewOut, err := s.runner.RunCLIReviewStep(ctx, s.rt.Task, s.rt.Agent, s.rt.JobID, workflow.StepCrossReview, instruction, []string{cliReviewCapturePath}, nil, allowSame)
 	if err != nil {
+		// No second harness available: skip the review rather than let the
+		// coder grade its own work. The job continues to cli_mr — an
+		// unavailable reviewer must not block delivery, but it must be
+		// visible that no independent review happened.
+		if errors.Is(err, ErrNoDistinctCLIHarness) {
+			if s.log != nil {
+				s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", "cross_review skipped: only one CLI harness available")
+			}
+			if s.status != nil {
+				if _, err := s.status.UpdateTaskStatus(ctx, s.rt.Task.ID, models.TaskStatusHumanReview); err != nil {
+					return nil, err
+				}
+				s.rt.Task.Status = models.TaskStatusHumanReview
+			}
+			return StepResult{"status": "skipped", "skipped_reason": "single_harness"}, nil
+		}
 		return nil, err
 	}
-	if routeTrace != nil && routeTrace.SelfReviewFallback {
+
+	out := StepResult{"status": "success"}
+	if raw, ok := reviewOut.Files[cliReviewCapturePath]; ok && strings.TrimSpace(raw) != "" {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+			out["parsed"] = parsed
+		} else if s.log != nil {
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("cross_review: %s was not valid JSON: %v", cliReviewCapturePath, err))
+		}
+	} else if s.log != nil {
+		s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("cross_review: expected %s to be written by the reviewing agent, but it was missing or empty", cliReviewCapturePath))
+	}
+
+	if allowSame && reviewOut.ReviewerRef == reviewOut.CoderRef {
 		if s.log != nil {
-			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("cross-harness review fallback: reviewed by the same harness that wrote the code (%s) — no alternative provider was available", routeTrace.ActualModel))
+			s.log.Log(ctx, s.rt.Task.ID, &s.rt.JobID, "warn", fmt.Sprintf("cross-harness review fallback: reviewed by the same harness that wrote the code (%s) — permitted by review_harness_policy=same", reviewOut.ReviewerRef))
 		}
 		out["self_review_fallback"] = true
-		out["self_review_fallback_model"] = routeTrace.ActualModel
+		out["self_review_fallback_model"] = reviewOut.ReviewerRef
 	}
-	out["coded_by"] = map[string]any{"engine": coderEngine, "provider": coderProvider, "model": ""}
-	reviewedBy := map[string]any{}
-	if m, ok := out["model"].(string); ok && m != "" {
-		reviewedBy["model"] = m
-	}
-	if p, ok := out["provider"].(string); ok && p != "" {
-		reviewedBy["provider"] = p
-	}
-	if len(reviewedBy) > 0 {
-		out["reviewed_by"] = reviewedBy
-	}
+	out["coded_by"] = map[string]any{"engine": models.ExecutionEngineCLI, "provider": reviewOut.CoderRef, "model": ""}
+	out["reviewed_by"] = map[string]any{"engine": models.ExecutionEngineCLI, "provider": reviewOut.ReviewerRef}
 
 	hasFindings := false
 	specFail := false

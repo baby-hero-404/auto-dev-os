@@ -16,7 +16,7 @@ export type CreateTaskPayload = {
   labels: string[];
   agent_id?: string;
   repository_id?: string;
-  execution_engine?: string;
+  require_spec_review?: boolean;
 };
 
 export function CreateTaskPanel({
@@ -46,7 +46,7 @@ export function CreateTaskPanel({
   const [labels, setLabels] = useState<string[]>([]);
   const [agentID, setAgentID] = useState("");
   const [repositoryID, setRepositoryID] = useState("");
-  const [executionEngine, setExecutionEngine] = useState("");
+  const [requireSpecReview, setRequireSpecReview] = useState(false);
 
   const [isDescExpanded, setIsDescExpanded] = useState(false);
 
@@ -109,7 +109,7 @@ export function CreateTaskPanel({
       labels,
       agent_id: agentID || undefined,
       repository_id: repositoryID || undefined,
-      execution_engine: executionEngine || undefined,
+      require_spec_review: requireSpecReview || undefined,
     });
     if (!created) return;
 
@@ -120,7 +120,7 @@ export function CreateTaskPanel({
     setLabels([]);
     setAgentID("");
     setRepositoryID("");
-    setExecutionEngine("");
+    setRequireSpecReview(false);
   }
 
   if (!isOpen) return null;
@@ -247,22 +247,19 @@ export function CreateTaskPanel({
             </div>
           </Field>
 
-          <Field label="Execution Engine" hint="Override the default execution routing">
-            <div className="relative">
-              <select
-                value={executionEngine}
-                onChange={(e) => setExecutionEngine(e.target.value)}
-                className="w-full pl-4 pr-9 rounded-lg border border-stroke bg-surface py-2.5 text-sm text-foreground focus:border-brand-primary focus:ring-2 focus:ring-brand-primary-muted focus:outline-none transition-all duration-150 appearance-none cursor-pointer font-medium"
+          <Field label="Review spec before implementing" hint="Overrides the project default for this task only">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={requireSpecReview}
+                onChange={(e) => setRequireSpecReview(e.target.checked)}
                 disabled={isSubmitting}
-              >
-                <option value="">Auto (Use Project Default)</option>
-                <option value="api">API Native</option>
-                <option value="cli">CLI Spec-First</option>
-              </select>
-              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-content-muted/60">
-                <ChevronDown size={14} />
-              </div>
-            </div>
+                className="h-4 w-4 rounded border-stroke text-brand-primary focus:ring-2 focus:ring-brand-primary-muted"
+              />
+              <span className="text-sm text-content-muted font-medium">
+                Pause at spec_review for a human to approve the plan before coding starts
+              </span>
+            </label>
           </Field>
 
           <Field label="Assign Agent">

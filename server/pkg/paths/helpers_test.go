@@ -169,4 +169,3 @@ func TestDeriveBranchName(t *testing.T) {
 		t.Errorf("DeriveRoleBranchName(%q, %q, \"be\") = %q, want %q", taskID, title, gotRole, wantRole)
 	}
 }
-

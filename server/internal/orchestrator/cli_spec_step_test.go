@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -28,7 +27,7 @@ func TestCLIStepRunner_ResolveConfig_ExecutionProviders(t *testing.T) {
 		WithCredentialAvailability(pool),
 	)
 	runner := newCLIStepRunner(orch)
-	cfg, orgID, err := runner.resolveConfig(context.Background(), &models.Task{ProjectID: "proj-1"})
+	cfg, orgID, _, err := runner.resolveConfig(context.Background(), &models.Task{ProjectID: "proj-1"}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,26 +42,9 @@ func TestCLIStepRunner_ResolveConfig_ExecutionProviders(t *testing.T) {
 	}
 }
 
-func TestCLIStepRunner_ResolveConfig_LegacyFallback(t *testing.T) {
-	cfg := models.CLIEngineConfig{Command: "claude", Args: []string{"-p"}}
-	raw, _ := json.Marshal(cfg)
-	orch := New(nil, nil, nil, nil,
-		WithProjectRepository(&fakeProjectRepo{project: &models.Project{
-			ExecutionEngine: models.ExecutionEngineCLI,
-			CLIEngineConfig: raw,
-		}}),
-	)
-	runner := newCLIStepRunner(orch)
-	resolved, _, err := runner.resolveConfig(context.Background(), &models.Task{ProjectID: "proj-1"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resolved.Command != "claude" {
-		t.Errorf("expected legacy CLIEngineConfig carried through byte-identically, got %q", resolved.Command)
-	}
-}
-
-func TestCLIStepRunner_ResolveConfig_NonCLIResolutionErrors(t *testing.T) {
+// An api row is no longer a valid execution provider at all: it fails
+// validation, so resolution errors rather than returning a non-cli candidate.
+func TestCLIStepRunner_ResolveConfig_APIRowRejected(t *testing.T) {
 	pool := &fakeCredentialPool{byID: map[string]fakeCred{
 		"cred-anthropic": {provider: "anthropic", status: models.ProviderCredentialStatusActive},
 	}}
@@ -76,9 +58,9 @@ func TestCLIStepRunner_ResolveConfig_NonCLIResolutionErrors(t *testing.T) {
 		WithCredentialAvailability(pool),
 	)
 	runner := newCLIStepRunner(orch)
-	_, _, err := runner.resolveConfig(context.Background(), &models.Task{ProjectID: "proj-1"})
+	_, _, _, err := runner.resolveConfig(context.Background(), &models.Task{ProjectID: "proj-1"}, "")
 	if err == nil {
-		t.Fatal("expected an error when the Router resolves to a non-cli provider")
+		t.Fatal("expected an error: an api execution provider row is no longer valid")
 	}
 }
 
@@ -443,7 +425,7 @@ func TestCLIStepRunner_RunCLIStep_SavesSessionIDArtifact(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error from ExitCode=1 to prevent panic")
 	}
-	
+
 	found := false
 	for _, a := range arts.saved {
 		if a == "cli_session_id" {

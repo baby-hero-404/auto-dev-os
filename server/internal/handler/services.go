@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/attest"
@@ -61,7 +60,6 @@ type TaskService interface {
 	ApproveAnalysis(context.Context, string) (*models.Task, error)
 	RequestAnalysisChanges(context.Context, string, models.ClarifyTaskInput) (*models.Task, error)
 	UpdateAnalysis(context.Context, string, json.RawMessage) (*models.Task, error)
-	UpdateSpecConfig(context.Context, string, bool) (*models.Task, error)
 	ListSubTasks(context.Context, string) ([]models.Task, error)
 	CreateSubTask(context.Context, string, models.CreateTaskInput) (*models.Task, error)
 	ApproveSplit(context.Context, string, []models.ChildTaskSpec, string) ([]models.Task, error)
@@ -93,15 +91,10 @@ type SkillService interface {
 	GetFileContent(ctx context.Context, sourceID string, relativePath string) (*models.FileContent, error)
 }
 
-type AnalyticsService interface {
-	TokenUsage(context.Context, string, string, time.Time) ([]models.TokenUsageSummary, error)
-}
-
 type AnalyticsDashboardService interface {
 	Overview(context.Context, string) (*models.OverviewStats, error)
 	AgentPerformance(context.Context, string, string) ([]models.AgentStats, error)
 	TaskAnalytics(context.Context, string, string, int) (*models.TaskAnalytics, error)
-	GatewayUsage(context.Context, string, string, int) ([]models.GatewayUsagePoint, error)
 	WorkflowAnalytics(context.Context, string, string) (*models.WorkflowAnalytics, error)
 	RecentFailures(context.Context, string, string, int) ([]models.RecentFailure, error)
 }
@@ -148,16 +141,7 @@ type ProviderCredentialService interface {
 	ListByOrg(context.Context, string) ([]models.ProviderCredentialResponse, error)
 	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderCredentialInput) (*models.ProviderCredentialResponse, error)
 	Delete(ctx context.Context, orgID string, id string) error
-	TestConnection(ctx context.Context, orgID string, id string) error
-	TestConnectionInput(ctx context.Context, orgID string, input models.TestProviderCredentialInput) error
 	GetDecryptedCredential(ctx context.Context, orgID, id string) (string, map[string]string, error)
-}
-
-type ProviderModelService interface {
-	Create(ctx context.Context, orgID string, input models.CreateProviderModelInput) (*models.ProviderModel, error)
-	ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error)
-	Update(ctx context.Context, orgID string, id string, input models.UpdateProviderModelInput) (*models.ProviderModel, error)
-	Delete(ctx context.Context, orgID string, id string) error
 }
 
 // AttestationService serves the read/verify endpoints for signed per-commit

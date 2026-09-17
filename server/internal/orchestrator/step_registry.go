@@ -24,17 +24,6 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 
 	rt := steps.StepRuntime{Task: task, Agent: agent, JobID: jobID}
 
-	// Coding steps (backend/frontend/fix) dispatch through the pluggable
-	// execution engine: when the task/project resolves to engine "cli",
-	// their LLMRunner is swapped for one backed by the CLI engine instead
-	// of the API-native tool loop. Other steps (analyze, plan, review, ...)
-	// always use the API-native path — they aren't "coding" steps in the
-	// sense the CLI engine is designed for.
-	var codeStepLLM steps.LLMRunner = llmRunnerAdapter{run: o.runLLMStep}
-	if cliRunner := o.resolveCLIEngineRunner(context.Background(), task); cliRunner != nil {
-		codeStepLLM = cliRunner
-	}
-
 	prStep := steps.NewPRStep(
 		rt,
 		o.tasks, // TaskRepository
@@ -68,66 +57,6 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			o.containerPathForHostPath,
 			o.learnedSkills, // LearnedSkillReader
 		),
-		steps.NewAnalyzeStep(
-			rt,
-			o.workspaceRoot,
-			o.tasks,    // TaskReader
-			o.tasks,    // TaskUpdater
-			o.projects, // ProjectReader
-			o.llm,      // LLMChatter
-			o.prompts,  // PromptAssembler
-			sandboxRunnerAdapter{run: o.runSandboxStep},            // SandboxRunner
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			statusUpdaterAdapter{update: o.updateTaskStatus},       // StatusUpdater
-			traceRecorderAdapter{write: o.writeLLMCallTrace},       // TraceRecorder
-			loggerAdapter{log: o.log},                              // Logger
-			o.wkspace,                                              // WorkspaceLoader
-			o.containerPathForHostPath,
-			o.maxPhaseCost,
-			o.registry,
-		).WithDecomposition(o.decompositionThreshold).
-			WithSplitAutoApprove(splitAutoApproverAdapter{approve: o.autoApproveSplit}, o.decompositionMaxAutoChildren),
-		steps.NewPlanStep(
-			rt,
-			o.tasks,                             // TaskReader
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.repoutil,                          // WorktreeManager
-			o.wkspace,                           // WorkspaceLoader
-			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
-			loggerAdapter{log: o.log},                        // Logger
-			o.workflows,                                      // WorkflowCheckpointRepo
-			o.maxPhaseCost,                                   // maxCost
-		),
-		steps.NewCodeBackendStep(
-			rt,
-			o.tasks,     // TaskReader
-			codeStepLLM, // LLMRunner
-			o.agents,    // BackendAgentAssigner
-			o.repoutil,  // WorktreeManager
-			o.repoutil,  // DiffCapturer
-			o.repoutil,  // PatchApplier
-			o.wkspace,   // WorkspaceLoader
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
-			o.workflows,               // CheckpointLister
-			loggerAdapter{log: o.log}, // Logger
-			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
-		),
-		steps.NewCodeFrontendStep(
-			rt,
-			o.tasks,     // TaskReader
-			codeStepLLM, // LLMRunner
-			o.agents,    // FrontendAgentAssigner
-			o.repoutil,  // WorktreeManager
-			o.repoutil,  // DiffCapturer
-			o.repoutil,  // PatchApplier
-			o.wkspace,   // WorkspaceLoader
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			testerRunnerAdapter{run: o.runTargetedTests},           // TestRunner
-			o.workflows,               // CheckpointLister
-			loggerAdapter{log: o.log}, // Logger
-			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
-		),
 		steps.NewMergeStep(
 			rt,
 			o.tasks,      // TaskReader
@@ -138,43 +67,6 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			statusUpdaterAdapter{update: o.updateTaskStatus},       // StatusUpdater
 			o.containerPathForHostPath,
-		),
-		steps.NewReviewStep(
-			rt,
-			o.tasks,                             // TaskReader
-			o.projects,                          // ProjectReader
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.repoutil,                          // DiffCapturer
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			o.agents,      // ReviewerAssigner
-			o.checkpoints, // CheckpointReader
-			o.workflows,   // CheckpointLister
-			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
-			loggerAdapter{log: o.log},                        // Logger
-		),
-		steps.NewFixStep(
-			rt,
-			o.tasks,     // TaskReader
-			o.workflows, // CheckpointLister
-			codeStepLLM, // LLMRunner
-			o.repoutil,  // DiffCapturer
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			o.repoutil, // PatchApplier
-			testerRunnerAdapter{run: o.runTargetedTests},               // TestRunner
-			statusUpdaterAdapter{update: o.updateTaskStatus},           // StatusUpdater
-			loggerAdapter{log: o.log},                                  // Logger
-			o.repoutil,                                                 // WorktreeManager
-			affectedFileReaderAdapter{read: o.readAffectedFileContent}, // AffectedFileReader
-		),
-		steps.NewTestStep(
-			rt,
-			statusUpdaterAdapter{update: o.updateTaskStatus}, // StatusUpdater
-			sandboxRunnerAdapter{run: o.runSandboxStep},      // SandboxRunner
-			o.wkspace,     // WorkspaceLoader
-			o.projects,    // ProjectReader
-			o.checkpoints, // CheckpointReader
-			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
-			loggerAdapter{log: o.log},                              // Logger
 		),
 		prStep,
 		steps.NewCLIAnalyzeStep(
@@ -229,11 +121,11 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 		),
 		steps.NewCrossReviewStep(
 			rt,
-			o.tasks,                             // TaskReader
-			o.projects,                          // ProjectReader
-			llmRunnerAdapter{run: o.runLLMStep}, // LLMRunner
-			o.repoutil,                          // DiffCapturer
-			cliSpecRunner,                       // WorktreeHostPathResolver
+			o.tasks,       // TaskReader
+			o.projects,    // ProjectReader
+			cliSpecRunner, // CLIReviewRunner
+			o.repoutil,    // DiffCapturer
+			cliSpecRunner, // WorktreeHostPathResolver
 			artifactSaverAdapter{save: o.checkpoints.SaveArtifact}, // ArtifactSaver
 			o.checkpoints, // CheckpointReader
 			o.workflows,   // CheckpointLister
@@ -264,8 +156,7 @@ func (o *Orchestrator) stepRunners(task *models.Task, agent *models.Agent, jobID
 			return map[string]any(res), err
 		}
 		runners[stepID] = o.checkpoints.WithCheckpointRecovery(
-			stepID, resolver, task, agent, jobStep, runner,
-			o.repoutil.ApplyPatch, o.updateTaskStatus,
+			stepID, resolver, task, runner, o.updateTaskStatus,
 		)
 	}
 

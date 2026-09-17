@@ -31,6 +31,7 @@ export function update(projectID: string, token: string, input: {
   max_review_fix_cycles?: number;
   default_branch?: string;
   execution_providers?: ExecutionProviderConfig[];
+  require_spec_review?: boolean;
 }) {
   return request<Project>(`/projects/${projectID}`, {
     method: "PATCH",
@@ -111,7 +112,7 @@ export const tasks = {
   create(
     projectID: string,
     token: string,
-    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string; execution_engine?: string },
+    input: { title: string; description: string; complexity: string; priority: number; labels: string[]; agent_id?: string; repository_id?: string; require_spec_review?: boolean },
   ) {
     return request<Task>(`/projects/${projectID}/tasks`, {
       method: "POST",

@@ -96,11 +96,9 @@ export const api = {
   listSkillSourceFiles: agents.skills.listSourceFiles,
   getSkillSourceFileContent: agents.skills.getSourceFileContent,
 
-  tokenUsage: analytics.tokenUsage,
   analyticsOverview: analytics.overview,
   analyticsAgents: analytics.agents,
   analyticsTasks: analytics.tasks,
-  analyticsGatewayUsage: analytics.gatewayUsage,
   analyticsWorkflows: analytics.workflows,
   analyticsFailures: analytics.failures,
 

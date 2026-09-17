@@ -11,9 +11,7 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
-	"github.com/auto-code-os/auto-code-os/server/internal/tool"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"gopkg.in/yaml.v3"
 )
@@ -153,12 +151,12 @@ func (a *PromptAssembler) LoadStepPrompt(stepID string) (string, error) {
 }
 
 // LoadRolePrompt exposes the same role-prompt resolution loadBaseRolePrompts
-// uses for the tool-loop assembler pipeline (agent.Role -> tool.EffectiveRoleForStep
+// uses (agent.Role -> EffectiveRoleForStep
 // -> promptPaths.RolePrompt, with "backend"/"frontend" both mapping to the
 // shared "coder" role file) to callers that build one standalone CLI
 // instruction string per spawn instead — e.g. the CLI spec-first steps, so
 // a CLI agent given AgentRoleFrontend/AgentRoleBackend gets the same
-// role-specific instructions the API-native flow would produce, instead of
+// role-specific instructions every other step produces, instead of
 // a second, divergent profile format. A nil agent or missing role file
 // returns ("", nil) rather than an error — same fallback behavior
 // loadBaseRolePrompts already has, so an unrecognized/missing role doesn't
@@ -167,7 +165,7 @@ func (a *PromptAssembler) LoadRolePrompt(agent *models.Agent, task models.Task, 
 	if agent == nil || a.promptPaths == nil || a.fs == nil {
 		return "", nil
 	}
-	role := tool.EffectiveRoleForStep(stepID, agent.Role, &task)
+	role := EffectiveRoleForStep(stepID, agent.Role, &task)
 	roleFile := role
 	if role == models.AgentRoleBackend || role == models.AgentRoleFrontend {
 		roleFile = "coder"
@@ -553,7 +551,7 @@ func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string
 	}
 
 	if agent != nil && a.promptPaths != nil && a.fs != nil {
-		role := tool.EffectiveRoleForStep(stepID, agent.Role, &task)
+		role := EffectiveRoleForStep(stepID, agent.Role, &task)
 		roleFile := role
 		if role == "backend" || role == "frontend" {
 			roleFile = "coder"
@@ -573,10 +571,9 @@ func (a *PromptAssembler) loadBaseRolePrompts(agent *models.Agent, stepID string
 	return sections
 }
 
-// coderRoleForTask, stepRequiresEditCaps, effectiveRoleForStep moved to internal/tool
-// (tool.CoderRoleForTask, tool.StepRequiresEditCaps, tool.EffectiveRoleForStep) so this package
-// and orchestrator share one implementation instead of two copies that could silently diverge —
-// see internal/tool/rolepolicy.go.
+// Role resolution (CoderRoleForTask, EffectiveRoleForStep) lives in this
+// package's rolepolicy.go — see the note there on what it lost when the
+// server-side tool loop was removed.
 
 // collectJITSkills resolves and renders the JIT Skills section (REQ-003), or a zero-value
 // PromptSection (empty Body) if resolution failed or no skills matched.
@@ -698,27 +695,6 @@ func (a *PromptAssembler) collectLayeredRules(ctx context.Context, task models.T
 
 // collectOutputRulesAndTools loads the immutable Output Rules section and renders the
 // Available Tools section from the tools offered to this call.
-func (a *PromptAssembler) collectOutputRulesAndTools(tools []llm.ToolDefinition) []PromptSection {
-	var sections []PromptSection
-
-	if a.promptPaths != nil && a.fs != nil {
-		outputRulesFile := a.promptPaths.CorePrompt("output_rules.md")
-		if content, err := a.fs.ReadFile(outputRulesFile); err == nil {
-			sections = append(sections, NewPromptSection("Output Rules", string(content), PriorityOutputRules, RenderOrderOutputRules, true, "system"))
-		}
-	}
-
-	if len(tools) > 0 {
-		toolsMarkdown := FormatAvailableTools(tools)
-		sections = append(sections, NewPromptSection("Available Tools", toolsMarkdown, PriorityAvailableTools, RenderOrderAvailableTools, true, "system"))
-	}
-
-	return sections
-}
-
-// collectRequirementAndClarifications builds the Task Requirement section (the original
-// description, or an execution-contract pointer once a spec has superseded it) and the
-// Answers-to-Clarifications section.
 func collectRequirementAndClarifications(task models.Task, stepID string, analysis models.TaskAnalysis) []PromptSection {
 	var sections []PromptSection
 
@@ -1064,34 +1040,6 @@ func (a *PromptAssembler) collectGeneralContext(ctx context.Context, task models
 // per-concern helpers (Task 3.3 / REQ-M07) — base/role prompts, JIT skills, layered rules,
 // output rules/tools, requirement/clarifications, reviewer-vs-general context routing, semantic
 // context retrieval, and repo map construction — instead of one large function.
-func (a *PromptAssembler) collect(ctx context.Context, task models.Task, agent *models.Agent, tools []llm.ToolDefinition, promptBudget int) ([]PromptSection, error) {
-	stepID := stepIDFromCtx(ctx)
-	analysis := resolveTaskAnalysisForCollect(ctx, task, stepID)
-
-	var sections []PromptSection
-	sections = append(sections, a.loadBaseRolePrompts(agent, stepID, task)...)
-	if jit := a.collectJITSkills(ctx, task, agent, stepID); jit.Body != "" {
-		sections = append(sections, jit)
-	}
-	sections = append(sections, a.collectLayeredRules(ctx, task, agent, stepID, analysis)...)
-	sections = append(sections, a.collectOutputRulesAndTools(tools)...)
-	sections = append(sections, collectRequirementAndClarifications(task, stepID, analysis)...)
-
-	isReviewer := agent != nil && strings.ToLower(agent.Role) == "reviewer"
-	if isReviewer {
-		sections = append(sections, collectReviewerContext(analysis, task)...)
-	} else {
-		sections = append(sections, a.collectGeneralContext(ctx, task, agent, stepID, analysis, promptBudget, sections)...)
-	}
-
-	if memories, ok := ctx.Value(MemoriesCtxKey).([]models.EpisodicMemory); ok && len(memories) > 0 {
-		sections = append(sections, NewPromptSection("Retrieved Memories", "=== Retrieved Memories ===\n"+formatMemories(memories), PriorityRetrievedMemories, RenderOrderRetrievedMemories, false, "user"))
-	}
-
-	return sections, nil
-}
-
-// sort orders sections by RenderOrder for final rendering.
 func (a *PromptAssembler) sort(sections []PromptSection) []PromptSection {
 	sorted := make([]PromptSection, len(sections))
 	copy(sorted, sections)
@@ -1181,133 +1129,4 @@ func (a *PromptAssembler) optimizeBudget(ctx context.Context, sections []PromptS
 	}
 
 	return activeSections
-}
-
-func FormatAvailableTools(tools []llm.ToolDefinition) string {
-	if len(tools) == 0 {
-		return ""
-	}
-
-	// Group tools by Category
-	toolsByCategory := make(map[string][]llm.ToolDefinition)
-	for _, t := range tools {
-		cat, _ := toolMetadata(t.Name)
-		toolsByCategory[cat] = append(toolsByCategory[cat], t)
-	}
-
-	// Sort categories for deterministic rendering
-	var categories []string
-	for cat := range toolsByCategory {
-		categories = append(categories, cat)
-	}
-	sort.Strings(categories)
-
-	var sb strings.Builder
-	sb.WriteString("## Available Tools\n\n")
-
-	for _, cat := range categories {
-		sb.WriteString(fmt.Sprintf("### Category: %s\n\n", cat))
-		// Sort tools inside the category
-		catTools := toolsByCategory[cat]
-		sort.Slice(catTools, func(i, j int) bool {
-			return catTools[i].Name < catTools[j].Name
-		})
-
-		for _, t := range catTools {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", t.Name, t.Description))
-
-			// Parse parameters schema
-			if len(t.Parameters) > 0 {
-				var schema struct {
-					Properties map[string]struct {
-						Type        string `json:"type"`
-						Description string `json:"description"`
-						Default     any    `json:"default"`
-					} `json:"properties"`
-					Required []string `json:"required"`
-				}
-				if err := json.Unmarshal(t.Parameters, &schema); err == nil && len(schema.Properties) > 0 {
-					sb.WriteString("  - Parameters:\n")
-					// Sort keys for deterministic rendering
-					var keys []string
-					for k := range schema.Properties {
-						keys = append(keys, k)
-					}
-					sort.Strings(keys)
-
-					requiredMap := make(map[string]bool)
-					for _, req := range schema.Required {
-						requiredMap[req] = true
-					}
-
-					for _, k := range keys {
-						prop := schema.Properties[k]
-						reqStr := "optional"
-						if requiredMap[k] {
-							reqStr = "required"
-						}
-						defaultStr := ""
-						if prop.Default != nil {
-							defaultStr = fmt.Sprintf(", default: %v", prop.Default)
-						}
-						descStr := ""
-						if prop.Description != "" {
-							descStr = fmt.Sprintf(" - %s", prop.Description)
-						}
-						sb.WriteString(fmt.Sprintf("    - `%s` (%s, %s%s)%s\n", k, prop.Type, reqStr, defaultStr, descStr))
-					}
-				}
-			}
-
-			// Add usage example
-			_, example := toolMetadata(t.Name)
-			if example != "" {
-				sb.WriteString(fmt.Sprintf("  - Example: `%s`\n", example))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	return sb.String()
-}
-
-func toolMetadata(name string) (category string, example string) {
-	switch name {
-	case "read_file":
-		return "filesystem", `{"path": "src/main.go", "start_line": 1, "end_line": 100}`
-	case "write_file":
-		return "filesystem", `{"path": "src/hello.go", "content": "package main\n\nfunc main() {}"}`
-	case "list_files":
-		return "filesystem", `{"path": ".", "max_depth": 2}`
-	case "file_exists":
-		return "filesystem", `{"path": "package.json"}`
-	case "search_replace":
-		return "editing", `{"path": "src/main.go", "search": "fmt.Println(\"hello\")", "replace": "fmt.Println(\"world\")"}`
-	case "apply_patch":
-		return "editing", `{"path": "src/main.go", "search": "old content", "replace": "new content"}`
-	case "grep_search":
-		return "search", `{"query": "type Registry struct", "include": "*.go"}`
-	case "search_code":
-		return "search", `{"query": "func Main"}`
-	case "git_diff":
-		return "git", `{"staged": false}`
-	case "git_status":
-		return "git", `{}`
-	case "run_tests":
-		return "build", `{"command": "go test ./..."}`
-	case "run_build":
-		return "build", `{"command": "go build ./..."}`
-	case "read_spec":
-		return "context", `{}`
-	case "read_affected_files":
-		return "context", `{}`
-	case "analyze_logs":
-		return "other", `{"path": "logs/test.log"}`
-	case "generate_docs":
-		return "documentation", `{"topic": "API"}`
-	case "create_migration":
-		return "database", `{"name": "init"}`
-	default:
-		return "other", `{}`
-	}
 }

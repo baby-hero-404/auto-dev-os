@@ -2,8 +2,8 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -267,19 +267,6 @@ func (m *mockTestRunner) RunTargetedTests(ctx context.Context, task *models.Task
 	return m.result, m.err
 }
 
-type mockLLMChatter struct {
-	resp *llm.Response
-	err  error
-}
-
-func (m *mockLLMChatter) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
-	return m.resp, m.err
-}
-
-func (m *mockLLMChatter) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
-	return m.resp, m.err
-}
-
 type mockSandboxRunner struct {
 	result StepResult
 	err    error
@@ -304,4 +291,50 @@ type sandboxRunnerAdapter struct {
 
 func (s sandboxRunnerAdapter) RunCommand(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, command string) (StepResult, error) {
 	return s.run(ctx, task, agent, stepID, command)
+}
+
+// mockWorkspaceLoader is the minimal WorkspaceLoader: it hands back a fixed
+// workspace (or error) and drops metadata saves. mockStepWorkspaceLoader
+// above is the configurable variant, for tests that need to observe the save.
+type mockWorkspaceLoader struct {
+	ws  *models.TaskWorkspace
+	err error
+}
+
+func (m *mockWorkspaceLoader) LoadTaskWorkspace(ctx context.Context, task *models.Task) (*models.TaskWorkspace, error) {
+	return m.ws, m.err
+}
+
+func (m *mockWorkspaceLoader) SaveTaskWorkspaceMetadata(task *models.Task, ws *models.TaskWorkspace) error {
+	return nil
+}
+
+// mockCLIReviewRunner stands in for the cross-harness reviewer. verdict is
+// marshalled into the capture file the real runner would return, so the test
+// exercises the same JSON-parsing path production uses.
+type mockCLIReviewRunner struct {
+	verdict         map[string]any
+	err             error
+	coderRef        string
+	reviewerRef     string
+	lastInstruction string
+	lastAllowSame   bool
+}
+
+func (m *mockCLIReviewRunner) RunCLIReviewStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, allowSameHarness bool) (CLIReviewOutput, error) {
+	m.lastInstruction = instruction
+	m.lastAllowSame = allowSameHarness
+	if m.err != nil {
+		return CLIReviewOutput{}, m.err
+	}
+	files := map[string]string{}
+	if m.verdict != nil {
+		raw, _ := json.Marshal(m.verdict)
+		files[cliReviewCapturePath] = string(raw)
+	}
+	return CLIReviewOutput{
+		CLIStepOutput: CLIStepOutput{Files: files},
+		CoderRef:      m.coderRef,
+		ReviewerRef:   m.reviewerRef,
+	}, nil
 }

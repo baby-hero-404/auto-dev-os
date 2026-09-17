@@ -2,13 +2,12 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
@@ -45,14 +44,24 @@ type CredentialStatusSetter interface {
 }
 
 // ResolvedExecutionProvider is what ResolveExecutionProvider hands back to
-// the caller: enough to either use the existing api-native LLM path, or
-// build a cliEngineRunner without re-reading project.CLIEngineConfig.
+// the caller: enough to build a cliEngineRunner without re-reading
+// project.CLIEngineConfig.
+//
+// This used to carry a Type discriminator ("api" | "cli") because the
+// router arbitrated between two engines. There is only one engine now, so
+// resolution either yields a CLI candidate or fails — "no provider" is an
+// error, never a silent fall-through to an api-native default.
 type ResolvedExecutionProvider struct {
-	Type         string // "api", "cli"
 	Ref          string
 	CredentialID string
 	CLIConfig    *models.CLIEngineConfig
 }
+
+// ErrNoDistinctHarness is returned by ResolveReviewProvider when every
+// available CLI candidate is the same profile that wrote the code. Callers
+// must treat it as "skip cross_review" — never as "review with the same
+// harness", which is review theater (see docs/openspecs/remove-api-execution-mode).
+var ErrNoDistinctHarness = errors.New("no CLI harness distinct from the coder is available")
 
 type ErrAllCredentialsInCooldown struct {
 	SleepUntil time.Time
@@ -62,30 +71,42 @@ func (e *ErrAllCredentialsInCooldown) Error() string {
 	return fmt.Sprintf("all credentials in cooldown until %v", e.SleepUntil)
 }
 
-// ResolveExecutionProvider picks the first enabled, available candidate in
-// priority order, per this precedence chain (docs/openspecs/global-execution-providers):
+// ResolveExecutionProvider picks the first enabled, available CLI candidate
+// in priority order, per this precedence chain:
 //  1. project.ExecutionProviders, if it has at least one enabled row
 //     (models.HasEnabledProvider — see below for why "non-empty" isn't the
-//     right check) (REQ-004) — exhausting this list is a hard error, never
-//     a silent fall-through to steps below.
-//  2. project.ExecutionEngine=="cli" (legacy single-engine field), if
-//     explicitly set — a project already deliberately on the legacy path
-//     keeps running exactly as before, checked *before* the org default so
-//     an org enabling a global default can never change its behavior.
-//  3. organization.DefaultExecutionProviders, if non-empty and it produces
+//     right check). Exhausting this list is a hard error.
+//  2. organization.DefaultExecutionProviders, if non-empty and it produces
 //     an available candidate.
-//  4. Plain api_native default (today's behavior).
+//
+// There is no step 3. Before the API-native engine was removed this chain
+// ended in a plain api_native default, so a project with nothing configured
+// still ran; now it fails with an actionable message instead, because
+// running without a configured CLI harness is not a thing the platform can
+// do.
 //
 // Selection happens once per call — callers must not re-invoke mid-task to
 // "switch" providers (REQ-005).
-//
-// A per-task execution_engine override (task.ExecutionEngine) narrows
-// whichever list above is selected down to just that type instead of being
-// ignored: without this, once a project has any provider routing
-// configured, the per-task "API-native" / "CLI" override in the task UI
-// silently stopped doing anything, since only the legacy (empty-list) path
-// ever consulted it.
 func (o *Orchestrator) ResolveExecutionProvider(ctx context.Context, task *models.Task, project *models.Project) (*ResolvedExecutionProvider, error) {
+	return o.resolveExecutionProvider(ctx, task, project, "")
+}
+
+// ResolveReviewProvider resolves a CLI candidate for the cross-harness
+// review step, excluding excludeRef — the profile that wrote the code.
+// Returns ErrNoDistinctHarness when no other profile is authenticated.
+func (o *Orchestrator) ResolveReviewProvider(ctx context.Context, task *models.Task, project *models.Project, excludeRef string) (*ResolvedExecutionProvider, error) {
+	resolved, err := o.resolveExecutionProvider(ctx, task, project, excludeRef)
+	if err != nil {
+		var cooldown *ErrAllCredentialsInCooldown
+		if errors.As(err, &cooldown) {
+			return nil, err
+		}
+		return nil, ErrNoDistinctHarness
+	}
+	return resolved, nil
+}
+
+func (o *Orchestrator) resolveExecutionProvider(ctx context.Context, task *models.Task, project *models.Project, excludeRef string) (*ResolvedExecutionProvider, error) {
 	providers, err := models.ValidateExecutionProviders(project.ExecutionProviders)
 	if err != nil {
 		return nil, fmt.Errorf("execution provider routing: %w", err)
@@ -98,69 +119,43 @@ func (o *Orchestrator) ResolveExecutionProvider(ctx context.Context, task *model
 	// byte-empty once a project has been saved even once. Treating "list
 	// present but nothing enabled" as an explicit, exhausted configuration
 	// would hard-error every such project instead of falling through to the
-	// org default (or legacy), which defeats this feature (and was already
-	// a latent bug for the legacy fallback before the org default existed).
+	// org default.
 	if models.HasEnabledProvider(providers) {
-		return o.resolveFromProviderList(ctx, project.OrgID, providers, task.ExecutionEngine)
+		return o.resolveFromProviderList(ctx, project.OrgID, providers, excludeRef)
 	}
-	if project.ExecutionEngine != models.ExecutionEngineCLI {
-		if resolved, ok := o.resolveFromOrgDefault(ctx, task, project); ok {
-			return resolved, nil
-		}
+	if resolved, ok := o.resolveFromOrgDefault(ctx, task, project, excludeRef); ok {
+		return resolved, nil
 	}
-	return o.legacyResolveExecutionProvider(task, project), nil
+	return nil, fmt.Errorf("no CLI execution provider configured for this project: enable one in Project Settings > Execution Providers and authenticate a CLI credential")
 }
 
 // resolveFromProviderList runs the priority-ordered candidate selection
-// (sort, task-override narrowing, availability check) against any provider
-// list — shared by project.ExecutionProviders and
-// organization.DefaultExecutionProviders so the two sources can never drift
-// in behavior.
-func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string, providers []models.ExecutionProviderConfig, taskEngineOverride *string) (*ResolvedExecutionProvider, error) {
+// (sort, availability check) against any provider list — shared by
+// project.ExecutionProviders and organization.DefaultExecutionProviders so
+// the two sources can never drift in behavior.
+//
+// excludeRef, when non-empty, skips that profile: used by
+// ResolveReviewProvider to guarantee the cross-harness reviewer is not the
+// harness that wrote the code.
+func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string, providers []models.ExecutionProviderConfig, excludeRef string) (*ResolvedExecutionProvider, error) {
 	sorted := make([]models.ExecutionProviderConfig, len(providers))
 	copy(sorted, providers)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
 
-	if taskEngineOverride != nil && *taskEngineOverride != "" {
-		wantType := "api"
-		if *taskEngineOverride == models.ExecutionEngineCLI {
-			wantType = "cli"
-		}
-		filtered := make([]models.ExecutionProviderConfig, 0, len(sorted))
-		for _, p := range sorted {
-			if p.Type == wantType {
-				filtered = append(filtered, p)
-			}
-		}
-		sorted = filtered
-	}
-
 	var minSleep time.Time
 	for _, p := range sorted {
-		if !p.Enabled {
+		if !p.Enabled || (excludeRef != "" && p.Ref == excludeRef) {
 			continue
 		}
-		var isAvail bool
-		var credProvider string
-		switch p.Type {
-		case "api":
-			isAvail = o.hasAvailableCredential(ctx, orgID, p.Ref, p.CredentialID)
-			credProvider = p.Ref
-			if isAvail {
-				return &ResolvedExecutionProvider{Type: "api", Ref: p.Ref}, nil
-			}
-		case "cli":
-			var cfg *models.CLIEngineConfig
-			var credID string
-			cfg, credID, isAvail = o.resolveCLICandidate(ctx, orgID, p)
-			if isAvail {
-				return &ResolvedExecutionProvider{Type: "cli", Ref: p.Ref, CredentialID: credID, CLIConfig: cfg}, nil
-			}
-			if profile, ok := models.ProfileOrEmpty(p.Ref); ok {
-				credProvider = profile.CredentialProvider
-			}
+		cfg, credID, isAvail := o.resolveCLICandidate(ctx, orgID, p)
+		if isAvail {
+			return &ResolvedExecutionProvider{Ref: p.Ref, CredentialID: credID, CLIConfig: cfg}, nil
 		}
 
+		credProvider := ""
+		if profile, ok := models.ProfileOrEmpty(p.Ref); ok {
+			credProvider = profile.CredentialProvider
+		}
 		if credProvider != "" && o.credentialPool != nil {
 			if cdDur, _, err := o.credentialPool.GetMinCooldown(ctx, orgID, credProvider, ""); err == nil && cdDur > 0 {
 				cdTime := time.Now().Add(cdDur)
@@ -170,12 +165,12 @@ func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string
 			}
 		}
 	}
-	
+
 	if !minSleep.IsZero() {
 		return nil, &ErrAllCredentialsInCooldown{SleepUntil: minSleep}
 	}
 
-	return nil, fmt.Errorf("no enabled execution provider is available")
+	return nil, fmt.Errorf("no enabled CLI execution provider is available")
 }
 
 // resolveFromOrgDefault tries organization.DefaultExecutionProviders.
@@ -184,7 +179,7 @@ func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string
 // ok=false case falls through to the legacy/api_native default in the
 // caller, never an error surfaced to the user, since "no org default
 // configured" is the overwhelmingly common case and must stay silent.
-func (o *Orchestrator) resolveFromOrgDefault(ctx context.Context, task *models.Task, project *models.Project) (*ResolvedExecutionProvider, bool) {
+func (o *Orchestrator) resolveFromOrgDefault(ctx context.Context, task *models.Task, project *models.Project, excludeRef string) (*ResolvedExecutionProvider, bool) {
 	if o.orgs == nil {
 		return nil, false
 	}
@@ -196,56 +191,17 @@ func (o *Orchestrator) resolveFromOrgDefault(ctx context.Context, task *models.T
 	if err != nil || len(providers) == 0 {
 		return nil, false
 	}
-	resolved, err := o.resolveFromProviderList(ctx, project.OrgID, providers, task.ExecutionEngine)
+	resolved, err := o.resolveFromProviderList(ctx, project.OrgID, providers, excludeRef)
 	if err != nil {
 		return nil, false
 	}
 	return resolved, true
 }
 
-// shouldUseCLISpecFirstWorkflow reports whether task should run the
-// cli_analyze -> cli_spec -> cli_implement workflow shape instead of the
-// default DAG. Delegates entirely to ResolveExecutionProvider, which
-// already encodes the full precedence chain (project list, legacy-if-cli,
-// org default, plain api_native) — this asks the Router the same question
-// it will answer again per-step later; both calls happen at task/job start
-// with no state change in between, consistent with "resolve once at Task
-// start" (REQ-005).
-func (o *Orchestrator) shouldUseCLISpecFirstWorkflow(ctx context.Context, task *models.Task, project *models.Project) bool {
-	if project == nil {
-		return false
-	}
-	resolved, err := o.ResolveExecutionProvider(ctx, task, project)
-	return err == nil && resolved.Type == "cli"
-}
-
-// legacyResolveExecutionProvider reuses engine.ResolveEngine + the existing
-// project.CLIEngineConfig read verbatim, so REQ-003 can never drift from
-// today's behavior (it's the same code path, not a reimplementation).
-func (o *Orchestrator) legacyResolveExecutionProvider(task *models.Task, project *models.Project) *ResolvedExecutionProvider {
-	resolved := engine.ResolveEngine(task.ExecutionEngine, project.ExecutionEngine)
-	if resolved != models.ExecutionEngineCLI {
-		return &ResolvedExecutionProvider{Type: "api"}
-	}
-	cfg := legacyCLIEngineConfig(project)
-	cfg.ProfileRef = "custom"
-	return &ResolvedExecutionProvider{Type: "cli", Ref: "custom", CredentialID: cfg.CredentialID, CLIConfig: cfg}
-}
-
-// legacyCLIEngineConfig parses project.CLIEngineConfig exactly as
-// resolveCLIEngineRunner did before this OpenSpec — byte-identical
-// unmarshal, no reinterpretation (REQ-003).
-func legacyCLIEngineConfig(project *models.Project) *models.CLIEngineConfig {
-	var cfg models.CLIEngineConfig
-	if len(project.CLIEngineConfig) > 0 {
-		_ = json.Unmarshal(project.CLIEngineConfig, &cfg)
-	}
-	return &cfg
-}
-
-// hasAvailableCredential reports whether provider (api provider id, e.g.
-// "anthropic") has at least one usable credential: the pin if credentialID
-// is set, otherwise any active/non-cooldown credential for that provider.
+// hasAvailableCredential reports whether provider (a cli:* credential
+// provider, e.g. "cli:claude") has at least one usable credential: the pin
+// if credentialID is set, otherwise any active/non-cooldown credential for
+// that provider.
 func (o *Orchestrator) hasAvailableCredential(ctx context.Context, orgID, provider, credentialID string) bool {
 	if o.credentialPool == nil {
 		// No credential pool wired (e.g. some unit tests) — don't block
@@ -258,7 +214,7 @@ func (o *Orchestrator) hasAvailableCredential(ctx context.Context, orgID, provid
 			return false
 		}
 		// A pinned credential_id must actually belong to the provider this
-		// row claims (e.g. a claude_code row pinning a cli:codex or API
+		// row claims (e.g. a claude_code row pinning a cli:codex
 		// credential) — otherwise the wrong secret material gets resolved
 		// downstream (resolveCredentialFiles mounts by ID alone, with no
 		// provider check of its own).

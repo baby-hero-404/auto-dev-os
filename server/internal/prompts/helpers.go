@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
@@ -126,31 +125,6 @@ func lineOverlap(a, b models.ContextSnippet) float64 {
 		return 0
 	}
 	return overlap / shorter
-}
-
-func TruncateHistory(history []llm.Message, maxChars int) []llm.Message {
-	if maxChars <= 0 || len(history) == 0 {
-		return nil
-	}
-	selected := []llm.Message{}
-	total := 0
-	for i := len(history) - 1; i >= 0; i-- {
-		msg := history[i]
-		size := len(msg.Role) + len(msg.Content)
-		if total+size > maxChars {
-			selected = append(selected, llm.Message{
-				Role:    "system",
-				Content: fmt.Sprintf("Earlier conversation summarized: %d messages omitted to stay within token budget.", i+1),
-			})
-			break
-		}
-		total += size
-		selected = append(selected, msg)
-	}
-	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
-		selected[i], selected[j] = selected[j], selected[i]
-	}
-	return selected
 }
 
 func appendSystemPrompt(core string, metadata map[string]any) string {

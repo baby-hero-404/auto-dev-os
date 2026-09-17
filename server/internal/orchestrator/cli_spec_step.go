@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,6 +43,10 @@ type cliStepRunner struct {
 	preflight     error
 	credID        string // set by resolveConfig, read by RunCLIStep after RunCodeStep for cooldown write-back
 	candidateKey  string // set by resolveConfig, read by RunCLIStep to key the preflight cache
+	// coderRef is the CLI profile ref the last resolveConfig picked. cross_review
+	// reads it to exclude that profile when resolving its reviewer, so the
+	// reviewing harness is never the one that wrote the code.
+	coderRef string
 }
 
 func newCLIStepRunner(o *Orchestrator) *cliStepRunner {
@@ -55,26 +60,34 @@ func newCLIStepRunner(o *Orchestrator) *cliStepRunner {
 // here, and quota-exceeded cooldown (REQ-006 write-side) never fires for
 // the whole cli_analyze/cli_spec/cli_implement flow since no credential ID
 // was ever threaded through.
-func (r *cliStepRunner) resolveConfig(ctx context.Context, task *models.Task) (*models.CLIEngineConfig, string, error) {
+// excludeRef, when non-empty, forces a candidate other than that profile —
+// the cross-review path. It deliberately does not update r.coderRef: the
+// reviewer is a second harness for one step, not a change of who wrote the
+// code.
+func (r *cliStepRunner) resolveConfig(ctx context.Context, task *models.Task, excludeRef string) (*models.CLIEngineConfig, string, string, error) {
 	if r.o.projects == nil {
-		return nil, "", fmt.Errorf("cli step runner: project repository unavailable")
+		return nil, "", "", fmt.Errorf("cli step runner: project repository unavailable")
 	}
 	project, err := r.o.projects.GetByID(ctx, task.ProjectID)
 	if err != nil {
-		return nil, "", fmt.Errorf("cli step runner: load project: %w", err)
+		return nil, "", "", fmt.Errorf("cli step runner: load project: %w", err)
 	}
-	resolved, err := r.o.ResolveExecutionProvider(ctx, task, project)
+	var resolved *ResolvedExecutionProvider
+	if excludeRef != "" {
+		resolved, err = r.o.ResolveReviewProvider(ctx, task, project, excludeRef)
+	} else {
+		resolved, err = r.o.ResolveExecutionProvider(ctx, task, project)
+	}
 	if err != nil {
-		return nil, "", fmt.Errorf("cli step runner: %w", err)
-	}
-	if resolved.Type != "cli" {
-		// worker.go only builds a cliStepRunner when the Router has already
-		// confirmed a cli candidate; landing here with type=="api" means the
-		// two resolutions (workflow-shape selection, then this one) disagreed
-		// — fail clearly instead of silently running with an empty config.
-		return nil, "", fmt.Errorf("cli step runner: resolved provider is %q, not cli", resolved.Type)
+		if errors.Is(err, ErrNoDistinctHarness) {
+			return nil, "", "", steps.ErrNoDistinctCLIHarness
+		}
+		return nil, "", "", fmt.Errorf("cli step runner: %w", err)
 	}
 	r.credID = resolved.CredentialID
+	if excludeRef == "" {
+		r.coderRef = resolved.Ref
+	}
 	r.candidateKey = resolved.Ref + "|" + resolved.CredentialID
 	if r.o.workflows != nil {
 		r.o.log(ctx, task.ID, nil, "info", fmt.Sprintf(
@@ -82,13 +95,36 @@ func (r *cliStepRunner) resolveConfig(ctx context.Context, task *models.Task) (*
 			resolved.Ref, resolved.CredentialID,
 		))
 	}
-	return resolved.CLIConfig, project.OrgID, nil
+	return resolved.CLIConfig, project.OrgID, resolved.Ref, nil
 }
 
 func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix string) (steps.CLIStepOutput, error) {
-	cfg, orgID, err := r.resolveConfig(ctx, task)
+	out, _, err := r.runCLI(ctx, task, agent, jobID, stepID, instruction, captureFiles, contextFiles, worktreeSuffix, "")
+	return out, err
+}
+
+// RunCLIReviewStep runs one step on a harness other than the one that wrote
+// the code, so cross_review is a genuinely independent read of the diff.
+// Returns steps.ErrNoDistinctCLIHarness when no second profile is
+// authenticated — the caller skips the review rather than letting the coder
+// grade itself.
+func (r *cliStepRunner) RunCLIReviewStep(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, allowSameHarness bool) (steps.CLIReviewOutput, error) {
+	coderRef := r.coderRef
+	excludeRef := coderRef
+	if allowSameHarness {
+		excludeRef = ""
+	}
+	out, reviewerRef, err := r.runCLI(ctx, task, agent, jobID, stepID, instruction, captureFiles, contextFiles, "", excludeRef)
 	if err != nil {
-		return steps.CLIStepOutput{}, err
+		return steps.CLIReviewOutput{}, err
+	}
+	return steps.CLIReviewOutput{CLIStepOutput: out, CoderRef: coderRef, ReviewerRef: reviewerRef}, nil
+}
+
+func (r *cliStepRunner) runCLI(ctx context.Context, task *models.Task, agent *models.Agent, jobID, stepID, instruction string, captureFiles []string, contextFiles map[string]string, worktreeSuffix, excludeRef string) (steps.CLIStepOutput, string, error) {
+	cfg, orgID, ref, err := r.resolveConfig(ctx, task, excludeRef)
+	if err != nil {
+		return steps.CLIStepOutput{}, "", err
 	}
 
 	r.o.initRepoutil()
@@ -101,7 +137,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	// cwd — see the empty-output/exit-1 cli_analyze failures this fixes.
 	repoHostPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task)
 	if err != nil {
-		return steps.CLIStepOutput{}, fmt.Errorf("cli step runner: resolve repo path: %w", err)
+		return steps.CLIStepOutput{}, "", fmt.Errorf("cli step runner: resolve repo path: %w", err)
 	}
 	// worktreeSuffix routes a parallel implement track (Phase 4) into its own
 	// role worktree instead of the main checkout — same resolution
@@ -151,7 +187,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	preflightErr := r.preflight
 	r.mu.Unlock()
 	if preflightErr != nil {
-		return steps.CLIStepOutput{}, fmt.Errorf("cli engine preflight failed: %w", preflightErr)
+		return steps.CLIStepOutput{}, "", fmt.Errorf("cli engine preflight failed: %w", preflightErr)
 	}
 
 	if strings.HasPrefix(stepID, "cli_implement") && r.o.workspaceRoot != "" {
@@ -170,7 +206,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 	res, err := eng.RunCodeStep(ctx, req)
 	if err != nil {
 		r.o.log(ctx, task.ID, &jobID, "error", fmt.Sprintf("%s: cli engine run failed before producing a result: %v", stepID, err))
-		return steps.CLIStepOutput{}, err
+		return steps.CLIStepOutput{}, "", err
 	}
 
 	// Write-side of REQ-006, same as cliEngineRunner.RunLLMStep: only
@@ -253,7 +289,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		// whether to pause for clarification (REQ-006). Return the output
 		// so the step can extract the question, but no error: an error
 		// here would trigger the ordinary retry path instead.
-		return out, nil
+		return out, ref, nil
 	}
 	if !res.Success {
 		errMsg := res.Error
@@ -268,9 +304,9 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 			// human re-runs the CLI auth capture flow. A merely suspected
 			// (fallback-only) match falls through to the plain error below
 			// instead, so it retries like any other runtime failure.
-			return out, fmt.Errorf("%s: %w", errMsg, engine.ErrConfigInvalid)
+			return out, ref, fmt.Errorf("%s: %w", errMsg, engine.ErrConfigInvalid)
 		}
-		return out, fmt.Errorf("%s", errMsg)
+		return out, ref, fmt.Errorf("%s", errMsg)
 	}
 
 	if repoHostPath, err := r.o.repoutil.GetTaskRepoHostPath(ctx, task); err == nil {
@@ -292,7 +328,7 @@ func (r *cliStepRunner) RunCLIStep(ctx context.Context, task *models.Task, agent
 		}
 	}
 
-	return out, nil
+	return out, ref, nil
 }
 
 // ResolveHostWorktreeRoot implements steps.WorktreeHostPathResolver: the

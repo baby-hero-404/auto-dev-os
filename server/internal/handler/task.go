@@ -272,25 +272,6 @@ func (h *TaskHandler) UpdateAnalysis(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-type updateSpecConfigRequest struct {
-	IncludeSpecInMR bool `json:"include_spec_in_mr"`
-}
-
-func (h *TaskHandler) UpdateSpecConfig(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "taskID")
-	var input updateSpecConfigRequest
-	if err := decodeJSON(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	t, err := h.svc.UpdateSpecConfig(r.Context(), id, input.IncludeSpecInMR)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
-}
-
 func (h *TaskHandler) ListSubTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	tasks, err := h.svc.ListSubTasks(r.Context(), id)

@@ -9,18 +9,18 @@ import "time"
 // a Task creates a new TaskAttempt row; it never mutates or deletes a prior
 // one, preserving forensic history (docs/openspecs/task-subtask-decomposition).
 type TaskAttempt struct {
-	ID             string     `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	TaskID         string     `json:"task_id" gorm:"type:uuid;not null"`
-	AttemptNumber  int        `json:"attempt_number" gorm:"not null"`
-	StartedAt      time.Time  `json:"started_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	ExitStatus     *int       `json:"exit_status,omitempty"`
-	TokensIn       *int       `json:"tokens_in,omitempty"`
-	TokensOut      *int       `json:"tokens_out,omitempty"`
-	CostUSD        *float64   `json:"cost_usd,omitempty"`
-	SandboxRef     string     `json:"sandbox_ref,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID            string     `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	TaskID        string     `json:"task_id" gorm:"type:uuid;not null"`
+	AttemptNumber int        `json:"attempt_number" gorm:"not null"`
+	StartedAt     time.Time  `json:"started_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	ExitStatus    *int       `json:"exit_status,omitempty"`
+	TokensIn      *int       `json:"tokens_in,omitempty"`
+	TokensOut     *int       `json:"tokens_out,omitempty"`
+	CostUSD       *float64   `json:"cost_usd,omitempty"`
+	SandboxRef    string     `json:"sandbox_ref,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // TableName pins the GORM table name explicitly (plural, matching the

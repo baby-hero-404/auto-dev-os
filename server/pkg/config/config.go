@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/spf13/viper"
 )
 
@@ -34,29 +33,6 @@ type AuthConfig struct {
 type GitConfig struct {
 	DefaultAgentName  string `mapstructure:"default_agent_name"`
 	DefaultAgentEmail string `mapstructure:"default_agent_email"`
-}
-
-type LLMConfig struct {
-	Provider               string  `mapstructure:"provider"`
-	Model                  string  `mapstructure:"model"`
-	FastModel              string  `mapstructure:"fast_model"`
-	BalancedModel          string  `mapstructure:"balanced_model"`
-	PowerfulModel          string  `mapstructure:"powerful_model"`
-	AnthropicBalancedModel string  `mapstructure:"anthropic_balanced_model"`
-	AnthropicPowerfulModel string  `mapstructure:"anthropic_powerful_model"`
-	GeminiFastModel        string  `mapstructure:"gemini_fast_model"`
-	GeminiBalancedModel    string  `mapstructure:"gemini_balanced_model"`
-	CircuitMaxTokens       int     `mapstructure:"circuit_max_tokens"`
-	CircuitMaxCostUSD      float64 `mapstructure:"circuit_max_cost_usd"`
-	DefaultOutputTokens    int     `mapstructure:"default_output_tokens"`
-	MaxRetries             int     `mapstructure:"max_retries"`
-	OpenAIAPIKey           string  `mapstructure:"openai_api_key"`
-	AnthropicAPIKey        string  `mapstructure:"anthropic_api_key"`
-	GeminiAPIKey           string  `mapstructure:"gemini_api_key"`
-	BaseURL                string  `mapstructure:"base_url"`
-	LLMAPIKey              string  `mapstructure:"api_key"`
-	EmbeddingModel         string  `mapstructure:"embedding_model"`
-	APIKey                 string  // Dynamically populated based on provider
 }
 
 type SandboxConfig struct {
@@ -122,7 +98,6 @@ type Config struct {
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Auth       AuthConfig       `mapstructure:"auth"`
 	Git        GitConfig        `mapstructure:"git"`
-	LLM        LLMConfig        `mapstructure:"llm"`
 	Sandbox    SandboxConfig    `mapstructure:"sandbox"`
 	Worker     WorkerConfig     `mapstructure:"worker"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
@@ -167,9 +142,6 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("server.web_port", "WEB_PORT")
 	v.BindEnv("server.cors_allowed_origins", "CORS_ALLOWED_ORIGINS")
 	v.BindEnv("server.version", "SERVER_VERSION")
-	v.BindEnv("llm.openai_api_key", "OPENAI_API_KEY")
-	v.BindEnv("llm.anthropic_api_key", "ANTHROPIC_API_KEY")
-	v.BindEnv("llm.gemini_api_key", "GEMINI_API_KEY")
 	v.BindEnv("database.max_open_conns", "DB_MAX_OPEN_CONNS")
 	v.BindEnv("database.max_idle_conns", "DB_MAX_IDLE_CONNS")
 	v.BindEnv("database.conn_max_lifetime_seconds", "DB_CONN_MAX_LIFETIME_SECONDS")
@@ -219,17 +191,12 @@ func readConfigFile(v *viper.Viper) {
 }
 
 func normalize(cfg *Config) error {
-	cfg.LLM.Provider = strings.ToLower(cfg.LLM.Provider)
 	cfg.Sandbox.Runtime = strings.ToLower(cfg.Sandbox.Runtime)
 
 	if cfg.AutoCodeOS.DataRoot != "" {
 		cfg.Sandbox.WorkspaceRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "workspaces")
 		cfg.Sandbox.SkillsRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "skills")
 		cfg.Logging.FileRoot = filepath.Join(cfg.AutoCodeOS.DataRoot, "logs")
-	}
-
-	if err := configureLLM(&cfg.LLM); err != nil {
-		return err
 	}
 
 	if cfg.Worker.MaxPhaseCost <= 0 {
@@ -262,40 +229,6 @@ func normalize(cfg *Config) error {
 		cfg.Git.DefaultAgentEmail = "agent@autocode.os"
 	}
 
-	return nil
-}
-
-func configureLLM(cfg *LLMConfig) error {
-	switch cfg.Provider {
-	case models.ProviderOpenAI:
-		if cfg.Model == "" {
-			cfg.Model = "gpt-5.5"
-		}
-		cfg.APIKey = cfg.OpenAIAPIKey
-	case models.ProviderAnthropic:
-		if cfg.Model == "" {
-			cfg.Model = "claude-sonnet-4-6"
-		}
-		cfg.APIKey = cfg.AnthropicAPIKey
-	case models.ProviderGemini:
-		if cfg.Model == "" {
-			cfg.Model = "gemini-2.5-pro"
-		}
-		cfg.APIKey = cfg.GeminiAPIKey
-	case models.Provider9Router:
-		if cfg.Model == "" {
-			cfg.Model = "balanced"
-		}
-		cfg.APIKey = cfg.LLMAPIKey
-		if cfg.BaseURL == "" {
-			cfg.BaseURL = "http://localhost:20128/v1"
-		}
-	case "gateway":
-		// Gateway can resolve provider credentials from the database at runtime.
-		// Environment keys remain supported as a fallback but are not required.
-	default:
-		return fmt.Errorf("unsupported LLM provider: %s (supported: openai, anthropic, gemini, 9router, gateway)", cfg.Provider)
-	}
 	return nil
 }
 

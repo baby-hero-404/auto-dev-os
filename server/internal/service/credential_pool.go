@@ -25,23 +25,13 @@ const (
 	StrategyRoundRobin CredentialStrategy = "round_robin"
 )
 
-const (
-	testOpenAIModel    = "gpt-5.4-mini"
-	testAnthropicModel = "claude-haiku-4-5"
-	testGeminiModel    = "gemini-3.1-flash-lite"
-	testNineRouterMode = "balanced"
-)
+const ()
 
 type DecryptedCredential struct {
 	ID       string
 	Provider string
 	APIKey   string
 	BaseURL  string
-}
-
-type providerModelSeeder interface {
-	ListByOrg(ctx context.Context, orgID string, filter models.ProviderModelFilter) ([]models.ProviderModel, error)
-	Create(ctx context.Context, orgID string, input models.CreateProviderModelInput) (*models.ProviderModel, error)
 }
 
 // cooldownCacheTTL bounds how long a replica's in-process view of a (credential, model)
@@ -56,16 +46,14 @@ type cooldownCacheEntry struct {
 }
 
 type CredentialPoolService struct {
-	repo             *repository.ProviderCredentialRepo
-	cipher           *SecretCipher
-	audit            *AuditService
-	connectionTester credentialConnectionTester
-	seeder           providerModelSeeder
-	orgs             orgExecutionProvidersRepo
-	mu               sync.Mutex
-	rrCounters       map[string]int
-	modelCooldowns   map[string]cooldownCacheEntry
-	recoveryCounter  int64
+	repo            *repository.ProviderCredentialRepo
+	cipher          *SecretCipher
+	audit           *AuditService
+	orgs            orgExecutionProvidersRepo
+	mu              sync.Mutex
+	rrCounters      map[string]int
+	modelCooldowns  map[string]cooldownCacheEntry
+	recoveryCounter int64
 }
 
 // orgExecutionProvidersRepo is the narrow slice of *repository.OrganizationRepo
@@ -90,21 +78,13 @@ type orgExecutionProvidersRepo interface {
 // something is persistently hammering the same org row.
 const autoEnableGlobalRoutingMaxAttempts = 5
 
-type credentialConnectionTester func(context.Context, models.ProviderCredential, string) error
-
 func NewCredentialPoolService(repo *repository.ProviderCredentialRepo, cipher *SecretCipher) *CredentialPoolService {
 	return &CredentialPoolService{
-		repo:             repo,
-		cipher:           cipher,
-		connectionTester: testProviderConnection,
-		rrCounters:       map[string]int{},
-		modelCooldowns:   map[string]cooldownCacheEntry{},
+		repo:           repo,
+		cipher:         cipher,
+		rrCounters:     map[string]int{},
+		modelCooldowns: map[string]cooldownCacheEntry{},
 	}
-}
-
-func (s *CredentialPoolService) WithProviderModelSeeder(seeder providerModelSeeder) *CredentialPoolService {
-	s.seeder = seeder
-	return s
 }
 
 func (s *CredentialPoolService) WithAudit(audit *AuditService) *CredentialPoolService {
@@ -163,43 +143,6 @@ func (s *CredentialPoolService) autoEnableGlobalRouting(ctx context.Context, org
 	slog.Warn("auto-enable global routing: gave up after repeated compare-and-swap conflicts", "org_id", orgID, "provider", provider, "attempts", autoEnableGlobalRoutingMaxAttempts)
 }
 
-func (s *CredentialPoolService) withConnectionTester(tester credentialConnectionTester) *CredentialPoolService {
-	s.connectionTester = tester
-	return s
-}
-
-func (s *CredentialPoolService) TestConnectionInput(ctx context.Context, orgID string, input models.TestProviderCredentialInput) error {
-	provider := strings.ToLower(strings.TrimSpace(input.Provider))
-	if !isAllowedProvider(provider) {
-		return ErrValidation("unsupported provider")
-	}
-	apiKey := strings.TrimSpace(input.APIKey)
-	if apiKey == "" {
-		return ErrValidation("api_key is required")
-	}
-
-	// Check if this exact API key is already registered for this provider in this org
-	encryptedKey, err := s.cipher.Encrypt(apiKey)
-	if err == nil {
-		creds, _ := s.repo.ListByOrg(ctx, orgID)
-		for _, c := range creds {
-			if c.Provider == provider && c.EncryptedKey == encryptedKey {
-				return ErrValidation("This API key is already registered for this provider.")
-			}
-		}
-	}
-
-	if s.connectionTester == nil {
-		return nil
-	}
-	cred := models.ProviderCredential{
-		Provider:     provider,
-		EncryptedKey: "",
-		BaseURL:      strings.TrimSpace(input.BaseURL),
-	}
-	return s.connectionTester(ctx, cred, apiKey)
-}
-
 func (s *CredentialPoolService) Create(ctx context.Context, orgID string, input models.CreateProviderCredentialInput) (*models.ProviderCredentialResponse, error) {
 	if !isAllowedProvider(input.Provider) {
 		return nil, ErrValidation("unsupported provider")
@@ -223,68 +166,9 @@ func (s *CredentialPoolService) Create(ctx context.Context, orgID string, input 
 		"label":    cred.Label,
 		"priority": cred.Priority,
 	})
-	if s.seeder != nil {
-		s.seedDefaultModels(ctx, orgID, cred.Provider)
-	}
 	s.autoEnableGlobalRouting(ctx, orgID, cred.Provider)
 	resp := cred.ToResponse(suffix)
 	return &resp, nil
-}
-
-func (s *CredentialPoolService) seedDefaultModels(ctx context.Context, orgID string, provider string) {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	filter := models.ProviderModelFilter{
-		Provider: &provider,
-	}
-	existing, err := s.seeder.ListByOrg(ctx, orgID, filter)
-	if err != nil {
-		slog.Error("failed to list existing provider models during seeding", "org_id", orgID, "provider", provider, "error", err)
-		return
-	}
-	if len(existing) > 0 {
-		return
-	}
-
-	var defaults []models.CreateProviderModelInput
-	switch provider {
-	case "openai":
-		defaults = []models.CreateProviderModelInput{
-			{Provider: "openai", LevelGroup: "fast", ModelName: "gpt-5.4-nano", Priority: 0},
-			{Provider: "openai", LevelGroup: "fast", ModelName: "gpt-5.4-mini", Priority: 1},
-			{Provider: "openai", LevelGroup: "balanced", ModelName: "gpt-5-mini", Priority: 0},
-			{Provider: "openai", LevelGroup: "balanced", ModelName: "gpt-5.4", Priority: 1},
-			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.4-pro", Priority: 0},
-			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.5", Priority: 1},
-			{Provider: "openai", LevelGroup: "powerful", ModelName: "gpt-5.5-pro", Priority: 2},
-		}
-	case "anthropic":
-		defaults = []models.CreateProviderModelInput{
-			{Provider: "anthropic", LevelGroup: "fast", ModelName: "claude-haiku-4.5", Priority: 0},
-			{Provider: "anthropic", LevelGroup: "balanced", ModelName: "claude-sonnet-4.6", Priority: 0},
-			{Provider: "anthropic", LevelGroup: "powerful", ModelName: "claude-opus-4.6", Priority: 0},
-			{Provider: "anthropic", LevelGroup: "powerful", ModelName: "claude-opus-4.8", Priority: 1},
-		}
-	case "gemini":
-		defaults = []models.CreateProviderModelInput{
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-3.1-flash-lite", Priority: 0},
-			{Provider: "gemini", LevelGroup: "fast", ModelName: "gemini-2.5-flash-lite", Priority: 1},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.5-flash", Priority: 0},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-3.0-flash", Priority: 1},
-			{Provider: "gemini", LevelGroup: "balanced", ModelName: "gemini-2.5-flash", Priority: 2},
-			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-3.1-pro", Priority: 0},
-			{Provider: "gemini", LevelGroup: "powerful", ModelName: "gemini-2.5-pro", Priority: 1},
-		}
-	}
-
-	for _, d := range defaults {
-		if _, err := s.seeder.Create(ctx, orgID, d); err != nil {
-			if errors.Is(err, repository.ErrConflict) {
-				slog.Debug("default model seed skipped: unique constraint violation", "org_id", orgID, "provider", provider, "model", d.ModelName)
-			} else {
-				slog.Error("failed to seed default model", "org_id", orgID, "provider", provider, "model", d.ModelName, "error", err)
-			}
-		}
-	}
 }
 
 func (s *CredentialPoolService) GetByID(ctx context.Context, id string) (*models.ProviderCredentialResponse, error) {

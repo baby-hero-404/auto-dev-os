@@ -43,7 +43,7 @@ func TestCLISpecStep_HappyPath(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		&mockCLITaskUpdater{},
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
 	)
 
 	res, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -67,7 +67,7 @@ func TestCLISpecStep_PausesForClarification(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		updater,
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -90,6 +90,90 @@ func TestCLISpecStep_PausesForClarification(t *testing.T) {
 	}
 }
 
+func TestCLISpecStep_ClarificationBypassAfterMaxRounds(t *testing.T) {
+	root := t.TempDir()
+	task := newCLITestTask()
+	slug := TaskSpecSlug(task)
+	writeSpecFiles(t, root, slug, map[string]string{
+		"proposal.md": "# Proposal",
+		"specs.md":    "# Specs",
+		"design.md":   "# Design",
+		"tasks.md":    "- [ ] task one\n",
+	})
+	priorRounds := []models.ClarificationRound{
+		{Round: 1, Questions: []string{"q1"}},
+		{Round: 2, Questions: []string{"q2"}},
+	}
+	raw, err := json.Marshal(priorRounds)
+	if err != nil {
+		t.Fatalf("marshal prior rounds: %v", err)
+	}
+	task.Clarifications = raw
+
+	updater := &mockCLITaskUpdater{}
+	step := NewCLISpecStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockWorktreeHostPathResolver{root: root},
+		&mockCLIStepRunner{output: CLIStepOutput{Output: "One more thing?", AwaitingInput: true}},
+		&mockStepPromptLoader{prompt: "base"},
+		&mockCLILogger{},
+		updater,
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
+	)
+
+	res, err := step.Execute(context.Background(), workflow.StepContext{})
+	if err != nil {
+		t.Fatalf("expected bypass to proceed without error, got: %v", err)
+	}
+	if res["task_count"] != 1 {
+		t.Errorf("expected task_count 1, got %v", res["task_count"])
+	}
+	if updater.updated.SpecStatus == nil || *updater.updated.SpecStatus != models.TaskSpecStatusReadyWithWarnings {
+		t.Errorf("expected SpecStatus=ready_with_warnings, got %+v", updater.updated)
+	}
+	var rounds []models.ClarificationRound
+	if err := json.Unmarshal(updater.updated.Clarifications, &rounds); err != nil {
+		t.Fatalf("failed to unmarshal clarifications: %v", err)
+	}
+	if len(rounds) != 3 {
+		t.Errorf("expected 3 clarification rounds (2 prior + bypass), got %+v", rounds)
+	}
+}
+
+func TestCLISpecStep_ClarificationBypassStillPausesWithoutSpecFiles(t *testing.T) {
+	root := t.TempDir()
+	task := newCLITestTask()
+	priorRounds := []models.ClarificationRound{
+		{Round: 1, Questions: []string{"q1"}},
+		{Round: 2, Questions: []string{"q2"}},
+	}
+	raw, err := json.Marshal(priorRounds)
+	if err != nil {
+		t.Fatalf("marshal prior rounds: %v", err)
+	}
+	task.Clarifications = raw
+
+	updater := &mockCLITaskUpdater{}
+	step := NewCLISpecStep(
+		StepRuntime{Task: task, Agent: &models.Agent{ID: "a1"}, JobID: "j1"},
+		&mockWorktreeHostPathResolver{root: root},
+		&mockCLIStepRunner{output: CLIStepOutput{Output: "One more thing?", AwaitingInput: true}},
+		&mockStepPromptLoader{prompt: "base"},
+		&mockCLILogger{},
+		updater,
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
+	)
+
+	_, err = step.Execute(context.Background(), workflow.StepContext{})
+	var pauseErr workflow.PauseError
+	if !errors.As(err, &pauseErr) {
+		t.Fatalf("expected workflow.PauseError when spec files are missing, got: %v", err)
+	}
+	if updater.updated.SpecStatus == nil || *updater.updated.SpecStatus != models.TaskSpecStatusClarificationRequired {
+		t.Errorf("expected SpecStatus=clarification_required, got %+v", updater.updated)
+	}
+}
+
 func TestCLISpecStep_SupervisedPauses(t *testing.T) {
 	root := t.TempDir()
 	task := newCLITestTask()
@@ -109,7 +193,7 @@ func TestCLISpecStep_SupervisedPauses(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		taskUpdater,
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomySupervised}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: true}},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -148,7 +232,7 @@ func TestCLISpecStep_ResumeAfterApprovalSkipsRunner(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		&mockCLITaskUpdater{},
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomySupervised}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: true}},
 	)
 
 	res, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -177,7 +261,7 @@ func TestCLISpecStep_MissingRequiredFile(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		&mockCLITaskUpdater{},
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -204,7 +288,7 @@ func TestCLISpecStep_TasksMDWithNoCheckboxes(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		&mockCLITaskUpdater{},
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})
@@ -222,7 +306,7 @@ func TestCLISpecStep_RunnerError(t *testing.T) {
 		&mockStepPromptLoader{prompt: "base"},
 		&mockCLILogger{},
 		&mockCLITaskUpdater{},
-		&mockProjectReader{project: &models.Project{DefaultAutonomy: models.AgentAutonomyAutonomous}},
+		&mockProjectReader{project: &models.Project{RequireSpecReview: false}},
 	)
 
 	_, err := step.Execute(context.Background(), workflow.StepContext{})

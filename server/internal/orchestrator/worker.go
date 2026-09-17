@@ -15,7 +15,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
 	cliengine "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
@@ -281,18 +280,6 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 				if event.Error != "" {
 					timelineEvent["error"] = event.Error
 				}
-				// REQ-003: link code-step timeline records to the execution contract so the
-				// timeline is auditable/replayable against it. Additive fields, omitted for
-				// non-code steps (no matching execution unit).
-				if isCodeStep && len(task.Analysis) > 0 {
-					var tlAnalysis models.TaskAnalysis
-					if json.Unmarshal(task.Analysis, &tlAnalysis) == nil {
-						if unit := llmrunner.UnitForStep(&tlAnalysis, event.StepID); unit != nil {
-							timelineEvent["node_id"] = unit.ID
-							timelineEvent["objective"] = unit.Objective
-						}
-					}
-				}
 				if b, err := json.Marshal(timelineEvent); err == nil {
 					f, err := os.OpenFile(timelineFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 					if err == nil {
@@ -347,49 +334,23 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 		},
 	}
 
-	var subtasks map[string][]string
-	if len(task.Analysis) > 0 {
-		var analysis models.TaskAnalysis
-		if json.Unmarshal(task.Analysis, &analysis) == nil {
-			subtasks = workflow.ParseTasksMD(analysis.TasksMD)
-		}
-	}
-
 	runners := o.stepRunners(task, agent, job.ID, job.Step)
 	var def workflow.Definition
 
-	var project *models.Project
 	includeCrossReview := false
 	if o.projects != nil {
 		if p, err := o.projects.GetByID(ctx, task.ProjectID); err == nil {
-			project = p
 			includeCrossReview = p.ReviewHarnessPolicy != models.ReviewHarnessSame
 		}
 	}
-	if o.shouldUseCLISpecFirstWorkflow(ctx, task, project) {
-		if steps.CLIAnalysisNeedsParallelTracks(task) {
-			def = workflow.CLISpecFirstParallelWorkflow(runners, includeCrossReview)
-		} else {
-			def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
-		}
-	}
-
-	if def.Name == "" && len(task.Analysis) > 0 {
-		var analysis models.TaskAnalysis
-		if json.Unmarshal(task.Analysis, &analysis) == nil && len(analysis.ExecutionUnits) > 0 {
-			def = workflow.DynamicDAGWorkflow(runners, analysis.ExecutionUnits)
-		}
-	}
-
-	if def.Name == "" {
-		switch task.Complexity {
-		case models.TaskComplexityEasy:
-			def = workflow.EasyWorkflow(runners)
-		case models.TaskComplexityHard:
-			def = workflow.HardWorkflow(runners, subtasks)
-		default:
-			def = workflow.MediumWorkflow(runners, subtasks)
-		}
+	// One workflow family. The shape is chosen only by whether the CLI
+	// agent's analysis touches both frontend and backend files — the
+	// api-native DAG shapes (Easy/Medium/Hard/DynamicDAG) and the engine
+	// fork that used to select between them are gone.
+	if steps.CLIAnalysisNeedsParallelTracks(task) {
+		def = workflow.CLISpecFirstParallelWorkflow(runners, includeCrossReview)
+	} else {
+		def = workflow.CLISpecFirstWorkflow(runners, includeCrossReview)
 	}
 
 	// Load existing checkpoints to support resume-from-last-success.
@@ -646,7 +607,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			})
 			return
 		}
-		
+
 		var cooldownErr *ErrAllCredentialsInCooldown
 		if errors.As(err, &cooldownErr) {
 			o.log(ctx, task.ID, &job.ID, "info", fmt.Sprintf("All available credentials hit quota limits. Sleeping until %v", cooldownErr.SleepUntil))
@@ -657,7 +618,7 @@ func (o *Orchestrator) run(ctx context.Context, jobID string) {
 			})
 			return
 		}
-		
+
 		if err == nil || errors.Is(err, workflow.ErrPaused) || errors.Is(err, workflow.ErrWaitingApproval) {
 			break
 		}

@@ -55,39 +55,3 @@ func (r *AnalyticsDashboardRepo) TaskAnalytics(ctx context.Context, orgID string
 
 	return result, nil
 }
-
-// GatewayUsage returns daily gateway request, token, cost, and latency aggregates.
-func (r *AnalyticsDashboardRepo) GatewayUsage(ctx context.Context, orgID string, projectID string, days int) ([]models.GatewayUsagePoint, error) {
-	if days <= 0 {
-		days = 30
-	}
-	since := time.Now().AddDate(0, 0, -days)
-
-	query := r.db.WithContext(ctx).
-		Table("token_usage").
-		Select(`
-			DATE_TRUNC('day', created_at) AS bucket,
-			COUNT(*) AS requests,
-			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-			COALESCE(SUM(output_tokens), 0) AS output_tokens,
-			COALESCE(SUM(prompt_tokens + output_tokens), 0) AS total_tokens,
-			COALESCE(SUM(cost_usd), 0) AS cost_usd,
-			COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
-		`).
-		Where("created_at >= ?", since).
-		Group("bucket").
-		Order("bucket ASC")
-
-	if orgID != "" {
-		query = query.Where("org_id = ?", orgID)
-	}
-	if projectID != "" {
-		query = query.Where("project_id = ?", projectID)
-	}
-
-	var points []models.GatewayUsagePoint
-	if err := query.Scan(&points).Error; err != nil {
-		return nil, fmt.Errorf("gateway usage: %w", err)
-	}
-	return points, nil
-}

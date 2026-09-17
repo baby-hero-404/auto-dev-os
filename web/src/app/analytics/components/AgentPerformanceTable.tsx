@@ -1,12 +1,11 @@
 import type { AgentStats } from "@/lib/types";
-import { compactNumber, formatCost } from "../utils";
 
 export function AgentPerformanceTable({ agentStats }: { agentStats: AgentStats[] }) {
   return (
     <section className="overflow-hidden rounded-lg border border-stroke bg-panel">
       <div className="border-b border-stroke p-5">
         <h3 className="font-mono font-semibold">Agent Performance</h3>
-        <p className="text-sm text-content-muted">Per-agent metrics, success rates, and token consumption.</p>
+        <p className="text-sm text-content-muted">Per-agent metrics and success rates.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -18,8 +17,6 @@ export function AgentPerformanceTable({ agentStats }: { agentStats: AgentStats[]
               <th className="px-4 py-3">Tasks</th>
               <th className="px-4 py-3">Success</th>
               <th className="px-4 py-3">Retries</th>
-              <th className="px-4 py-3">Tokens</th>
-              <th className="px-4 py-3">Cost</th>
             </tr>
           </thead>
           <tbody>
@@ -74,13 +71,11 @@ export function AgentPerformanceTable({ agentStats }: { agentStats: AgentStats[]
                   </div>
                 </td>
                 <td className="px-4 py-3 font-mono">{agent.retry_count}</td>
-                <td className="px-4 py-3 font-mono">{compactNumber(agent.total_tokens)}</td>
-                <td className="px-4 py-3 font-mono">{formatCost(agent.total_cost_usd)}</td>
               </tr>
             ))}
             {agentStats?.length === 0 && (
               <tr>
-                <td className="px-4 py-8 text-center text-content-muted" colSpan={8}>
+                <td className="px-4 py-8 text-center text-content-muted" colSpan={6}>
                   No agent data available yet.
                 </td>
               </tr>

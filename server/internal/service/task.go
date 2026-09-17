@@ -38,14 +38,6 @@ func (s *TaskService) Create(ctx context.Context, projectID string, input models
 			return nil, ErrValidation("repository does not belong to the project")
 		}
 	}
-	if input.ExecutionEngine != nil && *input.ExecutionEngine != "" {
-		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
-			return nil, ErrValidation(err.Error())
-		}
-		if err := s.validateTaskEngineOverride(ctx, projectID, *input.ExecutionEngine); err != nil {
-			return nil, err
-		}
-	}
 	task, err := s.repo.Create(ctx, projectID, input)
 	if err != nil {
 		return nil, err
@@ -131,87 +123,12 @@ func (s *TaskService) Update(ctx context.Context, id string, input models.Update
 			return nil, ErrValidation(err.Error())
 		}
 	}
-	if input.ExecutionEngine != nil && *input.ExecutionEngine != "" {
-		if err := models.ValidateExecutionEngine(*input.ExecutionEngine); err != nil {
-			return nil, ErrValidation(err.Error())
-		}
-		task, err := s.repo.GetByID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.validateTaskEngineOverride(ctx, task.ProjectID, *input.ExecutionEngine); err != nil {
-			return nil, err
-		}
-	}
 	task, err := s.repo.Update(ctx, id, input)
 	if err != nil {
 		return nil, err
 	}
 	task.AvailableActions = computeAvailableActions(task)
 	return task, nil
-}
-
-// validateTaskEngineOverride guards against setting a task's execution_engine
-// override to "cli" when the owning project has no usable CLIEngineConfig
-// (i.e. no command configured). Without this, a task-level override bypasses
-// the equivalent check ProjectService already enforces when the project
-// itself switches to engine "cli" — every run would then fail identically at
-// the CLI engine's preflight step ("cli_engine_config.command is required").
-func (s *TaskService) validateTaskEngineOverride(ctx context.Context, projectID, executionEngine string) error {
-	if executionEngine != models.ExecutionEngineCLI {
-		return nil
-	}
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-	// A project can satisfy a cli override either through the newer
-	// ExecutionProviders list or the legacy CLIEngineConfig — check the
-	// former first (mirroring legacyResolveExecutionProvider's "empty
-	// providers -> use legacy field" fallback), otherwise a project that
-	// only adopted ExecutionProviders gets rejected here even though the
-	// Router would resolve it fine at Task run time.
-	providers, err := models.ValidateExecutionProviders(project.ExecutionProviders)
-	if err != nil {
-		return ErrValidation(err.Error())
-	}
-	// See models.HasEnabledProvider's doc comment: "configured" means at
-	// least one row enabled, not merely a non-empty list — must match
-	// ResolveExecutionProvider's gate exactly, or this validation rejects
-	// overrides the orchestrator would actually satisfy at Task run time.
-	if models.HasEnabledProvider(providers) {
-		for _, p := range providers {
-			if p.Type == "cli" && p.Enabled {
-				return nil
-			}
-		}
-		return ErrValidation("task execution_engine cannot be set to \"cli\": project has no enabled cli execution provider")
-	}
-	// Same precedence as the orchestrator's ResolveExecutionProvider
-	// (docs/openspecs/global-execution-providers): a project already
-	// explicitly on the legacy cli path is validated against its own
-	// CLIEngineConfig only, never the org default — so a project
-	// deliberately configured this way behaves identically whether or not
-	// an org default happens to exist.
-	if project.ExecutionEngine != models.ExecutionEngineCLI && s.orgRepo != nil {
-		if org, err := s.orgRepo.GetByID(ctx, project.OrgID); err == nil {
-			if orgProviders, err := models.ValidateExecutionProviders(org.DefaultExecutionProviders); err == nil {
-				for _, p := range orgProviders {
-					if p.Type == "cli" && p.Enabled {
-						return nil
-					}
-				}
-			}
-		}
-	}
-	var cfg models.CLIEngineConfig
-	if len(project.CLIEngineConfig) > 0 {
-		_ = json.Unmarshal(project.CLIEngineConfig, &cfg)
-	}
-	if err := models.ValidateCLIEngineConfig(executionEngine, &cfg); err != nil {
-		return ErrValidation(fmt.Sprintf("task execution_engine cannot be set to \"cli\": project has no cli_engine_config configured (%s)", err.Error()))
-	}
-	return nil
 }
 
 func (s *TaskService) Delete(ctx context.Context, id string) error {
@@ -234,33 +151,13 @@ func (s *TaskService) Analyze(ctx context.Context, id string) (*models.Task, err
 		return nil, fmt.Errorf("get project: %w", err)
 	}
 
-	affectedFilesStrings := make([]string, len(analysis.AffectedFiles))
-	for i, f := range analysis.AffectedFiles {
-		affectedFilesStrings[i] = f.File
-	}
-
 	hasClarifications := len(analysis.ClarificationQuestions) > 0
 	var priorRounds []models.ClarificationRound
 	if len(task.Clarifications) > 0 {
 		_ = json.Unmarshal(task.Clarifications, &priorRounds)
 	}
-	dorBypassed := hasClarifications && policy.IsDefinitionOfReadyBypassed(task.Labels, len(priorRounds))
-	if dorBypassed {
-		hasClarifications = false
-	}
 
-	specStatus, status := policy.ShouldAutoApproveSpec(
-		analysis.Complexity,
-		affectedFilesStrings,
-		analysis.RiskDomains,
-		"", // no agent autonomy in this path
-		project.DefaultAutonomy,
-		project.AutoReviewPolicy,
-		hasClarifications,
-	)
-	if dorBypassed && specStatus == models.TaskSpecStatusAutoApproved {
-		specStatus = models.TaskSpecStatusReadyWithWarnings
-	}
+	specStatus, status := policy.ResolveSpecGate(task, project, hasClarifications, len(priorRounds))
 	if task.Status != models.TaskStatusTodo &&
 		task.Status != models.TaskStatusAnalyzing &&
 		task.Status != models.TaskStatusSpecReview &&
@@ -372,20 +269,6 @@ func (s *TaskService) UpdateAnalysis(ctx context.Context, id string, analysis js
 	}
 	specStatus := models.TaskSpecStatusDraft
 	return s.repo.Update(ctx, id, models.UpdateTaskInput{Analysis: analysis, SpecStatus: &specStatus})
-}
-
-func (s *TaskService) UpdateSpecConfig(ctx context.Context, id string, includeSpec bool) (*models.Task, error) {
-	task, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	var analysis models.TaskAnalysis
-	if len(task.Analysis) > 0 {
-		_ = json.Unmarshal(task.Analysis, &analysis)
-	}
-	analysis.IncludeSpecInMR = includeSpec
-	raw, _ := json.Marshal(analysis)
-	return s.repo.Update(ctx, id, models.UpdateTaskInput{Analysis: raw})
 }
 
 func (s *TaskService) ListSubTasks(ctx context.Context, parentID string) ([]models.Task, error) {

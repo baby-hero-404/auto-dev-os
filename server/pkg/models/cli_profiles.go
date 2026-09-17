@@ -26,6 +26,17 @@ type CLIProfile struct {
 // a real --file/--prompt-file flag by using a bare {prompt_file} arg.
 const promptFileInstruction = "Read and follow the complete task instructions in the file {prompt_file}, then carry them out."
 
+// cliProfileTimeoutMinutes is the wall-clock cap on a single CLI step.
+//
+// This was 30 minutes, which silently overrode the engine's own 3h default
+// *downward* and killed healthy long runs — a spec-first implement step on a
+// real codebase routinely runs for hours. Five hours makes it a genuine
+// backstop. Stall detection is not this knob's job and is deliberately
+// untouched: sandbox.DefaultIdleTimeout (15m) kills a step with no
+// stdout/stderr activity, so a working agent prints and a hung one does not.
+// A CLI step is killed for silence, not for duration.
+const cliProfileTimeoutMinutes = 300
+
 // CLIProfiles is the built-in registry of known CLI coding tools, keyed by
 // the same profile ID used in ExecutionProviderConfig.Ref.
 var CLIProfiles = map[string]CLIProfile{
@@ -45,7 +56,7 @@ var CLIProfiles = map[string]CLIProfile{
 		// Preflight, so detectAuthInvalid (cli_auth.go) checks this output
 		// for the loggedIn:false signature instead of trusting exit 0.
 		AuthCheckCommand:   "claude auth status",
-		TimeoutMinutes:     30,
+		TimeoutMinutes:     cliProfileTimeoutMinutes,
 		CredentialProvider: "cli:claude",
 	},
 	"openai_codex": {
@@ -65,7 +76,7 @@ var CLIProfiles = map[string]CLIProfile{
 		// ChatGPT" on success (verified against the real binary, same
 		// REQ-003 investigation as claude_code above).
 		AuthCheckCommand:   "codex login status",
-		TimeoutMinutes:     30,
+		TimeoutMinutes:     cliProfileTimeoutMinutes,
 		CredentialProvider: "cli:codex",
 	},
 	"antigravity": {
@@ -88,7 +99,7 @@ var CLIProfiles = map[string]CLIProfile{
 		// docs/guides/antigravity-cli-headless.md's own example).
 		Args:               []string{"--dangerously-skip-permissions", "-p", promptFileInstruction, "--output-format", "json"},
 		AuthCheckCommand:   "agy --version",
-		TimeoutMinutes:     30,
+		TimeoutMinutes:     cliProfileTimeoutMinutes,
 		CredentialProvider: "cli:antigravity",
 	},
 }

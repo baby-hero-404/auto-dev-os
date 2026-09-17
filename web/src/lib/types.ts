@@ -218,7 +218,7 @@ export type Task = {
   analysis?: TaskAnalysis;
   spec_status: TaskSpecStatus;
   clarifications?: ClarificationRound[];
-  execution_engine?: string;
+  require_spec_review?: boolean;
   available_actions?: AvailableAction[];
   created_at: string;
   updated_at: string;
@@ -397,23 +397,6 @@ export type Skill = {
   updated_at: string;
 };
 
-export type TokenUsageSummary = {
-  project_id?: string;
-  credential_id?: string;
-  key_label?: string;
-  provider: string;
-  model: string;
-  level_group: string;
-  requests: number;
-  success_requests?: number;
-  failed_requests?: number;
-  prompt_tokens?: number;
-  output_tokens?: number;
-  total_tokens: number;
-  cost_usd: number;
-  avg_latency_ms: number;
-};
-
 export type Agent = {
   id: string;
   org_id?: string;
@@ -471,8 +454,6 @@ export type OverviewStats = {
   success_rate: number;
   avg_completion_ms: number;
   open_prs: number;
-  total_token_cost: number;
-  total_tokens_used: number;
 };
 
 export type AgentStats = {
@@ -486,8 +467,6 @@ export type AgentStats = {
   fail_count: number;
   success_rate: number;
   retry_count: number;
-  total_tokens: number;
-  total_cost_usd: number;
 };
 
 export type TaskStatusDistribution = {
@@ -505,16 +484,6 @@ export type TaskTimeSeries = {
 export type TaskAnalytics = {
   distribution: TaskStatusDistribution[];
   time_series: TaskTimeSeries[];
-};
-
-export type GatewayUsagePoint = {
-  bucket: string;
-  requests: number;
-  prompt_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-  cost_usd: number;
-  avg_latency_ms: number;
 };
 
 export type WorkflowStepStats = {

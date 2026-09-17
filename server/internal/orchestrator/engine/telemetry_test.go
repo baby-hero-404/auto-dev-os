@@ -91,7 +91,7 @@ func TestParseCLITelemetry_SessionID(t *testing.T) {
 	if got.SessionID != "abc12345" {
 		t.Errorf("session_id = %q, want abc12345", got.SessionID)
 	}
-	
+
 	// agy uses conversation_id, which should map to SessionID if session_id is not present
 	output2 := `{"conversation_id":"def67890"}`
 	got2, ok2 := parseCLITelemetry(output2)

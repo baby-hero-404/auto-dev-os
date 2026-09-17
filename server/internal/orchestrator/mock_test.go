@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -279,59 +278,6 @@ func (m *mockAnalyzeSandboxRuntime) Prewarm(ctx context.Context) error {
 
 func (m *mockAnalyzeSandboxRuntime) RunInteractive(ctx context.Context, req sandbox.CommandRequest, stdin io.Reader, stdout, stderr io.Writer) error {
 	return nil
-}
-
-type mockLLMProvider struct {
-	responses              map[string]string
-	responseQueue          []*llm.Response
-	lastChatOptions        llm.ChatOptions
-	sawStateMachineEnabled bool
-	calls                  []string
-	history                [][]llm.Message
-}
-
-func (m *mockLLMProvider) Name() string {
-	return "mock-model"
-}
-
-func (m *mockLLMProvider) Chat(ctx context.Context, messages []llm.Message) (*llm.Response, error) {
-	return m.ChatWithOptions(ctx, messages, llm.ChatOptions{})
-}
-
-func (m *mockLLMProvider) ChatWithOptions(ctx context.Context, messages []llm.Message, opts llm.ChatOptions) (*llm.Response, error) {
-	m.history = append(m.history, messages)
-	m.lastChatOptions = opts
-	if models.IsStateMachineEnabled(ctx) {
-		m.sawStateMachineEnabled = true
-	}
-	if len(m.responseQueue) > 0 {
-		resp := m.responseQueue[0]
-		m.responseQueue = m.responseQueue[1:]
-		m.calls = append(m.calls, "queued")
-		return resp, nil
-	}
-	lastMsg := messages[len(messages)-1].Content
-	content := `{"patch": "diff --git a/main.go b/main.go\n"}`
-	matchedKey := ""
-	// Match on the "Workflow step: <id>" prefix that BuildInitialMessages/analyze.go always
-	// prepend, not a bare substring anywhere in the (large, assembled) prompt — a bare substring
-	// match is prone to false positives (e.g. a step's boilerplate mentioning "review" or "fix"
-	// in passing) and, combined with Go's randomized map iteration order, made this flaky: which
-	// key won depended on iteration order whenever more than one key's text appeared in the prompt.
-	for k, v := range m.responses {
-		if strings.Contains(lastMsg, "Workflow step: "+k) {
-			content = v
-			matchedKey = k
-			break
-		}
-	}
-	m.calls = append(m.calls, matchedKey)
-	return &llm.Response{
-		Model:        "mock-model",
-		Content:      content,
-		PromptTokens: 10,
-		OutputTokens: 20,
-	}, nil
 }
 
 type mockGitOpsClient struct {

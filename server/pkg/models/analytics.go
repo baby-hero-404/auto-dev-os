@@ -2,48 +2,6 @@ package models
 
 import "time"
 
-type TokenUsage struct {
-	ID               string    `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	OrgID            *string   `json:"org_id,omitempty" gorm:"type:uuid"`
-	CredentialID     *string   `json:"credential_id,omitempty" gorm:"type:uuid"`
-	ProjectID        *string   `json:"project_id,omitempty" gorm:"type:uuid"`
-	AgentID          *string   `json:"agent_id,omitempty" gorm:"type:uuid"`
-	TaskID           *string   `json:"task_id,omitempty" gorm:"type:uuid"`
-	Provider         string    `json:"provider"`
-	Model            string    `json:"model"`
-	LevelGroup       string    `json:"level_group"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	OutputTokens     int       `json:"output_tokens"`
-	CacheReadTokens  int       `json:"cache_read_tokens"`
-	CacheWriteTokens int       `json:"cache_write_tokens"`
-	CostUSD          float64   `json:"cost_usd"`
-	LatencyMS        int64     `json:"latency_ms"`
-	Status           string    `json:"status"`
-	Error            string    `json:"error"`
-	CreatedAt        time.Time `json:"created_at"`
-}
-
-func (TokenUsage) TableName() string {
-	return "token_usage"
-}
-
-type TokenUsageSummary struct {
-	ProjectID       *string `json:"project_id,omitempty"`
-	CredentialID    *string `json:"credential_id,omitempty"`
-	KeyLabel        string  `json:"key_label,omitempty"`
-	Provider        string  `json:"provider"`
-	Model           string  `json:"model"`
-	LevelGroup      string  `json:"level_group"`
-	Requests        int64   `json:"requests"`
-	SuccessRequests int64   `json:"success_requests"`
-	FailedRequests  int64   `json:"failed_requests"`
-	PromptTokens    int64   `json:"prompt_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	TotalTokens     int64   `json:"total_tokens"`
-	CostUSD         float64 `json:"cost_usd"`
-	AvgLatencyMS    float64 `json:"avg_latency_ms"`
-}
-
 // OverviewStats provides a high-level platform summary.
 type OverviewStats struct {
 	TotalProjects   int64   `json:"total_projects"`
@@ -56,8 +14,6 @@ type OverviewStats struct {
 	SuccessRate     float64 `json:"success_rate"`
 	AvgCompletionMs float64 `json:"avg_completion_ms"`
 	OpenPRs         int64   `json:"open_prs"`
-	TotalTokenCost  float64 `json:"total_token_cost"`
-	TotalTokensUsed int64   `json:"total_tokens_used"`
 }
 
 // AgentStats provides per-agent performance metrics.
@@ -72,8 +28,6 @@ type AgentStats struct {
 	FailCount       int64   `json:"fail_count"`
 	SuccessRate     float64 `json:"success_rate"`
 	RetryCount      int64   `json:"retry_count"`
-	TotalTokens     int64   `json:"total_tokens"`
-	TotalCostUSD    float64 `json:"total_cost_usd"`
 }
 
 // TaskTimeSeries represents time-bucketed task counts for trend charts.
@@ -94,17 +48,6 @@ type TaskStatusDistribution struct {
 type TaskAnalytics struct {
 	Distribution []TaskStatusDistribution `json:"distribution"`
 	TimeSeries   []TaskTimeSeries         `json:"time_series"`
-}
-
-// GatewayUsagePoint represents daily LLM gateway usage.
-type GatewayUsagePoint struct {
-	Bucket       time.Time `json:"bucket"`
-	Requests     int64     `json:"requests"`
-	PromptTokens int64     `json:"prompt_tokens"`
-	OutputTokens int64     `json:"output_tokens"`
-	TotalTokens  int64     `json:"total_tokens"`
-	CostUSD      float64   `json:"cost_usd"`
-	AvgLatencyMS float64   `json:"avg_latency_ms"`
 }
 
 // WorkflowStepStats represents average duration for a specific workflow step.

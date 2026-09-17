@@ -17,40 +17,13 @@ import (
 type MemoryService struct {
 	memories *repository.MemoryRepo
 	edges    *repository.KnowledgeEdgeRepo
-	embedder MemoryEmbedder
-	breaker  *embedderCircuitBreaker
 }
 
 func NewMemoryService(memories *repository.MemoryRepo, edges *repository.KnowledgeEdgeRepo) *MemoryService {
 	return &MemoryService{
 		memories: memories,
 		edges:    edges,
-		breaker:  newEmbedderCircuitBreaker(5, 2*time.Minute),
 	}
-}
-
-// embed generates an embedding via the configured embedder, short-circuiting
-// through the circuit breaker when the provider is degraded. Callers must
-// treat a nil/error result as "continue without vector stream" — the same
-// fallback they already use for a plain Embed() error.
-func (s *MemoryService) embed(ctx context.Context, text string) ([]float32, error) {
-	if s.embedder == nil {
-		return nil, nil
-	}
-	if !s.breaker.Allow() {
-		return nil, fmt.Errorf("embedder circuit open: %s unavailable, falling back to BM25-only", s.embedder.Name())
-	}
-	vec, err := s.embedder.Embed(ctx, text)
-	if err != nil {
-		s.breaker.RecordFailure()
-		return nil, err
-	}
-	s.breaker.RecordSuccess()
-	return vec, nil
-}
-
-func (s *MemoryService) SetEmbedder(embedder MemoryEmbedder) {
-	s.embedder = embedder
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -69,15 +42,6 @@ func (s *MemoryService) RecordObservation(ctx context.Context, input models.Crea
 	// Strip potential secrets before storage
 	cleaned := stripSecrets(input.Content)
 	hash := sha256Hash(cleaned)
-	embedding := input.Embedding
-	if len(embedding) == 0 && s.embedder != nil {
-		generated, err := s.embed(ctx, embeddingText(cleaned, input.Summary))
-		if err != nil {
-			slog.Warn("memory embedding generation failed, storing memory without vector", "error", err)
-		} else {
-			embedding = generated
-		}
-	}
 
 	tier := input.Tier
 	if tier == "" {
@@ -99,7 +63,6 @@ func (s *MemoryService) RecordObservation(ctx context.Context, input models.Crea
 		ContentHash: hash,
 		Category:    category,
 		Tags:        input.Tags,
-		Embedding:   models.Embedding(embedding),
 	}
 
 	if err := s.memories.Create(ctx, mem); err != nil {

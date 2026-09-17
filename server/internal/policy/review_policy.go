@@ -6,41 +6,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-var HighRiskPatterns = map[string][]string{
-	"auth":           {"auth/", "login", "jwt", "oauth", "session", "token"},
-	"payment":        {"payment", "billing", "stripe", "invoice", "pricing"},
-	"data_migration": {"migration", "migrations/", "schema", "backfill", "etl"},
-	"infra":          {"Dockerfile", "docker-compose", ".github/workflows", "deploy", "terraform", "k8s"},
-	"security":       {"secret", "cors", "csp", "encryption", "vulnerability"},
-	"rbac":           {"permission", "rbac", "role", "policy", "access_control"},
-	"public_api":     {"api/", "openapi", "proto", "graphql"},
-}
-
-// HasHighRiskDomains checks affected files and risk_domains from analysis.
-func HasHighRiskDomains(affectedFiles []string, riskDomains []string) bool {
-	// 1. Check risk domains
-	for _, rd := range riskDomains {
-		rdLower := strings.ToLower(strings.TrimSpace(rd))
-		if _, exists := HighRiskPatterns[rdLower]; exists {
-			return true
-		}
-	}
-
-	// 2. Check affected files
-	for _, file := range affectedFiles {
-		fileLower := strings.ToLower(file)
-		for _, patterns := range HighRiskPatterns {
-			for _, pattern := range patterns {
-				if strings.Contains(fileLower, strings.ToLower(pattern)) {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
 // MaxClarificationRounds caps how many times the clarification-required gate
 // can pause a task on the same unanswered questions before it gives up and
 // lets the pipeline proceed anyway — a task whose author won't (or can't)
@@ -65,56 +30,60 @@ func IsDefinitionOfReadyBypassed(labels []string, priorClarificationRounds int) 
 	return false
 }
 
-// ShouldAutoApproveSpec determines whether a spec can be auto-approved.
-// Returns (specStatus, taskStatus). When hasClarifications is true but the
-// caller has determined via IsDefinitionOfReadyBypassed that the gate should
-// be bypassed (hotfix label, or clarification round limit reached), the
-// caller should pass hasClarifications=false and instead surface the bypass
-// to the user via TaskSpecStatusReadyWithWarnings + a logged warning.
-func ShouldAutoApproveSpec(
-	complexity string,
-	affectedFiles []string,
-	riskDomains []string,
-	agentAutonomy string,
-	projectAutonomy string,
-	projectReviewPolicy string,
-	hasClarifications bool,
-) (specStatus string, taskStatus string) {
+// RequiresSpecReview reports whether the run must pause at spec_review after
+// cli_spec, so a human approves the plan before any code is written.
+//
+// This replaces a six-input matrix (project review policy x agent autonomy x
+// project autonomy x high-risk-domain pattern match x complexity x
+// clarifications). The matrix optimized for gating risky work automatically,
+// but its risk detection was substring matching over file paths — "role"
+// matched role_templates.go, "api/" matched every handler — so it fired on
+// ordinary work and got ignored, while nobody could predict from a project's
+// settings whether a given task would stop and wait. A gate nobody can
+// predict is a gate nobody relies on.
+//
+// The default is now false: a task runs straight through to an opened merge
+// request. The enforced human boundary is the MR itself, which nothing merges
+// without, and which now carries the OpenSpec the work was based on. An org
+// that wants pre-implementation review back sets the flag.
+//
+// Resolution: the task-level override decides whenever it is set (including
+// an explicit false on a project that defaults to true); otherwise the
+// project default decides.
+func RequiresSpecReview(task *models.Task, project *models.Project) bool {
+	if task != nil && task.RequireSpecReview != nil {
+		return *task.RequireSpecReview
+	}
+	if project != nil {
+		return project.RequireSpecReview
+	}
+	return false
+}
+
+// ResolveSpecGate returns the (specStatus, taskStatus) cli_spec should write,
+// folding in the clarification path so the whole decision lives in one place.
+//
+// Clarifications gate independently of the flag: when the agent came back with
+// unanswered questions, proceeding would silently answer them by assumption,
+// which is exactly the failure the questions exist to prevent. priorRounds and
+// labels still bound that via IsDefinitionOfReadyBypassed, so an unresponsive
+// author cannot deadlock the task forever.
+func ResolveSpecGate(task *models.Task, project *models.Project, hasClarifications bool, priorRounds int) (specStatus, taskStatus string) {
+	var labels []string
+	if task != nil {
+		labels = task.Labels
+	}
+	if hasClarifications && IsDefinitionOfReadyBypassed(labels, priorRounds) {
+		// Bypassed rather than silently auto-approved: the caller surfaces the
+		// unanswered questions as warnings instead of pretending they were
+		// resolved.
+		return models.TaskSpecStatusReadyWithWarnings, models.TaskStatusCoding
+	}
 	if hasClarifications {
 		return models.TaskSpecStatusClarificationRequired, models.TaskStatusSpecReview
 	}
-
-	if projectReviewPolicy == "always_review" {
+	if RequiresSpecReview(task, project) {
 		return models.TaskSpecStatusPendingReview, models.TaskStatusSpecReview
 	}
-
-	// Risk check - if high risk, always require review regardless of autonomy or auto_merge policy
-	if HasHighRiskDomains(affectedFiles, riskDomains) {
-		return models.TaskSpecStatusPendingReview, models.TaskStatusSpecReview
-	}
-
-	if projectReviewPolicy == "auto_merge" {
-		return models.TaskSpecStatusAutoApproved, models.TaskStatusCoding
-	}
-
-	// Default/complexity_based policy
-	autonomy := agentAutonomy
-	if autonomy == "" {
-		autonomy = projectAutonomy
-	}
-	if autonomy == "" {
-		autonomy = models.AgentAutonomySupervised
-	}
-
-	switch autonomy {
-	case models.AgentAutonomyAutonomous:
-		return models.TaskSpecStatusAutoApproved, models.TaskStatusCoding
-	case models.AgentAutonomyApprovalRequired:
-		return models.TaskSpecStatusPendingReview, models.TaskStatusSpecReview
-	default: // supervised / complexity-based default
-		if complexity == models.TaskComplexityEasy {
-			return models.TaskSpecStatusAutoApproved, models.TaskStatusCoding
-		}
-		return models.TaskSpecStatusPendingReview, models.TaskStatusSpecReview
-	}
+	return models.TaskSpecStatusAutoApproved, models.TaskStatusCoding
 }

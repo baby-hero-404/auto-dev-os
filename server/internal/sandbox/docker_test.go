@@ -170,21 +170,21 @@ func TestDockerRuntimeHomeBindMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create docker runtime: %v", err)
 	}
-	
+
 	homeDir := t.TempDir()
-	
+
 	if err := rt.Prewarm(ctx); err != nil {
 		t.Fatalf("Prewarm failed: %v", err)
 	}
-	
+
 	req := CommandRequest{
-		Command:     []string{"bash", "-c", "echo 'test-home-content' > /home/agent/test_home_file.txt"},
+		Command: []string{"bash", "-c", "echo 'test-home-content' > /home/agent/test_home_file.txt"},
 		SessionMounts: map[string]string{
 			"/home/agent": homeDir,
 		},
-		Timeout:     15 * time.Second,
+		Timeout: 15 * time.Second,
 	}
-	
+
 	res, err := rt.Run(ctx, req)
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
@@ -192,13 +192,12 @@ func TestDockerRuntimeHomeBindMount(t *testing.T) {
 	if res.ExitCode != 0 {
 		t.Fatalf("Run failed with exit code %d. Stderr: %s", res.ExitCode, res.Stderr)
 	}
-	
+
 	hostFilePath := filepath.Join(homeDir, "test_home_file.txt")
 	data, err := os.ReadFile(hostFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read file from host home dir mount: %v", err)
 	}
-	
 
 	if content := string(data); strings.TrimSpace(content) != "test-home-content" {
 		t.Errorf("Expected content 'test-home-content', got %q", content)

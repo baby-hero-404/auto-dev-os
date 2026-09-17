@@ -115,40 +115,6 @@ func (r *MemoryRepo) SearchBM25Ranked(ctx context.Context, query, agentID string
 	return results, nil
 }
 
-// SearchVector performs cosine similarity search using pgvector.
-// The embedding parameter must be a 1536-dimensional float slice serialized as a pgvector literal.
-func (r *MemoryRepo) SearchVector(ctx context.Context, embeddingLiteral, agentID string, limit int) ([]models.MemorySearchResult, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-
-	type rankedRow struct {
-		models.EpisodicMemory
-		VectorScore float64 `gorm:"column:vector_score"`
-	}
-	var rows []rankedRow
-
-	if err := r.db.WithContext(ctx).Raw(`
-		SELECT em.*, 1 - (em.embedding <=> ?::vector) AS vector_score
-		FROM episodic_memories em
-		WHERE em.agent_id = ?
-		  AND em.embedding IS NOT NULL
-		ORDER BY em.embedding <=> ?::vector
-		LIMIT ?
-	`, embeddingLiteral, agentID, embeddingLiteral, limit).Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("vector search: %w", err)
-	}
-
-	results := make([]models.MemorySearchResult, 0, len(rows))
-	for _, row := range rows {
-		results = append(results, models.MemorySearchResult{
-			Memory:      row.EpisodicMemory,
-			VectorScore: row.VectorScore,
-		})
-	}
-	return results, nil
-}
-
 // SearchGraph traverses knowledge_edges from a source memory up to the given depth.
 func (r *MemoryRepo) SearchGraph(ctx context.Context, memoryID string, depth int) ([]models.MemorySearchResult, error) {
 	if depth <= 0 {

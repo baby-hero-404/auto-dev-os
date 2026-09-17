@@ -26,7 +26,7 @@ func TestMaterializeCLIContext_ReturnsLayer1And2WhenAvailable(t *testing.T) {
 			{ID: "ls-1", Title: "avoid flaky test", Content: "use real DB not mocks"},
 		},
 	}
-	assembler := NewPromptAssembler(testBaseTools(), engine).
+	assembler := NewPromptAssembler(engine).
 		WithLearnedSkillsLister(learned)
 
 	task := models.Task{
@@ -56,7 +56,7 @@ func TestMaterializeCLIContext_ReturnsLayer1And2WhenAvailable(t *testing.T) {
 
 func TestMaterializeCLIContext_EmptyWhenNothingAvailable(t *testing.T) {
 	engine := &MockContextEngine{}
-	assembler := NewPromptAssembler(testBaseTools(), engine)
+	assembler := NewPromptAssembler(engine)
 
 	task := models.Task{ID: "task-2", ProjectID: "proj-2", Title: "No-op task"}
 
@@ -118,7 +118,7 @@ func TestMaterializeCLIContext_CollidingSkillSlugsDoNotClobberEachOther(t *testi
 	}
 
 	engine := &MockContextEngine{}
-	assembler := NewPromptAssembler(testBaseTools(), engine).WithDataRoot(tmpDir)
+	assembler := NewPromptAssembler(engine).WithDataRoot(tmpDir)
 
 	task := models.Task{
 		ID:          "task-collide",

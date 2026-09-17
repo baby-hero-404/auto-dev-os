@@ -38,11 +38,6 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 		agentQuery = agentQuery.Where("org_id = ?", orgID)
 	}
 
-	tokenQuery := db.Table("token_usage")
-	if orgID != "" {
-		tokenQuery = tokenQuery.Where("org_id = ?", orgID)
-	}
-
 	// Total projects.
 	if err := projQuery.Count(&stats.TotalProjects).Error; err != nil {
 		return nil, fmt.Errorf("count projects: %w", err)
@@ -93,19 +88,6 @@ func (r *AnalyticsDashboardRepo) Overview(ctx context.Context, orgID string) (*m
 	if err := scopedTaskQuery().Where("status = ?", models.TaskStatusHumanReview).Count(&stats.OpenPRs).Error; err != nil {
 		return nil, fmt.Errorf("count open prs: %w", err)
 	}
-
-	// Token cost summary.
-	var tokenAgg struct {
-		TotalCost   float64
-		TotalTokens int64
-	}
-	if err := tokenQuery.
-		Select("COALESCE(SUM(cost_usd), 0) AS total_cost, COALESCE(SUM(prompt_tokens + output_tokens), 0) AS total_tokens").
-		Scan(&tokenAgg).Error; err != nil {
-		return nil, fmt.Errorf("token cost summary: %w", err)
-	}
-	stats.TotalTokenCost = tokenAgg.TotalCost
-	stats.TotalTokensUsed = tokenAgg.TotalTokens
 
 	return &stats, nil
 }

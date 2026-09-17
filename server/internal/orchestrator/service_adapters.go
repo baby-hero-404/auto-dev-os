@@ -2,11 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/llmrunner"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
+
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -64,12 +62,4 @@ type loggerAdapter struct {
 
 func (a loggerAdapter) Log(ctx context.Context, taskID string, jobID *string, level string, message string) {
 	a.log(ctx, taskID, jobID, level, message)
-}
-
-type traceRecorderAdapter struct {
-	write func(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed map[string]any, counters llmrunner.TraceCounters, latency time.Duration)
-}
-
-func (a traceRecorderAdapter) WriteLLMCallTrace(ctx context.Context, task *models.Task, agent *models.Agent, stepID string, messages []llm.Message, resp *llm.Response, parsed steps.StepResult, counters llmrunner.TraceCounters, latency time.Duration) {
-	a.write(ctx, task, agent, stepID, messages, resp, map[string]any(parsed), counters, latency)
 }

@@ -134,4 +134,3 @@ func WorkspaceToRepoRelative(path string) string {
 
 	return repoName
 }
-

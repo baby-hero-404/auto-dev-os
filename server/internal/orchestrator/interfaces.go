@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -25,15 +24,11 @@ type SandboxGitClient interface {
 	MergeBranch(ctx context.Context, task *models.Task, agent *models.Agent, containerPath string, branch string) (string, error)
 }
 
-// PromptBuilder assembles LLM messages and tool definitions for agents.
+// PromptBuilder builds the standalone instruction text and context files a
+// CLI agent is spawned with.
 type PromptBuilder interface {
-	Assemble(ctx context.Context, task models.Task) ([]llm.Message, []llm.ToolDefinition, error)
-	AssembleForAgent(ctx context.Context, task models.Task, agent *models.Agent, history []llm.Message, tools []llm.ToolDefinition) ([]llm.Message, []llm.ToolDefinition, error)
-	ListAllSkills(ctx context.Context, task models.Task) ([]llm.ToolDefinition, error)
-	// LoadStepPrompt loads a step's standalone instruction template — used
-	// by the CLI spec-first steps (cli_analyze/cli_spec/cli_implement),
-	// which build one full instruction per spawn rather than assembling a
-	// multi-section tool-loop prompt.
+	// LoadStepPrompt loads a step's standalone instruction template — the
+	// CLI steps build one full instruction per spawn.
 	LoadStepPrompt(stepID string) (string, error)
 	// MaterializeCLIContext builds the platform-knowledge file set (relevant
 	// skills, learned skills, task rules) written into a CLI task's

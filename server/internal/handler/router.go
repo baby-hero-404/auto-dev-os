@@ -30,7 +30,6 @@ type Deps struct {
 	RuleSvc         RuleService
 	SkillSvc        SkillService
 	LearnedSkillSvc LearnedSkillService
-	AnalyticsSvc    AnalyticsService
 	DashboardSvc    AnalyticsDashboardService
 	AuditSvc        AuditService
 	AuthSvc         AuthService
@@ -39,7 +38,6 @@ type Deps struct {
 	GitAccountSvc   GitAccountService
 	ProviderCredSvc ProviderCredentialService
 
-	ProviderModelSvc   ProviderModelService
 	AttestationSvc     AttestationService
 	TaskEventSvc       *service.TaskEventService
 	TaskActionSvc      *service.TaskActionService
@@ -107,7 +105,6 @@ func NewRouter(d Deps) http.Handler {
 	ruleH := NewRuleHandler(d.RuleSvc)
 	skillH := NewSkillHandler(d.SkillSvc)
 	learnedSkillH := NewLearnedSkillHandler(d.LearnedSkillSvc)
-	analyticsH := NewAnalyticsHandler(d.AnalyticsSvc)
 	dashboardH := NewAnalyticsDashboardHandler(d.DashboardSvc)
 	attestationH := NewAttestationHandler(d.AttestationSvc)
 	auditH := NewAuditHandler(d.AuditSvc)
@@ -122,7 +119,6 @@ func NewRouter(d Deps) http.Handler {
 	gitAccH := NewGitAccountHandler(d.GitAccountSvc)
 	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
 
-	providerModelH := NewProviderModelHandler(d.ProviderModelSvc)
 	govH := NewGovernanceHandler()
 	cliAuthH := NewCLIAuthHandler(d.SandboxRuntime)
 	cliTestH := NewCLITestHandler(d.SandboxRuntime, d.ProviderCredSvc)
@@ -186,20 +182,8 @@ func NewRouter(d Deps) http.Handler {
 						r.Group(func(r chi.Router) {
 							r.Use(mw.RequireRole(models.UserRoleAdmin))
 							r.Post("/", providerCredH.Create)
-							r.Post("/test", providerCredH.TestInput)
 							r.Put("/{credentialID}", providerCredH.Update)
 							r.Delete("/{credentialID}", providerCredH.Delete)
-							r.Post("/{credentialID}/test", providerCredH.Test)
-						})
-					})
-
-					r.Route("/provider-models", func(r chi.Router) {
-						r.Get("/", providerModelH.List)
-						r.Group(func(r chi.Router) {
-							r.Use(mw.RequireRole(models.UserRoleAdmin))
-							r.Post("/", providerModelH.Create)
-							r.Put("/{modelID}", providerModelH.Update)
-							r.Delete("/{modelID}", providerModelH.Delete)
 						})
 					})
 				})
@@ -269,7 +253,6 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/tasks/{taskID}/spec-review", taskH.SpecReview)
 			r.Get("/tasks/{taskID}/spec", taskH.GetSpec)
 			r.Put("/tasks/{taskID}/spec", taskH.UpdateSpec)
-			r.Patch("/tasks/{taskID}/specs/config", taskH.UpdateSpecConfig)
 			r.Get("/tasks/{taskID}/subtasks", taskH.ListSubTasks)
 			r.Post("/tasks/{taskID}/subtasks", taskH.CreateSubTask)
 			r.Post("/tasks/{taskID}/split/approve", taskH.ApproveSplit)
@@ -299,11 +282,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Patch("/rules/{ruleID}", ruleH.Update)
 			r.With(mw.RequireRole(models.UserRoleAdmin)).Delete("/rules/{ruleID}", ruleH.Delete)
 
-			r.Get("/analytics/token-usage", analyticsH.TokenUsage)
 			r.Get("/analytics/overview", dashboardH.Overview)
 			r.Get("/analytics/agents", dashboardH.AgentPerformance)
 			r.Get("/analytics/tasks", dashboardH.TaskAnalytics)
-			r.Get("/analytics/gateway-usage", dashboardH.GatewayUsage)
 			r.Get("/analytics/workflows", dashboardH.WorkflowAnalytics)
 			r.Get("/analytics/failures", dashboardH.RecentFailures)
 

@@ -93,4 +93,3 @@ type ProjectAgent struct {
 	AgentID   string    `json:"agent_id" gorm:"type:uuid;primaryKey"`
 	CreatedAt time.Time `json:"created_at"`
 }
-

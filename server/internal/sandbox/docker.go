@@ -337,7 +337,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 		// there: the CLI gets a writable home, the host original is
 		// untouched, and the staging copy is discarded after the run.
 		authDirFiles := map[string]string{
-			filepath.Join(homeDir, ".claude.json"):                            filepath.Join(SandboxHomeDir, ".claude.json"),                 // Claude Code config
+			filepath.Join(homeDir, ".claude.json"):                 filepath.Join(SandboxHomeDir, ".claude.json"),                 // Claude Code config
 			filepath.Join(homeDir, ".claude", ".credentials.json"): filepath.Join(SandboxHomeDir, ".claude", ".credentials.json"), // Claude Code OAuth session
 		}
 		authDirTrees := map[string]string{
@@ -395,7 +395,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 	// while supporting atomic renames (which these CLIs do when refreshing
 	// tokens), we stage them in a temporary directory on the host and mount
 	// the whole parent directories.
-	
+
 	credentialHostPaths := make(map[string]string, len(req.CredentialFiles))
 	if len(req.CredentialFiles) > 0 {
 		credDir, err := os.MkdirTemp("", "auto-code-os-cred-*")
@@ -445,12 +445,12 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 			if err := os.MkdirAll(filepath.Dir(hostPath), 0o777); err != nil {
 				return nil, fmt.Errorf("create credential subdirs: %w", err)
 			}
-			
+
 			// 0o666 allows read/write from any UID inside the container
 			if err := os.WriteFile(hostPath, []byte(content), 0o666); err != nil {
 				return nil, fmt.Errorf("write credential file: %w", err)
 			}
-			
+
 			// We need this map for extracting updated files later
 			credentialHostPaths[targetContainerPath] = hostPath
 		}
@@ -463,7 +463,7 @@ func (r *DockerRuntime) Run(ctx context.Context, req CommandRequest) (*CommandRe
 			if sessionMountsOverlap(targetContainerPath, req.SessionMounts) {
 				continue
 			}
-			
+
 			rel, err := filepath.Rel(SandboxHomeDir, targetContainerPath)
 			if err == nil && !strings.HasPrefix(rel, "..") && rel != "." && strings.Contains(rel, string(filepath.Separator)) {
 				// E.g. target="/home/agent/.claude/.credentials.json", rel=".claude/.credentials.json"

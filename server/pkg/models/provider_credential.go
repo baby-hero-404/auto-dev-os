@@ -16,27 +16,15 @@ const (
 	ProviderCredentialStatusNeedsReauth = "needs_reauth"
 )
 
-const (
-	ProviderOpenAI    = "openai"
-	ProviderAnthropic = "anthropic"
-	ProviderGemini    = "gemini"
-	Provider9Router   = "9router"
-	ProviderGateway   = "gateway"
-)
-
+// IsAllowedProvider reports whether provider names a credential the platform
+// can use. Only cli:* providers qualify: model auth lives inside the CLI
+// harness under its own subscription session, and the platform holds no API
+// keys (see docs/openspecs/remove-api-execution-mode). The openai/anthropic/
+// gemini/9router/gateway constants that used to live here are gone with the
+// LLM API layer.
 func IsAllowedProvider(provider string) bool {
-	switch provider {
-	case ProviderOpenAI, ProviderAnthropic, ProviderGemini, Provider9Router, ProviderGateway:
-		return true
-	default:
-		// Accept any cli:* dynamic provider
-		if len(provider) > 4 && provider[:4] == "cli:" {
-			return true
-		}
-		return false
-	}
+	return len(provider) > 4 && provider[:4] == "cli:"
 }
-
 
 type ProviderCredential struct {
 	ID            string          `json:"id" gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`

@@ -8,14 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/database"
-	aigateway "github.com/auto-code-os/auto-code-os/server/internal/gateway"
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
 	"github.com/auto-code-os/auto-code-os/server/internal/handler"
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
@@ -26,7 +24,6 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
-	"github.com/auto-code-os/auto-code-os/server/pkg/llm"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
 )
 
@@ -90,7 +87,6 @@ func run() error {
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowRepo.SetLogFileRoot(cfg.Logging.FileRoot)
 	taskEventRepo := repository.NewTaskEventRepo(db)
-	analyticsRepo := repository.NewAnalyticsRepo(db)
 	dashboardRepo := repository.NewAnalyticsDashboardRepo(db)
 	auditRepo := repository.NewAuditRepo(db)
 	memoryRepo := repository.NewMemoryRepo(db)
@@ -98,15 +94,13 @@ func run() error {
 	suggestionRepo := repository.NewLearningSuggestionRepo(db)
 	gitAccountRepo := repository.NewGitAccountRepo(db)
 	providerCredentialRepo := repository.NewProviderCredentialRepo(db)
-	providerModelRepo := repository.NewProviderModelRepo(db)
 
 	secretCipher, err := service.NewSecretCipher(cfg.Auth.JWTSecret)
 	if err != nil {
 		return err
 	}
 	auditSvc := service.NewAuditService(auditRepo)
-	providerModelSvc := service.NewProviderModelService(providerModelRepo)
-	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc).WithProviderModelSeeder(providerModelSvc).WithOrgs(orgRepo)
+	credentialPoolSvc := service.NewCredentialPoolService(providerCredentialRepo, secretCipher).WithAudit(auditSvc).WithOrgs(orgRepo)
 	sandboxRuntime, err := buildSandboxRuntime(cfg)
 	if err != nil {
 		return err
@@ -147,7 +141,6 @@ func run() error {
 
 	promptAssembler := prompts.NewPromptAssemblerWithRules(
 		ruleRepo,
-		nil,
 		pathRegistry.Prompt,
 		pathRegistry.FS,
 		ctxEngine,
@@ -177,20 +170,9 @@ func run() error {
 		orchestrator.WithSandboxTimeout(time.Duration(cfg.Sandbox.TimeoutMinutes) * time.Minute),
 	}
 
-	if provider, err := buildLLMProvider(cfg, credentialPoolSvc, providerModelSvc, analyticsRepo); err != nil {
-		slog.Warn("llm provider disabled", "error", err)
-	} else if provider != nil {
-		opts = append(opts, orchestrator.WithLLMProvider(provider))
-	}
-
-	// Phase 6: Memory & Learning
+	// Phase 6: Memory & Learning. Memory search runs on BM25 + the knowledge
+	// graph; the embedding/vector stream went with the LLM API layer.
 	memorySvc := service.NewMemoryService(memoryRepo, edgeRepo)
-	hasOpenAIKey := cfg.LLM.OpenAIAPIKey != "" && !strings.Contains(cfg.LLM.OpenAIAPIKey, "your-openai-key")
-	if hasOpenAIKey {
-		memorySvc.SetEmbedder(llm.NewOpenAIEmbedder(cfg.LLM.OpenAIAPIKey, cfg.LLM.EmbeddingModel))
-	} else {
-		slog.Warn("memory embeddings disabled: OPENAI_API_KEY is not configured or is a placeholder")
-	}
 	learningSvc := service.NewLearningService(suggestionRepo, ruleRepo)
 	learningSvc.SetPromptRoot(filepath.Clean(promptsRoot))
 	memoryHooks := learning.NewMemoryHooks(memorySvc)
@@ -237,7 +219,6 @@ func run() error {
 		RuleSvc:            service.NewRuleService(ruleRepo),
 		SkillSvc:           skillSvc,
 		LearnedSkillSvc:    learnedSkillRepo,
-		AnalyticsSvc:       service.NewAnalyticsService(analyticsRepo),
 		DashboardSvc:       service.NewAnalyticsDashboardService(dashboardRepo),
 		AuditSvc:           auditSvc,
 		AuthSvc:            service.NewAuthService(authRepo, cfg.Auth.JWTSecret),
@@ -245,7 +226,6 @@ func run() error {
 		LearningSvc:        learningSvc,
 		GitAccountSvc:      service.NewGitAccountService(gitAccountRepo, secretCipher),
 		ProviderCredSvc:    credentialPoolSvc,
-		ProviderModelSvc:   providerModelSvc,
 		AttestationSvc:     attestationSvc,
 		TaskEventSvc:       taskEventSvc,
 		TaskActionSvc:      taskActionSvc,
@@ -314,7 +294,7 @@ func run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		aigateway.StartCooldownWorker(workerCtx, credentialPoolSvc, time.Minute)
+		service.StartCooldownWorker(workerCtx, credentialPoolSvc, time.Minute)
 	}()
 	slog.Info("provider credential cooldown worker started")
 	wg.Add(1)
@@ -359,39 +339,6 @@ func run() error {
 	wg.Wait()
 	orch.Wait()
 	return srv.Shutdown(ctx)
-}
-
-func buildLLMProvider(cfg *config.Config, credentialPool *service.CredentialPoolService, providerModels *service.ProviderModelService, recorder llm.UsageRecorder) (llm.Provider, error) {
-	var fallback llm.Provider
-	var err error
-
-	if cfg.LLM.Provider != "gateway" && cfg.LLM.Provider != "" {
-		if cfg.LLM.APIKey != "" || cfg.LLM.LLMAPIKey != "" {
-			fallback, err = llm.NewProviderWithRecorder(cfg, recorder)
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		if cfg.LLM.OpenAIAPIKey != "" || cfg.LLM.AnthropicAPIKey != "" || cfg.LLM.GeminiAPIKey != "" {
-			fallback, err = llm.NewProviderWithRecorder(cfg, recorder)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if credentialPool != nil {
-		return aigateway.NewAIGateway(aigateway.Options{
-			FallbackProvider:      fallback,
-			CredentialPool:        credentialPool,
-			ProviderModelResolver: providerModels,
-			Config:                cfg,
-			Recorder:              recorder,
-		}), nil
-	}
-
-	return fallback, nil
 }
 
 func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {

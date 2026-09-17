@@ -134,7 +134,7 @@ func TestStepContextLoad_Execute(t *testing.T) {
 			func(task *models.Task, hostPath string, worktreeSuffix string) string {
 				return hostPath
 			},
-		nil,
+			nil,
 		)
 	}
 

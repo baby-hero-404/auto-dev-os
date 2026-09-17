@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/policy"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
@@ -112,7 +114,26 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	if err != nil {
 		return nil, fmt.Errorf("cli_spec: %w", err)
 	}
+
+	var project *models.Project
+	if s.projects != nil {
+		if p, perr := s.projects.GetByID(ctx, s.rt.Task.ProjectID); perr == nil {
+			project = p
+		}
+	}
+
 	if out.AwaitingInput {
+		priorRounds := clarificationRoundCount(s.rt.Task)
+		specStatus, _ := policy.ResolveSpecGate(s.rt.Task, project, true, priorRounds)
+		// Bypass (hotfix label, or MaxClarificationRounds exhausted) only
+		// helps if the CLI actually produced the 4 required files before it
+		// stopped to ask — otherwise there is nothing to hand to cli_implement
+		// and pausing is still the only option.
+		if specStatus != models.TaskSpecStatusClarificationRequired {
+			if total, verr := s.validateSpecFiles(specDir, slug); verr == nil {
+				return s.recordReadyWithWarnings(ctx, specDir, total, out.Output)
+			}
+		}
 		return pauseForClarification(ctx, s.tasks, s.rt.Task, s.ID(), out.Output)
 	}
 
@@ -121,14 +142,7 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 		return nil, err
 	}
 
-	autonomy := models.AgentAutonomySupervised
-	if s.projects != nil {
-		if project, perr := s.projects.GetByID(ctx, s.rt.Task.ProjectID); perr == nil && project.DefaultAutonomy != "" {
-			autonomy = project.DefaultAutonomy
-		}
-	}
-
-	if autonomy == models.AgentAutonomyAutonomous {
+	if !policy.RequiresSpecReview(s.rt.Task, project) {
 		specStatus := models.TaskSpecStatusAutoApproved
 		if s.tasks != nil {
 			if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{SpecStatus: &specStatus}); err != nil {
@@ -150,6 +164,54 @@ func (s *CLISpecStep) Execute(ctx context.Context, stepCtx workflow.StepContext)
 	s.rt.Task.Status = status
 
 	return nil, workflow.PauseError{Step: workflow.StepCLISpec, Reason: cliSpecAwaitingApprovalReason}
+}
+
+// clarificationRoundCount returns how many clarification rounds are already
+// recorded on the task, so IsDefinitionOfReadyBypassed can bound a stuck
+// clarification loop by MaxClarificationRounds.
+func clarificationRoundCount(task *models.Task) int {
+	if len(task.Clarifications) == 0 {
+		return 0
+	}
+	var rounds []models.ClarificationRound
+	if json.Unmarshal(task.Clarifications, &rounds) != nil {
+		return 0
+	}
+	return len(rounds)
+}
+
+// recordReadyWithWarnings appends the CLI's question as a final, bypassed
+// clarification round (for the audit trail) and proceeds to coding instead
+// of pausing again — used when IsDefinitionOfReadyBypassed fires (hotfix
+// label or MaxClarificationRounds exhausted) and the required spec files
+// already exist despite the CLI stopping to ask a question.
+func (s *CLISpecStep) recordReadyWithWarnings(ctx context.Context, specDir string, total int, cliOutput string) (StepResult, error) {
+	var rounds []models.ClarificationRound
+	if len(s.rt.Task.Clarifications) > 0 {
+		_ = json.Unmarshal(s.rt.Task.Clarifications, &rounds)
+	}
+	rounds = append(rounds, models.ClarificationRound{
+		Round:     len(rounds) + 1,
+		Timestamp: time.Now(),
+		Questions: []string{lastNonEmptyLine(cliOutput)},
+		Response:  "bypassed: definition-of-ready gate exhausted, proceeding with warnings",
+	})
+	raw, err := json.Marshal(rounds)
+	if err != nil {
+		return nil, fmt.Errorf("cli_spec: marshal clarifications: %w", err)
+	}
+	specStatus := models.TaskSpecStatusReadyWithWarnings
+	if s.tasks != nil {
+		if _, err := s.tasks.Update(ctx, s.rt.Task.ID, models.UpdateTaskInput{
+			Clarifications: raw,
+			SpecStatus:     &specStatus,
+		}); err != nil {
+			return nil, fmt.Errorf("cli_spec: persist ready-with-warnings: %w", err)
+		}
+	}
+	s.rt.Task.Clarifications = raw
+	s.rt.Task.SpecStatus = specStatus
+	return StepResult{"status": "success", "spec_dir": specDir, "task_count": total}, nil
 }
 
 // validateSpecFiles checks all 4 required OpenSpec files exist in specDir

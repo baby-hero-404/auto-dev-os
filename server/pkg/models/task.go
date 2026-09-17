@@ -94,11 +94,13 @@ type Task struct {
 	// legacy API-native flow, where clarification always originates at, and
 	// resumes to, the "analyze" step. Set only by the CLI spec-first steps
 	// (cli_analyze/cli_spec/cli_implement).
-	PausedStep      string          `json:"paused_step,omitempty" gorm:"default:''"`
-	PRURLs          pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
-	PRMetadata      json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
-	ExecutionEngine *string         `json:"execution_engine,omitempty" gorm:"column:execution_engine"` // nil = inherit from project
-	SubTasks        []Task          `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
+	PausedStep string          `json:"paused_step,omitempty" gorm:"default:''"`
+	PRURLs     pq.StringArray  `json:"pr_urls" gorm:"type:text[]"`
+	PRMetadata json.RawMessage `json:"pr_metadata" gorm:"type:jsonb;default:'[]'"`
+	// RequireSpecReview overrides the project's setting for this task.
+	// nil inherits; an explicit false wins over a project default of true.
+	RequireSpecReview *bool  `json:"require_spec_review,omitempty" gorm:"column:require_spec_review"`
+	SubTasks          []Task `json:"subtasks,omitempty" gorm:"foreignKey:ParentTaskID"`
 	// SequenceIndex is this task's 0-based dispatch order among its siblings
 	// when it is a decomposed child (nil for a non-decomposed task or a
 	// decomposition parent). Children execute strictly in this order in v1
@@ -174,15 +176,15 @@ func WorkspaceOwnerID(task *Task) string {
 
 // CreateTaskInput is the payload to create a task.
 type CreateTaskInput struct {
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	Complexity      string   `json:"complexity"`
-	Priority        int      `json:"priority"`
-	Labels          []string `json:"labels"`
-	ParentTaskID    *string  `json:"parent_task_id,omitempty"`
-	AgentID         *string  `json:"agent_id,omitempty"`
-	RepositoryID    *string  `json:"repository_id,omitempty"`
-	ExecutionEngine *string  `json:"execution_engine,omitempty"`
+	Title             string   `json:"title"`
+	Description       string   `json:"description"`
+	Complexity        string   `json:"complexity"`
+	Priority          int      `json:"priority"`
+	Labels            []string `json:"labels"`
+	ParentTaskID      *string  `json:"parent_task_id,omitempty"`
+	AgentID           *string  `json:"agent_id,omitempty"`
+	RepositoryID      *string  `json:"repository_id,omitempty"`
+	RequireSpecReview *bool    `json:"require_spec_review,omitempty"`
 }
 
 // UpdateTaskInput is the payload to partially update a task.
@@ -197,12 +199,12 @@ type UpdateTaskInput struct {
 	RepositoryID       *string         `json:"repository_id,omitempty"`
 	Analysis           json.RawMessage `json:"analysis,omitempty"`
 	SpecStatus         *string         `json:"spec_status,omitempty"`
+	RequireSpecReview  *bool           `json:"require_spec_review,omitempty"`
 	Clarifications     json.RawMessage `json:"clarifications,omitempty"`
 	PausedStep         *string         `json:"paused_step,omitempty"`
 	PRURLs             *pq.StringArray `json:"pr_urls,omitempty"`
 	PRMetadata         json.RawMessage `json:"pr_metadata,omitempty"`
 	ParentTaskID       *string         `json:"parent_task_id,omitempty"`
-	ExecutionEngine    *string         `json:"execution_engine,omitempty"`
 	SequenceIndex      *int            `json:"sequence_index,omitempty"`
 	DecompositionMode  *string         `json:"decomposition_mode,omitempty"`
 	ComplexityScore    json.RawMessage `json:"complexity_score,omitempty"`
@@ -419,7 +421,6 @@ type TaskAnalysis struct {
 	SpecsMD                string              `json:"specs_md,omitempty"`
 	DesignMD               string              `json:"design_md,omitempty"`
 	TasksMD                string              `json:"tasks_md,omitempty"`
-	IncludeSpecInMR        bool                `json:"include_spec_in_mr"`
 	SpecFeedbackText       string              `json:"spec_feedback_text,omitempty"`
 	Tasks                  []TaskDAG           `json:"tasks,omitempty"`
 	ComplexityDetails      *ComplexityDetails  `json:"complexity_details,omitempty"`

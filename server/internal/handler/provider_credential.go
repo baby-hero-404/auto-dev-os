@@ -65,27 +65,3 @@ func (h *ProviderCredentialHandler) Delete(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-func (h *ProviderCredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
-	orgID := chi.URLParam(r, "orgID")
-	id := chi.URLParam(r, "credentialID")
-	if err := h.svc.TestConnection(r.Context(), orgID, id); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, envelope{"status": "configured"})
-}
-
-func (h *ProviderCredentialHandler) TestInput(w http.ResponseWriter, r *http.Request) {
-	var input models.TestProviderCredentialInput
-	if err := decodeJSON(r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	orgID := chi.URLParam(r, "orgID")
-	if err := h.svc.TestConnectionInput(r.Context(), orgID, input); err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, envelope{"status": "ok"})
-}

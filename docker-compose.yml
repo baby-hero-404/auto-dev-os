@@ -42,7 +42,7 @@ services:
     image: golang:1.27
     container_name: autocodeos-server
     working_dir: /app/server
-    command: sh -c "go run ./cmd/api"
+    command: sh -c "go run -mod=vendor ./cmd/api"
     env_file:
       - .env
     ports:

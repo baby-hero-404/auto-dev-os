@@ -1,4 +1,4 @@
-// Mirrors server/pkg/models/cli_profiles.go — labels/icons only, no command/args.
+// Mirrors github.com/baby-hero-404/aicli/profile — labels/icons only, no command/args.
 // Command/args stay server-side; the frontend only needs to render the picker.
 export interface CLIProfileMeta {
   label: string;

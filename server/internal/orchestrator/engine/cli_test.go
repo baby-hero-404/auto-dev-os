@@ -197,6 +197,8 @@ func TestCLIEngine_RunCodeStep_NonZeroExit(t *testing.T) {
 	}
 }
 
+const loopKillThreshold = 10
+
 func TestCLIEngine_RunCodeStep_LoopKill(t *testing.T) {
 	var lines []string
 	for i := 0; i < loopKillThreshold; i++ {

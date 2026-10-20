@@ -26,6 +26,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/auto-code-os/auto-code-os/server/runtimes"
 	"github.com/baby-hero-404/aicli/sandbox"
 	sandboxdocker "github.com/baby-hero-404/aicli/sandbox/docker"
 	"github.com/baby-hero-404/gocore/stdlog"
@@ -350,9 +351,13 @@ func run() error {
 }
 
 func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {
-	registry, err := sandbox.NewRegistry()
+	manifests, err := runtimes.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load sandbox runtime manifests: %w", err)
+	}
+	registry, err := sandbox.NewRegistry(manifests...)
+	if err != nil {
+		return nil, fmt.Errorf("init sandbox registry: %w", err)
 	}
 
 	switch cfg.Sandbox.Runtime {

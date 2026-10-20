@@ -26,7 +26,7 @@ sandbox:
   runtime: "docker"
   image: "auto-code-os-sandbox:latest"
   workspace_root: "/tmp/auto-code-os/workspaces"
-  skills_root: "/home/ubuntu/my_projects/skills"
+  skills_root: "./.data/skills"
   workspace_retention_hours: 72
   workspace_cleanup_interval_minutes: 60
   memory_mb: 4096

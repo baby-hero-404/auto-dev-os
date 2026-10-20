@@ -9,7 +9,7 @@ import (
 
 // LogFileName/TraceFileName are the fixed filenames mcp-context writes under
 // its log directory (conventionally the container-side end of the
-// sandbox.LogsHostDir bind mount, see internal/sandbox/docker.go and
+// sandbox.LogsHostDir bind mount, see
 // docs/guides/tracing-workflow-logs.md).
 const (
 	LogFileName   = "mcp-server.log"

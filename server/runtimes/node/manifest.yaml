@@ -1,0 +1,9 @@
+id: node
+image: autocode/node:latest
+detect:
+  - package.json
+cache:
+  - name: npm
+    container: /home/agent/.npm
+setup: []
+healthcheck: "node --version"

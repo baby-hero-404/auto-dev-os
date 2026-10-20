@@ -1,0 +1,10 @@
+id: python
+image: autocode/python:latest
+detect:
+  - requirements.txt
+  - pyproject.toml
+cache:
+  - name: pip
+    container: /home/agent/.cache/pip
+setup: []
+healthcheck: "python3 --version"

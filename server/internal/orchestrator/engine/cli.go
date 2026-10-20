@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/baby-hero-404/aicli/rules"
+	"github.com/baby-hero-404/aicli/run"
 	"log"
 	"maps"
 	"os"
@@ -478,7 +479,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		combined += result.Stderr
 	}
 	combined, capturedFiles := extractCapturedFiles(combined)
-	telemetry, telemetryOK := parseCLITelemetry(combined)
+	telemetry, telemetryOK := run.ParseTelemetry(combined)
 	// killed is true either from the post-hoc error-line heuristic over the
 	// fully captured output (detectLoop) or because the sandbox runtime
 	// itself already force-killed the container mid-run (result.Killed —
@@ -580,16 +581,11 @@ func lastNonEmptyLine(s string) string {
 	return ""
 }
 
-func detectLoop(output string) bool {
-	d := newLoopDetector()
-	triggered := false
-	for line := range strings.SplitSeq(output, "\n") {
-		if d.Push(line) {
-			triggered = true
-		}
-	}
-	return triggered
-}
+// RedactSecrets scrubs known API-key/token shapes from text before it is persisted.
+func RedactSecrets(s string) string { return run.RedactSecrets(s) }
+func redactSecrets(s string) string { return run.RedactSecrets(s) }
+
+func detectLoop(output string) bool { return run.DetectLoop(output) }
 
 // idleTimeoutEnvVar lets operators tune Phase 7's idle-activity kill
 // threshold without a rebuild — e.g. loosening it for an org whose agents

@@ -1,10 +1,7 @@
 package orchestrator
 
-import "github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
+import "github.com/baby-hero-404/aicli/run"
 
 // redactSecrets scrubs credential shapes from text before it reaches a log
-// line or a task event. It delegates to engine.RedactSecrets so the pattern
-// set has exactly one definition — this package used to carry a second,
-// near-identical copy that could silently drift from the one actually applied
-// to captured CLI output.
-func redactSecrets(s string) string { return engine.RedactSecrets(s) }
+// file, SSE event, or persistent checkpoint. Delegated to aicli/run.RedactSecrets.
+func redactSecrets(s string) string { return run.RedactSecrets(s) }

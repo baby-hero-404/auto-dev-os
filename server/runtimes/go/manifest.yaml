@@ -1,0 +1,9 @@
+id: go
+image: autocode/go:latest
+detect:
+  - go.mod
+cache:
+  - name: gomod
+    container: /go/pkg/mod
+setup: []
+healthcheck: "go version"

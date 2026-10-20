@@ -1,0 +1,11 @@
+id: java
+image: autocode/java:latest
+detect:
+  - pom.xml
+cache:
+  - name: m2
+    container: /home/agent/.m2
+  - name: gradle
+    container: /home/agent/.gradle
+setup: []
+healthcheck: "java -version"

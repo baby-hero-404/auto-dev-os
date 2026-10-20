@@ -72,7 +72,7 @@ sandbox-build: ## Build the Docker sandbox image for agents
 		--build-arg USER_GID=$(shell id -g) \
 		-f docker/Dockerfile.sandbox . --network host
 
-sandbox-images: ## Build the layered per-runtime sandbox images (autocode-base + node/python/java/go/flutter), tagged to match the aicli module's sandbox/runtimes/*/manifest.yaml (github.com/baby-hero-404/aicli)'s image: fields. Not wired into any request-time code path — SandboxManager only selects an already-built tag, never builds one live.
+sandbox-images: ## Build the layered per-runtime sandbox images (autocode-base + node/python/java/go/flutter), tagged to match server/runtimes/*/manifest.yaml's image: fields. Not wired into any request-time code path — SandboxManager only selects an already-built tag, never builds one live.
 	@echo "==> Building autocode-base image..."
 	docker build -t autocode-base:latest \
 		--build-arg USER_UID=$(shell id -u) \

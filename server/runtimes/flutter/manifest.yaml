@@ -1,0 +1,12 @@
+id: flutter
+image: autocode/flutter:latest
+detect:
+  - pubspec.yaml
+cache:
+  - name: pub-cache
+    container: /home/agent/.pub-cache
+  - name: gradle
+    container: /home/agent/.gradle
+setup:
+  - flutter pub get
+healthcheck: "flutter doctor"

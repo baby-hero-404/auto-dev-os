@@ -103,6 +103,7 @@ export const CLI_AUTH_PROVIDERS: Record<string, CliAuthProviderConfig> = {
         The system will automatically run <code>agy</code> for you, and capture the session once authentication is successful.
       </>
     ),
+    initialCommand: "agy\n",
     steps: [],
     footerNote: (
       <>

@@ -22,7 +22,7 @@ func main() {
 	dbPath := flag.String("db", "", "path to the workspace AST cache SQLite db (defaults to <root>/context/workspace_cache.db)")
 	contextDir := flag.String("context-dir", "", "materialized skills/rules directory for this run (defaults to $AUTOCODE_CONTEXT_DIR, see PromptAssembler.MaterializeCLIContext)")
 	// logDir defaults to sandbox.LogsContainerDir — the fixed path
-	// internal/sandbox/docker.go bind-mounts CommandRequest.LogsHostDir to
+	// the Docker runtime bind-mounts CommandRequest.LogsHostDir to
 	// (Phase 6, "Docker Log Bind-Mount"). Overridable for local/non-sandbox
 	// runs (e.g. the smoke tests in tasks.md Phase 1) where that mount
 	// doesn't exist; NewAppLogger/OpenTraceWriter degrade gracefully to

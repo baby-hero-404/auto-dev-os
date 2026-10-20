@@ -33,7 +33,6 @@ interface ProviderSummaryProps {
   configuredProviderCount: number;
   totalCredentialCount: number;
   activeCredentialCount: number;
-  activeTab?: "api" | "cli";
 }
 
 export function ProviderSummary({

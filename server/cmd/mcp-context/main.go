@@ -14,7 +14,7 @@ import (
 	"strconv"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/mcpcontext"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 func main() {

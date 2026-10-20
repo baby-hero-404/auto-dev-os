@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/baby-hero-404/aicli/sandbox"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/observability"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 // CleanupWorkspaceAfterFinalState releases locks and prunes workspace repositories to save space.

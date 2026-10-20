@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/baby-hero-404/aicli/rules"
 	"log"
 	"maps"
 	"os"
@@ -13,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 // ErrConfigInvalid marks a cli engine failure as a permanent configuration
@@ -138,7 +139,7 @@ func (e *cliEngine) resolveCredentialFiles(ctx context.Context, req CodeStepRequ
 		if clean == "/" || strings.Contains(clean, "..") {
 			continue
 		}
-		files[sandbox.SandboxHomeDir+clean] = content
+		files[sandbox.HomeDir+clean] = content
 	}
 	return files, payload, nil
 }
@@ -164,10 +165,9 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	checkCmd := fmt.Sprintf("command -v %s >/dev/null 2>&1", paths.QuoteShellArg(cfg.Command))
 	res, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
-		AgentID:         agentID(req.Agent),
 		Workspace:       req.HostWorkspace,
 		Command:         []string{"bash", "-lc", checkCmd},
-		Env:             map[string]string{"CI": "1", "HOME": sandbox.SandboxHomeDir},
+		Env:             map[string]string{"CI": "1", "HOME": sandbox.HomeDir},
 		NetworkMode:     req.NetworkMode,
 		Timeout:         binaryCheckTimeout,
 		CredentialFiles: credentialFiles,
@@ -189,11 +189,10 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
 	if _, ok := env["HOME"]; !ok {
-		env["HOME"] = sandbox.SandboxHomeDir
+		env["HOME"] = sandbox.HomeDir
 	}
 	authRes, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
-		AgentID:         agentID(req.Agent),
 		Workspace:       req.HostWorkspace,
 		Command:         []string{"bash", "-lc", cfg.AuthCheckCommand},
 		Env:             env,
@@ -224,7 +223,7 @@ func (e *cliEngine) Preflight(ctx context.Context, req CodeStepRequest) (string,
 	// auth_check_command's own small, purpose-built response, not a noisy
 	// agent trace, so the mid-transcript false-positive risk that
 	// motivates the confidence split elsewhere barely applies here.
-	if detectAuthInvalid(cfg.ProfileRef, authOutput) != AuthInvalidNone {
+	if rules.DetectAuthInvalid(cfg.ProfileRef, authOutput) != rules.AuthInvalidNone {
 		return "", fmt.Errorf("cli engine: auth check command reports not authenticated: %s", redactSecrets(strings.TrimSpace(authOutput)))
 	}
 	return "", nil
@@ -366,7 +365,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	env := cloneEnv(cfg.Env)
 	env["CI"] = "1"
 	if _, ok := env["HOME"]; !ok {
-		env["HOME"] = sandbox.SandboxHomeDir
+		env["HOME"] = sandbox.HomeDir
 	}
 	if len(req.ContextFiles) > 0 {
 		env["AUTOCODE_CONTEXT_DIR"] = autocodeDir + "/context"
@@ -413,7 +412,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		if paths, ok := layouts[cfg.ProfileRef]; ok {
 			for _, p := range paths {
 				hostPath := filepath.Join(sessionDir, p)
-				containerPath := filepath.Join(sandbox.SandboxHomeDir, p)
+				containerPath := filepath.Join(sandbox.HomeDir, p)
 
 				if err := os.MkdirAll(hostPath, 0o755); err != nil {
 					return nil, fmt.Errorf("cli engine: create session mount dir %s: %w", hostPath, err)
@@ -425,7 +424,6 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 
 	result, err := e.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:          req.Task.ID,
-		AgentID:         agentID(req.Agent),
 		Workspace:       req.HostWorkspace,
 		Command:         []string{"bash", "-lc", script},
 		Env:             env,
@@ -454,7 +452,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 			merged := make(map[string]string, len(fresh))
 			maps.Copy(merged, fresh)
 			for targetPath, newContent := range result.UpdatedCredentialFiles {
-				relPath, ok := strings.CutPrefix(targetPath, sandbox.SandboxHomeDir+"/")
+				relPath, ok := strings.CutPrefix(targetPath, sandbox.HomeDir+"/")
 				if !ok {
 					continue
 				}
@@ -490,16 +488,16 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	// live in-stream threshold before the process exits on its own.
 	killed := detectLoop(combined) || result.Killed
 	idleTimeoutHit := result.Killed && result.KillReason == sandbox.KillReasonIdleTimeout
-	authConfidence := detectAuthInvalid(cfg.ProfileRef, combined)
-	authInvalid := authConfidence != AuthInvalidNone
-	authInvalidConfirmed := authConfidence == AuthInvalidConfirmed
+	authConfidence := rules.DetectAuthInvalid(cfg.ProfileRef, combined)
+	authInvalid := authConfidence != rules.AuthInvalidNone
+	authInvalidConfirmed := authConfidence == rules.AuthInvalidConfirmed
 	// Auth-invalid takes priority over quota: both are runtime failure
 	// signatures but auth-invalid is permanent (retrying never helps) while
 	// quota is transient (cools down and retries later) — reporting both on
 	// the same output would let the quota cooldown path mask the permanent
 	// one. Applies at any confidence level: even a merely suspected match
 	// isn't a quota signature, so it shouldn't cool down the credential.
-	quotaExceeded, quotaCooldown := detectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
+	quotaExceeded, quotaCooldown := rules.DetectQuotaExceeded(cfg.ProfileRef, combined, result.ExitCode)
 	if authInvalid {
 		quotaExceeded = false
 		quotaCooldown = 0
@@ -509,7 +507,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 	// exit 0 ("can't prompt non-interactively"), which would otherwise be
 	// read as a silent success. Skipped when a more specific outcome
 	// (killed loop, auth failure) already explains why the run stopped.
-	awaitingInput := !killed && !authInvalid && detectAwaitingInput(lastNonEmptyLine(combined))
+	awaitingInput := !killed && !authInvalid && rules.DetectAwaitingInput(lastNonEmptyLine(combined))
 
 	credID := ""
 	if cfg != nil {
@@ -543,7 +541,7 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 		res.Error = "cli engine: repeated error output detected, killing step as a stuck loop"
 	case authInvalidConfirmed:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: credential not authenticated (permanent, will not retry): %s", lastNonEmptyLine(combined)))
-	case authInvalid: // suspected only — see AuthInvalidSuspected doc
+	case authInvalid: // suspected only — see rules.AuthInvalidSuspected doc
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: possible auth failure, unconfirmed signature (will retry): %s", lastNonEmptyLine(combined)))
 	case quotaExceeded:
 		res.Error = redactSecrets(fmt.Sprintf("cli engine: rate limit or quota exceeded (will cool down and retry): %s", lastNonEmptyLine(combined)))

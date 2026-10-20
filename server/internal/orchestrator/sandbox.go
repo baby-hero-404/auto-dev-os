@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
 	"go.opentelemetry.io/otel"
 )
 
@@ -24,7 +24,6 @@ func (o *Orchestrator) runSandboxStep(ctx context.Context, task *models.Task, ag
 
 	result, err := o.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:      task.ID,
-		AgentID:     agent.ID,
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", command},
 		NetworkMode: networkMode,
@@ -75,7 +74,6 @@ func (o *Orchestrator) runSandboxStepInWorktree(ctx context.Context, task *model
 
 	result, err := o.runtime.Run(ctx, sandbox.CommandRequest{
 		TaskID:      task.ID,
-		AgentID:     agent.ID,
 		Workspace:   localPath,
 		Command:     []string{"bash", "-lc", wrappedCommand},
 		NetworkMode: networkMode,

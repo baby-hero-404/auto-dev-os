@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 func TestOrchestrator_Resume_DoesNotLoseCLISpec(t *testing.T) {

@@ -6,7 +6,7 @@ The project context initialization has completed successfully. Below is the stru
 - **Project Name:** Auto Code OS (`my_projects-auto_code_os`)
 - **Repository Location:** `/home/ubuntu/my_projects/auto_code_os`
 - **Type:** Monorepo (AI-Native SDLC Platform)
-- **Primary Tech Stack:** Go 1.26+ (Chi Router, GORM) & Next.js 16 (App Router, Tailwind CSS v4, TypeScript, React 19)
+- **Primary Tech Stack:** Go 1.27+ (Chi Router, GORM) & Next.js 16 (App Router, Tailwind CSS v4, TypeScript, React 19)
 - **Database:** PostgreSQL 17 + pgvector (Migrations via `golang-migrate`)
 
 ## 🛠️ SLOT_MAP - Active & Suggested Skills

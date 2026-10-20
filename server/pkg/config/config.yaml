@@ -7,26 +7,6 @@ server:
   cors_allowed_origins: ""
   version: "0.2.0"
 
-llm:
-  provider: "gateway"
-  model: ""
-  fast_model: "gpt-5.4-nano"
-  balanced_model: "gpt-5.4"
-  powerful_model: "gpt-5.5"
-  anthropic_balanced_model: "claude-sonnet-4-6"
-  anthropic_powerful_model: "claude-opus-4-8"
-  gemini_fast_model: "gemini-3.1-flash-lite"
-  gemini_balanced_model: "gemini-3.5-flash"
-  circuit_max_tokens: 120000
-  circuit_max_cost_usd: 2.50
-  default_output_tokens: 2048
-  max_retries: 2
-  embedding_model: "text-embedding-3-small"
-  base_url: ""
-  api_key: ""
-  openai_api_key: ""
-  anthropic_api_key: ""
-  gemini_api_key: ""
 
 database:
   url: ""

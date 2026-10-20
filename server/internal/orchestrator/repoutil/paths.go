@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 func RepoNameFromURL(repoURL string) string {

@@ -6,7 +6,7 @@
 
 | Layer              | Technology                          | Rationale                                                    |
 | :----------------- | :---------------------------------- | :----------------------------------------------------------- |
-| **Backend**        | Go 1.26.x                           | High performance, strong concurrency (goroutines for agents); matches `server/go.mod` |
+| **Backend**        | Go 1.27.x                           | High performance, strong concurrency (goroutines for agents); matches `server/go.mod` |
 | **Web UI**         | Next.js 16.x (App Router, TypeScript) | Active LTS, modern SSR/RSC, Turbopack defaults, great DX for dashboards |
 | **Database**       | PostgreSQL 17 + pgvector            | Relational + vector search for RAG/memory in one DB          |
 | **AI Gateway**     | Internal Go package (`pkg/llm`)     | Abstracts OpenAI, Anthropic, Google Gemini behind one interface |

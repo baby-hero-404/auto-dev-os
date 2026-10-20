@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/engine"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 func TestCLIStepRunner_ResolveConfig_ExecutionProviders(t *testing.T) {

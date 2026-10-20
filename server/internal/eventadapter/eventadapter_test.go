@@ -1,4 +1,4 @@
-package sandbox
+package eventadapter
 
 import (
 	"context"
@@ -43,9 +43,9 @@ func (f *fakeArtifacts) Create(ctx context.Context, artifact *models.WorkflowArt
 	return nil
 }
 
-func TestEventAdapter_ToolCall(t *testing.T) {
+func TestAdapter_ToolCall(t *testing.T) {
 	emitter := &fakeEmitter{}
-	a := NewEventAdapter(emitter, nil)
+	a := New(emitter, nil)
 
 	err := a.ProcessLine(context.Background(), "task-1", `{"type":"tool_call","tool":"terminal","command":"go test"}`)
 	if err != nil {
@@ -58,9 +58,9 @@ func TestEventAdapter_ToolCall(t *testing.T) {
 	}
 }
 
-func TestEventAdapter_PlainTextFallback(t *testing.T) {
+func TestAdapter_PlainTextFallback(t *testing.T) {
 	emitter := &fakeEmitter{}
-	a := NewEventAdapter(emitter, nil)
+	a := New(emitter, nil)
 
 	err := a.ProcessLine(context.Background(), "task-1", "Analyzing authentication flow...")
 	if err != nil {
@@ -73,9 +73,9 @@ func TestEventAdapter_PlainTextFallback(t *testing.T) {
 	}
 }
 
-func TestEventAdapter_MalformedJSONFallback(t *testing.T) {
+func TestAdapter_MalformedJSONFallback(t *testing.T) {
 	emitter := &fakeEmitter{}
-	a := NewEventAdapter(emitter, nil)
+	a := New(emitter, nil)
 
 	err := a.ProcessLine(context.Background(), "task-1", `{"type":"tool_call", not valid json`)
 	if err != nil {
@@ -88,9 +88,9 @@ func TestEventAdapter_MalformedJSONFallback(t *testing.T) {
 	}
 }
 
-func TestEventAdapter_CommandFinishedTruncatesTail(t *testing.T) {
+func TestAdapter_CommandFinishedTruncatesTail(t *testing.T) {
 	emitter := &fakeEmitter{}
-	a := NewEventAdapter(emitter, nil)
+	a := New(emitter, nil)
 
 	bigStdout := strings.Repeat("x", 20*1024)
 	exitCode := 0
@@ -119,10 +119,10 @@ func TestEventAdapter_CommandFinishedTruncatesTail(t *testing.T) {
 	}
 }
 
-func TestEventAdapter_TestResultExternalizesLargeFailureLog(t *testing.T) {
+func TestAdapter_TestResultExternalizesLargeFailureLog(t *testing.T) {
 	emitter := &fakeEmitter{}
 	artifacts := &fakeArtifacts{}
-	a := NewEventAdapter(emitter, artifacts)
+	a := New(emitter, artifacts)
 
 	bigLog := strings.Repeat("FAIL\n", 8000) // > 40KB
 	line, _ := json.Marshal(map[string]any{
@@ -165,9 +165,9 @@ func TestEventAdapter_TestResultExternalizesLargeFailureLog(t *testing.T) {
 	}
 }
 
-func TestEventAdapter_SizeBytesMatchesPayload(t *testing.T) {
+func TestAdapter_SizeBytesMatchesPayload(t *testing.T) {
 	emitter := &fakeEmitter{}
-	a := NewEventAdapter(emitter, nil)
+	a := New(emitter, nil)
 
 	if err := a.ProcessLine(context.Background(), "task-1", "short message"); err != nil {
 		t.Fatalf("ProcessLine: %v", err)

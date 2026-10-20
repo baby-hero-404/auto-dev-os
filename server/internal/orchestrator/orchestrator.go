@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/auto-code-os/auto-code-os/server/internal/eventadapter"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,10 +18,10 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/repoutil"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/steps"
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/wkspace"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/workflow"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 // Orchestrator coordinates the end-to-end workflow for task execution:
@@ -62,7 +63,7 @@ type Orchestrator struct {
 	gitConfig                    config.GitConfig
 	learnedSkills                LearnedSkillReader
 	attestations                 steps.AttestationSigner
-	eventAdapter                 *sandbox.EventAdapter
+	eventAdapter                 *eventadapter.Adapter
 	taskEventCounter             TaskEventCounter
 	credentials                  engine.CredentialGetter
 	credentialPool               CredentialAvailability
@@ -225,7 +226,7 @@ func WithTaskEventCounter(counter TaskEventCounter) Option {
 	}
 }
 
-func WithEventAdapter(adapter *sandbox.EventAdapter) Option {
+func WithEventAdapter(adapter *eventadapter.Adapter) Option {
 	return func(o *Orchestrator) {
 		o.eventAdapter = adapter
 	}

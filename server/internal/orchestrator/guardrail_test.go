@@ -3,10 +3,10 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"github.com/auto-code-os/auto-code-os/server/internal/eventadapter"
 	"testing"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
@@ -42,7 +42,7 @@ func newGuardrailTestOrchestrator(t *testing.T, task *models.Task, project *mode
 	workflowRepo := &mockWorkflowRepo{}
 	agentMgr := &mockAgentAssigner{agent: &models.Agent{ID: "agent-1"}}
 	runtime := &mockSandboxRuntime{}
-	adapter := sandbox.NewEventAdapter(&fakeEventEmitter{}, nil)
+	adapter := eventadapter.New(&fakeEventEmitter{}, nil)
 	o := New(taskRepo, workflowRepo, agentMgr, runtime,
 		WithProjectRepository(&mockProjectRepo{project: project}),
 		WithTaskEventCounter(&mockTaskEventCounter{count: eventCount}),

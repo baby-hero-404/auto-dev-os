@@ -5,7 +5,7 @@
 # a task detected as e.g. "python" never pulls/carries node+JDK+go it will
 # never use. mcp-context, the CLI agents (claude/codex), and the "agent"
 # non-root user are shared by every runtime image, so they stay here.
-FROM golang:1.26-bookworm AS mcpbuilder
+FROM golang:1.27-bookworm AS mcpbuilder
 WORKDIR /src
 COPY server/go.mod server/go.sum ./
 RUN go mod download

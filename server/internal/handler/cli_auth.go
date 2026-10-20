@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
+	"github.com/baby-hero-404/aicli/sandbox"
 	"github.com/gorilla/websocket"
 )
 

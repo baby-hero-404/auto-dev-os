@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 type PatchEngine interface {

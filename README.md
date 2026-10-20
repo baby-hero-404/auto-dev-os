@@ -39,7 +39,7 @@ Follow these 4 simple steps to set up your environment and spin up the applicati
 
 ### 1. Install Prerequisites
 Ensure you have the following installed on your host machine:
-*   **Go** 1.26+
+*   **Go** 1.27+
 *   **Node.js** 20+ (with `npm`)
 *   **Docker & Docker Compose**
 
@@ -57,15 +57,10 @@ make sandbox-build
 > [!IMPORTANT]
 > The sandbox container isolates the agent's code execution, running tests, and compiling code. Without building this image, agents running tasks in `docker` mode will fail to start.
 
-### 4. Configure Environment Secrets (Optional)
-If you wish to configure LLM keys via environment variables (as a fallback), open the `.env` file and set your credentials:
-```env
-LLM_PROVIDER=openai  # Supported: openai, anthropic, gemini, gateway
-OPENAI_API_KEY=sk-your-openai-api-key-here
-# Optional: ANTHROPIC_API_KEY / GEMINI_API_KEY
-```
+### 4. Configure Environment (Optional)
+Review your `.env` file for database, port, and GitHub settings.
 > [!NOTE]
-> Environment API keys are optional fallbacks. You can also configure all provider credentials dynamically directly through the Web UI Dashboard once the application is running.
+> AI execution is CLI-native: agents run using CLI binaries (Claude Code, OpenAI Codex, Antigravity). Configure all CLI provider credentials directly through the Web UI Dashboard once the application is running.
 
 ---
 

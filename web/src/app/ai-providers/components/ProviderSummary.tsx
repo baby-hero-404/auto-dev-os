@@ -33,44 +33,29 @@ interface ProviderSummaryProps {
   configuredProviderCount: number;
   totalCredentialCount: number;
   activeCredentialCount: number;
-  activeTab: "api" | "cli";
+  activeTab?: "api" | "cli";
 }
 
 export function ProviderSummary({
   configuredProviderCount,
   totalCredentialCount,
   activeCredentialCount,
-  activeTab,
 }: ProviderSummaryProps) {
-  const apiProviders = PROVIDERS.filter((p) => p !== "gateway" && !p.startsWith("cli:"));
   const cliProviders = PROVIDERS.filter((p) => p.startsWith("cli:"));
 
   const getProviderLabel = (p: string) => {
-    if (p.startsWith("cli:")) {
-      const ref = Object.keys(CLI_PROFILES).find(k => CLI_PROFILES[k].credentialProvider === p);
-      return ref ? CLI_PROFILES[ref].label : p;
-    }
-    return p === "9router" ? "9Router" : p.charAt(0).toUpperCase() + p.slice(1);
+    const ref = Object.keys(CLI_PROFILES).find(k => CLI_PROFILES[k].credentialProvider === p);
+    return ref ? CLI_PROFILES[ref].label : p.replace("cli:", "");
   };
 
   const config = {
-    api: {
-      totalProviders: apiProviders.length,
-      providerListText: apiProviders.map(getProviderLabel).join(", "),
-      credentialLabel: "Credential pool",
-      credentialEntity: "key",
-      readinessLabel: "Gateway readiness",
-      readinessDetail: "Agents route through the gateway pool",
-    },
-    cli: {
-      totalProviders: cliProviders.length,
-      providerListText: cliProviders.map(getProviderLabel).join(", "),
-      credentialLabel: "Auth profiles",
-      credentialEntity: "profile",
-      readinessLabel: "Execution readiness",
-      readinessDetail: "Sandboxed CLIs ready for execution",
-    },
-  }[activeTab];
+    totalProviders: cliProviders.length,
+    providerListText: cliProviders.map(getProviderLabel).join(", "),
+    credentialLabel: "Auth profiles",
+    credentialEntity: "profile",
+    readinessLabel: "Execution readiness",
+    readinessDetail: "Sandboxed CLIs ready for execution",
+  };
 
   return (
     <div className="grid gap-3 md:grid-cols-3">

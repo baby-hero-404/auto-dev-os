@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	cliprofile "github.com/baby-hero-404/aicli/profile"
 	"sort"
 	"strings"
 	"time"
@@ -153,7 +154,7 @@ func (o *Orchestrator) resolveFromProviderList(ctx context.Context, orgID string
 		}
 
 		credProvider := ""
-		if profile, ok := models.ProfileOrEmpty(p.Ref); ok {
+		if profile, ok := cliprofile.Lookup(p.Ref); ok {
 			credProvider = profile.CredentialProvider
 		}
 		if credProvider != "" && o.credentialPool != nil {
@@ -241,7 +242,7 @@ func (o *Orchestrator) resolveCLICandidate(ctx context.Context, orgID string, p 
 		}
 		cfg = *p.CLIConfig
 	} else {
-		profile, ok := models.ProfileOrEmpty(p.Ref)
+		profile, ok := cliprofile.Lookup(p.Ref)
 		if !ok {
 			return nil, "", false
 		}

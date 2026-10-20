@@ -1,16 +1,16 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
 
+	gcdb "github.com/baby-hero-404/gocore/database"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 type PoolConfig struct {
@@ -20,30 +20,19 @@ type PoolConfig struct {
 	ConnMaxIdleTimeSeconds int
 }
 
-// ConnectWithPool opens a GORM connection to PostgreSQL with explicit pool settings.
+// ConnectWithPool opens a GORM connection to PostgreSQL via gocore, with explicit pool settings,
+// a startup ping and bounded connection retries.
 func ConnectWithPool(databaseURL string, pool PoolConfig) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+	db, err := gcdb.NewPostgres(context.Background(), gcdb.Config{
+		DSN:             databaseURL,
+		MaxOpenConns:    pool.MaxOpenConns,
+		MaxIdleConns:    pool.MaxIdleConns,
+		ConnMaxLifetime: time.Duration(pool.ConnMaxLifetimeSeconds) * time.Second,
+		ConnMaxIdleTime: time.Duration(pool.ConnMaxIdleTimeSeconds) * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("get underlying sql.DB: %w", err)
-	}
-	sqlDB.SetMaxOpenConns(pool.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(pool.MaxIdleConns)
-	sqlDB.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifetimeSeconds) * time.Second)
-	sqlDB.SetConnMaxIdleTime(time.Duration(pool.ConnMaxIdleTimeSeconds) * time.Second)
-
-	slog.Info("connected to database",
-		"max_open_conns", pool.MaxOpenConns,
-		"max_idle_conns", pool.MaxIdleConns,
-		"conn_max_lifetime_seconds", pool.ConnMaxLifetimeSeconds,
-		"conn_max_idle_time_seconds", pool.ConnMaxIdleTimeSeconds,
-	)
 	return db, nil
 }
 

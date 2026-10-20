@@ -39,7 +39,7 @@ services:
         condition: service_healthy
 
   server:
-    image: golang:1.26
+    image: golang:1.27
     container_name: autocodeos-server
     working_dir: /app/server
     command: sh -c "go run ./cmd/api"

@@ -1,4 +1,4 @@
-package sandbox
+package eventadapter
 
 import (
 	"context"
@@ -8,30 +8,30 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 )
 
-// EventEmitter is the subset of TaskEventService that EventAdapter needs.
+// EventEmitter is the subset of TaskEventService that Adapter needs.
 // Declared here (rather than importing internal/service directly) to avoid
 // an import cycle: internal/service -> internal/orchestrator/steps ->
-// internal/orchestrator/llmrunner -> internal/sandbox.
+// internal/orchestrator/llmrunner -> internal/eventadapter.
 type EventEmitter interface {
 	Emit(ctx context.Context, taskID, eventType string, schemaVersion int, payload json.RawMessage, artifactID *string) (*models.TaskEvent, error)
 }
 
-// ArtifactWriter is the subset of ArtifactRepo that EventAdapter needs.
+// ArtifactWriter is the subset of ArtifactRepo that Adapter needs.
 type ArtifactWriter interface {
 	Create(ctx context.Context, artifact *models.WorkflowArtifact) error
 }
 
-// EventAdapter normalizes raw CLI output lines into structured TaskEvents
+// Adapter normalizes raw CLI output lines into structured TaskEvents
 // (docs/openspecs/status-driven-agent-workspace/design.md's Agent Adapter
 // section), truncating/externalizing large payloads so task_events rows
 // stay small and queryable.
-type EventAdapter struct {
+type Adapter struct {
 	events    EventEmitter
 	artifacts ArtifactWriter
 }
 
-func NewEventAdapter(events EventEmitter, artifacts ArtifactWriter) *EventAdapter {
-	return &EventAdapter{events: events, artifacts: artifacts}
+func New(events EventEmitter, artifacts ArtifactWriter) *Adapter {
+	return &Adapter{events: events, artifacts: artifacts}
 }
 
 // cliLine is the known JSON shape emitted by supported CLI engines. Lines
@@ -57,7 +57,7 @@ type cliLine struct {
 // TaskEvent. It never returns an error for malformed input — a parse
 // failure degrades to an agent.message fallback rather than dropping the
 // line or panicking.
-func (a *EventAdapter) ProcessLine(ctx context.Context, taskID string, line string) error {
+func (a *Adapter) ProcessLine(ctx context.Context, taskID string, line string) error {
 	var parsed cliLine
 	if err := json.Unmarshal([]byte(line), &parsed); err != nil || parsed.Type == "" {
 		return a.emitMessage(ctx, taskID, line)
@@ -96,13 +96,13 @@ func (a *EventAdapter) ProcessLine(ctx context.Context, taskID string, line stri
 	}
 }
 
-func (a *EventAdapter) emitMessage(ctx context.Context, taskID, text string) error {
+func (a *Adapter) emitMessage(ctx context.Context, taskID, text string) error {
 	return a.emitSimple(ctx, taskID, models.AgentEventMessage, map[string]any{
 		"text": truncateTail(text),
 	})
 }
 
-func (a *EventAdapter) emitSimple(ctx context.Context, taskID, eventType string, fields map[string]any) error {
+func (a *Adapter) emitSimple(ctx context.Context, taskID, eventType string, fields map[string]any) error {
 	payload, err := json.Marshal(fields)
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
@@ -117,7 +117,7 @@ func (a *EventAdapter) emitSimple(ctx context.Context, taskID, eventType string,
 // emitCommandFinished externalizes stdout/stderr to a workflow_artifact when
 // the command failed and its combined output exceeds MaxTailBytes, keeping
 // only a truncated tail + summary inline (see tasks.md 2.1).
-func (a *EventAdapter) emitCommandFinished(ctx context.Context, taskID string, parsed cliLine) error {
+func (a *Adapter) emitCommandFinished(ctx context.Context, taskID string, parsed cliLine) error {
 	combined := parsed.Stdout + parsed.Stderr
 	failed := parsed.ExitCode != nil && *parsed.ExitCode != 0
 
@@ -140,7 +140,7 @@ func (a *EventAdapter) emitCommandFinished(ctx context.Context, taskID string, p
 	return a.emitWithArtifact(ctx, taskID, models.AgentEventCommandFinished, fields, artifactID)
 }
 
-func (a *EventAdapter) emitTestResult(ctx context.Context, taskID string, parsed cliLine) error {
+func (a *Adapter) emitTestResult(ctx context.Context, taskID string, parsed cliLine) error {
 	fields := map[string]any{
 		"passed": parsed.Passed,
 		"failed": parsed.Failed,
@@ -159,7 +159,7 @@ func (a *EventAdapter) emitTestResult(ctx context.Context, taskID string, parsed
 	return a.emitWithArtifact(ctx, taskID, models.AgentEventTestResult, fields, artifactID)
 }
 
-func (a *EventAdapter) emitWithArtifact(ctx context.Context, taskID, eventType string, fields map[string]any, artifactID *string) error {
+func (a *Adapter) emitWithArtifact(ctx context.Context, taskID, eventType string, fields map[string]any, artifactID *string) error {
 	payload, err := json.Marshal(fields)
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
@@ -171,7 +171,7 @@ func (a *EventAdapter) emitWithArtifact(ctx context.Context, taskID, eventType s
 	return err
 }
 
-func (a *EventAdapter) writeArtifact(ctx context.Context, taskID, artifactType, content string) (*string, error) {
+func (a *Adapter) writeArtifact(ctx context.Context, taskID, artifactType, content string) (*string, error) {
 	artifact := &models.WorkflowArtifact{
 		TaskID:  taskID,
 		Type:    artifactType,
@@ -184,7 +184,7 @@ func (a *EventAdapter) writeArtifact(ctx context.Context, taskID, artifactType, 
 }
 
 // EmitStatusChange is a convenience wrapper for status.changed events.
-func (a *EventAdapter) EmitStatusChange(ctx context.Context, taskID, from, to string) error {
+func (a *Adapter) EmitStatusChange(ctx context.Context, taskID, from, to string) error {
 	return a.emitSimple(ctx, taskID, models.AgentEventStatusChanged, map[string]any{
 		"from": from,
 		"to":   to,
@@ -194,7 +194,7 @@ func (a *EventAdapter) EmitStatusChange(ctx context.Context, taskID, from, to st
 // EmitError emits a task.error event — used both by CLI-output parsing and
 // by the orchestrator's execution guardrails (tasks.md 2.3) when a guardrail
 // trips and the task is about to transition to TaskStatusBlocked.
-func (a *EventAdapter) EmitError(ctx context.Context, taskID, reason string, isRetryable bool) error {
+func (a *Adapter) EmitError(ctx context.Context, taskID, reason string, isRetryable bool) error {
 	return a.emitSimple(ctx, taskID, models.AgentEventTaskError, map[string]any{
 		"reason":       reason,
 		"is_retryable": isRetryable,

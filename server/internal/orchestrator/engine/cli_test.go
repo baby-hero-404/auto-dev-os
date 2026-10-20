@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	"github.com/baby-hero-404/aicli/sandbox"
 )
 
 type mockRuntime struct {
@@ -517,7 +517,7 @@ func TestCLIEngine_RunCodeStep_SetsSessionMounts(t *testing.T) {
 	}
 
 	expectedHostPath := filepath.Join(filepath.Dir(req.HostWorkspace), ".cli-homes", "claude_code", ".claude")
-	expectedContainerPath := filepath.Join(sandbox.SandboxHomeDir, ".claude")
+	expectedContainerPath := filepath.Join(sandbox.HomeDir, ".claude")
 
 	if mountPath, ok := rt.calls[0].SessionMounts[expectedContainerPath]; !ok || mountPath != expectedHostPath {
 		t.Errorf("expected SessionMounts[%q] = %q, got map: %v", expectedContainerPath, expectedHostPath, rt.calls[0].SessionMounts)

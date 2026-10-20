@@ -69,8 +69,8 @@ export function ProviderCredentialsTable({
             <tr>
               <th className="w-[18%] px-4 py-3">Provider</th>
               <th className="w-[20%] px-4 py-3">Label</th>
-              <th className="w-[16%] px-4 py-3">{activeTab === "api" ? "API Key" : "Auth Data"}</th>
-              <th className="w-[18%] px-4 py-3">{activeTab === "api" ? "Base URL" : "Profile Config"}</th>
+              <th className="w-[16%] px-4 py-3">Auth Data</th>
+              <th className="w-[18%] px-4 py-3">Profile Config</th>
               <th className="w-[10%] px-4 py-3">Priority</th>
               <th className="w-[10%] px-4 py-3">Status</th>
               <th className="w-[18%] px-4 py-3 text-right">Actions</th>

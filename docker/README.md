@@ -28,7 +28,7 @@ docker exec -u 0 -it <sandbox_container> npm install -g @anthropic-ai/claude-cod
 #### 2. Authentication & Environment Configuration
 
 When running CLI tools in sandbox mode:
-- **API Key via Env**: Pass your API keys (e.g. `ANTHROPIC_API_KEY`) in the project's **CLI Engine Configuration** (`cli_engine_config.env`).
+- **Subscription & Session Auth**: CLI tools authenticate via persistent subscription sessions (e.g. `claude auth status`, `codex login status`, `agy models`), managed dynamically through the **AI Providers -> CLI Profiles** dashboard.
 - **Auth Check Command**: Configure an optional `auth_check_command` (e.g., `claude auth status`) in project settings to verify authentication before task execution.
 - **Headless Execution**: Auto Code OS automatically sets `CI=1` and closes `stdin` during CLI execution to prevent interactive browser authentication hangs.
 

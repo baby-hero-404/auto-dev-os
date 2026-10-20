@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"github.com/auto-code-os/auto-code-os/server/internal/eventadapter"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,13 +23,19 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/orchestrator/learning"
 	"github.com/auto-code-os/auto-code-os/server/internal/prompts"
 	"github.com/auto-code-os/auto-code-os/server/internal/repository"
-	"github.com/auto-code-os/auto-code-os/server/internal/sandbox"
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/config"
 	"github.com/auto-code-os/auto-code-os/server/pkg/paths"
+	"github.com/baby-hero-404/aicli/sandbox"
+	sandboxdocker "github.com/baby-hero-404/aicli/sandbox/docker"
+	"github.com/baby-hero-404/gocore/stdlog"
 )
 
 func main() {
+	// Route every slog call through gocore's stdlog: sensitive fields are redacted and
+	// request ids are attached. Text format on stderr keeps the previous log shape.
+	stdlog.SetDefault(stdlog.New(stdlog.WithJSON(false), stdlog.WithOutput(os.Stderr)))
+
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
 		os.Exit(1)
@@ -196,7 +204,7 @@ func run() error {
 	opts = append(opts, orchestrator.WithDecompositionConfig(cfg.Execution.DecompositionThreshold, cfg.Execution.DecompositionMaxAutoChildren))
 
 	taskEventSvc := service.NewTaskEventService(taskEventRepo)
-	opts = append(opts, orchestrator.WithEventAdapter(sandbox.NewEventAdapter(taskEventSvc, artifactRepo)))
+	opts = append(opts, orchestrator.WithEventAdapter(eventadapter.New(taskEventSvc, artifactRepo)))
 	opts = append(opts, orchestrator.WithTaskEventCounter(taskEventSvc))
 
 	orch := orchestrator.New(taskRepo, workflowRepo, agentManager, sandboxRuntime, opts...)
@@ -349,9 +357,9 @@ func buildSandboxRuntime(cfg *config.Config) (sandbox.Runtime, error) {
 
 	switch cfg.Sandbox.Runtime {
 	case "docker":
-		runtime, err := sandbox.NewDockerRuntime(sandbox.DockerConfig{
-			Image:             cfg.Sandbox.Image,
-			WorkspaceRoot:     cfg.Sandbox.WorkspaceRoot,
+		runtime, err := sandboxdocker.New(sandboxdocker.Config{
+			Image:             cmp.Or(cfg.Sandbox.Image, "auto-code-os-sandbox:latest"),
+			WorkspaceRoot:     cmp.Or(cfg.Sandbox.WorkspaceRoot, "/tmp/auto-code-os/workspaces"),
 			MemoryBytes:       cfg.Sandbox.MemoryMB * 1024 * 1024,
 			NanoCPUs:          cfg.Sandbox.NanoCPUs,
 			DisableNetworking: cfg.Sandbox.DisableNetworking,

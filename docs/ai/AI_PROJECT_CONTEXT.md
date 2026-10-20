@@ -2,7 +2,7 @@
 
 - **Name**: Auto Code OS
 - **Type**: AI-Native SDLC Platform / Monorepo
-- **Language/Runtime**: Go 1.26+ (Backend), TypeScript & Node 20+ (Frontend)
+- **Language/Runtime**: Go 1.27+ (Backend), TypeScript & Node 20+ (Frontend)
 - **Framework**: chi/v5 (Go Router), Next.js 16 (App Router)
 - **Database**: PostgreSQL 17 + pgvector, migrations via golang-migrate, pgx/v5 driver
 - **Architecture**: Clean 3-layer Go backend (Handler → Service → Repository) + Next.js App Router Frontend

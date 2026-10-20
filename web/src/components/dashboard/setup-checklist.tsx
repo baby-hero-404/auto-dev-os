@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Key,
+  Terminal,
   GitBranch,
   FolderGit,
   Bot,
@@ -114,10 +114,10 @@ export function SetupChecklist({
     return [
       {
         id: "provider",
-        label: "Add an AI provider key",
+        label: "Connect AI CLI credentials",
         href: "/ai-providers",
-        hrefLabel: "AI Providers",
-        icon: Key,
+        hrefLabel: "CLI Profiles",
+        icon: Terminal,
         required: true,
         done: hasProvider,
       },

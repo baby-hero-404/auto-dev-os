@@ -241,6 +241,7 @@ func run() error {
 		Orch:               orch,
 		WebPort:            cfg.Server.WebPort,
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,
+		TrustedProxies:     cfg.Server.TrustedProxies,
 		SandboxRuntime:     sandboxRuntime,
 	}
 

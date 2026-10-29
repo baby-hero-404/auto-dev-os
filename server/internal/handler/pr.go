@@ -40,7 +40,7 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskSvc.GetByID(r.Context(), taskID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -54,14 +54,14 @@ func (h *PRHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if h.orch != nil {
 		updated, err = h.orch.ApproveMerge(r.Context(), taskID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	} else {
 		merged := models.TaskStatusMerged
 		updated, err = h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &merged})
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -82,7 +82,7 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskSvc.GetByID(r.Context(), taskID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	fixing := models.TaskStatusFixing
 	updated, err := h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &fixing})
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -125,15 +125,15 @@ func (h *PRHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 	if h.orch != nil {
 		if err := h.orch.SavePRRejectionFeedback(r.Context(), taskID, input.Feedback); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 		if err := h.orch.ClearCheckpointsForRepair(r.Context(), taskID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 		if _, err := h.orch.Execute(r.Context(), taskID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -148,7 +148,7 @@ func (h *PRHandler) StartReview(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.taskSvc.GetByID(r.Context(), taskID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -161,14 +161,14 @@ func (h *PRHandler) StartReview(w http.ResponseWriter, r *http.Request) {
 	if h.orch != nil {
 		updated, err = h.orch.StartReview(r.Context(), taskID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	} else {
 		hr := models.TaskStatusHumanReview
 		updated, err = h.taskSvc.Update(r.Context(), taskID, models.UpdateTaskInput{Status: &hr})
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,10 @@ type ServerConfig struct {
 	Port        string `mapstructure:"port"`
 	WebPort     string `mapstructure:"web_port"`
 	CORSOrigins string `mapstructure:"cors_allowed_origins"`
-	Version     string `mapstructure:"version"`
+	// TrustedProxies lists the CIDRs of reverse proxies whose X-Forwarded-For is trusted. Empty means
+	// no proxy is trusted and the TCP peer is the client.
+	TrustedProxies string `mapstructure:"trusted_proxies"`
+	Version        string `mapstructure:"version"`
 }
 
 type DatabaseConfig struct {
@@ -141,6 +145,7 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("server.port", "SERVER_PORT")
 	v.BindEnv("server.web_port", "WEB_PORT")
 	v.BindEnv("server.cors_allowed_origins", "CORS_ALLOWED_ORIGINS")
+	v.BindEnv("server.trusted_proxies", "TRUSTED_PROXIES")
 	v.BindEnv("server.version", "SERVER_VERSION")
 	v.BindEnv("database.max_open_conns", "DB_MAX_OPEN_CONNS")
 	v.BindEnv("database.max_idle_conns", "DB_MAX_IDLE_CONNS")
@@ -253,6 +258,19 @@ func validate(cfg *Config) error {
 	}
 	if strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
 		return fmt.Errorf("missing JWT_SECRET environment variable")
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Server.TrustedProxies), "none") {
+		for _, entry := range strings.Split(cfg.Server.TrustedProxies, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if _, err := netip.ParsePrefix(entry); err != nil {
+				if _, addrErr := netip.ParseAddr(entry); addrErr != nil {
+					return fmt.Errorf("TRUSTED_PROXIES entry %q is not a CIDR or IP address", entry)
+				}
+			}
+		}
 	}
 	if err := validatePositiveInt64("SANDBOX_MEMORY_MB", cfg.Sandbox.MemoryMB); err != nil {
 		return err

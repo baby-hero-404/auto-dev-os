@@ -31,7 +31,7 @@ func (h *MemoryHandler) ListByAgent(w http.ResponseWriter, r *http.Request) {
 
 	memories, err := h.memorySvc.ListByAgent(r.Context(), agentID, tier, limit, offset)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"memories": memories})
@@ -62,7 +62,7 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		Limit:   limit,
 	})
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"results": results})
@@ -74,7 +74,7 @@ func (h *MemoryHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	memory, err := h.memorySvc.GetByID(r.Context(), memoryID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	memoryID := chi.URLParam(r, "memoryID")
 
 	if err := h.memorySvc.Delete(r.Context(), memoryID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"deleted": true})

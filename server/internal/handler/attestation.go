@@ -30,7 +30,7 @@ func (h *AttestationHandler) GetByCommit(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusNotFound, "no attestation found for commit")
 			return
 		}
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -50,7 +50,7 @@ func (h *AttestationHandler) ListByTask(w http.ResponseWriter, r *http.Request) 
 	}
 	attestations, err := h.svc.ListByTaskID(r.Context(), taskID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, attestations)
@@ -61,7 +61,7 @@ func (h *AttestationHandler) ListByTask(w http.ResponseWriter, r *http.Request) 
 func (h *AttestationHandler) Keys(w http.ResponseWriter, r *http.Request) {
 	jwks, err := h.svc.JWKS(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, jwks)

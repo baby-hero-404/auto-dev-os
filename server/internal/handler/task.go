@@ -26,12 +26,12 @@ func (h *TaskHandler) Analyze(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	t, err := h.svc.Analyze(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if t.SpecStatus == models.TaskSpecStatusAutoApproved && h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), id); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -47,12 +47,12 @@ func (h *TaskHandler) Clarify(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.Clarify(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), id); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -63,7 +63,7 @@ func (h *TaskHandler) GetAnalysis(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	analysis, err := h.svc.GetAnalysis(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"analysis": json.RawMessage(analysis)})
@@ -73,12 +73,12 @@ func (h *TaskHandler) ApproveAnalysis(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	t, err := h.svc.ApproveAnalysis(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), id); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -94,12 +94,12 @@ func (h *TaskHandler) RequestAnalysisChanges(w http.ResponseWriter, r *http.Requ
 	}
 	t, err := h.svc.RequestAnalysisChanges(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), id); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -124,12 +124,12 @@ func (h *TaskHandler) ApproveSplit(w http.ResponseWriter, r *http.Request) {
 	}
 	children, err := h.svc.ApproveSplit(r.Context(), id, input.Children, input.Mode)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if err := h.orch.DispatchDecomposedParent(r.Context(), id); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -142,7 +142,7 @@ func (h *TaskHandler) RejectSplit(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	t, err := h.svc.RejectSplit(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -159,7 +159,7 @@ func (h *TaskHandler) RetryBlockedParent(w http.ResponseWriter, r *http.Request)
 	}
 	t, err := h.orch.RetryBlockedParent(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -193,7 +193,7 @@ func (h *TaskHandler) UpdateSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.orch.UpdateTaskSpec(r.Context(), id, req); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -219,12 +219,12 @@ func (h *TaskHandler) SpecReview(w http.ResponseWriter, r *http.Request) {
 	case "approve":
 		t, err := h.svc.ApproveAnalysis(r.Context(), id)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 		if h.orch != nil {
 			if _, err := h.orch.Execute(r.Context(), id); err != nil {
-				writeServiceError(w, err)
+				writeServiceError(w, r, err)
 				return
 			}
 		}
@@ -238,16 +238,16 @@ func (h *TaskHandler) SpecReview(w http.ResponseWriter, r *http.Request) {
 		}
 		t, err := h.svc.RequestAnalysisChanges(r.Context(), id, models.ClarifyTaskInput{Context: input.Comment})
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 		if h.orch != nil {
 			if err := h.orch.SaveSpecReviewCycle(r.Context(), id, input.Comment); err != nil {
-				writeServiceError(w, err)
+				writeServiceError(w, r, err)
 				return
 			}
 			if _, err := h.orch.Execute(r.Context(), id); err != nil {
-				writeServiceError(w, err)
+				writeServiceError(w, r, err)
 				return
 			}
 		}
@@ -266,7 +266,7 @@ func (h *TaskHandler) UpdateAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.UpdateAnalysis(r.Context(), id, raw)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -276,7 +276,7 @@ func (h *TaskHandler) ListSubTasks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	tasks, err := h.svc.ListSubTasks(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tasks)
@@ -291,12 +291,12 @@ func (h *TaskHandler) CreateSubTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.CreateSubTask(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), t.ID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 	}
@@ -312,13 +312,13 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.Create(r.Context(), projectID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {
 		if _, err := h.orch.Execute(r.Context(), t.ID); err != nil {
 			_ = h.svc.Delete(context.WithoutCancel(r.Context()), t.ID)
-			writeServiceError(w, err)
+			writeServiceError(w, r, err)
 			return
 		}
 		if updated, err := h.svc.GetByID(r.Context(), t.ID); err == nil {
@@ -332,7 +332,7 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	t, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
@@ -345,7 +345,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	tasks, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tasks)
@@ -360,7 +360,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -369,7 +369,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "taskID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	if h.orch != nil {

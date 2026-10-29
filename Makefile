@@ -11,7 +11,7 @@ WEB_PORT ?= 3000
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.2.0-dev")
 LDFLAGS = -ldflags "-X github.com/auto-code-os/auto-code-os/server/internal/handler.Version=$(VERSION)"
 
-.PHONY: help init build clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build sandbox-images clone-references rollout-gate
+.PHONY: help init vendor build clean test test-be test-fe lint fmt api web dev dev-be dev-fe db-up db-down db-clean migrate sandbox-build sandbox-images clone-references rollout-gate
 
 # Default target displays the help menu
 .DEFAULT_GOAL := help
@@ -29,8 +29,11 @@ init: ## Setup local environment (configs & deps)
 	@echo "==> Installing web dependencies..."
 	cd web && npm install
 	@echo "==> Installing server dependencies & syncing vendor..."
-	cd server && go mod tidy
+	bash scripts/vendor.sh
 	@echo "==> Initialization complete. Please update your .env file with necessary keys."
+
+vendor: ## Re-vendor server dependencies from published tags (restores cgo header dirs)
+	bash scripts/vendor.sh
 
 clone-references: ## Clone external test/skill references
 	@echo "==> Cloning external references..."

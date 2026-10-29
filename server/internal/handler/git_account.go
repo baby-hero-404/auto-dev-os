@@ -24,7 +24,7 @@ func (h *GitAccountHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	acc, err := h.svc.Create(r.Context(), orgID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, acc)
@@ -34,7 +34,7 @@ func (h *GitAccountHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "accID")
 	acc, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, acc)
@@ -44,7 +44,7 @@ func (h *GitAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "orgID")
 	accounts, err := h.svc.ListByOrgID(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, accounts)
@@ -59,7 +59,7 @@ func (h *GitAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	acc, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, acc)
@@ -68,7 +68,7 @@ func (h *GitAccountHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *GitAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "accID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

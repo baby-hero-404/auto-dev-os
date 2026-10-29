@@ -30,7 +30,7 @@ func (h *LearningHandler) ListSuggestions(w http.ResponseWriter, r *http.Request
 
 	suggestions, err := h.learningSvc.ListSuggestions(r.Context(), agentID, status, limit)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"suggestions": suggestions})
@@ -42,7 +42,7 @@ func (h *LearningHandler) GetSuggestion(w http.ResponseWriter, r *http.Request) 
 
 	suggestion, err := h.learningSvc.GetSuggestion(r.Context(), suggestionID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"suggestion": suggestion})
@@ -61,7 +61,7 @@ func (h *LearningHandler) ApproveSuggestion(w http.ResponseWriter, r *http.Reque
 
 	suggestion, err := h.learningSvc.ApproveSuggestion(r.Context(), suggestionID, claims.Subject)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"suggestion": suggestion})
@@ -86,7 +86,7 @@ func (h *LearningHandler) RejectSuggestion(w http.ResponseWriter, r *http.Reques
 
 	suggestion, err := h.learningSvc.RejectSuggestion(r.Context(), suggestionID, claims.Subject, body.Feedback)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"suggestion": suggestion})

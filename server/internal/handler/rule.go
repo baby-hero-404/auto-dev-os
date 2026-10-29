@@ -27,7 +27,7 @@ func (h *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.Create(r.Context(), pid, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rule)
@@ -42,7 +42,7 @@ func (h *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.GetByID(r.Context(), id, claims.OrgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rule)
@@ -52,7 +52,7 @@ func (h *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	rules, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rules)
@@ -67,7 +67,7 @@ func (h *RuleHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.CreateGlobal(r.Context(), orgID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rule)
@@ -77,7 +77,7 @@ func (h *RuleHandler) ListGlobal(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "orgID")
 	rules, err := h.svc.ListGlobalByOrgID(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rules)
@@ -87,7 +87,7 @@ func (h *RuleHandler) SeedGlobal(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "orgID")
 	rules, err := h.svc.SeedGlobalDefaultRules(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rules)
@@ -107,7 +107,7 @@ func (h *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := h.svc.Update(r.Context(), id, claims.OrgID, claims.Role, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rule)
@@ -121,7 +121,7 @@ func (h *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Delete(r.Context(), id, claims.OrgID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -131,7 +131,7 @@ func (h *RuleHandler) Seed(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	rules, err := h.svc.SeedDefaultRules(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, rules)

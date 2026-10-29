@@ -33,7 +33,7 @@ func (h *TaskActionHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.Dispatch(r.Context(), taskID, claims.Role, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)

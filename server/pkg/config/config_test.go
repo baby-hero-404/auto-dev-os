@@ -129,3 +129,43 @@ func TestLoadDatabasePoolOverrides(t *testing.T) {
 		t.Fatalf("unexpected pool durations: %+v", cfg.Database)
 	}
 }
+
+func TestLoadTrustedProxies(t *testing.T) {
+	const dbURL = "postgres://user:pass@localhost:5432/db?sslmode=disable"
+	tests := []struct {
+		name    string
+		env     string
+		set     bool
+		want    string
+		wantErr string
+	}{
+		{"default trusts loopback and private networks", "", false, "10.0.0.0/8", ""},
+		{"custom list", "203.0.113.0/24, 198.51.100.4", true, "203.0.113.0/24, 198.51.100.4", ""},
+		{"none disables trust", "none", true, "none", ""},
+		{"invalid entry is rejected at startup", "10.0.0.0/8,not-a-cidr", true, "", "TRUSTED_PROXIES"},
+		{"invalid prefix length is rejected", "10.0.0.0/99", true, "", "TRUSTED_PROXIES"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetConfig(t)
+			t.Setenv("DATABASE_URL", dbURL)
+			t.Setenv("JWT_SECRET", "test-secret")
+			if tt.set {
+				t.Setenv("TRUSTED_PROXIES", tt.env)
+			}
+			cfg, err := Load()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(cfg.Server.TrustedProxies, tt.want) {
+				t.Errorf("TrustedProxies = %q, want it to contain %q", cfg.Server.TrustedProxies, tt.want)
+			}
+		})
+	}
+}

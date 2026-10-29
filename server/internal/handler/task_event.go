@@ -48,7 +48,7 @@ func (h *TaskEventHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	events, err := h.svc.ListByTaskIDPaginated(r.Context(), taskID, before, limit)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, events)

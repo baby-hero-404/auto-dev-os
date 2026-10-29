@@ -20,7 +20,7 @@ func (h *AnalyticsDashboardHandler) Overview(w http.ResponseWriter, r *http.Requ
 	orgID := r.URL.Query().Get("org_id")
 	stats, err := h.svc.Overview(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
@@ -33,7 +33,7 @@ func (h *AnalyticsDashboardHandler) AgentPerformance(w http.ResponseWriter, r *h
 	projectID := r.URL.Query().Get("project_id")
 	stats, err := h.svc.AgentPerformance(r.Context(), orgID, projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
@@ -52,7 +52,7 @@ func (h *AnalyticsDashboardHandler) TaskAnalytics(w http.ResponseWriter, r *http
 	}
 	analytics, err := h.svc.TaskAnalytics(r.Context(), orgID, projectID, days)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, analytics)
@@ -65,7 +65,7 @@ func (h *AnalyticsDashboardHandler) WorkflowAnalytics(w http.ResponseWriter, r *
 	projectID := r.URL.Query().Get("project_id")
 	analytics, err := h.svc.WorkflowAnalytics(r.Context(), orgID, projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, analytics)
@@ -84,7 +84,7 @@ func (h *AnalyticsDashboardHandler) RecentFailures(w http.ResponseWriter, r *htt
 	}
 	failures, err := h.svc.RecentFailures(r.Context(), orgID, projectID, limit)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, failures)

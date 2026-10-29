@@ -48,7 +48,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	logs, err := h.svc.List(r.Context(), filter)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, logs)
@@ -60,7 +60,7 @@ func (h *AuditHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	orgID := r.URL.Query().Get("org_id")
 	counts, err := h.svc.CountByAction(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, counts)

@@ -24,7 +24,7 @@ func (h *ProviderCredentialHandler) Create(w http.ResponseWriter, r *http.Reques
 	}
 	cred, err := h.svc.Create(r.Context(), orgID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, cred)
@@ -34,7 +34,7 @@ func (h *ProviderCredentialHandler) List(w http.ResponseWriter, r *http.Request)
 	orgID := chi.URLParam(r, "orgID")
 	creds, err := h.svc.ListByOrg(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, creds)
@@ -50,7 +50,7 @@ func (h *ProviderCredentialHandler) Update(w http.ResponseWriter, r *http.Reques
 	}
 	cred, err := h.svc.Update(r.Context(), orgID, id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cred)
@@ -60,7 +60,7 @@ func (h *ProviderCredentialHandler) Delete(w http.ResponseWriter, r *http.Reques
 	orgID := chi.URLParam(r, "orgID")
 	id := chi.URLParam(r, "credentialID")
 	if err := h.svc.Delete(r.Context(), orgID, id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

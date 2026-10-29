@@ -59,3 +59,7 @@ web/.ds-sync-cache/
 .ai-memory/memory.db
 .tokensave
 .claude/.headroom_wrap_marker.json
+
+# local development against unreleased gocore/aicli: never commit
+go.work
+go.work.sum

@@ -37,7 +37,7 @@ func (h *LearnedSkillHandler) ListLearnedSkills(w http.ResponseWriter, r *http.R
 	}
 	skills, err := h.repo.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"skills": skills})
@@ -48,7 +48,7 @@ func (h *LearnedSkillHandler) GetLearnedSkill(w http.ResponseWriter, r *http.Req
 	skillID := chi.URLParam(r, "skillID")
 	skill, err := h.repo.GetByID(r.Context(), skillID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"skill": skill})
@@ -69,7 +69,7 @@ func (h *LearnedSkillHandler) UpdateLearnedSkill(w http.ResponseWriter, r *http.
 
 	skill, err := h.repo.Update(r.Context(), skillID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"skill": skill})
@@ -79,7 +79,7 @@ func (h *LearnedSkillHandler) UpdateLearnedSkill(w http.ResponseWriter, r *http.
 func (h *LearnedSkillHandler) DeleteLearnedSkill(w http.ResponseWriter, r *http.Request) {
 	skillID := chi.URLParam(r, "skillID")
 	if err := h.repo.Delete(r.Context(), skillID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

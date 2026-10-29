@@ -11,6 +11,7 @@ import (
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
 	"github.com/baby-hero-404/aicli/sandbox"
+	"github.com/baby-hero-404/gocore/httpmw"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -44,6 +45,7 @@ type Deps struct {
 	Orch               *orchestrator.Orchestrator
 	WebPort            string
 	CORSAllowedOrigins string
+	TrustedProxies     string // comma separated CIDRs whose X-Forwarded-For is trusted
 	SandboxRuntime     sandbox.Runtime
 }
 
@@ -51,12 +53,17 @@ type Deps struct {
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 
-	// Global middleware
-	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	// Global middleware. RequestID, RequestLogger and Recovery come from gocore/httpmw: validated
+	// X-Request-ID, structured request logs through stdlog (request ID included), and panics turned
+	// into a 500 envelope that never exposes the panic text.
+	r.Use(httpmw.RequestID())
+	// Client IP only from trusted proxies (see mw.ClientIPResolver); chi's RealIP trusted any caller.
+	// The access log below still shows the TCP peer: pass httpmw.WithClientIP(mw.ClientIP) to
+	// RequestLogger once gocore ships that option.
+	r.Use(mw.ClientIPResolver(d.TrustedProxies))
 	r.Use(observability.TraceMiddleware("auto-code-os-api"))
-	r.Use(chimw.Logger)
-	r.Use(chimw.Recoverer)
+	r.Use(httpmw.RequestLogger())
+	r.Use(httpmw.Recovery())
 
 	// Apply 30s timeout to all routes except the websocket terminal
 	r.Use(func(next http.Handler) http.Handler {

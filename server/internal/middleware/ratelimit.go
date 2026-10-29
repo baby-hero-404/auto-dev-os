@@ -85,8 +85,9 @@ func (rl *RateLimiter) cleanup() {
 func RateLimit(limiter *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Use user ID from JWT claims if available, otherwise use remote IP.
-			key := r.RemoteAddr
+			// Use user ID from JWT claims if available, otherwise the resolved client IP (never the
+			// raw RemoteAddr, which carries a per-connection port, nor client supplied headers).
+			key := ClientIP(r)
 			if claims, ok := r.Context().Value(authClaimsKey).(*service.TokenClaims); ok && claims != nil {
 				key = claims.Subject
 			}

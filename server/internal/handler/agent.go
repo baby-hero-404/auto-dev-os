@@ -23,7 +23,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.svc.AssignToProject(r.Context(), projectID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -38,7 +38,7 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.svc.Hire(r.Context(), orgID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -53,7 +53,7 @@ func (h *AgentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.svc.GetByID(r.Context(), id, claims.OrgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -63,7 +63,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	agents, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, agents)
@@ -73,7 +73,7 @@ func (h *AgentHandler) ListOrg(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "orgID")
 	agents, err := h.svc.ListByOrgID(r.Context(), orgID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, agents)
@@ -82,7 +82,7 @@ func (h *AgentHandler) ListOrg(w http.ResponseWriter, r *http.Request) {
 func (h *AgentHandler) ListRoleTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := h.svc.ListRoleTemplates(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, templates)
@@ -102,7 +102,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.svc.Update(r.Context(), id, claims.OrgID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -116,7 +116,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Delete(r.Context(), id, claims.OrgID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

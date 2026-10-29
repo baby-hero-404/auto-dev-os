@@ -99,7 +99,7 @@ func (h *WebhookHandler) GitHub(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.taskSvc.Create(r.Context(), projectID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, task)

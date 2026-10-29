@@ -5,6 +5,10 @@ server:
   port: "32080"
   web_port: "32300"
   cors_allowed_origins: ""
+  # Reverse proxies whose X-Forwarded-For is trusted for rate limiting and audit logs: loopback and
+  # private networks (a proxy or the web container in front of the API). Set TRUSTED_PROXIES to your
+  # real proxy CIDRs, or to "none" to trust no proxy (the TCP peer is then the client).
+  trusted_proxies: "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
   version: "0.2.0"
 
 

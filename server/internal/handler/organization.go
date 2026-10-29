@@ -21,7 +21,7 @@ func (h *OrganizationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	org, err := h.svc.Create(r.Context(), input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, org)
@@ -31,7 +31,7 @@ func (h *OrganizationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "orgID")
 	org, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, org)
@@ -40,7 +40,7 @@ func (h *OrganizationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *OrganizationHandler) List(w http.ResponseWriter, r *http.Request) {
 	orgs, err := h.svc.List(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, orgs)
@@ -55,7 +55,7 @@ func (h *OrganizationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	org, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, org)
@@ -64,7 +64,7 @@ func (h *OrganizationHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *OrganizationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "orgID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

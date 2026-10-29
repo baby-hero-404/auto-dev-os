@@ -16,7 +16,7 @@ func NewRepositoryHandler(svc RepositoryService) *RepositoryHandler {
 func (h *RepositoryHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	if err := h.svc.ValidateToken(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"valid": true})
@@ -26,7 +26,7 @@ func (h *RepositoryHandler) ListRemoteRepos(w http.ResponseWriter, r *http.Reque
 	token := r.URL.Query().Get("token")
 	repos, err := h.svc.ListRemoteRepos(r.Context(), token)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repos)
@@ -36,7 +36,7 @@ func (h *RepositoryHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	repo, err := h.svc.Clone(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -51,7 +51,7 @@ func (h *RepositoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	repo, err := h.svc.Create(r.Context(), projectID, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, repo)
@@ -61,7 +61,7 @@ func (h *RepositoryHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	repo, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -71,7 +71,7 @@ func (h *RepositoryHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := chi.URLParam(r, "projectID")
 	repos, err := h.svc.ListByProjectID(r.Context(), projectID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repos)
@@ -86,7 +86,7 @@ func (h *RepositoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	repo, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, repo)
@@ -95,7 +95,7 @@ func (h *RepositoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *RepositoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "repoID")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -113,7 +113,7 @@ func (h *RepositoryHandler) GetBranches(w http.ResponseWriter, r *http.Request) 
 	}
 	branches, err := h.svc.GetRemoteBranches(r.Context(), input.URL, input.Token, input.GitAccountID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{"branches": branches})

@@ -17,7 +17,7 @@ func (h *SkillHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "skillID")
 	s, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)
@@ -26,7 +26,7 @@ func (h *SkillHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	skills, err := h.svc.List(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, skills)
@@ -41,7 +41,7 @@ func (h *SkillHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.svc.Test(r.Context(), id, input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -52,7 +52,7 @@ func (h *SkillHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	files, err := h.svc.ListFiles(r.Context(), sourceID, path)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, files)
@@ -63,7 +63,7 @@ func (h *SkillHandler) GetFileContent(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	content, err := h.svc.GetFileContent(r.Context(), sourceID, path)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, content)
@@ -72,7 +72,7 @@ func (h *SkillHandler) GetFileContent(w http.ResponseWriter, r *http.Request) {
 func (h *SkillHandler) Seed(w http.ResponseWriter, r *http.Request) {
 	skills, err := h.svc.SeedDefaultSkills(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, skills)
@@ -81,7 +81,7 @@ func (h *SkillHandler) Seed(w http.ResponseWriter, r *http.Request) {
 func (h *SkillHandler) ListSources(w http.ResponseWriter, r *http.Request) {
 	sources, err := h.svc.ListSources(r.Context())
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, sources)
@@ -95,7 +95,7 @@ func (h *SkillHandler) AddSource(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.svc.AddSource(r.Context(), input)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, s)
@@ -104,7 +104,7 @@ func (h *SkillHandler) AddSource(w http.ResponseWriter, r *http.Request) {
 func (h *SkillHandler) DeleteSource(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "sourceID")
 	if err := h.svc.DeleteSource(r.Context(), id); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -114,7 +114,7 @@ func (h *SkillHandler) SyncSource(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "sourceID")
 	s, err := h.svc.SyncSource(r.Context(), id)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)

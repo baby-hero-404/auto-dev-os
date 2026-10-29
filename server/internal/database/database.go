@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gcdb "github.com/baby-hero-404/gocore/database"
+	"github.com/baby-hero-404/gocore/database/postgres"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -23,7 +24,7 @@ type PoolConfig struct {
 // ConnectWithPool opens a GORM connection to PostgreSQL via gocore, with explicit pool settings,
 // a startup ping and bounded connection retries.
 func ConnectWithPool(databaseURL string, pool PoolConfig) (*gorm.DB, error) {
-	db, err := gcdb.NewPostgres(context.Background(), gcdb.Config{
+	db, err := postgres.Open(context.Background(), gcdb.Config{
 		DSN:             databaseURL,
 		MaxOpenConns:    pool.MaxOpenConns,
 		MaxIdleConns:    pool.MaxIdleConns,

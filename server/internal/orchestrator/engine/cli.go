@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	cliprofile "github.com/baby-hero-404/aicli/profile"
 	"github.com/baby-hero-404/aicli/rules"
 	"github.com/baby-hero-404/aicli/run"
 	"log"
@@ -403,15 +404,11 @@ func (e *cliEngine) RunCodeStep(ctx context.Context, req CodeStepRequest) (*Code
 			sessionDir = filepath.Join(sessionDir, cfg.CredentialID)
 		}
 
-		// Map known CLI persistence directories to the isolated session directory
-		layouts := map[string][]string{
-			"claude_code":  {".claude"},
-			"antigravity":  {".gemini"},
-			"openai_codex": {".config/codex"},
-		}
-
-		if paths, ok := layouts[cfg.ProfileRef]; ok {
-			for _, p := range paths {
+		// Map the CLI's persistence directories to the isolated session directory. The directories
+		// come from aicli's profile, which is checked against the real binaries; a table kept here
+		// had drifted (it named .config/codex, where codex keeps nothing).
+		if prof, ok := cliprofile.Lookup(cfg.ProfileRef); ok {
+			for _, p := range prof.StateDirs {
 				hostPath := filepath.Join(sessionDir, p)
 				containerPath := filepath.Join(sandbox.HomeDir, p)
 

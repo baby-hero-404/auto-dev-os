@@ -1,31 +1,45 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 
+	"github.com/baby-hero-404/aicli/capture/ticket"
+	"github.com/baby-hero-404/aicli/capture/wsgorilla"
 	"github.com/baby-hero-404/aicli/sandbox"
 )
 
+// CLITestHandler opens a sandbox terminal with a stored provider credential in place, so the user
+// can try the CLI with it. The credential never travels back to the browser.
 type CLITestHandler struct {
-	runtime sandbox.Runtime
-	svc     ProviderCredentialService
-	tickets *wsTerminalTicketStore
+	term *terminal
 }
 
-func NewCLITestHandler(runtime sandbox.Runtime, svc ProviderCredentialService) *CLITestHandler {
-	return &CLITestHandler{
-		runtime: runtime,
-		svc:     svc,
-		tickets: newWSTerminalTicketStore(),
-	}
+// NewCLITestHandler returns the handler. Only the browser origins in allowedOrigins may open the
+// terminal socket.
+func NewCLITestHandler(runtime sandbox.Runtime, svc ProviderCredentialService, allowedOrigins []string) *CLITestHandler {
+	return &CLITestHandler{term: newTerminal(runtime, "auto-code-os-cli-test", allowedOrigins, func(h *wsgorilla.Handler) {
+		h.Banner = func(ticket.Ticket) string {
+			return "\r\n✅ Workspace prepared with your credential.\r\nType the CLI command (e.g. 'claude') to test it.\r\n"
+		}
+		// The ticket carries the credential ID (Value) and the organization (Scope).
+		h.Seed = func(ctx context.Context, t ticket.Ticket) (map[string]string, error) {
+			_, files, err := svc.GetDecryptedCredential(ctx, t.Scope, t.Value)
+			if err != nil {
+				log.Printf("cli-test: load credential %s: %v", t.Value, err)
+				return nil, errors.New("failed to get credential")
+			}
+			return files, nil
+		}
+		h.DiscardFiles = true
+	})}
 }
 
 // MintWSTicket handles POST /organizations/{orgID}/cli-test/ws-ticket.
 func (h *CLITestHandler) MintWSTicket(w http.ResponseWriter, r *http.Request) {
-	h.tickets.mintTicket(w, r, func(r *http.Request) (string, bool) {
+	h.term.mintTicket(w, r, func(r *http.Request) (string, bool) {
 		var body struct {
 			CredentialID string `json:"credential_id"`
 		}
@@ -33,55 +47,12 @@ func (h *CLITestHandler) MintWSTicket(w http.ResponseWriter, r *http.Request) {
 			return "", false
 		}
 		return body.CredentialID, true
-	}, "missing credential_id", func(w http.ResponseWriter, ticket string) {
-		writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
+	}, "missing credential_id", func(w http.ResponseWriter, token string) {
+		writeJSON(w, http.StatusOK, map[string]string{"ticket": token})
 	})
 }
 
 // Terminal handles GET /organizations/{orgID}/cli-test/terminal via WebSocket.
 func (h *CLITestHandler) Terminal(w http.ResponseWriter, r *http.Request) {
-	conn, ticket, taskID, tmpDir, cleanup, ok := h.tickets.beginTerminal(w, r, "auto-code-os-cli-test")
-	if !ok {
-		return
-	}
-	defer conn.Close()
-	defer cleanup()
-
-	credentialID := ticket.Provider // The ticket system stores the requested string in 'Provider'
-
-	// Fetch decrypted credential
-	provider, payloadMap, err := h.svc.GetDecryptedCredential(r.Context(), ticket.OrgID, credentialID)
-	if err != nil {
-		sendWSError(conn, "failed to get credential: %v", err)
-		return
-	}
-
-	// Write credential payload to the temp dir based on the JSON payload structure
-	for relPath, content := range payloadMap {
-		fullPath := filepath.Join(tmpDir, relPath)
-		// Ensure no directory traversal
-		rel, err := filepath.Rel(tmpDir, fullPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			continue
-		}
-		_ = os.WriteFile(fullPath, []byte(content), 0o600)
-	}
-
-	providerName := provider
-	// Extract basic tool name (e.g. 'claude' from 'cli:claude')
-	if rest, ok := strings.CutPrefix(providerName, "cli:"); ok {
-		providerName = rest
-	}
-
-	sendWSStdout(conn, "\r\n✅ Workspace prepared with your %s credential.\r\nType the CLI command (e.g. '%s') to test it.\r\n", provider, providerName)
-
-	if err := runPTYTerminal(r.Context(), h.runtime, conn, taskID, tmpDir); err != nil {
-		sendWSError(conn, "sandbox error: %v", err)
-		return
-	}
-
-	_ = wsSendJSON(conn, map[string]interface{}{"type": "exit"})
+	h.term.serve(w, r)
 }

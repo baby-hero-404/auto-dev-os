@@ -11,6 +11,7 @@
     "test:parity": "SKIP_WEBSERVER=1 playwright test task-status-parity"
   },
   "dependencies": {
+    "@aicli/ui": "file:../../aicli/web",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

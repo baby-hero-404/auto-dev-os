@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/auto-code-os/auto-code-os/server/internal/chat"
 	"github.com/auto-code-os/auto-code-os/server/internal/context/provider"
 	"github.com/auto-code-os/auto-code-os/server/internal/database"
 	"github.com/auto-code-os/auto-code-os/server/internal/gitops"
@@ -243,6 +244,29 @@ func run() error {
 		CORSAllowedOrigins: cfg.Server.CORSOrigins,
 		TrustedProxies:     cfg.Server.TrustedProxies,
 		SandboxRuntime:     sandboxRuntime,
+	}
+
+	if cfg.Chat.Enabled {
+		dataDir, err := filepath.Abs(cfg.Chat.DataDir)
+		if err != nil {
+			return fmt.Errorf("chat data dir: %w", err)
+		}
+		chatSvc, err := chat.New(chat.Config{Profile: cfg.Chat.Profile, DataDir: dataDir}, db, credentialPoolSvc, sandboxRuntime)
+		if err != nil {
+			return fmt.Errorf("chat: %w", err)
+		}
+		deps.Chat = chatSvc
+		chatCtx, stopChat := context.WithCancel(context.Background())
+		defer stopChat()
+		go chatSvc.Run(chatCtx) // recovers turns whose instance died
+		defer func() {
+			// interrupts running turns and records them
+			shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := chatSvc.Close(shutdown); err != nil {
+				slog.Warn("chat: close", "error", err)
+			}
+		}()
 	}
 
 	router := handler.NewRouter(deps)

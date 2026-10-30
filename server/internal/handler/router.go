@@ -47,6 +47,8 @@ type Deps struct {
 	CORSAllowedOrigins string
 	TrustedProxies     string // comma separated CIDRs whose X-Forwarded-For is trusted
 	SandboxRuntime     sandbox.Runtime
+	// Chat is the conversation API (internal/chat); nil leaves /organizations/{orgID}/chat off.
+	Chat ChatService
 }
 
 // NewRouter creates the chi router with all API v1 routes.
@@ -69,7 +71,9 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(func(next http.Handler) http.Handler {
 		timeoutHandler := chimw.Timeout(30 * time.Second)(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if strings.Contains(req.URL.Path, "/cli-auth/terminal") || strings.Contains(req.URL.Path, "/cli-test/terminal") {
+			// Long-lived responses: the terminals and the chat's event stream.
+			if strings.Contains(req.URL.Path, "/cli-auth/terminal") || strings.Contains(req.URL.Path, "/cli-test/terminal") ||
+				(strings.Contains(req.URL.Path, "/chat/conversations/") && strings.HasSuffix(req.URL.Path, "/stream")) {
 				next.ServeHTTP(w, req)
 			} else {
 				timeoutHandler.ServeHTTP(w, req)
@@ -127,8 +131,8 @@ func NewRouter(d Deps) http.Handler {
 	providerCredH := NewProviderCredentialHandler(d.ProviderCredSvc)
 
 	govH := NewGovernanceHandler()
-	cliAuthH := NewCLIAuthHandler(d.SandboxRuntime)
-	cliTestH := NewCLITestHandler(d.SandboxRuntime, d.ProviderCredSvc)
+	cliAuthH := NewCLIAuthHandler(d.SandboxRuntime, allowedOrigins)
+	cliTestH := NewCLITestHandler(d.SandboxRuntime, d.ProviderCredSvc, allowedOrigins)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public: auth endpoints
@@ -169,6 +173,10 @@ func NewRouter(d Deps) http.Handler {
 						r.Post("/", projH.Create)
 						r.Get("/", projH.List)
 					})
+
+					if d.Chat != nil {
+						r.With(mw.RequireRole(models.UserRoleAdmin)).HandleFunc("/chat/*", chatRoute(d.Chat, allowedOrigins))
+					}
 
 					r.Post("/cli-auth/ws-ticket", cliAuthH.MintWSTicket)
 					r.Post("/cli-test/ws-ticket", cliTestH.MintWSTicket)

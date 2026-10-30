@@ -26,6 +26,13 @@ git:
   default_agent_name: "AutoCodeOS Agent"
   default_agent_email: "agent@autocode.os"
 
+# Chat with a headless AI CLI in the sandbox (internal/chat). Off by default. Override via env
+# CHAT_ENABLED, CHAT_PROFILE, CHAT_DATA_DIR.
+chat:
+  enabled: false
+  profile: "antigravity_notools"
+  data_dir: "./.data/chat"
+
 sandbox:
   runtime: "docker"
   image: "auto-code-os-sandbox:latest"

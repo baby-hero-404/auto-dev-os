@@ -12,6 +12,7 @@ import {
   Cpu,
   GitBranch,
   BarChart3,
+  MessageSquare,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -36,6 +37,7 @@ const navSections: NavSection[] = [
     title: "Infrastructure",
     items: [
       { label: "AI Providers", href: "/ai-providers", icon: Cpu },
+      { label: "Chat", href: "/chat", icon: MessageSquare },
       { label: "Gateway", href: "/gateway", icon: BarChart3 },
       { label: "Git Accounts", href: "/git-accounts", icon: GitBranch },
     ],

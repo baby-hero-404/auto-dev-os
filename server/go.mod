@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/baby-hero-404/aicli v0.1.2
+	github.com/baby-hero-404/aicli v0.2.0
 	github.com/baby-hero-404/gocore v0.3.1
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-chi/cors v1.2.2

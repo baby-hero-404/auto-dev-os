@@ -1,0 +1,58 @@
+/* @aicli/ui ships no styles: these are the aicli-* hooks it exposes. */
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) 1fr;
+  gap: 1rem;
+  min-height: 60vh;
+}
+
+.chat-layout .aicli-list ul {
+  padding: 0;
+  list-style: none;
+}
+
+.chat-layout .aicli-list li button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0.25rem 0;
+  text-align: left;
+}
+
+.chat-layout .aicli-list li button[aria-current="true"] {
+  outline: 2px solid currentColor;
+}
+
+.chat-layout .aicli-conversation {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-layout .aicli-messages {
+  flex: 1;
+  overflow: auto;
+}
+
+.chat-layout .aicli-user,
+.chat-layout .aicli-assistant {
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-layout .aicli-author {
+  margin-right: 0.5rem;
+  font-weight: 600;
+}
+
+.chat-layout .aicli-error,
+.chat-layout .aicli-failure {
+  color: #b91c1c;
+}
+
+@media (max-width: 40rem) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+}

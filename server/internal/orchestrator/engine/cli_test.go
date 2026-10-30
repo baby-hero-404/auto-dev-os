@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/pkg/models"
+	cliprofile "github.com/baby-hero-404/aicli/profile"
 	"github.com/baby-hero-404/aicli/sandbox"
 )
 
@@ -523,6 +524,42 @@ func TestCLIEngine_RunCodeStep_SetsSessionMounts(t *testing.T) {
 
 	if mountPath, ok := rt.calls[0].SessionMounts[expectedContainerPath]; !ok || mountPath != expectedHostPath {
 		t.Errorf("expected SessionMounts[%q] = %q, got map: %v", expectedContainerPath, expectedHostPath, rt.calls[0].SessionMounts)
+	}
+}
+
+// The directories a CLI keeps its state in come from aicli's profiles (verified against the real
+// binaries), so every profile, codex included, gets its own persistent mount.
+func TestCLIEngine_RunCodeStep_SessionMountsFollowTheProfile(t *testing.T) {
+	for ref, cmd := range map[string]string{"claude_code": "claude", "antigravity": "agy", "openai_codex": "codex"} {
+		t.Run(ref, func(t *testing.T) {
+			rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
+			cfg := &models.CLIEngineConfig{Command: cmd, ProfileRef: ref}
+			req := baseReq(cfg)
+			if _, err := NewCLIEngine(rt, nil).RunCodeStep(context.Background(), req); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			prof, ok := cliprofile.Lookup(ref)
+			if !ok || len(prof.StateDirs) == 0 {
+				t.Fatalf("aicli has no state dirs for %s", ref)
+			}
+			mounts := rt.calls[0].SessionMounts
+			if len(mounts) != len(prof.StateDirs) {
+				t.Errorf("mounts = %v, want one per state dir %v", mounts, prof.StateDirs)
+			}
+			for _, dir := range prof.StateDirs {
+				want := filepath.Join(filepath.Dir(req.HostWorkspace), ".cli-homes", ref, dir)
+				if got := mounts[filepath.Join(sandbox.HomeDir, dir)]; got != want {
+					t.Errorf("mount for %s = %q, want %q", dir, got, want)
+				}
+			}
+		})
+	}
+	// the old table pointed codex at a directory it never uses
+	rt := &mockRuntime{results: []*sandbox.CommandResult{{ExitCode: 0, Stdout: "done"}}}
+	req := baseReq(&models.CLIEngineConfig{Command: "codex", ProfileRef: "openai_codex"})
+	_, _ = NewCLIEngine(rt, nil).RunCodeStep(context.Background(), req)
+	if _, stale := rt.calls[0].SessionMounts[filepath.Join(sandbox.HomeDir, ".config/codex")]; stale {
+		t.Error("codex still mounts .config/codex")
 	}
 }
 

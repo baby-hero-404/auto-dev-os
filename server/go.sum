@@ -6,8 +6,8 @@ github.com/DATA-DOG/go-sqlmock v1.5.2 h1:OcvFkGmslmlZibjAjaHm3L//6LiuBgolP7Oputl
 github.com/DATA-DOG/go-sqlmock v1.5.2/go.mod h1:88MAG/4G7SMwSE3CeA0ZKzrT5CiOU3OJ+JlNzwDqpNU=
 github.com/Microsoft/go-winio v0.6.4 h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=
 github.com/Microsoft/go-winio v0.6.4/go.mod h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=
-github.com/baby-hero-404/aicli v0.1.2 h1:OOR+WaxUdWOvHr0225JNZ5P51u/M4FfzHXGxqXv9RY0=
-github.com/baby-hero-404/aicli v0.1.2/go.mod h1:BVmerH9wWDvgcpNYblwCPwccGQWdhTRpDILQ0qk4qUA=
+github.com/baby-hero-404/aicli v0.2.0 h1:lTksA95yP91ZI11PVnNrLDkB6OdUyV7dvNP2YWF38cQ=
+github.com/baby-hero-404/aicli v0.2.0/go.mod h1:CQ7XCz/12UjcsvAURxBENiDOQi8wXaEby0mduuzrSYk=
 github.com/baby-hero-404/gocore v0.3.1 h1:1hus5Io6jngXCRTdsjT96LjBqR/pXBa7bHu1aMpyf1E=
 github.com/baby-hero-404/gocore v0.3.1/go.mod h1:Km9009Z45R2dPWIDlYb1byPc7aa6yhkHsR6Oo+PFGWQ=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=

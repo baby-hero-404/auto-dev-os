@@ -52,6 +52,16 @@ type SandboxConfig struct {
 	TimeoutMinutes                  int    `mapstructure:"timeout_minutes"`
 }
 
+// ChatConfig configures the chat with a headless AI CLI in the sandbox (internal/chat). Off by
+// default: it needs Docker, a sandbox image with the CLI, and an organization CLI credential.
+type ChatConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Profile must stream and have no tools (antigravity_notools).
+	Profile string `mapstructure:"profile"`
+	// DataDir holds one workspace and one CLI session per conversation.
+	DataDir string `mapstructure:"data_dir"`
+}
+
 type WorkerConfig struct {
 	Enabled      bool    `mapstructure:"enabled"`
 	IntervalMS   int     `mapstructure:"interval_ms"`
@@ -107,6 +117,7 @@ type Config struct {
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
 	Execution  ExecutionConfig  `mapstructure:"execution"`
+	Chat       ChatConfig       `mapstructure:"chat"`
 }
 
 //go:embed config.yaml
@@ -152,6 +163,9 @@ func configure(v *viper.Viper) error {
 	v.BindEnv("database.conn_max_lifetime_seconds", "DB_CONN_MAX_LIFETIME_SECONDS")
 	v.BindEnv("database.conn_max_idle_time_seconds", "DB_CONN_MAX_IDLE_TIME_SECONDS")
 	v.BindEnv("auth.jwt_secret", "JWT_SECRET")
+	v.BindEnv("chat.enabled", "CHAT_ENABLED")
+	v.BindEnv("chat.profile", "CHAT_PROFILE")
+	v.BindEnv("chat.data_dir", "CHAT_DATA_DIR")
 	v.BindEnv("worker.enabled", "QUEUE_WORKER_ENABLED")
 	v.BindEnv("worker.interval_ms", "QUEUE_WORKER_INTERVAL_MS")
 	v.BindEnv("worker.concurrency", "QUEUE_WORKER_CONCURRENCY")

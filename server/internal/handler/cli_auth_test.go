@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	"github.com/auto-code-os/auto-code-os/server/internal/service"
+	"github.com/baby-hero-404/aicli/capture/ticket"
+	"github.com/baby-hero-404/aicli/sandbox"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestMintWSTicket_Success(t *testing.T) {
-	h := NewCLIAuthHandler(nil)
+	h := NewCLIAuthHandler(sandbox.NewStubRuntime(), nil)
 
 	claims := &service.TokenClaims{Subject: "user-1", OrgID: "org-1"}
 	req := httptest.NewRequest("POST", "/organizations/org-1/cli-auth/ws-ticket", strings.NewReader(`{"provider":"claude"}`))
@@ -42,7 +44,7 @@ func TestMintWSTicket_Success(t *testing.T) {
 }
 
 func TestMintWSTicket_OrgMismatchForbidden(t *testing.T) {
-	h := NewCLIAuthHandler(nil)
+	h := NewCLIAuthHandler(sandbox.NewStubRuntime(), nil)
 
 	claims := &service.TokenClaims{Subject: "user-1", OrgID: "org-1"}
 	req := httptest.NewRequest("POST", "/organizations/org-2/cli-auth/ws-ticket", strings.NewReader(`{"provider":"claude"}`))
@@ -61,7 +63,7 @@ func TestMintWSTicket_OrgMismatchForbidden(t *testing.T) {
 }
 
 func TestTerminal_MissingTicket_Unauthorized(t *testing.T) {
-	h := NewCLIAuthHandler(nil)
+	h := NewCLIAuthHandler(sandbox.NewStubRuntime(), nil)
 
 	req := httptest.NewRequest("GET", "/organizations/org-1/cli-auth/terminal", nil)
 	rctx := chi.NewRouteContext()
@@ -77,7 +79,7 @@ func TestTerminal_MissingTicket_Unauthorized(t *testing.T) {
 }
 
 func TestTerminal_InvalidTicket_Unauthorized(t *testing.T) {
-	h := NewCLIAuthHandler(nil)
+	h := NewCLIAuthHandler(sandbox.NewStubRuntime(), nil)
 
 	req := httptest.NewRequest("GET", "/organizations/org-1/cli-auth/terminal?ticket=does-not-exist", nil)
 	rctx := chi.NewRouteContext()
@@ -93,8 +95,8 @@ func TestTerminal_InvalidTicket_Unauthorized(t *testing.T) {
 }
 
 func TestTerminal_TicketFromDifferentOrg_Unauthorized(t *testing.T) {
-	h := NewCLIAuthHandler(nil)
-	token, _ := h.tickets.Mint("user-1", "org-A", "claude")
+	h := NewCLIAuthHandler(sandbox.NewStubRuntime(), nil)
+	token, _ := h.term.tickets.Mint(context.Background(), ticket.Ticket{Subject: "user-1", Scope: "org-A", Value: "claude"})
 
 	req := httptest.NewRequest("GET", "/organizations/org-B/cli-auth/terminal?ticket="+token, nil)
 	rctx := chi.NewRouteContext()

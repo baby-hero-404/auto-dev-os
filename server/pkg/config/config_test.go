@@ -169,3 +169,31 @@ func TestLoadTrustedProxies(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadChatDefaultsOffAndEnvOverrides(t *testing.T) {
+	resetConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Chat.Enabled || cfg.Chat.Profile != "antigravity_notools" || cfg.Chat.DataDir != "./.data/chat" {
+		t.Errorf("chat defaults = %+v, want off with antigravity_notools under ./.data/chat", cfg.Chat)
+	}
+
+	resetConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("CHAT_ENABLED", "true")
+	t.Setenv("CHAT_PROFILE", "antigravity")
+	t.Setenv("CHAT_DATA_DIR", "/srv/chat")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Chat.Enabled || cfg.Chat.Profile != "antigravity" || cfg.Chat.DataDir != "/srv/chat" {
+		t.Errorf("chat env overrides = %+v", cfg.Chat)
+	}
+}
